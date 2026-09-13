@@ -7,6 +7,32 @@
     @dragleave="dragOver = false"
     @drop.prevent="onDrop"
   >
+    <div class="chat-input-head">
+      <input
+        ref="fileInputEl"
+        type="file"
+        multiple
+        hidden
+        :accept="ATTACHMENT_ACCEPT"
+        @change="onFilePicked"
+      />
+      <button
+        v-if="allowAttachments"
+        type="button"
+        class="attach"
+        title="添加附件（图片、文档、文本）"
+        @click="fileInputEl?.click()"
+      >
+        📎
+      </button>
+      <button
+        type="button"
+        class="preview"
+        :class="{ on: previewing }"
+        :title="previewing ? '回到编辑' : '预览发送后的 Markdown 效果'"
+        @click="togglePreview"
+      >{{ previewing ? "✎ 编辑" : "👁 预览" }}</button>
+    </div>
     <div v-if="attachments.length > 0 || notice" class="chat-input-atts">
       <span v-for="a in attachments" :key="a.id" class="att-chip">
         <img v-if="a.mime.startsWith('image/')" :src="a.dataUrl" class="att-thumb" alt="" />
@@ -32,30 +58,6 @@
       <p v-else class="chat-input-preview-empty">输入内容后，这里显示发送后的 Markdown 效果</p>
     </div>
     <div class="chat-input-foot">
-      <input
-        ref="fileInputEl"
-        type="file"
-        multiple
-        hidden
-        :accept="ATTACHMENT_ACCEPT"
-        @change="onFilePicked"
-      />
-      <button
-        v-if="allowAttachments"
-        type="button"
-        class="attach"
-        title="添加附件（图片、文档、文本）"
-        @click="fileInputEl?.click()"
-      >
-        📎
-      </button>
-      <button
-        type="button"
-        class="preview"
-        :class="{ on: previewing }"
-        :title="previewing ? '回到编辑' : '预览发送后的 Markdown 效果'"
-        @click="togglePreview"
-      >{{ previewing ? "✎ 编辑" : "👁 预览" }}</button>
       <ModelPicker
         :model-value="model"
         :models="models"

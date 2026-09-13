@@ -98,6 +98,8 @@ interface AppState {
    * pins: the sessions themselves keep living in the agent backend.
    */
   tags: Record<string, string[]>;
+  /** User-chosen hue per tag name (tags.json colors); hash color otherwise. */
+  tagColors: Record<string, number>;
   /**
    * Sessions and directories tucked away (persisted in archive.json).
    * Pure awefork overlay: the data keeps living in the agent backend.
@@ -188,6 +190,7 @@ const state = reactive<AppState>({
   lineage: {},
   pins: [],
   tags: {},
+  tagColors: {},
   archive: { sessions: [], directories: [] },
   selectedDirectory: null,
   selectedId: null,
@@ -722,9 +725,12 @@ async function bootBackend(backend: BackendId): Promise<void> {
     state.pins = [];
   }
   try {
-    state.tags = await window.awefork.tags(backend);
+    const store = await window.awefork.tags(backend);
+    state.tags = store.sessions;
+    state.tagColors = store.colors;
   } catch {
     state.tags = {};
+    state.tagColors = {};
   }
   try {
     state.archive = await window.awefork.archive(backend);
@@ -1340,21 +1346,55 @@ function tagHue(tag: string): number {
   return hash % 360;
 }
 
+/** The tag's hue: the user's pick when set, else the name's stable hash. */
+function hueOf(tag: string): number {
+  return state.tagColors[tag] ?? tagHue(tag);
+}
+
 /** Solid chip text color for a tag. */
 export function tagColor(tag: string): string {
-  return `hsl(${tagHue(tag)} 55% 42%)`;
+  return `hsl(${hueOf(tag)} 55% 42%)`;
 }
 
 /** Matching 12%-alpha chip background for a tag. */
 export function tagBg(tag: string): string {
-  return `hsl(${tagHue(tag)} 65% 50% / 0.13)`;
+  return `hsl(${hueOf(tag)} 65% 50% / 0.13)`;
+}
+
+/** True when the user picked this tag's color (vs the hash fallback). */
+export function tagColorPicked(tag: string): boolean {
+  return tag in state.tagColors;
 }
 
 /** Replace one session's tags; trims, drops empties and duplicates. */
 export async function setSessionTags(sessionId: string, tags: string[]): Promise<void> {
   const next = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
   try {
-    state.tags = await window.awefork.setSessionTags(state.activeBackend, sessionId, next);
+    const store = await window.awefork.setSessionTags(state.activeBackend, sessionId, next);
+    state.tags = store.sessions;
+    state.tagColors = store.colors;
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** Set (null clears to the hash color) one tag's user-chosen hue. */
+export async function setTagColor(tag: string, hue: number | null): Promise<void> {
+  try {
+    const store = await window.awefork.setTagColor(state.activeBackend, tag, hue);
+    state.tags = store.sessions;
+    state.tagColors = store.colors;
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** Remove a tag from every session (and its color); not undoable. */
+export async function deleteTag(tag: string): Promise<void> {
+  try {
+    const store = await window.awefork.deleteTag(state.activeBackend, tag);
+    state.tags = store.sessions;
+    state.tagColors = store.colors;
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
   }
@@ -2394,6 +2434,7 @@ interface WorkspaceSnapshot {
   lineage: Record<string, ForkRecord>;
   pins: string[];
   tags: Record<string, string[]>;
+  tagColors: Record<string, number>;
   trash: string[];
   archive: ArchiveState;
   selectedDirectory: string | null;
@@ -2414,6 +2455,7 @@ function parkWorkspace(backend: BackendId): void {
     lineage: { ...state.lineage },
     pins: [...state.pins],
     tags: { ...state.tags },
+    tagColors: { ...state.tagColors },
     trash: [...state.trash],
     archive: {
       sessions: [...state.archive.sessions],
@@ -2443,6 +2485,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.lineage = snapshot.lineage;
   state.pins = snapshot.pins;
   state.tags = snapshot.tags;
+  state.tagColors = snapshot.tagColors;
   state.trash = snapshot.trash;
   state.archive = snapshot.archive;
   state.selectedDirectory = snapshot.selectedDirectory;
@@ -2499,6 +2542,7 @@ function resetWorkspace(): void {
   state.lineage = {};
   state.pins = [];
   state.tags = {};
+  state.tagColors = {};
   state.trash = [];
   state.deletedToast = null;
   state.archive = { sessions: [], directories: [] };

@@ -27,6 +27,12 @@ export interface CheckUpdatesResult {
   updateAvailable: boolean;
 }
 
+/** The tags.json sidecar's shape (see tags-store.ts on the main side). */
+export interface TagStore {
+  sessions: Record<string, string[]>;
+  colors: Record<string, number>;
+}
+
 /**
  * The full window.awefork surface exposed by the preload bridge. Declared once
  * so the preload implementation and the renderer's Window typing can't drift:
@@ -86,14 +92,14 @@ export interface AweforkApi {
   ): Promise<{ ok: boolean; error?: string }>;
   pins(backend: BackendId): Promise<string[]>;
   togglePin(backend: BackendId, sessionId: string): Promise<string[]>;
-  /** Session tags (tags.json sidecar): sessionId → ordered tag names. */
-  tags(backend: BackendId): Promise<Record<string, string[]>>;
-  /** Replace one session's tags (empty clears it); returns the whole map. */
-  setSessionTags(
-    backend: BackendId,
-    sessionId: string,
-    tags: string[],
-  ): Promise<Record<string, string[]>>;
+  /** Session tags (tags.json sidecar): sessions map + per-tag color hues. */
+  tags(backend: BackendId): Promise<TagStore>;
+  /** Replace one session's tags (empty clears it); returns the whole store. */
+  setSessionTags(backend: BackendId, sessionId: string, tags: string[]): Promise<TagStore>;
+  /** Set (null clears) a tag's user-chosen hue; returns the whole store. */
+  setTagColor(backend: BackendId, tag: string, hue: number | null): Promise<TagStore>;
+  /** Remove a tag from every session; returns the whole store. */
+  deleteTag(backend: BackendId, tag: string): Promise<TagStore>;
   trash(backend: BackendId): Promise<TrashEntry[]>;
   trashAdd(backend: BackendId, sessionId: string, title: string): Promise<TrashEntry[]>;
   trashRemove(backend: BackendId, sessionId: string): Promise<TrashEntry[]>;

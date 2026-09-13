@@ -14,7 +14,13 @@ import {
 import { readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
-import { pruneTags, readTags, setSessionTags } from "../shared/tags-store.js";
+import {
+  deleteTag,
+  pruneTags,
+  readTags,
+  setSessionTags,
+  setTagColor,
+} from "../shared/tags-store.js";
 import { addTrashEntry, readTrash, removeTrashEntry } from "../shared/trash-store.js";
 import type {
   AgentInteractionResponse,
@@ -276,6 +282,18 @@ export function registerIpc(registry: BackendRegistry): void {
     "awefork:setSessionTags",
     (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string, tags: string[]) =>
       setSessionTags(registry.storePaths(storeBackend(backend)).tags, sessionId, tags),
+  );
+
+  ipcMain.handle(
+    "awefork:setTagColor",
+    (_event: IpcMainInvokeEvent, backend: BackendId, tag: string, hue: number | null) =>
+      setTagColor(registry.storePaths(storeBackend(backend)).tags, tag, hue),
+  );
+
+  ipcMain.handle(
+    "awefork:deleteTag",
+    (_event: IpcMainInvokeEvent, backend: BackendId, tag: string) =>
+      deleteTag(registry.storePaths(storeBackend(backend)).tags, tag),
   );
 
   ipcMain.handle("awefork:trash", async (_event: IpcMainInvokeEvent, backend: BackendId) =>

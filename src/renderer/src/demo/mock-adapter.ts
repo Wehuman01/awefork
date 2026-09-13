@@ -13,6 +13,7 @@
  * production builds (import.meta.env.DEV is false).
  */
 
+import type { TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
 import type {
   AgentEvent,
@@ -432,6 +433,8 @@ export function installMockAdapter(): void {
   );
   const cloneTags = (): Record<string, string[]> =>
     Object.fromEntries(Object.entries(tagMap).map(([id, tags]) => [id, [...tags]]));
+  let tagColors: Record<string, number> = {};
+  const cloneStore = (): TagStore => ({ sessions: cloneTags(), colors: { ...tagColors } });
   const handlers = new Set<(envelope: BackendEventEnvelope) => void>();
   const emit = (event: AgentEvent): void => {
     for (const handler of handlers) handler({ backend: "opencode", event });
@@ -632,7 +635,7 @@ export function installMockAdapter(): void {
         : [...pins, sessionId];
       return pins;
     },
-    tags: async () => cloneTags(),
+    tags: async () => cloneStore(),
     setSessionTags: async (_backend, sessionId, tags) => {
       const next = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
       if (next.length === 0) {
@@ -642,7 +645,28 @@ export function installMockAdapter(): void {
       } else {
         tagMap = { ...tagMap, [sessionId]: next };
       }
-      return cloneTags();
+      return cloneStore();
+    },
+    setTagColor: async (_backend, tag, hue) => {
+      if (hue === null) {
+        const { [tag]: _gone, ...kept } = tagColors;
+        void _gone;
+        tagColors = kept;
+      } else {
+        tagColors = { ...tagColors, [tag]: hue };
+      }
+      return cloneStore();
+    },
+    deleteTag: async (_backend, tag) => {
+      tagMap = Object.fromEntries(
+        Object.entries(tagMap)
+          .map(([id, tags]) => [id, tags.filter((t) => t !== tag)] as const)
+          .filter(([, tags]) => tags.length > 0),
+      );
+      const { [tag]: _gone, ...kept } = tagColors;
+      void _gone;
+      tagColors = kept;
+      return cloneStore();
     },
     trash: async () => trash,
     trashAdd: async (_backend, sessionId, title) => {

@@ -41,12 +41,14 @@
         >
           <span class="fav-dot"></span>
           <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
-          <span
-            v-for="tag in rowTags(sess.id, 1).tags"
-            :key="tag"
-            class="tag-chip"
-            :style="{ color: tagColor(tag), background: tagBg(tag) }"
-          >{{ tag }}</span>
+              <span
+                v-for="tag in rowTags(sess.id, 1).tags"
+                :key="tag"
+                class="tag-chip clickable"
+                :style="{ color: tagColor(tag), background: tagBg(tag) }"
+                title="只看带这个标签的会话"
+                @click.stop="toggleTagFilter(tag)"
+              >{{ tag }}</span>
           <span
             v-if="rowTags(sess.id, 1).more > 0"
             class="tag-chip tag-more"
@@ -121,8 +123,10 @@
               <span
                 v-for="tag in rowTags(row.session.id, 2).tags"
                 :key="tag"
-                class="tag-chip"
+                class="tag-chip clickable"
                 :style="{ color: tagColor(tag), background: tagBg(tag) }"
+                title="只看带这个标签的会话"
+                @click.stop="toggleTagFilter(tag)"
               >{{ tag }}</span>
               <span
                 v-if="rowTags(row.session.id, 2).more > 0"
@@ -207,17 +211,50 @@
       @mousedown.stop
     >
       <div class="tag-menu-head">这个会话的标签</div>
-      <label v-for="tag in allTags" :key="tag" class="tag-opt">
-        <input
-          type="checkbox"
-          :checked="tagsOf(tagMenu.sessionId).includes(tag)"
-          @change="toggleSessionTag(tagMenu.sessionId, tag)"
-        />
-        <span class="tag-chip" :style="{ color: tagColor(tag), background: tagBg(tag) }">{{
-          tag
-        }}</span>
-        <span class="tag-count">{{ tagCount(tag) }}</span>
-      </label>
+      <template v-for="tag in allTags" :key="tag">
+        <label class="tag-opt">
+          <input
+            type="checkbox"
+            :checked="tagsOf(tagMenu.sessionId).includes(tag)"
+            @change="toggleSessionTag(tagMenu.sessionId, tag)"
+          />
+          <span class="tag-chip" :style="{ color: tagColor(tag), background: tagBg(tag) }">{{
+            tag
+          }}</span>
+          <span class="tag-count">{{ tagCount(tag) }}</span>
+          <button
+            type="button"
+            class="tag-dot"
+            :class="{ picked: tagColorPicked(tag) }"
+            :style="{ background: tagColor(tag) }"
+            :title="tagColorPicked(tag) ? '换个颜色（点 ✕ 恢复默认）' : '给这个标签选个颜色'"
+            @click.stop.prevent="colorEdit = colorEdit === tag ? null : tag"
+          ></button>
+          <button
+            type="button"
+            class="tag-del"
+            title="删除这个标签（从所有会话移除）"
+            @click.stop.prevent="removeTag(tag)"
+          >🗑</button>
+        </label>
+        <div v-if="colorEdit === tag" class="tag-palette" @mousedown.stop>
+          <button
+            v-for="hue in TAG_PALETTE"
+            :key="hue"
+            type="button"
+            class="pal-swatch"
+            :style="{ background: `hsl(${hue} 55% 45%)` }"
+            :title="`色相 ${hue}`"
+            @click="pickTagColor(tag, hue)"
+          ></button>
+          <button
+            type="button"
+            class="pal-reset"
+            title="恢复按名字自动分配的颜色"
+            @click="pickTagColor(tag, null)"
+          >✕</button>
+        </div>
+      </template>
       <form class="tag-new" @submit.prevent="addNewTag">
         <input
           v-model="newTagText"
@@ -243,6 +280,7 @@ import {
   archiveSession,
   createSession,
   deleteSession,
+  deleteTag,
   favoriteSessions,
   openSessionTerminal,
   recentAlphaFor,
@@ -253,10 +291,12 @@ import {
   selectSession,
   sessionGroups,
   setSessionTags,
+  setTagColor,
   store,
   switchDirectory,
   tagBg,
   tagColor,
+  tagColorPicked,
   tagsOf,
   togglePin,
 } from "../state";
@@ -394,6 +434,11 @@ function beginDelete(): void {
 
 const tagMenu = ref<{ sessionId: string; x: number; y: number } | null>(null);
 const newTagText = ref("");
+/** The tag whose color palette row is open; null = none. */
+const colorEdit = ref<string | null>(null);
+
+/** Preset hues — enough spread that label names rarely collide. */
+const TAG_PALETTE = [0, 18, 40, 125, 165, 210, 262, 320] as const;
 
 /** Anchor near the context menu that opened it; stays until click-out/Esc. */
 function openTagMenu(): void {
@@ -407,6 +452,18 @@ function openTagMenu(): void {
 function closeTagMenu(): void {
   tagMenu.value = null;
   newTagText.value = "";
+  colorEdit.value = null;
+}
+
+function pickTagColor(tag: string, hue: number | null): void {
+  void setTagColor(tag, hue);
+  colorEdit.value = null;
+}
+
+/** Delete the tag everywhere; a filter sitting on it clears via the watcher. */
+function removeTag(tag: string): void {
+  colorEdit.value = null;
+  void deleteTag(tag);
 }
 
 function toggleSessionTag(sessionId: string, tag: string): void {

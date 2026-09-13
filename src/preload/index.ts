@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AweforkApi, CheckUpdatesResult } from "../shared/awefork-api.js";
+import type { AweforkApi, CheckUpdatesResult, TagStore } from "../shared/awefork-api.js";
 import type {
   BackendCapabilities,
   BackendEventEnvelope,
@@ -7,6 +7,7 @@ import type {
   BackendsResult,
 } from "../shared/backend.js";
 import type { LineDiffResult } from "../shared/diff.js";
+
 import type {
   AgentInteractionResponse,
   ArchiveKind,
@@ -80,14 +81,13 @@ const api: AweforkApi = {
   pins: (backend: BackendId): Promise<string[]> => ipcRenderer.invoke("awefork:pins", backend),
   togglePin: (backend: BackendId, sessionId: string): Promise<string[]> =>
     ipcRenderer.invoke("awefork:togglePin", backend, sessionId),
-  tags: (backend: BackendId): Promise<Record<string, string[]>> =>
-    ipcRenderer.invoke("awefork:tags", backend),
-  setSessionTags: (
-    backend: BackendId,
-    sessionId: string,
-    tags: string[],
-  ): Promise<Record<string, string[]>> =>
+  tags: (backend: BackendId): Promise<TagStore> => ipcRenderer.invoke("awefork:tags", backend),
+  setSessionTags: (backend: BackendId, sessionId: string, tags: string[]): Promise<TagStore> =>
     ipcRenderer.invoke("awefork:setSessionTags", backend, sessionId, tags),
+  setTagColor: (backend: BackendId, tag: string, hue: number | null): Promise<TagStore> =>
+    ipcRenderer.invoke("awefork:setTagColor", backend, tag, hue),
+  deleteTag: (backend: BackendId, tag: string): Promise<TagStore> =>
+    ipcRenderer.invoke("awefork:deleteTag", backend, tag),
   trash: (backend: BackendId): Promise<TrashEntry[]> =>
     ipcRenderer.invoke("awefork:trash", backend),
   trashAdd: (backend: BackendId, sessionId: string, title: string): Promise<TrashEntry[]> =>

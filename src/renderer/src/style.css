@@ -598,6 +598,15 @@ textarea {
   white-space: nowrap;
 }
 
+/* a chip on a session row doubles as a one-click filter toggle */
+.tag-chip.clickable {
+  cursor: pointer;
+}
+
+.tag-chip.clickable:hover {
+  filter: brightness(0.82);
+}
+
 /* the +N overflow chip when a row carries more labels than it may show */
 .tag-chip.tag-more {
   color: var(--ink-faint);
@@ -898,6 +907,71 @@ textarea {
   margin-left: auto;
   font-size: 10px;
   color: var(--ink-faint);
+}
+
+/* per-tag actions in the tag menu: color dot + delete, right of the count */
+.tag-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  padding: 0;
+}
+
+.tag-dot.picked {
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.tag-del {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--ink-faint);
+  padding: 2px 4px;
+  border-radius: 6px;
+  opacity: 0;
+}
+
+.tag-opt:hover .tag-del,
+.tag-del:focus-visible {
+  opacity: 1;
+}
+
+.tag-del:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* inline swatch row under a tag menu entry; ✕ resets to the hash color */
+.tag-palette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px 30px;
+}
+
+.pal-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  padding: 0;
+}
+
+.pal-swatch:hover {
+  transform: scale(1.18);
+}
+
+.pal-reset {
+  font-size: 11px;
+  color: var(--ink-faint);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+
+.pal-reset:hover {
+  color: var(--ink-soft);
+  background: var(--mint-soft);
 }
 
 .tag-new input {
@@ -2323,9 +2397,20 @@ code.md-code {
   background: var(--bg);
 }
 
+/* Head row: attachment + preview sit above the textarea so the footer's
+   model picker gets the full row width. */
+.chat-input-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
 .chat-input-foot {
   display: flex;
   align-items: center;
+  gap: 6px;
   margin-top: 8px;
 }
 
