@@ -24,13 +24,6 @@
           title="重跑这个回合（预填原文，可先换模型/档位）"
           @click="retry"
         >↻</button>
-        <button
-          type="button"
-          class="nav-btn"
-          title="克隆当前分支（从最新状态存一个 checkpoint）"
-          :disabled="!selectedSession || isRunning"
-          @click="cloneBranch"
-        >⎇</button>
         <template v-if="pane">
           <button
             type="button"
@@ -124,7 +117,6 @@ import { formatDuration, formatTokens } from "../format";
 import {
   abortRun,
   activeChain,
-  cloneSelectedSession,
   paneComposerModel,
   paneMessages,
   paneTurn,
@@ -192,10 +184,6 @@ function send(text: string, attachments: PromptAttachment[]): void {
 
 function abort(): void {
   void abortRun();
-}
-
-function cloneBranch(): void {
-  void cloneSelectedSession();
 }
 
 function retry(): void {
