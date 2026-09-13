@@ -57,6 +57,7 @@
         }"
         @mousedown.stop
         @click="selectNode(node)"
+        @contextmenu.prevent="requestSessionMenu(node.sessionId, $event.clientX, $event.clientY)"
       >
         <div
           v-if="node.sessionId === store.selectedId && storyTagColors.length > 0"
@@ -297,6 +298,7 @@ import {
   isTurnDelete,
   openDraft,
   recentAlphaFor,
+  requestSessionMenu,
   retryNode,
   selectTurn,
   sendDraft,

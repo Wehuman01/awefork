@@ -177,6 +177,11 @@ interface AppState {
    * should also move the view: the canvas centers on this node.
    */
   turnJumpRequest: { nodeId: string; nonce: number } | null;
+  /**
+   * A right-click on a canvas card asking the sidebar to open its session
+   * context menu at that screen point; consumed and cleared by side-bar.
+   */
+  sessionMenuRequest: { sessionId: string; x: number; y: number } | null;
   /** Installed app version, filled in by the first update check (or the last one). */
   currentVersion: string | null;
   /** Newest release on GitHub; non-null while an update is available. */
@@ -230,6 +235,7 @@ const state = reactive<AppState>({
   focusRequest: null,
   fitRequest: null,
   turnJumpRequest: null,
+  sessionMenuRequest: null,
   currentVersion: null,
   updateLatest: null,
   checkingUpdates: false,
@@ -958,6 +964,21 @@ export async function selectTurn(
   if (options.focusCanvas) {
     state.turnJumpRequest = { nodeId: node.id, nonce: Date.now() };
   }
+}
+
+/**
+ * Ask the sidebar to open its session context menu at a screen point — for
+ * right-clicks outside the sidebar (canvas cards). side-bar consumes it.
+ */
+export function requestSessionMenu(sessionId: string, x: number, y: number): void {
+  state.sessionMenuRequest = { sessionId, x, y };
+}
+
+/** Take (and clear) the pending session-menu request, if any. */
+export function takeSessionMenuRequest(): { sessionId: string; x: number; y: number } | null {
+  const request = state.sessionMenuRequest;
+  state.sessionMenuRequest = null;
+  return request;
 }
 
 /** Move the pane to a neighboring turn of the selected session (±1). */

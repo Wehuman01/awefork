@@ -135,7 +135,7 @@
               }"
               :title="row.session.title || '(untitled)'"
               @click="selectSession(row.session.id, { focus: true })"
-              @contextmenu.prevent="openMenu(row.session, $event)"
+              @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
             >
               <span class="dot"></span>
               <span v-if="row.session.origin === 'fork'" class="fork-glyph">⎇</span>
@@ -422,6 +422,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { SessionGroup, SessionTreeNode } from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
 import { shortPath } from "../format";
+import { panels, persistLayout } from "../layout";
 import {
   allTags,
   archiveDirectory,
@@ -449,6 +450,7 @@ import {
   tagColor,
   tagColorPicked,
   tagsOf,
+  takeSessionMenuRequest,
   togglePin,
 } from "../state";
 
@@ -525,19 +527,48 @@ function rowTags(
 
 // ── context menu + inline rename ────────────────────────────────────
 
-const menu = ref<{ sessionId: string; title: string; x: number; y: number } | null>(null);
+const menu = ref<{
+  sessionId: string;
+  title: string;
+  x: number;
+  y: number;
+  /** Canvas right-click: 重命名 must reveal the sidebar row first. */
+  fromCanvas: boolean;
+  /** The session's directory — opens its group when revealing the row. */
+  directory: string | null;
+} | null>(null);
 const renaming = ref<{ sessionId: string; title: string } | null>(null);
 const renameText = ref("");
 const dirMenu = ref<{ directory: string; x: number; y: number } | null>(null);
 /** Right-clicked shelf tag awaiting delete confirmation. */
 const shelfTagMenu = ref<{ tag: string; x: number; y: number } | null>(null);
 
-function openMenu(session: SessionSummary, event: MouseEvent): void {
+function openMenu(session: SessionSummary, x: number, y: number, fromCanvas = false): void {
   dirMenu.value = null;
   shelfTagMenu.value = null;
-  menu.value = { sessionId: session.id, title: session.title, x: event.clientX, y: event.clientY };
+  menu.value = {
+    sessionId: session.id,
+    title: session.title,
+    x,
+    y,
+    fromCanvas,
+    directory: session.directory,
+  };
   placeAndFocusMenu();
 }
+
+// Canvas cards right-click into this same menu: they only know the session,
+// so look the summary up and hand the click point to openMenu.
+watch(
+  () => store.sessionMenuRequest,
+  (request) => {
+    if (!request) return;
+    takeSessionMenuRequest();
+    const session = store.sessions.find((s) => s.id === request.sessionId);
+    if (!session) return;
+    openMenu(session, request.x, request.y, true);
+  },
+);
 
 function closeMenu(): void {
   menu.value = null;
@@ -573,8 +604,23 @@ function beginRename(): void {
   const active = menu.value;
   if (!active) return;
   closeMenu();
+  if (active.fromCanvas) revealSessionRow(active.directory);
   renaming.value = { sessionId: active.sessionId, title: active.title };
   renameText.value = active.title;
+}
+
+/** A canvas-originated rename edits the sidebar row inline, so that row must
+ * be reachable: un-collapse the panel and open the session's directory group. */
+function revealSessionRow(directory: string | null): void {
+  const panel = panels.sidebar;
+  if (panel.collapsed) {
+    panel.collapsed = false;
+    panel.width = panel.saved;
+    persistLayout();
+  }
+  if (directory && !isDirOpen(directory)) {
+    expandedOverride.value = { ...expandedOverride.value, [directory]: true };
+  }
 }
 
 function cancelRename(): void {
