@@ -161,6 +161,12 @@
               :title="store.pins.includes(row.session.id) ? '取消收藏' : '收藏'"
               @click.stop="pinToggle(row.session.id)"
             >{{ store.pins.includes(row.session.id) ? "★" : "☆" }}</button>
+            <button
+              type="button"
+              class="sess-archive"
+              title="归档会话（在下方归档区可恢复）"
+              @click.stop="rowArchive(row.session.id)"
+            >📦</button>
           </div>
         </template>
       </template>
@@ -880,6 +886,11 @@ function toggleDir(directory: string): void {
 
 function pinToggle(sessionId: string): void {
   void togglePin(sessionId);
+}
+
+/** One-click row archive — reversible from the archive section, so no confirm. */
+function rowArchive(sessionId: string): void {
+  void archiveSession(sessionId);
 }
 
 const visibleGroups = computed<SessionGroup[]>(() => {

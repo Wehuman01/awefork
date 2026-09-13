@@ -663,7 +663,8 @@ textarea {
   background: var(--primary);
 }
 
-.pin-star {
+.pin-star,
+.sess-archive {
   flex: 0 0 24px;
   width: 24px;
   height: 24px;
@@ -673,13 +674,17 @@ textarea {
   font-size: 13px;
   color: var(--ink-faint);
   line-height: 1;
-  /* unstarred stars wait for the row; lit ones (and focused rows) show */
+  /* quick row actions wait for the row; lit stars (and focused rows) show */
   opacity: 0;
   transition: opacity 0.12s ease;
 }
 
-.pin-star:hover {
+.pin-star:hover,
+.sess-archive:hover {
   background: var(--primary-soft);
+}
+
+.pin-star:hover {
   color: var(--butter);
 }
 
@@ -689,6 +694,8 @@ textarea {
 
 .sess-row:hover .pin-star,
 .sess-row:focus-within .pin-star,
+.sess-row:hover .sess-archive,
+.sess-row:focus-within .sess-archive,
 .pin-star.on {
   opacity: 1;
 }
