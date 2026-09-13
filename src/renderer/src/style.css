@@ -1062,6 +1062,18 @@ textarea {
   border-color: transparent;
 }
 
+/* the shelf's right-click popover: same confirm strip, on the ctx-menu card */
+.tag-ctx {
+  min-width: 216px;
+}
+
+.tag-del-confirm.flat {
+  margin: 0;
+  padding: 7px 6px;
+  background: none;
+  border: none;
+}
+
 /* color palette panel — shared by tag edit rows and the new-tag form:
    one row of evenly spaced swatches (auto + presets) over a full-width
    rainbow hue slider. Swatches show the exact chip color (55% 42%). */

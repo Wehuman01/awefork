@@ -22,6 +22,7 @@
           :style="{ '--tag-c': tagColor(tag) }"
           :title="activeTagFilters.includes(tag) ? '点击取消这个筛选' : '只看带这个标签的会话'"
           @click="toggleTagFilter(tag)"
+          @contextmenu.prevent="openShelfTagMenu(tag, $event)"
         >{{ activeTagFilters.includes(tag) ? "✓ " : "" }}{{ tag }}</button>
       </div>
       <button
@@ -215,6 +216,28 @@
       <button type="button" class="ctx-menu-item" @click="beginDirArchive">
         📦 归档这个目录…
       </button>
+    </div>
+
+    <div
+      v-if="shelfTagMenu"
+      class="ctx-menu tag-ctx"
+      :style="{ left: `${shelfTagMenu.x}px`, top: `${shelfTagMenu.y}px` }"
+      @mousedown.stop
+    >
+      <div class="tag-del-confirm flat">
+        <span class="tdc-text"
+          >「{{ shelfTagMenu.tag }}」挂在 {{ tagCount(shelfTagMenu.tag) }} 个会话上</span
+        >
+        <div class="tdc-btns">
+          <button
+            type="button"
+            class="tdc-btn danger"
+            title="从所有会话删除这个标签（可撤销）"
+            @click="confirmShelfDelete"
+          >全部删除</button>
+          <button type="button" class="tdc-btn" @click="shelfTagMenu = null">取消</button>
+        </div>
+      </div>
     </div>
 
     <div
@@ -475,9 +498,12 @@ const menu = ref<{ sessionId: string; title: string; x: number; y: number } | nu
 const renaming = ref<{ sessionId: string; title: string } | null>(null);
 const renameText = ref("");
 const dirMenu = ref<{ directory: string; x: number; y: number } | null>(null);
+/** Right-clicked shelf tag awaiting delete confirmation. */
+const shelfTagMenu = ref<{ tag: string; x: number; y: number } | null>(null);
 
 function openMenu(session: SessionSummary, event: MouseEvent): void {
   dirMenu.value = null;
+  shelfTagMenu.value = null;
   menu.value = { sessionId: session.id, title: session.title, x: event.clientX, y: event.clientY };
 }
 
@@ -485,11 +511,28 @@ function closeMenu(): void {
   menu.value = null;
   dirMenu.value = null;
   tagMenu.value = null;
+  shelfTagMenu.value = null;
 }
 
 function openDirMenu(directory: string, event: MouseEvent): void {
   menu.value = null;
+  shelfTagMenu.value = null;
   dirMenu.value = { directory, x: event.clientX, y: event.clientY };
+}
+
+function openShelfTagMenu(tag: string, event: MouseEvent): void {
+  menu.value = null;
+  dirMenu.value = null;
+  tagMenu.value = null;
+  shelfTagMenu.value = { tag, x: event.clientX, y: event.clientY };
+}
+
+/** Same global delete as the tag menu's; the undo toast applies here too. */
+function confirmShelfDelete(): void {
+  const active = shelfTagMenu.value;
+  if (!active) return;
+  shelfTagMenu.value = null;
+  void deleteTag(active.tag);
 }
 
 function beginRename(): void {
