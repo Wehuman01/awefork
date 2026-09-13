@@ -52,7 +52,9 @@ const S1_USER: ChatMessage = {
   error: null,
 };
 
-async function bootState() {
+async function bootState(
+  options: { archive?: { sessions: { id: string; archivedAt: number }[] } } = {},
+) {
   vi.resetModules();
   let opencodeSessions = [OPENCODE_S1];
   const messagesCalls: Array<{ backend: BackendId; sessionId: string }> = [];
@@ -92,9 +94,12 @@ async function bootState() {
     trash: async () => [],
     trashAdd: async () => [],
     trashRemove: async () => [],
-    archive: async () => ({ sessions: [], directories: [] }),
+    archive: async () => ({
+      sessions: options.archive?.sessions ?? [],
+      directories: [],
+    }),
     archiveAdd: async () => ({ sessions: [], directories: [] }),
-    archiveRemove: async () => ({ sessions: [], directories: [] }),
+    archiveRemove: vi.fn(async () => ({ sessions: [], directories: [] })),
     composer: async () => null,
     saveComposer: async () => {},
     backends: async () => ({
@@ -130,6 +135,7 @@ async function bootState() {
     switchBackend: state.switchBackend,
     selectSession: state.selectSession,
     setSessionTags: state.setSessionTags,
+    refreshSessions: state.refreshSessions,
     /** Play a TUI-side change the parked backend will surface on return. */
     addOpencodeSession: () => {
       opencodeSessions = [OPENCODE_S1, OPENCODE_S2];
@@ -239,5 +245,52 @@ describe("backend switch cache", () => {
 
     await h.switchBackend("opencode");
     expect(h.store.tags).toEqual({ s1: ["执行", "待办"] });
+  });
+
+  it("drops a session refresh that lands after a backend switch", async () => {
+    const h = await bootState();
+    let resolveSessions!: (value: Awaited<ReturnType<AweforkApi["sessions"]>>) => void;
+    (h.api.sessions as ReturnType<typeof vi.fn>).mockImplementation((backend: BackendId) =>
+      backend === "opencode"
+        ? new Promise((resolve) => {
+            resolveSessions = resolve;
+          })
+        : Promise.resolve({ sessions: [CODEX_C1], lineage: {} }),
+    );
+
+    // A refresh of the opencode list is still in flight when the user leaves
+    // for codex — the codex boot then settles before the old fetch resolves.
+    const stale = h.refreshSessions();
+    await h.switchBackend("codex");
+    expect(h.store.activeBackend).toBe("codex");
+    expect(h.store.selectedId).toBe("c1");
+
+    resolveSessions({ sessions: [OPENCODE_S1], lineage: {} });
+    await stale;
+
+    // The stale result must not repaint the parked backend's sessions into
+    // the codex view, steal the selection back, or fetch s1's messages from
+    // the codex server (a cross-backend id the server would reject).
+    expect(h.store.sessions.map((s) => s.id)).toEqual(["c1"]);
+    expect(h.store.selectedId).toBe("c1");
+    expect(callsFor(h.messagesCalls, "codex", "s1")).toBe(0);
+  });
+
+  it("keeps archived sessions when a refresh returns an empty list", async () => {
+    // Boot with an archived entry for a live session: a healthy refresh keeps
+    // it (the session exists server-side).
+    const h = await bootState({ archive: { sessions: [{ id: "s1", archivedAt: 1 }] } });
+    expect(h.store.archive.sessions).toEqual([{ id: "s1", archivedAt: 1 }]);
+
+    // A cold server answering before its session scan finishes returns an
+    // empty list — that is not proof the sessions died, so the archive must
+    // survive it instead of being pruned away.
+    (h.api.sessions as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessions: [],
+      lineage: {},
+    });
+    await h.refreshSessions();
+    expect(h.store.archive.sessions).toEqual([{ id: "s1", archivedAt: 1 }]);
+    expect(h.api.archiveRemove).not.toHaveBeenCalled();
   });
 });

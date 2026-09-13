@@ -804,8 +804,12 @@ export async function init(): Promise<void> {
 const INITIAL_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 
 async function initialSessionLoad(): Promise<void> {
+  const generation = workspaceGeneration;
   for (let attempt = 0; ; attempt++) {
     await refreshSessions();
+    // The user switched backends mid-boot: this loop now belongs to a parked
+    // workspace, and its retries would fetch whatever backend is active now.
+    if (generation !== workspaceGeneration) return;
     if (state.connectionError === null && state.sessions.length > 0) return;
     const delay = INITIAL_RETRY_DELAYS_MS[attempt];
     if (delay === undefined) return;
@@ -839,8 +843,14 @@ async function flushTrash(): Promise<void> {
 
 export async function refreshSessions(): Promise<void> {
   const backend = state.activeBackend;
+  const generation = workspaceGeneration;
   try {
     const { sessions, lineage } = await window.awefork.sessions(backend);
+    // The user switched backends while the fetch ran: this result belongs to a
+    // parked workspace now. Applying it would paint the old backend's sessions
+    // into the new workspace and auto-select one — whose message load then
+    // hits the wrong server (the cross-backend 500 on switching).
+    if (generation !== workspaceGeneration || backend !== state.activeBackend) return;
     state.sessions = sessions;
     state.lineage = lineage;
     // The fetch is the connection test; success revives a UI that an earlier
@@ -849,14 +859,20 @@ export async function refreshSessions(): Promise<void> {
 
     // Prune archive entries whose session no longer exists server-side (e.g.
     // deleted in the agent's own TUI); directory entries match by path and
-    // never go stale. A failed prune retries on the next refresh.
-    const alive = new Set(sessions.map((s) => s.id));
-    for (const entry of state.archive.sessions) {
-      if (alive.has(entry.id)) continue;
-      try {
-        state.archive = await window.awefork.archiveRemove(backend, "session", entry.id);
-      } catch {
-        // Left for the next refresh.
+    // never go stale. A failed prune retries on the next refresh. An empty
+    // list is a cold server answering before its session scan finishes (the
+    // initial load retries on one), not proof everything died — pruning on it
+    // would wipe the archive on every boot.
+    if (sessions.length > 0) {
+      const alive = new Set(sessions.map((s) => s.id));
+      for (const entry of state.archive.sessions) {
+        if (alive.has(entry.id)) continue;
+        if (generation !== workspaceGeneration) return;
+        try {
+          state.archive = await window.awefork.archiveRemove(backend, "session", entry.id);
+        } catch {
+          // Left for the next refresh.
+        }
       }
     }
 
@@ -875,7 +891,10 @@ export async function refreshSessions(): Promise<void> {
     }
     await ensureCanvasMessages();
   } catch (error) {
-    state.connectionError = error instanceof Error ? error.message : String(error);
+    // A failure from a parked world must not flag the active one offline.
+    if (generation === workspaceGeneration && backend === state.activeBackend) {
+      state.connectionError = error instanceof Error ? error.message : String(error);
+    }
   }
 }
 
