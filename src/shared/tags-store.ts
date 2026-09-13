@@ -9,7 +9,9 @@ import { enqueueWrite } from "./write-queue.js";
  * 咨询 …). A plain JSON sidecar like pins — losing it only loses the
  * curation, never session data. `sessions` maps sessionId → tag names
  * (ordered); `colors` maps tag name → hue (0-360) for user-chosen colors.
- * Older files that were just a sessionId → names map migrate on read.
+ * A color never outlives its tag: hues whose tag has no session references
+ * are pruned on read and on every write. Older files that were just a
+ * sessionId → names map migrate on read.
  */
 
 export type TagMap = TagStore["sessions"];
@@ -40,6 +42,22 @@ function sanitizeColors(parsed: Record<string, unknown>): Record<string, number>
   return colors;
 }
 
+/** Keep only colors whose tag still has at least one session reference. */
+function pruneOrphanColors(
+  sessions: TagMap,
+  colors: Record<string, number>,
+): Record<string, number> {
+  const live = new Set<string>();
+  for (const tags of Object.values(sessions)) {
+    for (const tag of tags) live.add(tag);
+  }
+  const kept: Record<string, number> = {};
+  for (const [tag, hue] of Object.entries(colors)) {
+    if (live.has(tag)) kept[tag] = hue;
+  }
+  return kept;
+}
+
 export async function readTags(filePath: string): Promise<TagStore> {
   let raw: string;
   try {
@@ -55,9 +73,12 @@ export async function readTags(filePath: string): Promise<TagStore> {
     if (isLegacy(obj)) {
       return { sessions: sanitizeSessions(obj), colors: {} };
     }
-    const sessions = (obj.sessions ?? {}) as Record<string, unknown>;
-    const colors = (obj.colors ?? {}) as Record<string, unknown>;
-    return { sessions: sanitizeSessions(sessions), colors: sanitizeColors(colors) };
+    const sessions = sanitizeSessions((obj.sessions ?? {}) as Record<string, unknown>);
+    const colors = pruneOrphanColors(
+      sessions,
+      sanitizeColors((obj.colors ?? {}) as Record<string, unknown>),
+    );
+    return { sessions, colors };
   } catch {
     return EMPTY;
   }
@@ -76,21 +97,38 @@ export function setSessionTags(
 ): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
-    const next: TagStore = { colors: store.colors, sessions: { ...store.sessions } };
+    const next: TagStore = {
+      sessions: { ...store.sessions },
+      colors: { ...store.colors },
+    };
     if (tags.length > 0) next.sessions[sessionId] = tags;
     else delete next.sessions[sessionId];
+    next.colors = pruneOrphanColors(next.sessions, next.colors);
     await writeTags(filePath, next);
     return next;
   });
 }
 
-/** Set (or with null clear) a tag's user-chosen hue; serialized per file. */
+/**
+ * Set (or with null clear) a tag's user-chosen hue; serialized per file.
+ * Defensive: hues that are not finite numbers are ignored, and a hue is never
+ * stored for a tag with no session references (no orphan colors).
+ */
 export function setTagColor(filePath: string, tag: string, hue: number | null): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
+    if (hue === null) {
+      if (!(tag in store.colors)) return store;
+      const next: TagStore = { sessions: store.sessions, colors: { ...store.colors } };
+      delete next.colors[tag];
+      await writeTags(filePath, next);
+      return next;
+    }
+    if (!Number.isFinite(hue)) return store;
+    const referenced = Object.values(store.sessions).some((tags) => tags.includes(tag));
+    if (!referenced) return store;
     const next: TagStore = { sessions: store.sessions, colors: { ...store.colors } };
-    if (hue === null) delete next.colors[tag];
-    else next.colors[tag] = ((hue % 360) + 360) % 360;
+    next.colors[tag] = ((hue % 360) + 360) % 360;
     await writeTags(filePath, next);
     return next;
   });
@@ -105,8 +143,7 @@ export function deleteTag(filePath: string, tag: string): Promise<TagStore> {
       const kept = tags.filter((t) => t !== tag);
       if (kept.length > 0) sessions[id] = kept;
     }
-    const colors = { ...store.colors };
-    delete colors[tag];
+    const colors = pruneOrphanColors(sessions, store.colors);
     const next: TagStore = { sessions, colors };
     await writeTags(filePath, next);
     return next;
@@ -120,7 +157,7 @@ export function pruneTags(filePath: string, sessionId: string): Promise<TagStore
     if (!(sessionId in store.sessions)) return store;
     const sessions = { ...store.sessions };
     delete sessions[sessionId];
-    const next: TagStore = { sessions, colors: store.colors };
+    const next: TagStore = { sessions, colors: pruneOrphanColors(sessions, store.colors) };
     await writeTags(filePath, next);
     return next;
   });

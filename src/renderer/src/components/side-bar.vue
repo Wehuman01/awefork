@@ -11,17 +11,30 @@
       <span>⌕</span>
       <input v-model="query" type="text" placeholder="搜索会话" />
     </div>
-    <div v-if="allTags.length > 0" class="tag-shelf">
+    <div v-if="allTags.length > 0" class="tag-shelf-zone">
+      <div id="tag-shelf" class="tag-shelf">
+        <button
+          v-for="tag in shelfTags"
+          :key="tag"
+          type="button"
+          class="tag-filter"
+          :class="{ on: activeTagFilters.includes(tag) }"
+          :style="{ '--tag-c': tagColor(tag) }"
+          :title="activeTagFilters.includes(tag) ? '点击取消这个筛选' : '只看带这个标签的会话'"
+          @click="toggleTagFilter(tag)"
+        >{{ activeTagFilters.includes(tag) ? "✓ " : "" }}{{ tag }}</button>
+      </div>
       <button
-        v-for="tag in allTags"
-        :key="tag"
+        v-if="allTags.length > SHELF_PREVIEW"
         type="button"
-        class="tag-filter"
-        :class="{ on: activeTagFilters.includes(tag) }"
-        :style="{ '--tag-c': tagColor(tag) }"
-        :title="activeTagFilters.includes(tag) ? '点击取消这个筛选' : '只看带这个标签的会话'"
-        @click="toggleTagFilter(tag)"
-      >{{ activeTagFilters.includes(tag) ? "✓ " : "" }}{{ tag }}</button>
+        class="shelf-toggle"
+        :aria-expanded="shelfShowAll"
+        aria-controls="tag-shelf"
+        @click="shelfExpanded = !shelfExpanded"
+      >
+        <span class="shelf-toggle-caret">{{ shelfShowAll ? "▾" : "▸" }}</span
+        >{{ shelfShowAll ? "收起标签" : `还有 ${allTags.length - SHELF_PREVIEW} 个标签` }}
+      </button>
     </div>
     <div v-if="favoriteSessions.length > 0 && !searching" class="fav-zone">
       <button type="button" class="fav-head" @click="favOpen = !favOpen">
@@ -41,14 +54,14 @@
         >
           <span class="fav-dot"></span>
           <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
-              <span
-                v-for="tag in rowTags(sess.id, 1).tags"
-                :key="tag"
-                class="tag-chip clickable"
-                :style="{ color: tagColor(tag), background: tagBg(tag) }"
-                title="只看带这个标签的会话"
-                @click.stop="toggleTagFilter(tag)"
-              >{{ tag }}</span>
+          <span
+            v-for="tag in rowTags(sess.id, 1).tags"
+            :key="tag"
+            class="tag-chip clickable"
+            :style="{ color: tagColor(tag), background: tagBg(tag) }"
+            title="只看带这个标签的会话"
+            @click.stop="filterByTag(tag)"
+          >{{ tag }}</span>
           <span
             v-if="rowTags(sess.id, 1).more > 0"
             class="tag-chip tag-more"
@@ -126,7 +139,7 @@
                 class="tag-chip clickable"
                 :style="{ color: tagColor(tag), background: tagBg(tag) }"
                 title="只看带这个标签的会话"
-                @click.stop="toggleTagFilter(tag)"
+                @click.stop="filterByTag(tag)"
               >{{ tag }}</span>
               <span
                 v-if="rowTags(row.session.id, 2).more > 0"
@@ -211,57 +224,120 @@
       @mousedown.stop
     >
       <div class="tag-menu-head">这个会话的标签</div>
-      <template v-for="tag in allTags" :key="tag">
-        <label class="tag-opt">
-          <input
-            type="checkbox"
-            :checked="tagsOf(tagMenu.sessionId).includes(tag)"
-            @change="toggleSessionTag(tagMenu.sessionId, tag)"
-          />
-          <span class="tag-chip" :style="{ color: tagColor(tag), background: tagBg(tag) }">{{
-            tag
-          }}</span>
-          <span class="tag-count">{{ tagCount(tag) }}</span>
-          <button
-            type="button"
-            class="tag-dot"
-            :class="{ picked: tagColorPicked(tag) }"
-            :style="{ background: tagColor(tag) }"
-            :title="tagColorPicked(tag) ? '换个颜色（点 ✕ 恢复默认）' : '给这个标签选个颜色'"
-            @click.stop.prevent="colorEdit = colorEdit === tag ? null : tag"
-          ></button>
-          <button
-            type="button"
-            class="tag-del"
-            title="删除这个标签（从所有会话移除）"
-            @click.stop.prevent="removeTag(tag)"
-          >🗑</button>
-        </label>
-        <div v-if="colorEdit === tag" class="tag-palette" @mousedown.stop>
-          <button
-            v-for="hue in TAG_PALETTE"
-            :key="hue"
-            type="button"
-            class="pal-swatch"
-            :style="{ background: `hsl(${hue} 55% 45%)` }"
-            :title="`色相 ${hue}`"
-            @click="pickTagColor(tag, hue)"
-          ></button>
-          <button
-            type="button"
-            class="pal-reset"
-            title="恢复按名字自动分配的颜色"
-            @click="pickTagColor(tag, null)"
-          >✕</button>
-        </div>
-      </template>
+      <div class="tag-menu-search">
+        <span>⌕</span>
+        <input
+          v-model="tagSearch"
+          type="text"
+          placeholder="搜索标签"
+          aria-label="搜索标签"
+          @keydown.esc.stop="onTagMenuEsc"
+        />
+      </div>
+      <div class="tag-menu-list" role="group" aria-label="标签列表">
+        <template v-for="tag in menuTags" :key="tag">
+          <label class="tag-opt">
+            <input
+              type="checkbox"
+              :checked="draftTags.includes(tag)"
+              @change="toggleDraftTag(tag)"
+            />
+            <span class="tag-chip" :style="{ color: tagColor(tag), background: tagBg(tag) }">{{
+              tag
+            }}</span>
+            <span class="tag-count">{{ tagCount(tag) }}</span>
+            <button
+              type="button"
+              class="tag-dot"
+              :class="{ picked: tagColorPicked(tag) }"
+              :style="{ background: tagColor(tag) }"
+              :title="tagColorPicked(tag) ? '换个颜色（点 ✕ 恢复默认）' : '给这个标签选个颜色'"
+              @click.stop.prevent="toggleColorEdit(tag)"
+            ></button>
+            <button
+              type="button"
+              class="tag-del"
+              title="删除这个标签（从所有会话移除）"
+              @click.stop.prevent="removeTag(tag)"
+            >🗑</button>
+          </label>
+          <div v-if="colorEdit === tag" class="tag-palette" @mousedown.stop>
+            <div class="pal-row">
+              <button
+                type="button"
+                class="pal-swatch pal-auto"
+                :class="{ picked: !tagColorPicked(tag) }"
+                :style="{ '--auto-c': tagColor(tag) }"
+                title="按名字自动配色"
+                @click="pickTagColor(tag, null)"
+              ></button>
+              <button
+                v-for="hue in TAG_PALETTE"
+                :key="hue"
+                type="button"
+                class="pal-swatch"
+                :class="{ picked: tagColorPicked(tag) && hueOf(tag) === hue }"
+                :style="{ background: `hsl(${hue} 55% 42%)` }"
+                :title="`色相 ${hue}`"
+                @click="pickTagColor(tag, hue)"
+              ></button>
+            </div>
+            <input
+              type="range"
+              class="hue-slider"
+              min="0"
+              max="359"
+              :value="hueDrag ?? hueOf(tag)"
+              :style="{ '--thumb-c': `hsl(${hueDrag ?? hueOf(tag)} 55% 42%)` }"
+              aria-label="自定义色相"
+              title="自定义色相"
+              @input="dragHue"
+              @change="setEditTagHue(tag, $event)"
+            />
+          </div>
+        </template>
+        <p v-if="menuTags.length === 0" class="tag-menu-empty">没有匹配的标签</p>
+      </div>
       <form class="tag-new" @submit.prevent="addNewTag">
         <input
           v-model="newTagText"
           type="text"
           placeholder="＋ 新建标签，回车添加"
-          @keydown.esc.stop="closeTagMenu"
+          @keydown.esc.stop="onTagMenuEsc"
         />
+        <div class="tag-palette" @mousedown.stop>
+          <div class="pal-row">
+            <button
+              type="button"
+              class="pal-swatch pal-auto"
+              :class="{ picked: newTagHue === null }"
+              :style="{ '--auto-c': tagColor(newTagText.trim() || '新标签') }"
+              title="按名字自动配色"
+              @click="newTagHue = null"
+            ></button>
+            <button
+              v-for="hue in TAG_PALETTE"
+              :key="hue"
+              type="button"
+              class="pal-swatch"
+              :class="{ picked: newTagHue === hue }"
+              :style="{ background: `hsl(${hue} 55% 42%)` }"
+              :title="`色相 ${hue}`"
+              @click="newTagHue = newTagHue === hue ? null : hue"
+            ></button>
+          </div>
+          <input
+            type="range"
+            class="hue-slider"
+            min="0"
+            max="359"
+            :value="newTagHue ?? newTagAutoHue"
+            :style="{ '--thumb-c': `hsl(${newTagHue ?? newTagAutoHue} 55% 42%)` }"
+            aria-label="新建标签的自定义色相"
+            title="自定义色相"
+            @input="setNewTagHue"
+          />
+        </div>
       </form>
     </div>
   </aside>
@@ -282,6 +358,7 @@ import {
   deleteSession,
   deleteTag,
   favoriteSessions,
+  hueOf,
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
@@ -314,6 +391,30 @@ function toggleTagFilter(tag: string): void {
   activeTagFilters.value = activeTagFilters.value.includes(tag)
     ? activeTagFilters.value.filter((t) => t !== tag)
     : [...activeTagFilters.value, tag];
+}
+
+/** How many shelf chips show before the expandable overflow control. */
+const SHELF_PREVIEW = 6;
+
+const shelfExpanded = ref(false);
+
+const shelfShowAll = computed(() => shelfExpanded.value);
+
+/** Active filters stay visible while collapsed, without disabling the expander. */
+const shelfTags = computed(() => {
+  if (shelfShowAll.value) return allTags.value;
+  const active = new Set(activeTagFilters.value);
+  return allTags.value.filter((tag, index) => index < SHELF_PREVIEW || active.has(tag));
+});
+
+/**
+ * Row/favorite chip click: filter to exactly this tag — a second click on the
+ * lone active chip clears it. Deliberate single-select, so a stray click never
+ * silently stacks AND filters; the shelf is where AND combinations are built.
+ */
+function filterByTag(tag: string): void {
+  activeTagFilters.value =
+    activeTagFilters.value.length === 1 && activeTagFilters.value[0] === tag ? [] : [tag];
 }
 
 // A filter whose tag died — edited off its last session, or left behind on a
@@ -434,52 +535,116 @@ function beginDelete(): void {
 
 const tagMenu = ref<{ sessionId: string; x: number; y: number } | null>(null);
 const newTagText = ref("");
+/** Draft hue for the tag being created; null = auto (assigned from the name). */
+const newTagHue = ref<number | null>(null);
 /** The tag whose color palette row is open; null = none. */
 const colorEdit = ref<string | null>(null);
+const tagSearch = ref("");
+/**
+ * Snapshot of the session's tags taken when the menu opened. Checkboxes read
+ * and save through this draft, so rapid toggles never race a pending write
+ * (a stale store read could otherwise re-add a just-deleted tag).
+ */
+const draftTags = ref<string[]>([]);
 
-/** Preset hues — enough spread that label names rarely collide. */
-const TAG_PALETTE = [0, 18, 40, 125, 165, 210, 262, 320] as const;
+/** Preset hues — one tidy row, curated to look right at the chip's s/l. */
+const TAG_PALETTE = [355, 25, 45, 145, 175, 210, 260, 315] as const;
+
+const menuTags = computed(() => {
+  const needle = tagSearch.value.trim().toLowerCase();
+  if (!needle) return allTags.value;
+  return allTags.value.filter((t) => t.toLowerCase().includes(needle));
+});
+
+/** Hue the auto cell would give the tag being typed, before it exists. */
+const newTagAutoHue = computed(() => hueOf(newTagText.value.trim() || "新标签"));
+
+/** Live hue while dragging the edit slider; lands on release. */
+const hueDrag = ref<number | null>(null);
+
+function dragHue(event: Event): void {
+  hueDrag.value = Number((event.target as HTMLInputElement).value);
+}
+
+function toggleColorEdit(tag: string): void {
+  hueDrag.value = null;
+  colorEdit.value = colorEdit.value === tag ? null : tag;
+}
 
 /** Anchor near the context menu that opened it; stays until click-out/Esc. */
 function openTagMenu(): void {
   const active = menu.value;
   if (!active) return;
   tagMenu.value = { sessionId: active.sessionId, x: active.x, y: active.y + 36 };
+  draftTags.value = [...tagsOf(active.sessionId)];
   newTagText.value = "";
+  newTagHue.value = null;
+  tagSearch.value = "";
   menu.value = null;
 }
 
 function closeTagMenu(): void {
   tagMenu.value = null;
   newTagText.value = "";
+  newTagHue.value = null;
   colorEdit.value = null;
+  hueDrag.value = null;
+  tagSearch.value = "";
+  draftTags.value = [];
+}
+
+/** Esc closes the menu, except while an IME is dismissing its candidate list. */
+function onTagMenuEsc(event: KeyboardEvent): void {
+  if (event.isComposing || event.keyCode === 229) return;
+  closeTagMenu();
 }
 
 function pickTagColor(tag: string, hue: number | null): void {
+  hueDrag.value = null;
   void setTagColor(tag, hue);
-  colorEdit.value = null;
+}
+
+function setEditTagHue(tag: string, event: Event): void {
+  hueDrag.value = null;
+  void setTagColor(tag, Number((event.target as HTMLInputElement).value));
+}
+
+function setNewTagHue(event: Event): void {
+  newTagHue.value = Number((event.target as HTMLInputElement).value);
 }
 
 /** Delete the tag everywhere; a filter sitting on it clears via the watcher. */
 function removeTag(tag: string): void {
   colorEdit.value = null;
+  const count = tagCount(tag);
+  const detail = count > 0 ? `将从 ${count} 个会话上移除` : "它当前没有挂在任何会话上";
+  if (!window.confirm(`确定删除标签「${tag}」？${detail}，且不可撤销。`)) return;
+  // Gone from the draft too, or a queued checkbox write could resurrect it.
+  draftTags.value = draftTags.value.filter((t) => t !== tag);
   void deleteTag(tag);
 }
 
-function toggleSessionTag(sessionId: string, tag: string): void {
-  const current = tagsOf(sessionId);
-  void setSessionTags(
-    sessionId,
-    current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag],
-  );
+function toggleDraftTag(tag: string): void {
+  const active = tagMenu.value;
+  if (!active) return;
+  draftTags.value = draftTags.value.includes(tag)
+    ? draftTags.value.filter((t) => t !== tag)
+    : [...draftTags.value, tag];
+  void setSessionTags(active.sessionId, draftTags.value);
 }
 
-function addNewTag(): void {
+async function addNewTag(): Promise<void> {
   const active = tagMenu.value;
   const tag = newTagText.value.trim();
   if (!active || !tag) return;
-  void setSessionTags(active.sessionId, [...tagsOf(active.sessionId), tag]);
+  let attached = draftTags.value.includes(tag);
+  if (!draftTags.value.includes(tag)) {
+    draftTags.value = [...draftTags.value, tag];
+    attached = await setSessionTags(active.sessionId, draftTags.value);
+  }
+  if (attached && newTagHue.value !== null) void setTagColor(tag, newTagHue.value);
   newTagText.value = "";
+  newTagHue.value = null;
 }
 
 /** Archive is fully reversible — no confirm, the archive section undoes it. */

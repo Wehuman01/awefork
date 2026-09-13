@@ -1347,7 +1347,7 @@ function tagHue(tag: string): number {
 }
 
 /** The tag's hue: the user's pick when set, else the name's stable hash. */
-function hueOf(tag: string): number {
+export function hueOf(tag: string): number {
   return state.tagColors[tag] ?? tagHue(tag);
 }
 
@@ -1367,25 +1367,29 @@ export function tagColorPicked(tag: string): boolean {
 }
 
 /** Replace one session's tags; trims, drops empties and duplicates. */
-export async function setSessionTags(sessionId: string, tags: string[]): Promise<void> {
+export async function setSessionTags(sessionId: string, tags: string[]): Promise<boolean> {
   const next = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
   try {
     const store = await window.awefork.setSessionTags(state.activeBackend, sessionId, next);
     state.tags = store.sessions;
     state.tagColors = store.colors;
+    return true;
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return false;
   }
 }
 
 /** Set (null clears to the hash color) one tag's user-chosen hue. */
-export async function setTagColor(tag: string, hue: number | null): Promise<void> {
+export async function setTagColor(tag: string, hue: number | null): Promise<boolean> {
   try {
     const store = await window.awefork.setTagColor(state.activeBackend, tag, hue);
     state.tags = store.sessions;
     state.tagColors = store.colors;
+    return true;
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return false;
   }
 }
 

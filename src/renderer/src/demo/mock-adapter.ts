@@ -434,6 +434,15 @@ export function installMockAdapter(): void {
   const cloneTags = (): Record<string, string[]> =>
     Object.fromEntries(Object.entries(tagMap).map(([id, tags]) => [id, [...tags]]));
   let tagColors: Record<string, number> = {};
+  // A color never outlives its tag: hues with no session reference are
+  // pruned on every mutation, mirroring shared/tags-store.ts.
+  const pruneOrphanColors = (): void => {
+    const live = new Set<string>();
+    for (const tags of Object.values(tagMap)) {
+      for (const tag of tags) live.add(tag);
+    }
+    tagColors = Object.fromEntries(Object.entries(tagColors).filter(([tag]) => live.has(tag)));
+  };
   const cloneStore = (): TagStore => ({ sessions: cloneTags(), colors: { ...tagColors } });
   const handlers = new Set<(envelope: BackendEventEnvelope) => void>();
   const emit = (event: AgentEvent): void => {
@@ -500,6 +509,7 @@ export function installMockAdapter(): void {
       const { [sessionId]: _goneTags, ...keptTags } = tagMap;
       void _goneTags;
       tagMap = keptTags;
+      pruneOrphanColors();
       return pins;
     },
     deleteMessage: async (_backend, sessionId, messageId) => {
@@ -645,14 +655,17 @@ export function installMockAdapter(): void {
       } else {
         tagMap = { ...tagMap, [sessionId]: next };
       }
+      pruneOrphanColors();
       return cloneStore();
     },
     setTagColor: async (_backend, tag, hue) => {
       if (hue === null) {
-        const { [tag]: _gone, ...kept } = tagColors;
-        void _gone;
-        tagColors = kept;
-      } else {
+        if (tag in tagColors) {
+          const { [tag]: _gone, ...kept } = tagColors;
+          void _gone;
+          tagColors = kept;
+        }
+      } else if (Number.isFinite(hue) && Object.values(tagMap).some((tags) => tags.includes(tag))) {
         tagColors = { ...tagColors, [tag]: ((hue % 360) + 360) % 360 };
       }
       return cloneStore();
@@ -663,9 +676,7 @@ export function installMockAdapter(): void {
           .map(([id, tags]) => [id, tags.filter((t) => t !== tag)] as const)
           .filter(([, tags]) => tags.length > 0),
       );
-      const { [tag]: _gone, ...kept } = tagColors;
-      void _gone;
-      tagColors = kept;
+      pruneOrphanColors();
       return cloneStore();
     },
     trash: async () => trash,
