@@ -52,6 +52,15 @@
         @click="undoDelete(store.deletedToast.sessionId)"
       >撤销</button>
     </div>
+    <div v-if="store.tagDeletedToast" class="toast banner-undo" role="status">
+      <span class="undo-text">已删除标签「{{ store.tagDeletedToast.tag }}」</span>
+      <button
+        type="button"
+        class="undo-btn"
+        title="把标签加回所有会话"
+        @click="undoDeleteTag()"
+      >撤销</button>
+    </div>
     <div v-if="store.updateToast" class="toast banner-update" role="status">
       {{ store.updateToast }}
     </div>
@@ -76,6 +85,7 @@ import {
   skipUpdateVersion,
   store,
   undoDelete,
+  undoDeleteTag,
 } from "./state";
 
 onMounted(() => {

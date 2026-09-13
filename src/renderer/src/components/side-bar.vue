@@ -224,7 +224,7 @@
       @mousedown.stop
     >
       <div class="tag-menu-head">这个会话的标签</div>
-      <div class="tag-menu-search">
+      <div v-if="allTags.length > TAG_SEARCH_MIN" class="tag-menu-search">
         <span>⌕</span>
         <input
           v-model="tagSearch"
@@ -257,10 +257,30 @@
             <button
               type="button"
               class="tag-del"
-              title="删除这个标签（从所有会话移除）"
-              @click.stop.prevent="removeTag(tag)"
+              :class="{ arming: delConfirm === tag }"
+              title="删除这个标签"
+              @click.stop.prevent="delConfirm = delConfirm === tag ? null : tag"
             >🗑</button>
           </label>
+          <div v-if="delConfirm === tag" class="tag-del-confirm" @mousedown.stop>
+            <span class="tdc-text">「{{ tag }}」挂在 {{ tagCount(tag) }} 个会话上</span>
+            <div class="tdc-btns">
+              <button
+                v-if="draftTags.includes(tag)"
+                type="button"
+                class="tdc-btn"
+                title="只从当前会话移除这个标签"
+                @click="confirmDelLocal(tag)"
+              >仅本会话移除</button>
+              <button
+                type="button"
+                class="tdc-btn danger"
+                title="从所有会话删除这个标签（可撤销）"
+                @click="confirmDelAll(tag)"
+              >全部删除</button>
+              <button type="button" class="tdc-btn" @click="delConfirm = null">取消</button>
+            </div>
+          </div>
           <div v-if="colorEdit === tag" class="tag-palette" @mousedown.stop>
             <div class="pal-row">
               <button
@@ -550,6 +570,9 @@ const draftTags = ref<string[]>([]);
 /** Preset hues — one tidy row, curated to look right at the chip's s/l. */
 const TAG_PALETTE = [355, 25, 45, 145, 175, 210, 260, 315] as const;
 
+/** Below this many tags the search row stays hidden — nothing to sift. */
+const TAG_SEARCH_MIN = 8;
+
 const menuTags = computed(() => {
   const needle = tagSearch.value.trim().toLowerCase();
   if (!needle) return allTags.value;
@@ -589,6 +612,7 @@ function closeTagMenu(): void {
   newTagHue.value = null;
   colorEdit.value = null;
   hueDrag.value = null;
+  delConfirm.value = null;
   tagSearch.value = "";
   draftTags.value = [];
 }
@@ -613,12 +637,25 @@ function setNewTagHue(event: Event): void {
   newTagHue.value = Number((event.target as HTMLInputElement).value);
 }
 
-/** Delete the tag everywhere; a filter sitting on it clears via the watcher. */
-function removeTag(tag: string): void {
+/** The tag whose inline delete-confirm strip is open; null = none. */
+const delConfirm = ref<string | null>(null);
+
+/** Remove the tag from this session only — same write as unchecking. */
+function confirmDelLocal(tag: string): void {
+  const active = tagMenu.value;
+  delConfirm.value = null;
+  if (!active) return;
+  draftTags.value = draftTags.value.filter((t) => t !== tag);
+  void setSessionTags(active.sessionId, draftTags.value);
+}
+
+/**
+ * Delete the tag everywhere; a filter sitting on it clears via the watcher.
+ * The toast in state offers 撤销 for a few seconds after.
+ */
+function confirmDelAll(tag: string): void {
+  delConfirm.value = null;
   colorEdit.value = null;
-  const count = tagCount(tag);
-  const detail = count > 0 ? `将从 ${count} 个会话上移除` : "它当前没有挂在任何会话上";
-  if (!window.confirm(`确定删除标签「${tag}」？${detail}，且不可撤销。`)) return;
   // Gone from the draft too, or a queued checkbox write could resurrect it.
   draftTags.value = draftTags.value.filter((t) => t !== tag);
   void deleteTag(tag);

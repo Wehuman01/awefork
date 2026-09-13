@@ -101,6 +101,11 @@ interface AppState {
   /** User-chosen hue per tag name (tags.json colors); hash color otherwise. */
   tagColors: Record<string, number>;
   /**
+   * The latest global tag delete, driving the tag undo toast; null = no toast.
+   * `sessions` snapshots each affected session's full tag list at delete time.
+   */
+  tagDeletedToast: { tag: string; hue: number | null; sessions: [string, string[]][] } | null;
+  /**
    * Sessions and directories tucked away (persisted in archive.json).
    * Pure awefork overlay: the data keeps living in the agent backend.
    */
@@ -191,6 +196,7 @@ const state = reactive<AppState>({
   pins: [],
   tags: {},
   tagColors: {},
+  tagDeletedToast: null,
   archive: { sessions: [], directories: [] },
   selectedDirectory: null,
   selectedId: null,
@@ -1393,8 +1399,17 @@ export async function setTagColor(tag: string, hue: number | null): Promise<bool
   }
 }
 
-/** Remove a tag from every session (and its color); not undoable. */
+/**
+ * Remove a tag from every session (and its color). The delete is final on
+ * disk, but a short toast window offers 撤销, which re-attaches the tag to
+ * every session that had it and restores its picked hue.
+ */
 export async function deleteTag(tag: string): Promise<void> {
+  // Undo snapshot, taken before any local strip mutates state.tags.
+  const hue = state.tagColors[tag] ?? null;
+  const sessions = Object.entries(state.tags)
+    .filter(([, tags]) => tags.includes(tag))
+    .map(([id, tags]) => [id, [...tags]] as [string, string[]]);
   // Strip locally before the write lands: a checkbox toggle in the still-open
   // tag menu must not read the stale snapshot and write the tag back.
   state.tags = Object.fromEntries(
@@ -1409,9 +1424,35 @@ export async function deleteTag(tag: string): Promise<void> {
     const store = await window.awefork.deleteTag(state.activeBackend, tag);
     state.tags = store.sessions;
     state.tagColors = store.colors;
+    showTagDeleteToast(tag, hue, sessions);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
   }
+}
+
+/** The toast is pure UI: fading it only ends the undo window. */
+function showTagDeleteToast(tag: string, hue: number | null, sessions: [string, string[]][]): void {
+  state.tagDeletedToast = { tag, hue, sessions };
+  setTimeout(() => {
+    if (state.tagDeletedToast?.tag === tag) state.tagDeletedToast = null;
+  }, TOAST_MS);
+}
+
+/** Re-attach the last deleted tag everywhere it lived, hue included. */
+export async function undoDeleteTag(): Promise<void> {
+  const snap = state.tagDeletedToast;
+  if (!snap) return;
+  state.tagDeletedToast = null;
+  for (const [sessionId, tags] of snap.sessions) {
+    // Sessions may have gained or lost other tags during the window; union
+    // with what is live now rather than overwriting with the snapshot.
+    const current = state.tags[sessionId];
+    if (current?.includes(snap.tag)) continue;
+    const base = current ?? tags;
+    await setSessionTags(sessionId, [...base, snap.tag]);
+  }
+  // Color last: the store ignores a hue for a tag nothing references.
+  if (snap.hue !== null) await setTagColor(snap.tag, snap.hue);
 }
 
 /**
@@ -2510,6 +2551,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.messagesError = null;
   state.loadingMessages = false;
   state.deletedToast = null;
+  state.tagDeletedToast = null;
   state.draft = null;
   state.focusRequest = null;
   state.composerFocusRequest = null;
@@ -2557,6 +2599,7 @@ function resetWorkspace(): void {
   state.pins = [];
   state.tags = {};
   state.tagColors = {};
+  state.tagDeletedToast = null;
   state.trash = [];
   state.deletedToast = null;
   state.archive = { sessions: [], directories: [] };
