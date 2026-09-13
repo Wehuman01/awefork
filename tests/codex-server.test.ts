@@ -3,6 +3,16 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureCodexServer, isCodexInstalled, stopCodexServer } from "../src/main/codex-server.js";
 
+// A wedged child is reaped through the module's own `spawn` (taskkill on
+// Windows), which the injected spawnFn cannot observe — so spy on the module
+// for real. Only `spawn` is replaced; `execFile` stays real for the probes.
+const mocks = vi.hoisted(() => ({ spawn: vi.fn() }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: mocks.spawn };
+});
+
 /**
  * In-memory `codex app-server`: stdin is parsed as JSON-RPC requests, each
  * method answered from a script (result, or {__error__} for an error reply),
@@ -83,6 +93,7 @@ describe("ensureCodexServer per-home slots", () => {
       kills.push(args);
       return true;
     });
+    mocks.spawn.mockClear();
     let exits = 0;
     try {
       await expect(
@@ -98,7 +109,20 @@ describe("ensureCodexServer per-home slots", () => {
     } finally {
       killSpy.mockRestore();
     }
-    expect(kills).toEqual([[-4321, "SIGTERM"]]);
+    // The reap is platform-shaped, so the assertion is too: POSIX signals the
+    // whole process group, Windows has no process groups and shells out to
+    // taskkill instead. Asserting the branch that did not run stays a real
+    // check rather than a vacuous "nothing was called".
+    if (process.platform === "win32") {
+      expect(kills).toEqual([]);
+      expect(mocks.spawn).toHaveBeenCalledWith("taskkill", ["/pid", "4321", "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else {
+      expect(kills).toEqual([[-4321, "SIGTERM"]]);
+      expect(mocks.spawn).not.toHaveBeenCalled();
+    }
     expect(exits).toBe(1);
   });
 });
