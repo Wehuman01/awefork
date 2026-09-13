@@ -58,7 +58,11 @@
         @mousedown.stop
         @click="selectNode(node)"
       >
-        <div v-if="storyTagColors.length > 0" class="story-bands" aria-hidden="true">
+        <div
+          v-if="node.sessionId === store.selectedId && storyTagColors.length > 0"
+          class="story-bands"
+          aria-hidden="true"
+        >
           <span
             v-for="(color, i) in storyTagColors"
             :key="i"
@@ -329,9 +333,11 @@ const worldStyle = computed(() => ({
 }));
 
 /**
- * The selected story's tag colors — every card carries one stacked band per
- * tag on its left edge, so a multi-labeled story reads as a small stripe
- * group instead of an arbitrary "first tag" pick.
+ * The selected branch's tag colors — each of its own cards carries one
+ * stacked band per tag on its left edge, so a multi-labeled branch reads as
+ * a small stripe group instead of an arbitrary "first tag" pick. Bands mark
+ * the session's own turns only: child forks and the inherited parent prefix
+ * stay unmarked (the template gates on node.sessionId).
  */
 const storyTagColors = computed(() => {
   const id = store.selectedId;
