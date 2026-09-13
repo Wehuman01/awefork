@@ -18,7 +18,7 @@ Sessions gain a second dimension: tags. A colored filter shelf turns a flat run 
 
 ### Install
 
-Installers are attached: `awefork-0.2.7-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
+Installers are attached: `awefork-0.2.7-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.2.7-x64-setup.exe` (Windows x64 — SmartScreen may warn; choose More info → Run anyway).
 
 ## v0.2.6
 
