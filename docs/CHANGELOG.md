@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.7
+
+Sessions gain a second dimension: tags. A colored filter shelf turns a flat run of directories into something you can slice by purpose, and the canvas wears each story's labels as identity bands. The composer learns to write code — a markdown preview, Tab indentation, and a paste that fences itself — and three state bugs that only surfaced mid-flight are closed: a stale refresh landing after a backend switch, an archive pruned by a cold server's empty list, and a tag filter outliving its tag.
+
+### Highlights
+
+- **Session tags** — a pure overlay store (`tags-<backend>.json`, same architecture as pins) labels sessions 执行/实验设计/咨询… across directories: the sidebar grows a colored filter shelf (multi-select, AND), row-end chips capped at two plus an overflow count, tag-aware search, and a right-click editor that creates a tag in place.
+- **The canvas wears the labels** — the selected story's tags each paint their own 3px stripe on a card's left edge, a stack rather than a first-tag-only band, so a multi-labeled story never hides behind an arbitrary pick; the pane header shows the session's own chips.
+- **Tags are editable objects** — a color-dot palette (eight curated presets, plus reset to the tag's hash color) and a two-tier delete: right-click a shelf tag or hover a row, both with an inline confirm and an undo toast. Deleting strips the tag from every session, and the local state prunes before the write lands so a still-open menu cannot resurrect it from a stale snapshot.
+- **Chips are filters** — clicking a session-row or favorite chip toggles that tag's filter, so a label you spot is one click from becoming the view.
+- **The composer learns to write code** — a markdown preview toggle, Tab indent/outdent, and code-aware paste that wraps a multi-line snippet in a fence; attach and preview move to a head row above the textarea, leaving the footer to model + variant + send. User-authored markdown in bubbles and preview renders without reply styling.
+- **A stale refresh cannot repaint a parked world** — a session fetch that resolves after a backend switch no longer paints the old backend's list into the new workspace, steals the selection back, or fires a message load for an id the new server does not know (the cross-backend 500 on switching); a failure from the parked world no longer flags the active backend offline.
+- **A cold server's empty list does not wipe the archive** — an empty session list is a server answering before its scan finishes, not proof every session died, so the archive prune now skips it instead of deleting entries that are still alive.
+- **A filter cannot outlive its tag** — a filter whose tag died (edited off its last session, or left behind on a backend switch) kept hiding the list with no chip left to click it off; filters now prune to the living set.
+- **The flaky snapshot test pinned down** — the file-change recorder reads "before" asynchronously, and its adapter test guessed with a fixed 80 ms delay that lost the race once this release's new test files grew the suite's parallel load, taking the release gate down with it; the recorder's reader is now injectable, and the test waits for the baseline read to land instead of guessing.
+
+### Install
+
+Installers are attached: `awefork-0.2.7-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
+
 ## v0.2.6
 
 The pane gets kinder to both ends of a turn: your own prompts render as markdown, and a failed run grows an always-visible 换模型重跑 entry instead of a hover-only chip. The composer now follows the branch you're on — its model and thinking carry into the draft — and the canvas reads better, keeping the selected session's fork subtree readable and lighting only the turn's own children. Codex takes a round of hardening, spawned CLIs inherit the login shell's full environment, and deleting a whole session asks first.
