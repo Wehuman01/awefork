@@ -1391,6 +1391,16 @@ export async function setTagColor(tag: string, hue: number | null): Promise<void
 
 /** Remove a tag from every session (and its color); not undoable. */
 export async function deleteTag(tag: string): Promise<void> {
+  // Strip locally before the write lands: a checkbox toggle in the still-open
+  // tag menu must not read the stale snapshot and write the tag back.
+  state.tags = Object.fromEntries(
+    Object.entries(state.tags)
+      .map(([id, tags]) => [id, tags.filter((t) => t !== tag)] as const)
+      .filter(([, tags]) => tags.length > 0),
+  );
+  const { [tag]: _goneColor, ...keptColors } = state.tagColors;
+  void _goneColor;
+  state.tagColors = keptColors;
   try {
     const store = await window.awefork.deleteTag(state.activeBackend, tag);
     state.tags = store.sessions;

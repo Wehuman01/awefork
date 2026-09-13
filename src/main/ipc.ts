@@ -61,10 +61,11 @@ import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
  *   renameSession(backend, id, title) -> void
  *   openSessionTerminal(backend, id) -> {ok, error?}  TUI in a system terminal
  * Overlay-store channels (per-backend files, no adapter spawn):
- *   pins / togglePin / tags / setSessionTags / trash / trashAdd / trashRemove /
+ *   pins / togglePin / tags / setSessionTags / setTagColor /
+ *   deleteTag / trash / trashAdd / trashRemove /
  *   archive / archiveAdd / archiveRemove / composer / saveComposer — same
  *   shapes as before, backend-routed (composer holds the unsent draft + pane
- *   model picks; tags maps sessionId → tag names).
+ *   model picks; tags returns { sessions, colors }).
  * Backend switcher:
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back

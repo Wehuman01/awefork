@@ -653,7 +653,7 @@ export function installMockAdapter(): void {
         void _gone;
         tagColors = kept;
       } else {
-        tagColors = { ...tagColors, [tag]: hue };
+        tagColors = { ...tagColors, [tag]: ((hue % 360) + 360) % 360 };
       }
       return cloneStore();
     },
