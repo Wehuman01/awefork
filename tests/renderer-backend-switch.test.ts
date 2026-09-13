@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AweforkApi } from "../src/shared/awefork-api";
+import type { AweforkApi, TagStore } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { ChatMessage, SessionSummary } from "../src/shared/types";
 
@@ -56,6 +56,8 @@ async function bootState() {
   vi.resetModules();
   let opencodeSessions = [OPENCODE_S1];
   const messagesCalls: Array<{ backend: BackendId; sessionId: string }> = [];
+  const opencodeTags: TagStore = { sessions: { s1: ["执行"] }, colors: {} };
+  const codexTags: TagStore = { sessions: { c1: ["评审"] }, colors: {} };
   const api: AweforkApi = {
     ready: vi.fn(async () => ({ ok: true })),
     sessions: vi.fn(async (backend: BackendId) =>
@@ -80,6 +82,13 @@ async function bootState() {
     openSessionTerminal: async () => ({ ok: true }),
     pins: async () => [],
     togglePin: async () => [],
+    tags: vi.fn(
+      async (backend: BackendId): Promise<TagStore> =>
+        backend === "codex" ? codexTags : opencodeTags,
+    ),
+    setSessionTags: vi.fn(async (): Promise<TagStore> => opencodeTags),
+    setTagColor: vi.fn(async (): Promise<TagStore> => ({ sessions: {}, colors: {} })),
+    deleteTag: vi.fn(async (): Promise<TagStore> => ({ sessions: {}, colors: {} })),
     trash: async () => [],
     trashAdd: async () => [],
     trashRemove: async () => [],
@@ -96,7 +105,7 @@ async function bootState() {
       ],
     }),
     selectBackend: async () => ({ ok: true }),
-    capabilities: async () => ({ deleteMessage: true, attachments: true }),
+    capabilities: async () => ({ deleteMessage: true, attachments: true, fileChanges: true }),
     openPath: async () => ({ ok: true }),
     openExternal: async () => {},
     convertDocument: async () => "",
@@ -120,6 +129,7 @@ async function bootState() {
     messagesCalls,
     switchBackend: state.switchBackend,
     selectSession: state.selectSession,
+    setSessionTags: state.setSessionTags,
     /** Play a TUI-side change the parked backend will surface on return. */
     addOpencodeSession: () => {
       opencodeSessions = [OPENCODE_S1, OPENCODE_S2];
@@ -203,5 +213,31 @@ describe("backend switch cache", () => {
     expect(h.store.connectionError).toContain("server died");
     // Cached sessions survive the failed refresh — the canvas stays readable.
     expect(h.store.sessions.map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("does not apply an old backend's tag-write result to the active backend", async () => {
+    const h = await bootState();
+    let resolveWrite!: (store: TagStore) => void;
+    (h.api.setSessionTags as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise<TagStore>((resolve) => {
+          resolveWrite = resolve;
+        }),
+    );
+
+    const write = h.setSessionTags("s1", ["执行", "待办"]);
+    await h.switchBackend("codex");
+    expect(h.store.activeBackend).toBe("codex");
+    expect(h.store.tags).toEqual({ c1: ["评审"] });
+
+    resolveWrite({ sessions: { s1: ["执行", "待办"] }, colors: {} });
+    await write;
+
+    expect(h.store.activeBackend).toBe("codex");
+    expect(h.store.tags).toEqual({ c1: ["评审"] });
+    expect(h.api.setSessionTags).toHaveBeenCalledWith("opencode", "s1", ["执行", "待办"]);
+
+    await h.switchBackend("opencode");
+    expect(h.store.tags).toEqual({ s1: ["执行", "待办"] });
   });
 });

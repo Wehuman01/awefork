@@ -9,7 +9,7 @@
     </div>
     <div class="search">
       <span>⌕</span>
-      <input v-model="query" type="text" placeholder="搜索会话" />
+      <input v-model="query" type="text" placeholder="搜索会话" aria-label="搜索会话" />
     </div>
     <div v-if="allTags.length > 0" class="tag-shelf-zone">
       <div id="tag-shelf" class="tag-shelf">
@@ -38,12 +38,18 @@
       </button>
     </div>
     <div v-if="favoriteSessions.length > 0 && !searching" class="fav-zone">
-      <button type="button" class="fav-head" @click="favOpen = !favOpen">
+      <button
+        type="button"
+        class="fav-head"
+        :aria-expanded="favOpen"
+        aria-controls="favorite-list"
+        @click="favOpen = !favOpen"
+      >
         <span class="archive-caret">{{ favOpen ? "▾" : "▸" }}</span>
         <span>★ 收藏</span>
         <span class="proj-count">{{ favoriteSessions.length }}</span>
       </button>
-      <div v-if="favOpen" class="fav-list">
+      <div v-if="favOpen" id="favorite-list" class="fav-list">
         <button
           v-for="sess in favoriteSessions"
           :key="sess.id"
@@ -162,12 +168,18 @@
     </nav>
 
     <div class="archive-zone">
-      <button type="button" class="archive-head" @click="archiveOpen = !archiveOpen">
+      <button
+        type="button"
+        class="archive-head"
+        :aria-expanded="archiveOpen"
+        aria-controls="archive-list"
+        @click="archiveOpen = !archiveOpen"
+      >
         <span class="archive-caret">{{ archiveOpen ? "▾" : "▸" }}</span>
         <span>📦 归档</span>
         <span v-if="archiveCount > 0" class="proj-count">{{ archiveCount }}</span>
       </button>
-      <div v-if="archiveOpen" class="archive-list">
+      <div v-if="archiveOpen" id="archive-list" class="archive-list">
         <div v-for="dir in archivedDirectoryViews" :key="`dir:${dir.path}`" class="arch-row">
           <span class="arch-name" :title="dir.path">📁 {{ shortPath(dir.path) }}</span>
           <span class="arch-count" :title="`${dir.hiddenCount} 个会话被隐藏`">{{ dir.hiddenCount }}</span>
@@ -194,15 +206,17 @@
     <div
       v-if="menu"
       class="ctx-menu"
+      role="menu"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
       @mousedown.stop
+      @keydown.tab="trapMenuTab"
     >
-      <button type="button" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
-      <button type="button" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
-      <button type="button" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
-      <button type="button" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
-      <button type="button" class="ctx-menu-item" @click="beginArchive">📦 归档会话</button>
-      <button type="button" class="ctx-menu-item danger" @click="beginDelete">
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginArchive">📦 归档会话</button>
+      <button type="button" role="menuitem" class="ctx-menu-item danger" @click="beginDelete">
         🗑 删除会话…
       </button>
     </div>
@@ -210,10 +224,12 @@
     <div
       v-if="dirMenu"
       class="ctx-menu"
+      role="menu"
       :style="{ left: `${dirMenu.x}px`, top: `${dirMenu.y}px` }"
       @mousedown.stop
+      @keydown.tab="trapMenuTab"
     >
-      <button type="button" class="ctx-menu-item" @click="beginDirArchive">
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginDirArchive">
         📦 归档这个目录…
       </button>
     </div>
@@ -221,8 +237,10 @@
     <div
       v-if="shelfTagMenu"
       class="ctx-menu tag-ctx"
+      role="menu"
       :style="{ left: `${shelfTagMenu.x}px`, top: `${shelfTagMenu.y}px` }"
       @mousedown.stop
+      @keydown.tab="trapMenuTab"
     >
       <div class="tag-del-confirm flat">
         <span class="tdc-text"
@@ -243,8 +261,10 @@
     <div
       v-if="tagMenu"
       class="ctx-menu tag-menu"
+      role="menu"
       :style="{ left: `${tagMenu.x}px`, top: `${tagMenu.y}px` }"
       @mousedown.stop
+      @keydown.tab="trapMenuTab"
     >
       <div class="tag-menu-head">这个会话的标签</div>
       <div v-if="allTags.length > TAG_SEARCH_MIN" class="tag-menu-search">
@@ -275,6 +295,7 @@
               :class="{ picked: tagColorPicked(tag) }"
               :style="{ background: tagColor(tag) }"
               :title="tagColorPicked(tag) ? '换个颜色（点 ✕ 恢复默认）' : '给这个标签选个颜色'"
+              :aria-label="tagColorPicked(tag) ? `修改「${tag}」的颜色` : `给「${tag}」选个颜色`"
               @click.stop.prevent="toggleColorEdit(tag)"
             ></button>
             <button
@@ -312,6 +333,7 @@
                 :class="{ picked: !tagColorPicked(tag) }"
                 :style="{ '--auto-c': tagColor(tag) }"
                 title="按名字自动配色"
+                aria-label="按名字自动配色"
                 @click="pickTagColor(tag, null)"
               ></button>
               <button
@@ -322,6 +344,7 @@
                 :class="{ picked: tagColorPicked(tag) && hueOf(tag) === hue }"
                 :style="{ background: `hsl(${hue} 55% 42%)` }"
                 :title="`色相 ${hue}`"
+                :aria-label="`色相 ${hue}`"
                 @click="pickTagColor(tag, hue)"
               ></button>
             </div>
@@ -355,7 +378,8 @@
               class="pal-swatch pal-auto"
               :class="{ picked: newTagHue === null }"
               :style="{ '--auto-c': tagColor(newTagText.trim() || '新标签') }"
-              title="按名字自动配色"
+                title="按名字自动配色"
+                aria-label="按名字自动配色"
               @click="newTagHue = null"
             ></button>
             <button
@@ -365,7 +389,8 @@
               class="pal-swatch"
               :class="{ picked: newTagHue === hue }"
               :style="{ background: `hsl(${hue} 55% 42%)` }"
-              :title="`色相 ${hue}`"
+                :title="`色相 ${hue}`"
+                :aria-label="`色相 ${hue}`"
               @click="newTagHue = newTagHue === hue ? null : hue"
             ></button>
           </div>
@@ -387,7 +412,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { SessionGroup, SessionTreeNode } from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
 import { shortPath } from "../format";
@@ -505,12 +530,13 @@ function openMenu(session: SessionSummary, event: MouseEvent): void {
   dirMenu.value = null;
   shelfTagMenu.value = null;
   menu.value = { sessionId: session.id, title: session.title, x: event.clientX, y: event.clientY };
+  placeAndFocusMenu();
 }
 
 function closeMenu(): void {
   menu.value = null;
   dirMenu.value = null;
-  tagMenu.value = null;
+  closeTagMenu();
   shelfTagMenu.value = null;
 }
 
@@ -518,6 +544,7 @@ function openDirMenu(directory: string, event: MouseEvent): void {
   menu.value = null;
   shelfTagMenu.value = null;
   dirMenu.value = { directory, x: event.clientX, y: event.clientY };
+  placeAndFocusMenu();
 }
 
 function openShelfTagMenu(tag: string, event: MouseEvent): void {
@@ -525,6 +552,7 @@ function openShelfTagMenu(tag: string, event: MouseEvent): void {
   dirMenu.value = null;
   tagMenu.value = null;
   shelfTagMenu.value = { tag, x: event.clientX, y: event.clientY };
+  placeAndFocusMenu();
 }
 
 /** Same global delete as the tag menu's; the undo toast applies here too. */
@@ -646,7 +674,42 @@ function openTagMenu(): void {
   newTagText.value = "";
   newTagHue.value = null;
   tagSearch.value = "";
+  colorEdit.value = null;
+  hueDrag.value = null;
+  delConfirm.value = null;
   menu.value = null;
+  placeAndFocusMenu();
+}
+
+function menuElement(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".ctx-menu");
+}
+
+function placeAndFocusMenu(): void {
+  void nextTick(() => {
+    const active = menu.value ?? dirMenu.value ?? shelfTagMenu.value ?? tagMenu.value;
+    const element = menuElement();
+    if (!active || !element) return;
+    active.x = Math.max(8, Math.min(active.x, window.innerWidth - element.offsetWidth - 8));
+    active.y = Math.max(8, Math.min(active.y, window.innerHeight - element.offsetHeight - 8));
+    element.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled])")?.focus();
+  });
+}
+
+function trapMenuTab(event: KeyboardEvent): void {
+  const menuElement = event.currentTarget as HTMLElement;
+  const items = [
+    ...menuElement.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])"),
+  ];
+  if (items.length === 0) return;
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  if (event.shiftKey && index <= 0) {
+    event.preventDefault();
+    items.at(-1)?.focus();
+  } else if (!event.shiftKey && index === items.length - 1) {
+    event.preventDefault();
+    items[0]?.focus();
+  }
 }
 
 function closeTagMenu(): void {
@@ -780,8 +843,21 @@ function onDocMousedown(): void {
   closeMenu();
 }
 
-onMounted(() => document.addEventListener("mousedown", onDocMousedown));
-onUnmounted(() => document.removeEventListener("mousedown", onDocMousedown));
+function onDocKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+  if (!menu.value && !dirMenu.value && !tagMenu.value && !shelfTagMenu.value) return;
+  event.preventDefault();
+  closeMenu();
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", onDocMousedown);
+  document.addEventListener("keydown", onDocKeydown);
+});
+onUnmounted(() => {
+  document.removeEventListener("mousedown", onDocMousedown);
+  document.removeEventListener("keydown", onDocKeydown);
+});
 
 const selectedDirectory = computed(() => store.selectedDirectory);
 const selectedId = computed(() => store.selectedId);

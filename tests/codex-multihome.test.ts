@@ -7,6 +7,17 @@ import { createCodexMultiHomeAdapter } from "../src/main/codex-multihome.js";
 import type { AgentAdapter, AgentEvent } from "../src/shared/types.js";
 
 const tempDirs: string[] = [];
+type Mock = ReturnType<typeof vi.fn>;
+type FakeHomeAdapter = AgentAdapter & {
+  listSessions: Mock;
+  messages: Mock;
+  createSession: Mock;
+  fork: Mock;
+  deleteSession: Mock;
+  prompt: Mock;
+  respondInteraction: Mock;
+  subscribe: Mock;
+};
 
 function makeDir(): string {
   const dir = join(tmpdir(), `awefork-mh-${Math.random().toString(36).slice(2)}`);
@@ -24,7 +35,7 @@ function fakeHomeAdapter(
   home: CodexHome,
   sessions: string[],
   updatedAt: Record<string, number> = {},
-): AgentAdapter {
+): FakeHomeAdapter {
   const adapter = {
     kind: "codex",
     listSessions: vi
@@ -46,7 +57,13 @@ function fakeHomeAdapter(
     subscribe: vi.fn().mockResolvedValue(() => {}),
     dispose: vi.fn(),
   };
-  return adapter as unknown as AgentAdapter;
+  return adapter as unknown as FakeHomeAdapter;
+}
+
+function homeAdapter(byHome: Map<string, FakeHomeAdapter>, id: string): FakeHomeAdapter {
+  const adapter = byHome.get(id);
+  if (!adapter) throw new Error(`no fake adapter for home "${id}"`);
+  return adapter;
 }
 
 function makeSummary(
@@ -74,7 +91,7 @@ function makeSummary(
 
 interface Harness {
   facade: AgentAdapter;
-  byHome: Map<string, AgentAdapter>;
+  byHome: Map<string, FakeHomeAdapter>;
 }
 
 function makeFacade(
@@ -87,16 +104,16 @@ function makeFacade(
     path: join("/homes", id),
     label: id,
   }));
-  const byHome = new Map<string, AgentAdapter>(
-    Object.entries(homeSessions).map(([id, sessions]) => {
-      const home = homes.find((h) => h.id === id)!;
-      return [id, fakeHomeAdapter(home, sessions, updatedAt[id])];
-    }),
+  const byHome = new Map<string, FakeHomeAdapter>(
+    homes.map((home) => [
+      home.id,
+      fakeHomeAdapter(home, homeSessions[home.id] ?? [], updatedAt[home.id]),
+    ]),
   );
   const facade = createCodexMultiHomeAdapter({
     lineagePath: join(makeDir(), "lineage.json"),
     homes: () => homes,
-    createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+    createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
     defaultHomePath: () => "/homes/default",
     ...overrides,
   });
@@ -141,21 +158,21 @@ describe("codex multi-home facade", () => {
     (foreign.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([
       { ...makeSummary("shared", 100), title: "foreign copy" },
     ]);
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", slowDefault],
       ["cxo", foreign],
     ]);
     const facade = createCodexMultiHomeAdapter({
       lineagePath: join(makeDir(), "lineage.json"),
       homes: () => homes,
-      createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+      createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
       defaultHomePath: () => "/homes/default",
     });
     const sessions = await facade.listSessions();
     expect(sessions.find((s) => s.id === "shared")?.title).toBe("default copy");
     await facade.messages("shared");
-    expect(byHome.get("default")!.messages).toHaveBeenCalledWith("shared");
-    expect(byHome.get("cxo")!.messages).not.toHaveBeenCalled();
+    expect(homeAdapter(byHome, "default").messages).toHaveBeenCalledWith("shared");
+    expect(homeAdapter(byHome, "cxo").messages).not.toHaveBeenCalled();
   });
 
   it("does not drop a foreign home's later sessions after an id collision", async () => {
@@ -170,14 +187,14 @@ describe("codex multi-home facade", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       return [makeSummary("shared", 100), makeSummary("other", 100)];
     });
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], ["shared"])],
       ["cxo", foreign],
     ]);
     const facade = createCodexMultiHomeAdapter({
       lineagePath: join(makeDir(), "lineage.json"),
       homes: () => homes,
-      createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+      createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
       defaultHomePath: () => "/homes/default",
     });
     const sessions = await facade.listSessions();
@@ -191,10 +208,10 @@ describe("codex multi-home facade", () => {
     // it just made.
     let serverListsFresh = false;
     const { facade, byHome } = makeFacade({ default: [] });
-    (byHome.get("default")!.listSessions as ReturnType<typeof vi.fn>).mockImplementation(
+    (homeAdapter(byHome, "default").listSessions as ReturnType<typeof vi.fn>).mockImplementation(
       async () => (serverListsFresh ? [makeSummary("fresh", 300)] : [makeSummary("older", 100)]),
     );
-    (byHome.get("default")!.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (homeAdapter(byHome, "default").createSession as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeSummary("fresh", 200),
     );
 
@@ -212,7 +229,7 @@ describe("codex multi-home facade", () => {
 
   it("keeps a just-cut fork listed before its first own turn", async () => {
     const { facade, byHome } = makeFacade({ default: ["parent"] });
-    (byHome.get("default")!.fork as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (homeAdapter(byHome, "default").fork as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...makeSummary("fork-1", 300),
       origin: "fork",
       parentSessionId: "parent",
@@ -225,7 +242,7 @@ describe("codex multi-home facade", () => {
 
   it("drops the memo row when the session is deleted before the server lists it", async () => {
     const { facade, byHome } = makeFacade({ default: [] });
-    (byHome.get("default")!.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (homeAdapter(byHome, "default").createSession as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeSummary("fresh", 200),
     );
     await facade.createSession("/repo");
@@ -256,8 +273,8 @@ describe("codex multi-home facade", () => {
     const { facade, byHome } = makeFacade({ default: [], cxo: ["foreign"] });
     await facade.listSessions();
     await facade.messages("foreign");
-    expect(byHome.get("cxo")!.messages).toHaveBeenCalledWith("foreign");
-    expect(byHome.get("default")!.messages).not.toHaveBeenCalled();
+    expect(homeAdapter(byHome, "cxo").messages).toHaveBeenCalledWith("foreign");
+    expect(homeAdapter(byHome, "default").messages).not.toHaveBeenCalled();
   });
 
   it("continues a foreign session on the default account by importing its rollout", async () => {
@@ -272,7 +289,7 @@ describe("codex multi-home facade", () => {
       { id: "default", path: defaultHome, label: "Codex" },
       { id: "cxo", path: foreignHome, label: "cxo" },
     ];
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], [])],
       ["cxo", fakeHomeAdapter(homes[1], [threadId])],
     ]);
@@ -280,7 +297,7 @@ describe("codex multi-home facade", () => {
       { default: [], cxo: [threadId] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
         defaultHomePath: () => defaultHome,
       },
     );
@@ -291,33 +308,35 @@ describe("codex multi-home facade", () => {
     expect(
       existsSync(join(defaultHome, rel, `rollout-2026-09-11T07-02-52-${threadId}.jsonl`)),
     ).toBe(true);
-    expect(byHome.get("default")!.prompt.mock.calls[0]?.slice(0, 3)).toEqual([
+    expect(homeAdapter(byHome, "default").prompt.mock.calls[0]?.slice(0, 3)).toEqual([
       threadId,
       "继续",
       null,
     ]);
-    expect(byHome.get("cxo")!.prompt).not.toHaveBeenCalled();
+    expect(homeAdapter(byHome, "cxo").prompt).not.toHaveBeenCalled();
 
     // The session now routes to the default home for everything else.
     await facade.messages(threadId);
-    expect(byHome.get("default")!.messages).toHaveBeenCalledWith(threadId);
+    expect(homeAdapter(byHome, "default").messages).toHaveBeenCalledWith(threadId);
   });
 
   it("does not import when continuing a default-home session", async () => {
     const defaultHome = makeDir();
     const homes: CodexHome[] = [{ id: "default", path: defaultHome, label: "Codex" }];
-    const byHome = new Map<string, AgentAdapter>([["default", fakeHomeAdapter(homes[0], ["own"])]]);
+    const byHome = new Map<string, FakeHomeAdapter>([
+      ["default", fakeHomeAdapter(homes[0], ["own"])],
+    ]);
     const { facade } = makeFacade(
       { default: ["own"] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
         defaultHomePath: () => defaultHome,
       },
     );
     await facade.listSessions();
     await facade.prompt("own", "hi", null);
-    expect(byHome.get("default")!.prompt).toHaveBeenCalled();
+    expect(homeAdapter(byHome, "default").prompt).toHaveBeenCalled();
   });
 
   it("forks a foreign session under the default account too", async () => {
@@ -332,7 +351,7 @@ describe("codex multi-home facade", () => {
       { id: "default", path: defaultHome, label: "Codex" },
       { id: "cxo", path: foreignHome, label: "cxo" },
     ];
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], [])],
       ["cxo", fakeHomeAdapter(homes[1], [threadId])],
     ]);
@@ -340,14 +359,14 @@ describe("codex multi-home facade", () => {
       { default: [], cxo: [threadId] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
         defaultHomePath: () => defaultHome,
       },
     );
     await facade.listSessions();
     await facade.fork(threadId, null);
 
-    expect(byHome.get("default")!.fork).toHaveBeenCalledWith(threadId, null);
+    expect(homeAdapter(byHome, "default").fork).toHaveBeenCalledWith(threadId, null);
     expect(existsSync(join(defaultHome, rel, `rollout-${threadId}.jsonl`))).toBe(true);
   });
 
@@ -367,7 +386,7 @@ describe("codex multi-home facade", () => {
       { id: "default", path: defaultHome, label: "Codex" },
       { id: "cxo", path: foreignHome, label: "cxo" },
     ];
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], [threadId])],
       ["cxo", fakeHomeAdapter(homes[1], [threadId])],
     ]);
@@ -382,15 +401,15 @@ describe("codex multi-home facade", () => {
       { default: [threadId], cxo: [threadId] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
         defaultHomePath: () => defaultHome,
       },
     );
     await facade.listSessions(); // default wins the collision, owns the id
     await facade.deleteSession(threadId);
 
-    expect(byHome.get("default")!.deleteSession).toHaveBeenCalledWith(threadId);
-    expect(byHome.get("cxo")!.deleteSession).toHaveBeenCalledWith(threadId);
+    expect(homeAdapter(byHome, "default").deleteSession).toHaveBeenCalledWith(threadId);
+    expect(homeAdapter(byHome, "cxo").deleteSession).toHaveBeenCalledWith(threadId);
     expect(existsSync(join(defaultHome, rel, `rollout-${threadId}.jsonl`))).toBe(false);
     expect(existsSync(join(foreignHome, rel, `rollout-${threadId}.jsonl`))).toBe(false);
   });
@@ -406,24 +425,24 @@ describe("codex multi-home facade", () => {
       { id: "default", path: defaultHome, label: "Codex" },
       { id: "cxo", path: foreignHome, label: "cxo" },
     ];
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], [threadId])],
       ["cxo", fakeHomeAdapter(homes[1], [])],
     ]);
-    byHome.get("cxo")!.deleteSession.mockRejectedValue(new Error("spawn failed"));
+    homeAdapter(byHome, "cxo").deleteSession.mockRejectedValue(new Error("spawn failed"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { facade } = makeFacade(
       { default: [threadId], cxo: [] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
         defaultHomePath: () => defaultHome,
       },
     );
     try {
       await facade.listSessions();
       await expect(facade.deleteSession(threadId)).resolves.toBeUndefined();
-      expect(byHome.get("default")!.deleteSession).toHaveBeenCalledWith(threadId);
+      expect(homeAdapter(byHome, "default").deleteSession).toHaveBeenCalledWith(threadId);
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -435,7 +454,7 @@ describe("codex multi-home facade", () => {
       { id: "default", path: "/homes/default", label: "Codex" },
       { id: "cxo", path: "/homes/cxo", label: "cxo" },
     ];
-    const byHome = new Map<string, AgentAdapter>([
+    const byHome = new Map<string, FakeHomeAdapter>([
       ["default", fakeHomeAdapter(homes[0], [])],
       ["cxo", fakeHomeAdapter(homes[1], ["foreign"])],
     ]);
@@ -443,7 +462,7 @@ describe("codex multi-home facade", () => {
       { default: [], cxo: ["foreign"] },
       {
         homes: () => homes,
-        createHomeAdapter: (home) => Promise.resolve(byHome.get(home.id)!),
+        createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
       },
     );
     await facade.listSessions();
@@ -475,10 +494,13 @@ describe("codex multi-home facade", () => {
     expect(new Set(requestIds).size).toBe(2);
 
     await facade.respondInteraction(requestIds[1], { decision: "allow" });
-    expect(byHome.get("cxo")!.respondInteraction).toHaveBeenCalledWith("codex-interaction-1", {
-      decision: "allow",
-    });
-    expect(byHome.get("default")!.respondInteraction).not.toHaveBeenCalled();
+    expect(homeAdapter(byHome, "cxo").respondInteraction).toHaveBeenCalledWith(
+      "codex-interaction-1",
+      {
+        decision: "allow",
+      },
+    );
+    expect(homeAdapter(byHome, "default").respondInteraction).not.toHaveBeenCalled();
   });
 
   it("delivers events again after a re-subscribe", async () => {

@@ -32,7 +32,13 @@ function commandApproval(requestId: string, sessionId = "s1"): AgentInteractionR
   };
 }
 
-async function bootState(options: { promptError?: Error } = {}) {
+async function bootState(
+  options: {
+    promptError?: Error;
+    tags?: { sessions: Record<string, string[]>; colors: Record<string, number> };
+    trash?: { id: string; title: string; deletedAt: number }[];
+  } = {},
+) {
   vi.resetModules();
   const replies: Array<{ backend: BackendId; requestId: string; response: unknown }> = [];
   let onEnvelope: ((envelope: BackendEventEnvelope) => void) | null = null;
@@ -44,7 +50,7 @@ async function bootState(options: { promptError?: Error } = {}) {
     messageAttachments: async () => [],
     createSession: async () => SESSION,
     fork: async () => SESSION,
-    deleteSession: async () => [],
+    deleteSession: vi.fn(async () => []),
     deleteMessage: async () => {},
     prompt: vi.fn(async () => {
       if (options.promptError) throw options.promptError;
@@ -57,18 +63,29 @@ async function bootState(options: { promptError?: Error } = {}) {
     openSessionTerminal: async () => ({ ok: true }),
     pins: async () => [],
     togglePin: async () => [],
-    trash: async () => [],
+    tags: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    setSessionTags: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    setTagColor: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    deleteTag: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    trash: async () => options.trash ?? [],
     trashAdd: async () => [],
     trashRemove: async () => [],
     archive: async () => ({ sessions: [], directories: [] }),
     archiveAdd: async () => ({ sessions: [], directories: [] }),
     archiveRemove: async () => ({ sessions: [], directories: [] }),
+    composer: async () => null,
+    saveComposer: async () => {},
+    fileChanges: async () => null,
+    fileChangeDiff: async () => null,
     backends: async () => ({
       selected: "codex",
-      backends: [{ id: "codex", label: "codex", installed: true }],
+      backends: [
+        { id: "codex", label: "codex", installed: true, version: null, versionWarning: null },
+      ],
     }),
     selectBackend: async () => ({ ok: true }),
-    capabilities: async () => ({ deleteMessage: false, attachments: false }),
+    capabilities: async () => ({ deleteMessage: false, attachments: false, fileChanges: false }),
+    openPath: async () => ({ ok: true }),
     openExternal: async () => {},
     convertDocument: async () => "",
     checkUpdates: async () => ({
@@ -94,6 +111,9 @@ async function bootState(options: { promptError?: Error } = {}) {
     selectSession: state.selectSession,
     sendPrompt: state.sendPrompt,
     respondInteraction: state.respondInteraction,
+    deleteTag: state.deleteTag,
+    undoDeleteTag: state.undoDeleteTag,
+    setSessionTags: state.setSessionTags,
   };
 }
 
@@ -124,6 +144,64 @@ describe("renderer interaction state", () => {
     expect((h.api.messages as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
       messagesCallsAfterLoad,
     );
+  });
+
+  it("restores the visible tags when a global delete cannot be persisted", async () => {
+    const h = await bootState({
+      tags: { sessions: { s1: ["执行", "咨询"] }, colors: { 执行: 210 } },
+    });
+    (h.api.deleteTag as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
+
+    await h.deleteTag("执行");
+
+    expect(h.store.tags).toEqual({ s1: ["执行", "咨询"] });
+    expect(h.store.tagColors).toEqual({ 执行: 210 });
+    expect(h.store.tagDeletedToast).toBeNull();
+    expect(h.store.actionError).toContain("disk full");
+  });
+
+  it("does not retain tags for sessions flushed from the startup trash", async () => {
+    const h = await bootState({
+      tags: { sessions: { s1: ["执行"] }, colors: { 执行: 210 } },
+      trash: [{ id: "s1", title: SESSION.title, deletedAt: 1 }],
+    });
+
+    expect(h.store.trash).toEqual([]);
+    expect(h.store.tags).toEqual({});
+    expect(h.store.tagColors).toEqual({});
+    expect(h.api.deleteSession).toHaveBeenCalledWith("codex", "s1");
+  });
+
+  it("undoes only the deleted tag on sessions that still exist", async () => {
+    const h = await bootState({
+      tags: {
+        sessions: { s1: ["执行", "咨询"], gone: ["执行", "归档"] },
+        colors: { 执行: 210 },
+      },
+    });
+    (h.api.deleteTag as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessions: { s1: ["咨询"] },
+      colors: {},
+    });
+    (h.api.setSessionTags as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_backend: BackendId, sessionId: string, tags: string[]) => ({
+        sessions: { [sessionId]: tags },
+        colors: {},
+      }),
+    );
+    (h.api.setTagColor as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessions: { s1: ["执行"] },
+      colors: { 执行: 210 },
+    });
+
+    await h.deleteTag("执行");
+    // The user removed the remaining tag before clicking undo.
+    await h.setSessionTags("s1", []);
+    await h.undoDeleteTag();
+
+    expect(h.api.setSessionTags).toHaveBeenCalledWith("codex", "s1", ["执行"]);
+    expect(h.api.setSessionTags).not.toHaveBeenCalledWith("codex", "gone", expect.anything());
+    expect(h.api.setTagColor).toHaveBeenCalledWith("codex", "执行", 210);
   });
 
   it("queues an interaction request and exposes its auto-deny deadline", async () => {

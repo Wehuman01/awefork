@@ -1,4 +1,5 @@
 import { computed, reactive, readonly, ref, watch } from "vue";
+import type { TagStore } from "../../shared/awefork-api";
 import {
   type BackendCapabilities,
   type BackendEventEnvelope,
@@ -102,9 +103,14 @@ interface AppState {
   tagColors: Record<string, number>;
   /**
    * The latest global tag delete, driving the tag undo toast; null = no toast.
-   * `sessions` snapshots each affected session's full tag list at delete time.
+   * `sessionIds` identifies every affected session at delete time.
    */
-  tagDeletedToast: { tag: string; hue: number | null; sessions: [string, string[]][] } | null;
+  tagDeletedToast: {
+    backend: BackendId;
+    tag: string;
+    hue: number | null;
+    sessionIds: string[];
+  } | null;
   /**
    * Sessions and directories tucked away (persisted in archive.json).
    * Pure awefork overlay: the data keeps living in the agent backend.
@@ -825,7 +831,9 @@ async function flushTrash(): Promise<void> {
       state.trash = (await window.awefork.trashRemove(backend, sessionId)).map((entry) => entry.id);
     } catch {
       // A leftover entry just flushes again next startup.
+      continue;
     }
+    removeLocalSessionTags(sessionId);
   }
 }
 
@@ -1372,13 +1380,53 @@ export function tagColorPicked(tag: string): boolean {
   return tag in state.tagColors;
 }
 
-/** Replace one session's tags; trims, drops empties and duplicates. */
-export async function setSessionTags(sessionId: string, tags: string[]): Promise<boolean> {
-  const next = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+function setVisibleTagStore(store: TagStore): void {
+  state.tags = store.sessions;
+  state.tagColors = store.colors;
+}
+
+function setCachedTagStore(backend: BackendId, store: TagStore): void {
+  const snapshot = workspaceCache.get(backend);
+  if (!snapshot) return;
+  snapshot.tags = store.sessions;
+  snapshot.tagColors = store.colors;
+}
+
+function applyTagStore(backend: BackendId, generation: number, store: TagStore): void {
+  if (state.activeBackend === backend && workspaceGeneration === generation) {
+    setVisibleTagStore(store);
+    return;
+  }
+  if (state.activeBackend === backend) {
+    // The user switched away and back while this backend write was in flight.
+    // The reply still describes this backend, so it is safe to show.
+    setVisibleTagStore(store);
+    return;
+  }
+  setCachedTagStore(backend, store);
+}
+
+function removeLocalSessionTags(sessionId: string): void {
+  if (!(sessionId in state.tags)) return;
+  const { [sessionId]: goneTags, ...keptTags } = state.tags;
+  void goneTags;
+  state.tags = keptTags;
+  const liveTags = new Set(Object.values(keptTags).flat());
+  state.tagColors = Object.fromEntries(
+    Object.entries(state.tagColors).filter(([tag]) => liveTags.has(tag)),
+  );
+}
+
+async function saveSessionTags(
+  backend: BackendId,
+  sessionId: string,
+  tags: string[],
+): Promise<boolean> {
+  const generation = workspaceGeneration;
+  const next = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
   try {
-    const store = await window.awefork.setSessionTags(state.activeBackend, sessionId, next);
-    state.tags = store.sessions;
-    state.tagColors = store.colors;
+    const store = await window.awefork.setSessionTags(backend, sessionId, next);
+    applyTagStore(backend, generation, store);
     return true;
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
@@ -1386,12 +1434,18 @@ export async function setSessionTags(sessionId: string, tags: string[]): Promise
   }
 }
 
+/** Replace one session's tags; trims, drops empties and duplicates. */
+export async function setSessionTags(sessionId: string, tags: string[]): Promise<boolean> {
+  return saveSessionTags(state.activeBackend, sessionId, tags);
+}
+
 /** Set (null clears to the hash color) one tag's user-chosen hue. */
 export async function setTagColor(tag: string, hue: number | null): Promise<boolean> {
+  const backend = state.activeBackend;
+  const generation = workspaceGeneration;
   try {
-    const store = await window.awefork.setTagColor(state.activeBackend, tag, hue);
-    state.tags = store.sessions;
-    state.tagColors = store.colors;
+    const store = await window.awefork.setTagColor(backend, tag, hue);
+    applyTagStore(backend, generation, store);
     return true;
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
@@ -1405,11 +1459,14 @@ export async function setTagColor(tag: string, hue: number | null): Promise<bool
  * every session that had it and restores its picked hue.
  */
 export async function deleteTag(tag: string): Promise<void> {
+  const backend = state.activeBackend;
+  const generation = workspaceGeneration;
   // Undo snapshot, taken before any local strip mutates state.tags.
   const hue = state.tagColors[tag] ?? null;
-  const sessions = Object.entries(state.tags)
+  const sessionIds = Object.entries(state.tags)
     .filter(([, tags]) => tags.includes(tag))
-    .map(([id, tags]) => [id, [...tags]] as [string, string[]]);
+    .map(([id]) => id);
+  const previous: TagStore = { sessions: state.tags, colors: state.tagColors };
   // Strip locally before the write lands: a checkbox toggle in the still-open
   // tag menu must not read the stale snapshot and write the tag back.
   state.tags = Object.fromEntries(
@@ -1421,18 +1478,23 @@ export async function deleteTag(tag: string): Promise<void> {
   void _goneColor;
   state.tagColors = keptColors;
   try {
-    const store = await window.awefork.deleteTag(state.activeBackend, tag);
-    state.tags = store.sessions;
-    state.tagColors = store.colors;
-    showTagDeleteToast(tag, hue, sessions);
+    const store = await window.awefork.deleteTag(backend, tag);
+    applyTagStore(backend, generation, store);
+    showTagDeleteToast(backend, tag, hue, sessionIds);
   } catch (error) {
+    applyTagStore(backend, generation, previous);
     state.actionError = error instanceof Error ? error.message : String(error);
   }
 }
 
 /** The toast is pure UI: fading it only ends the undo window. */
-function showTagDeleteToast(tag: string, hue: number | null, sessions: [string, string[]][]): void {
-  state.tagDeletedToast = { tag, hue, sessions };
+function showTagDeleteToast(
+  backend: BackendId,
+  tag: string,
+  hue: number | null,
+  sessionIds: string[],
+): void {
+  state.tagDeletedToast = { backend, tag, hue, sessionIds };
   setTimeout(() => {
     if (state.tagDeletedToast?.tag === tag) state.tagDeletedToast = null;
   }, TOAST_MS);
@@ -1443,16 +1505,26 @@ export async function undoDeleteTag(): Promise<void> {
   const snap = state.tagDeletedToast;
   if (!snap) return;
   state.tagDeletedToast = null;
-  for (const [sessionId, tags] of snap.sessions) {
-    // Sessions may have gained or lost other tags during the window; union
-    // with what is live now rather than overwriting with the snapshot.
-    const current = state.tags[sessionId];
+  const liveSessionIds = new Set(state.sessions.map((session) => session.id));
+  // Keep the active backend's state stable for the whole restore. A backend
+  // switch can repaint state.tags while the sequential writes are in flight.
+  const tagsAtUndo = state.tags;
+  for (const sessionId of snap.sessionIds) {
+    if (!liveSessionIds.has(sessionId)) continue;
+    const current = tagsAtUndo[sessionId] ?? [];
     if (current?.includes(snap.tag)) continue;
-    const base = current ?? tags;
-    await setSessionTags(sessionId, [...base, snap.tag]);
+    await saveSessionTags(snap.backend, sessionId, [...current, snap.tag]);
   }
   // Color last: the store ignores a hue for a tag nothing references.
-  if (snap.hue !== null) await setTagColor(snap.tag, snap.hue);
+  if (snap.hue !== null) {
+    const generation = workspaceGeneration;
+    try {
+      const store = await window.awefork.setTagColor(snap.backend, snap.tag, snap.hue);
+      applyTagStore(snap.backend, generation, store);
+    } catch (error) {
+      state.actionError = error instanceof Error ? error.message : String(error);
+    }
+  }
 }
 
 /**
@@ -1807,11 +1879,7 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
   clearRecent(backend, sessionId);
   // Main prunes the tags sidecar with the delete; mirror it locally so the
   // filter shelf and right-click menu don't offer a dead session's labels.
-  if (sessionId in state.tags) {
-    const { [sessionId]: goneTags, ...keptTags } = state.tags;
-    void goneTags;
-    state.tags = keptTags;
-  }
+  removeLocalSessionTags(sessionId);
   const { [sessionId]: goneMessages, ...keptMessages } = state.messagesBySession;
   void goneMessages;
   state.messagesBySession = keptMessages;

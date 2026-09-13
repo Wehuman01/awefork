@@ -875,6 +875,9 @@ textarea {
   position: fixed;
   z-index: 60;
   min-width: 140px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -986,6 +989,12 @@ textarea {
 
 .tag-dot.picked {
   box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.tag-dot:focus-visible,
+.pal-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .tag-del {
@@ -2160,45 +2169,6 @@ textarea {
   max-width: 85%;
 }
 
-/* the user bubble renders prompts through the same markdown renderer as
-   replies, downgraded for prompt-shaped input (headings flatten, tables and
-   math collapse to text — see downgradeUserBlocks); retune the elements
-   whose palette assumes the card background to the bubble's gradient. Code
-   blocks keep their own light panel — dark code text stays readable on any
-   bubble color. */
-.user-body .md {
-  color: #fff;
-}
-
-.user-body code.md-code {
-  background: rgba(255, 255, 255, 0.22);
-  border-color: rgba(255, 255, 255, 0.35);
-  color: #fff;
-}
-
-.user-body .md-link {
-  color: #fff;
-  text-decoration-color: rgba(255, 255, 255, 0.6);
-}
-
-.user-body .md-link:hover {
-  text-decoration-color: #fff;
-}
-
-.user-body .md-quote {
-  color: rgba(255, 255, 255, 0.85);
-  border-left-color: rgba(255, 255, 255, 0.5);
-}
-
-.user-body .md-hr {
-  border-top-color: rgba(255, 255, 255, 0.4);
-}
-
-.user-body .md-td,
-.user-body .md-table th {
-  color: var(--ink);
-}
-
 .message-body {
   flex: 1;
   min-width: 0;
@@ -2566,6 +2536,45 @@ code.md-code {
   background: #fffaf6;
 }
 
+/* the user bubble renders prompts through the same markdown renderer as
+   replies, downgraded for prompt-shaped input (headings flatten, tables and
+   math collapse to text — see downgradeUserBlocks); retune the elements
+   whose palette assumes the card background to the bubble's gradient. Code
+   blocks keep their own light panel — dark code text stays readable on any
+   bubble color. */
+.user-body .md {
+  color: #fff;
+}
+
+.user-body code.md-code {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.user-body .md-link {
+  color: #fff;
+  text-decoration-color: rgba(255, 255, 255, 0.6);
+}
+
+.user-body .md-link:hover {
+  text-decoration-color: #fff;
+}
+
+.user-body .md-quote {
+  color: rgba(255, 255, 255, 0.85);
+  border-left-color: rgba(255, 255, 255, 0.5);
+}
+
+.user-body .md-hr {
+  border-top-color: rgba(255, 255, 255, 0.4);
+}
+
+.user-body .md-td,
+.user-body .md-table th {
+  color: var(--ink);
+}
+
 /* chat input */
 
 .chat-input {
@@ -2869,6 +2878,10 @@ code.md-code {
   cursor: pointer;
   box-shadow: var(--shadow-lift);
   max-width: 70vw;
+}
+
+.tag-undo {
+  bottom: 72px;
 }
 
 /* ── Codex interaction approval ───────────────────────────────────── */

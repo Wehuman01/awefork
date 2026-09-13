@@ -47,6 +47,34 @@ describe("tags store", () => {
     });
   });
 
+  it("normalizes blank and duplicate tag names at the storage boundary", async () => {
+    const path = await tempTagsPath();
+    await expect(
+      setSessionTags(path, "ses_1", [" 执行 ", "", "执行", "  ", "咨询"]),
+    ).resolves.toEqual({
+      sessions: { ses_1: ["执行", "咨询"] },
+      colors: {},
+    });
+    expect(await readTags(path)).toEqual({ sessions: { ses_1: ["执行", "咨询"] }, colors: {} });
+  });
+
+  it("normalizes legacy data and ignores unsafe object keys", async () => {
+    const path = await tempTagsPath();
+    await writeFile(
+      path,
+      JSON.stringify({
+        ses_1: [" 执行 ", "执行", ""],
+        ["__proto__"]: ["忽略"],
+      }),
+      "utf8",
+    );
+    expect(await readTags(path)).toEqual({ sessions: { ses_1: ["执行"] }, colors: {} });
+    await expect(setSessionTags(path, "__proto__", ["忽略"])).resolves.toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+    });
+  });
+
   it("setTagColor sets, normalizes and clears a hue", async () => {
     const path = await tempTagsPath();
     await setSessionTags(path, "ses_1", ["执行"]);

@@ -239,7 +239,12 @@ function onTabKey(event: KeyboardEvent): void {
 
 function togglePreview(): void {
   previewing.value = !previewing.value;
-  if (!previewing.value) void nextTick(() => textareaEl.value?.focus());
+  if (!previewing.value) {
+    void nextTick(() => {
+      fitTextarea();
+      textareaEl.value?.focus();
+    });
+  }
 }
 
 function onDragOver(): void {

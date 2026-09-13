@@ -17,6 +17,22 @@ import { enqueueWrite } from "./write-queue.js";
 export type TagMap = TagStore["sessions"];
 
 const EMPTY: TagStore = { sessions: {}, colors: {} };
+const FORBIDDEN_KEY_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+function isSafeKey(key: string): boolean {
+  return !FORBIDDEN_KEY_NAMES.has(key);
+}
+
+function normalizeTags(tags: readonly unknown[]): string[] {
+  return [
+    ...new Set(
+      tags
+        .filter((tag): tag is string => typeof tag === "string")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
 function isLegacy(parsed: Record<string, unknown>): boolean {
   return Object.keys(parsed).length === 0 || Object.values(parsed).some((v) => Array.isArray(v));
@@ -25,8 +41,8 @@ function isLegacy(parsed: Record<string, unknown>): boolean {
 function sanitizeSessions(parsed: Record<string, unknown>): TagMap {
   const map: TagMap = {};
   for (const [id, value] of Object.entries(parsed)) {
-    if (!Array.isArray(value)) continue;
-    const tags = value.filter((t): t is string => typeof t === "string");
+    if (!isSafeKey(id) || !Array.isArray(value)) continue;
+    const tags = normalizeTags(value);
     if (tags.length > 0) map[id] = tags;
   }
   return map;
@@ -35,7 +51,7 @@ function sanitizeSessions(parsed: Record<string, unknown>): TagMap {
 function sanitizeColors(parsed: Record<string, unknown>): Record<string, number> {
   const colors: Record<string, number> = {};
   for (const [tag, value] of Object.entries(parsed)) {
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (isSafeKey(tag) && typeof value === "number" && Number.isFinite(value)) {
       colors[tag] = ((value % 360) + 360) % 360;
     }
   }
@@ -97,11 +113,13 @@ export function setSessionTags(
 ): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
+    if (!isSafeKey(sessionId)) return store;
     const next: TagStore = {
       sessions: { ...store.sessions },
       colors: { ...store.colors },
     };
-    if (tags.length > 0) next.sessions[sessionId] = tags;
+    const normalized = normalizeTags(tags);
+    if (normalized.length > 0) next.sessions[sessionId] = normalized;
     else delete next.sessions[sessionId];
     next.colors = pruneOrphanColors(next.sessions, next.colors);
     await writeTags(filePath, next);
@@ -117,6 +135,7 @@ export function setSessionTags(
 export function setTagColor(filePath: string, tag: string, hue: number | null): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
+    if (!isSafeKey(tag)) return store;
     if (hue === null) {
       if (!(tag in store.colors)) return store;
       const next: TagStore = { sessions: store.sessions, colors: { ...store.colors } };
@@ -138,6 +157,7 @@ export function setTagColor(filePath: string, tag: string, hue: number | null): 
 export function deleteTag(filePath: string, tag: string): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
+    if (!isSafeKey(tag)) return store;
     const sessions: TagMap = {};
     for (const [id, tags] of Object.entries(store.sessions)) {
       const kept = tags.filter((t) => t !== tag);
@@ -154,7 +174,7 @@ export function deleteTag(filePath: string, tag: string): Promise<TagStore> {
 export function pruneTags(filePath: string, sessionId: string): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
-    if (!(sessionId in store.sessions)) return store;
+    if (!isSafeKey(sessionId) || !(sessionId in store.sessions)) return store;
     const sessions = { ...store.sessions };
     delete sessions[sessionId];
     const next: TagStore = { sessions, colors: pruneOrphanColors(sessions, store.colors) };

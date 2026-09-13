@@ -43,7 +43,7 @@
     >
       {{ store.actionError }}（点击关闭）
     </div>
-    <div v-if="store.deletedToast" class="toast banner-undo" role="status">
+    <div v-if="store.deletedToast" class="toast banner-undo" role="status" aria-live="polite">
       <span class="undo-text">已删除「{{ store.deletedToast.title }}」（⌘/Ctrl+Z 也可撤销）</span>
       <button
         type="button"
@@ -52,7 +52,7 @@
         @click="undoDelete(store.deletedToast.sessionId)"
       >撤销</button>
     </div>
-    <div v-if="store.tagDeletedToast" class="toast banner-undo" role="status">
+    <div v-if="store.tagDeletedToast" class="toast banner-undo tag-undo" role="status" aria-live="polite">
       <span class="undo-text">已删除标签「{{ store.tagDeletedToast.tag }}」</span>
       <button
         type="button"
@@ -61,7 +61,7 @@
         @click="undoDeleteTag()"
       >撤销</button>
     </div>
-    <div v-if="store.updateToast" class="toast banner-update" role="status">
+    <div v-if="store.updateToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.updateToast }}
     </div>
   </div>
