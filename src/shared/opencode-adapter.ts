@@ -30,6 +30,13 @@ export interface OpenCodeAdapterOptions {
   fileChangesDir?: string;
   /** Descriptor override for tests; defaults to the bundled agents/opencode.json. */
   descriptor?: OpenCodeDescriptor;
+  /**
+   * Snapshot reader handed to the file-change recorder; defaults to node:fs.
+   * Tests use it to learn when a baseline read has actually landed, since the
+   * recorder reads "before" asynchronously and a wall-clock guess loses that
+   * race under load.
+   */
+  readFile?: (path: string) => Promise<Buffer>;
 }
 
 /**
@@ -72,6 +79,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
             recorder = createFileChangeRecorder({
               rootDir: options.fileChangesDir ?? "",
               fact: fileChangesFact,
+              readFile: options.readFile,
               directoryOf: async (id) => {
                 try {
                   const session = await client.session(id);

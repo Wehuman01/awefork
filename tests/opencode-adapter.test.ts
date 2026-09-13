@@ -1098,10 +1098,30 @@ describe("opencode adapter · file changes", () => {
       adapter.dispose();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     });
+    // The recorder reads "before" asynchronously, so the test waits for that
+    // read to land instead of guessing with a wall-clock delay: under the full
+    // suite's parallel load the guess loses the race, the recorder sees
+    // before === after, and it drops the row as a net no-op.
+    let baselineLanded!: () => void;
+    const baseline = new Promise<void>((resolve) => {
+      baselineLanded = resolve;
+    });
+    let baselineSeen = false;
     const adapter = createOpencodeAdapter({
       baseUrl,
       lineagePath,
       fileChangesDir: changesRoot,
+      readFile: async (path) => {
+        const buffer = await readFile(path);
+        // The recorder reads the target once for "before" (the running frame)
+        // and again for "after" (the terminal frame); only the first is the
+        // baseline the test has to get ahead of.
+        if (path === file && !baselineSeen) {
+          baselineSeen = true;
+          baselineLanded();
+        }
+        return buffer;
+      },
     });
 
     const events: AgentEvent[] = [];
@@ -1114,9 +1134,9 @@ describe("opencode adapter · file changes", () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       expect(events.length).toBeGreaterThan(0);
-      // Tool part frames ride the same stream as text parts; the frames are
-      // pushed with real time between them so the recorder's "before" read
-      // lands before the edit does.
+      // Tool part frames ride the same stream as text parts; the edit waits
+      // for the recorder's baseline read to actually land, so "before" is the
+      // pre-edit content no matter how loaded the suite is.
       pushEvent({
         type: "message.part.updated",
         properties: {
@@ -1130,7 +1150,7 @@ describe("opencode adapter · file changes", () => {
           },
         },
       });
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await baseline;
       await writeFile(file, "one\nTWO\nthree\n");
       pushEvent({
         type: "message.part.updated",
