@@ -297,7 +297,7 @@
           </template>
         </template>
       </template>
-      <p v-if="visibleGroups.length === 0" class="group-empty">没有匹配的会话</p>
+      <p v-if="visibleGroups.length === 0 && !bodyScanning" class="group-empty">没有匹配的会话</p>
     </nav>
 
     <div class="archive-zone">
@@ -688,18 +688,58 @@ const bodyScopeWanted = computed(
   () => searchScopes.body || parsedQuery.value.includes.some((term) => term.scope === "body"),
 );
 
+/** Number of sessions matched by the local title/tag surfaces before any body results join in. */
+const localSearchHitCount = computed(() => {
+  const parsed = parsedQuery.value;
+  const filters = activeTagFilters.value;
+  const scopedDir = projectScopeActive.value ? projectScope.value : null;
+  return visibleSessions.value.filter((session) => {
+    if (scopedDir !== null && session.directory !== scopedDir) return false;
+    const tags = tagsOf(session.id);
+    const context = {
+      title: session.title,
+      tags,
+      directory: session.directory,
+      pinned: store.pins.includes(session.id),
+      fork: session.origin === "fork",
+      running: Boolean(store.running[session.id]),
+    };
+    return (
+      gatesOk(parsed, context) &&
+      localTextMatched(parsed, context, searchScopes) &&
+      filters.every((filter) => tags.includes(filter))
+    );
+  }).length;
+});
+
+/** Plain-text queries fall back to body search only after title/tag matching finds nothing. */
+const bodyFallback = computed(() => {
+  const parsed = parsedQuery.value;
+  return (
+    !bodyScopeWanted.value &&
+    parsed.includes.length > 0 &&
+    parsed.includes.every((term) => term.scope === null) &&
+    localSearchHitCount.value === 0
+  );
+});
+
 /** Debounced dispatch; every call invalidates in-flight results via the sequence. */
 function scheduleBodySearch(): void {
   if (bodyTimer !== null) clearTimeout(bodyTimer);
   searchSequence++;
-  const terms = bodyScopeWanted.value ? bodySearchTerms(parsedQuery.value) : null;
+  const parsed = parsedQuery.value;
+  const terms = bodyScopeWanted.value
+    ? bodySearchTerms(parsed)
+    : bodyFallback.value
+      ? parsed.includes.map((term) => term.text)
+      : null;
   if (terms === null) {
     clearBodySearch();
     return;
   }
   bodyScanning.value = true;
   const token = searchSequence;
-  bodyTimer = setTimeout(() => void runBodySearch(token, terms, parsedQuery.value.excludes), 250);
+  bodyTimer = setTimeout(() => void runBodySearch(token, terms, parsed.excludes), 250);
 }
 
 async function runBodySearch(token: number, terms: string[], excludes: string[]): Promise<void> {
@@ -727,7 +767,10 @@ async function runBodySearch(token: number, terms: string[], excludes: string[])
   }
 }
 
-watch([query, () => searchScopes.body, projectScope, searchLimit], scheduleBodySearch);
+watch(
+  [query, () => searchScopes.body, projectScope, searchLimit, bodyFallback],
+  scheduleBodySearch,
+);
 // A backend switch invalidates every hit: ids never collide, but the bodies do.
 watch(
   () => store.activeBackend,
@@ -741,7 +784,10 @@ watch(
 watch(
   () => visibleSessions.value.map((session) => `${session.id}:${session.updatedAt}`).join("\n"),
   () => {
-    if (bodyScopeWanted.value && bodySearchTerms(parsedQuery.value) !== null) {
+    if (
+      (bodyScopeWanted.value && bodySearchTerms(parsedQuery.value) !== null) ||
+      bodyFallback.value
+    ) {
       scheduleBodySearch();
     }
   },
@@ -1336,7 +1382,7 @@ const visibleGroups = computed<SessionGroup[]>(() => {
             parsed.includes.length === 0
               ? true
               : localTextMatched(parsed, context, searchScopes) ||
-                (bodyScopeWanted.value && hitIds.has(node.session.id));
+                ((bodyScopeWanted.value || bodyFallback.value) && hitIds.has(node.session.id));
           const filterHit = filters.every((f) => tags.includes(f));
           return gateHit && textHit && filterHit
             ? { ...node, children }
