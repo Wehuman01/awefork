@@ -13,7 +13,7 @@
  * production builds (import.meta.env.DEV is false).
  */
 
-import type { TagStore } from "../../../shared/awefork-api.js";
+import type { BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
 import type {
   AgentEvent,
@@ -459,6 +459,39 @@ export function installMockAdapter(): void {
     ready: async () => ({ ok: true }),
     sessions: async () => ({ sessions: summaries(), lineage: { ...lineage } }),
     messages: async (_backend, sessionId) => ensureMessages(sessionId).map((m) => ({ ...m })),
+    // Demo body scan: same substring semantics as main, snippet from the
+    // first matching message — enough to exercise the sidebar's ✦ flow.
+    searchMessages: async (_backend, targets, request) => {
+      const hits: BodySearchHit[] = [];
+      const excludedSessionIds: string[] = [];
+      for (const target of targets) {
+        const rows = ensureMessages(target.id)
+          .filter((m) => m.text.trim().length > 0 || m.toolNames.length > 0)
+          .map((m) => ({
+            id: m.id,
+            searchable: `${m.text}\n${m.toolNames.join(" ")}`.toLowerCase(),
+          }));
+        const joined = rows.map((row) => row.searchable).join("\n");
+        if (request.excludes.some((term) => joined.includes(term))) {
+          excludedSessionIds.push(target.id);
+          continue;
+        }
+        if (!request.terms.every((term) => joined.includes(term))) continue;
+        for (const row of rows) {
+          if (!request.terms.some((term) => row.searchable.includes(term))) continue;
+          const index = row.searchable.indexOf(request.terms[0] ?? "");
+          hits.push({
+            sessionId: target.id,
+            messageId: row.id,
+            snippet: row.searchable.slice(Math.max(0, index - 36), index + 60),
+            matchStart: Math.min(36, index),
+            matchLength: (request.terms[0] ?? "").length,
+          });
+          if (hits.filter((hit) => hit.sessionId === target.id).length >= 2) break;
+        }
+      }
+      return { hits, excludedSessionIds, scanned: targets.length };
+    },
     // The demo keeps only attachment names; hand back readable stand-ins so
     // the retry prefill path still shows chips and resends.
     messageAttachments: async (_backend, sessionId, messageId) => {

@@ -109,7 +109,11 @@ function promptText(node: TurnNode, messages?: Record<string, ChatMessage[]>): s
   return user?.text || node.title;
 }
 
-function snippetAround(
+/**
+ * Window of `SNIPPET_RADIUS` characters around the match, "…" where trimmed —
+ * shared by every snippet the app renders (canvas turns, sidebar body hits).
+ */
+export function snippetAround(
   text: string,
   index: number,
   length: number,

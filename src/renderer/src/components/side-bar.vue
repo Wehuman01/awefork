@@ -1,22 +1,62 @@
 <template>
   <aside class="sidebar">
-    <div class="side-label">项目</div>
-    <div class="side-actions">
-      <button type="button" class="icon-btn wide" title="在当前项目里开一条新对话" @click="emitCreate">
-        ＋ 新对话
-      </button>
-      <button
-        type="button"
-        class="icon-btn wide"
-        title="选择一个项目目录加进侧栏，可在其中新建对话"
-        @click="emitAddDir"
-      >＋ 新目录</button>
-      <button type="button" class="icon-btn wide" title="重新加载会话" @click="emitRefresh">↻ 刷新</button>
-    </div>
     <div class="search">
       <span>⌕</span>
-      <input v-model="query" type="text" placeholder="搜索会话" aria-label="搜索会话" />
+      <input
+        v-model="query"
+        type="text"
+        :placeholder="searchPlaceholder"
+        aria-label="搜索会话"
+      />
+      <button
+        type="button"
+        class="search-boost"
+        :class="{ on: boostActive }"
+        :title="boostOpen ? '收起增强搜索' : '增强搜索：范围、标签、状态筛选'"
+        :aria-expanded="boostOpen"
+        @mousedown.stop
+        @click.stop="boostOpen = !boostOpen"
+      >✦</button>
     </div>
+    <div v-if="boostOpen" class="boost-menu" @mousedown.stop>
+      <div class="boost-head">搜索范围</div>
+      <div class="boost-scopes">
+        <label class="boost-opt"><input v-model="searchScopes.title" type="checkbox" />标题</label>
+        <label class="boost-opt"><input v-model="searchScopes.tag" type="checkbox" />标签</label>
+        <label class="boost-opt"
+          ><input v-model="searchScopes.body" type="checkbox" />正文·全文</label
+        >
+      </div>
+      <div class="boost-head">修饰符（点选插入）</div>
+      <div class="boost-chips">
+        <button
+          v-for="chip in flagChips"
+          :key="chip.token"
+          type="button"
+          class="boost-chip"
+          :class="{ on: parsedQuery.flags.has(chip.flag) }"
+          :title="`在搜索框里${parsedQuery.flags.has(chip.flag) ? '移除' : '加入'} ${chip.token}`"
+          @click="toggleQueryToken(chip.token)"
+        >{{ chip.token }}</button>
+      </div>
+      <div class="boost-head">语法</div>
+      <dl class="boost-syntax">
+        <dt><code>body:词</code></dt>
+        <dd>只搜会话正文</dd>
+        <dt><code>#标签</code></dt>
+        <dd>限定标签</dd>
+        <dt><code>title:词</code></dt>
+        <dd>限定标题</dd>
+        <dt><code>dir:目录</code></dt>
+        <dd>限定目录</dd>
+        <dt><code>"精确短语"</code></dt>
+        <dd>整句匹配</dd>
+        <dt><code>-词</code></dt>
+        <dd>排除含它的结果</dd>
+      </dl>
+      <p class="boost-note">勾选正文后：标题命中立即显示，正文命中扫描完成后补上。</p>
+    </div>
+    <p v-if="bodyScanning" class="body-scan">⟳ 正在搜索正文…</p>
     <div v-if="allTags.length > 0" class="tag-shelf-zone">
       <div id="tag-shelf" class="tag-shelf">
         <button
@@ -52,7 +92,7 @@
         @click="favOpen = !favOpen"
       >
         <span class="archive-caret">{{ favOpen ? "▾" : "▸" }}</span>
-        <span>★ 收藏</span>
+        <span>📌 置顶</span>
         <span class="proj-count">{{ favoriteSessions.length }}</span>
       </button>
       <div v-if="favOpen" id="favorite-list" class="fav-list">
@@ -62,7 +102,7 @@
           type="button"
           class="fav-row"
           :class="{ active: sess.id === selectedId, running: store.running[sess.id] }"
-          :title="sess.title || '(untitled)'"
+          :title="`${sess.title || '(untitled)'} · ${shortPath(sess.directory)}`"
           @click="openFavorite(sess)"
         >
           <span class="fav-dot"></span>
@@ -80,11 +120,30 @@
             class="tag-chip tag-more"
             :title="rowTags(sess.id, 1).hidden.join('、')"
           >+{{ rowTags(sess.id, 1).more }}</span>
-          <span class="fav-dir">{{ shortPath(sess.directory) }}</span>
+          <span class="fav-time">{{ relTime(sess.updatedAt) }}</span>
         </button>
       </div>
     </div>
-    <nav class="session-list">
+    <div class="proj-head">
+      <button
+        type="button"
+        class="head-caret"
+        :title="projectsOpen ? '收起项目列表' : '展开项目列表'"
+        :aria-expanded="projectsOpen"
+        @click="projectsOpen = !projectsOpen"
+      >{{ projectsOpen ? "▾" : "▸" }}</button>
+      <button type="button" class="head-label" @click="projectsOpen = !projectsOpen">项目</button>
+      <span class="head-actions">
+        <button type="button" class="head-icon" title="重新加载会话" @click="emitRefresh">↻</button>
+        <button
+          type="button"
+          class="head-icon"
+          title="选择一个项目目录加进侧栏，可在其中新建对话"
+          @click="emitAddDir"
+        >＋</button>
+      </span>
+    </div>
+    <nav v-show="projectsOpen" class="session-list">
       <template v-for="group in visibleGroups" :key="group.directory">
         <div
           class="proj-row"
@@ -108,72 +167,99 @@
             <span class="proj-name">{{ shortPath(group.directory) }}</span>
             <span v-if="countSessions(group) > 0" class="proj-count">{{ countSessions(group) }}</span>
           </button>
+          <button
+            type="button"
+            class="proj-add"
+            title="在这个项目里新建对话"
+            @click="emitCreateIn(group.directory)"
+          >＋</button>
         </div>
         <template v-if="isOpen(group)">
-          <div
-            v-for="row in flatSessions(group)"
-            :key="row.session.id"
-            class="sess-row"
-            :class="{ active: row.session.id === selectedId }"
-          >
-            <input
-              v-if="renaming?.sessionId === row.session.id"
-              :ref="focusRenameInput"
-              v-model="renameText"
-              class="sess-rename"
-              :style="{ marginLeft: `${8 + row.depth * 14}px` }"
-              @keydown.enter="onRenameEnter"
-              @keydown.esc.stop="onRenameEsc"
-              @mousedown.stop
-              @blur="commitRename"
-            />
-            <button
-              v-else
-              type="button"
-              class="sess"
-              :class="{
-                running: store.running[row.session.id],
-                recent: recentAlphaFor(row.session.id) > 0,
-              }"
-              :style="{
-                paddingLeft: `${8 + row.depth * 14}px`,
-                '--recent-alpha': recentAlphaFor(row.session.id),
-              }"
-              :title="row.session.title || '(untitled)'"
-              @click="selectSession(row.session.id, { focus: true })"
-              @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
-            >
-              <span class="dot"></span>
-              <span v-if="row.session.origin === 'fork'" class="fork-glyph">⎇</span>
-              <span class="sess-name">{{ row.session.title || "(untitled)" }}</span>
-              <span
-                v-for="tag in rowTags(row.session.id, 2).tags"
-                :key="tag"
-                class="tag-chip clickable"
-                :style="{ color: tagColor(tag), background: tagBg(tag) }"
-                title="只看带这个标签的会话"
-                @click.stop="filterByTag(tag)"
-              >{{ tag }}</span>
-              <span
-                v-if="rowTags(row.session.id, 2).more > 0"
-                class="tag-chip tag-more"
-                :title="rowTags(row.session.id, 2).hidden.join('、')"
-              >+{{ rowTags(row.session.id, 2).more }}</span>
-            </button>
-            <button
-              type="button"
-              class="pin-star"
-              :class="{ on: store.pins.includes(row.session.id) }"
-              :title="store.pins.includes(row.session.id) ? '取消收藏' : '收藏'"
-              @click.stop="pinToggle(row.session.id)"
-            >{{ store.pins.includes(row.session.id) ? "★" : "☆" }}</button>
-            <button
-              type="button"
-              class="sess-archive"
-              title="归档会话（在下方归档区可恢复）"
-              @click.stop="rowArchive(row.session.id)"
-            >📦</button>
-          </div>
+          <template v-for="row in flatSessions(group)" :key="row.session.id">
+            <div class="sess-row" :class="{ active: row.session.id === selectedId }">
+              <input
+                v-if="renaming?.sessionId === row.session.id"
+                :ref="focusRenameInput"
+                v-model="renameText"
+                class="sess-rename"
+                :style="{ marginLeft: `${8 + row.depth * 14}px` }"
+                @keydown.enter="onRenameEnter"
+                @keydown.esc.stop="onRenameEsc"
+                @mousedown.stop
+                @blur="commitRename"
+              />
+              <button
+                v-else
+                type="button"
+                class="sess"
+                :class="{
+                  running: store.running[row.session.id],
+                  recent: recentAlphaFor(row.session.id) > 0,
+                }"
+                :style="{
+                  paddingLeft: `${8 + row.depth * 14}px`,
+                  '--recent-alpha': recentAlphaFor(row.session.id),
+                }"
+                :title="row.session.title || '(untitled)'"
+                @click="selectSession(row.session.id, { focus: true })"
+                @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
+              >
+                <span class="dot"></span>
+                <span v-if="row.session.origin === 'fork'" class="fork-glyph">⎇</span>
+                <span class="sess-name">
+                  <template
+                    v-for="(segment, index) in titleSegments(row.session.title)"
+                    :key="index"
+                  >
+                    <mark v-if="segment.hit" class="hl">{{ segment.text }}</mark>
+                    <template v-else>{{ segment.text }}</template>
+                  </template>
+                </span>
+                <span
+                  v-for="tag in rowTags(row.session.id, 2).tags"
+                  :key="tag"
+                  class="tag-chip clickable"
+                  :style="{ color: tagColor(tag), background: tagBg(tag) }"
+                  title="只看带这个标签的会话"
+                  @click.stop="filterByTag(tag)"
+                >{{ tag }}</span>
+                <span
+                  v-if="rowTags(row.session.id, 2).more > 0"
+                  class="tag-chip tag-more"
+                  :title="rowTags(row.session.id, 2).hidden.join('、')"
+                >+{{ rowTags(row.session.id, 2).more }}</span>
+              </button>
+              <button
+                type="button"
+                class="pin-star"
+                :class="{ on: store.pins.includes(row.session.id) }"
+                :title="store.pins.includes(row.session.id) ? '取消收藏' : '收藏'"
+                @click.stop="pinToggle(row.session.id)"
+              >{{ store.pins.includes(row.session.id) ? "★" : "☆" }}</button>
+              <button
+                type="button"
+                class="sess-archive"
+                title="归档会话（在下方归档区可恢复）"
+                @click.stop="rowArchive(row.session.id)"
+              >📦</button>
+            </div>
+            <div v-if="bodyHits.has(row.session.id)" class="sess-snips">
+              <button
+                v-for="hit in bodyHits.get(row.session.id) ?? []"
+                :key="hit.messageId"
+                type="button"
+                class="sess-snip"
+                :style="{ paddingLeft: `${8 + row.depth * 14 + 10}px` }"
+                title="定位到这条消息所在的回合"
+                @click="jumpToHit(hit)"
+              >
+                <template v-for="(segment, index) in snippetSegments(hit)" :key="index">
+                  <mark v-if="segment.hit" class="hl">{{ segment.text }}</mark>
+                  <template v-else>{{ segment.text }}</template>
+                </template>
+              </button>
+            </div>
+          </template>
         </template>
       </template>
       <p v-if="visibleGroups.length === 0" class="group-empty">没有匹配的会话</p>
@@ -443,10 +529,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import type { BodySearchHit } from "../../../shared/awefork-api";
+import {
+  bodySearchTerms,
+  firstMatchRange,
+  gatesOk,
+  localTextMatched,
+  parseSearchQuery,
+  type ScopeSet,
+  type SearchFlag,
+} from "../../../shared/search-query";
 import type { SessionGroup, SessionTreeNode } from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
-import { shortPath } from "../format";
+import { relTime, shortPath } from "../format";
 import { panels, persistLayout } from "../layout";
 import {
   addDirectory,
@@ -460,6 +556,7 @@ import {
   deleteTag,
   favoriteSessions,
   hueOf,
+  jumpToMessage,
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
@@ -479,11 +576,174 @@ import {
   tagsOf,
   takeSessionMenuRequest,
   togglePin,
+  visibleSessions,
 } from "../state";
 
 const query = ref("");
 /** Per-directory expansion overrides; a directory defaults open when selected. */
 const expandedOverride = ref<Record<string, boolean>>({});
+
+// ── enhanced search (✦) ─────────────────────────────────────────────
+
+/** Which surfaces plain terms search; 正文 is opt-in (a scan costs a round-trip per session). */
+const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
+const boostOpen = ref(false);
+
+const parsedQuery = computed(() => parseSearchQuery(query.value));
+
+/** Any filtering active — includes the tag shelf, so pure #bug/is: queries count. */
+const queryActive = computed(
+  () =>
+    parsedQuery.value.includes.length > 0 ||
+    parsedQuery.value.excludes.length > 0 ||
+    parsedQuery.value.flags.size > 0 ||
+    activeTagFilters.value.length > 0,
+);
+
+/** ✦ lights up while the panel is open or a non-default search is in effect. */
+const boostActive = computed(
+  () =>
+    boostOpen.value ||
+    searchScopes.body ||
+    parsedQuery.value.flags.size > 0 ||
+    parsedQuery.value.excludes.length > 0 ||
+    parsedQuery.value.includes.some((term) => term.scope !== null),
+);
+
+const searchPlaceholder = computed(() => {
+  const parts = [
+    searchScopes.title && "标题",
+    searchScopes.tag && "标签",
+    searchScopes.body && "正文",
+  ].filter(Boolean);
+  return `搜索${parts.join("、")}…`;
+});
+
+const flagChips: { token: string; flag: SearchFlag }[] = [
+  { token: "is:收藏", flag: "pinned" },
+  { token: "is:fork", flag: "fork" },
+  { token: "is:运行中", flag: "running" },
+];
+
+/** Append (or remove) one whole token like is:收藏 — chip state reads the parsed query. */
+function toggleQueryToken(token: string): void {
+  const tokens = query.value.split(/\s+/).filter(Boolean);
+  const kept = tokens.filter((item) => item.toLowerCase() !== token.toLowerCase());
+  query.value =
+    kept.length === tokens.length ? `${query.value.trim()} ${token}`.trim() : kept.join(" ");
+}
+
+// ── body scan (main-process, two-phase) ─────────────────────────────
+
+/** sessionId → up to two snippet hits; body-matched sessions stay listed even without local hits. */
+const bodyHits = ref<Map<string, BodySearchHit[]>>(new Map());
+/** Sessions whose body contains an exclusion — vetoed everywhere, title hits included. */
+const bodyExcluded = ref<Set<string>>(new Set());
+const bodyScanning = ref(false);
+let searchSequence = 0;
+let bodyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearBodySearch(): void {
+  bodyHits.value = new Map();
+  bodyExcluded.value = new Set();
+  bodyScanning.value = false;
+}
+
+/** Body scan runs when 正文 is checked OR a body: term states the intent outright. */
+const bodyScopeWanted = computed(
+  () => searchScopes.body || parsedQuery.value.includes.some((term) => term.scope === "body"),
+);
+
+/** Debounced dispatch; every call invalidates in-flight results via the sequence. */
+function scheduleBodySearch(): void {
+  if (bodyTimer !== null) clearTimeout(bodyTimer);
+  searchSequence++;
+  const terms = bodyScopeWanted.value ? bodySearchTerms(parsedQuery.value) : null;
+  if (terms === null) {
+    clearBodySearch();
+    return;
+  }
+  bodyScanning.value = true;
+  const token = searchSequence;
+  bodyTimer = setTimeout(() => void runBodySearch(token, terms, parsedQuery.value.excludes), 250);
+}
+
+async function runBodySearch(token: number, terms: string[], excludes: string[]): Promise<void> {
+  const backend = store.activeBackend;
+  const targets = visibleSessions.value.map((session) => ({
+    id: session.id,
+    updatedAt: session.updatedAt,
+  }));
+  try {
+    const result = await window.awefork.searchMessages(backend, targets, { terms, excludes });
+    if (token !== searchSequence || backend !== store.activeBackend) return;
+    const bySession = new Map<string, BodySearchHit[]>();
+    for (const hit of result.hits) {
+      const list = bySession.get(hit.sessionId) ?? [];
+      list.push(hit);
+      bySession.set(hit.sessionId, list);
+    }
+    bodyHits.value = bySession;
+    bodyExcluded.value = new Set(result.excludedSessionIds);
+    bodyScanning.value = false;
+  } catch {
+    if (token === searchSequence) clearBodySearch();
+  }
+}
+
+watch([query, () => searchScopes.body], scheduleBodySearch);
+// A backend switch invalidates every hit: ids never collide, but the bodies do.
+watch(
+  () => store.activeBackend,
+  () => {
+    clearBodySearch();
+    scheduleBodySearch();
+  },
+);
+// Session churn (refresh, streams settling) re-scans only what changed —
+// main caches bodies by sessionId+updatedAt.
+watch(
+  () => visibleSessions.value.map((session) => `${session.id}:${session.updatedAt}`).join("\n"),
+  () => {
+    if (bodyScopeWanted.value && bodySearchTerms(parsedQuery.value) !== null) {
+      scheduleBodySearch();
+    }
+  },
+);
+
+onUnmounted(() => {
+  if (bodyTimer !== null) clearTimeout(bodyTimer);
+});
+
+/** Title text split around the first matching term — the row renders <mark> on the hit part. */
+function titleSegments(title: string): { text: string; hit: boolean }[] {
+  const text = title || "(untitled)";
+  const terms = parsedQuery.value.includes.map((term) => term.text);
+  const range = terms.length > 0 ? firstMatchRange(text, terms) : null;
+  if (range === null) return [{ text, hit: false }];
+  return [
+    { text: text.slice(0, range.start), hit: false },
+    { text: text.slice(range.start, range.start + range.length), hit: true },
+    { text: text.slice(range.start + range.length), hit: false },
+  ];
+}
+
+/** Snippet split around its carried match — same shape as titleSegments. */
+function snippetSegments(hit: BodySearchHit): { text: string; hit: boolean }[] {
+  const end = hit.matchStart + hit.matchLength;
+  return [
+    { text: hit.snippet.slice(0, hit.matchStart), hit: false },
+    { text: hit.snippet.slice(hit.matchStart, end), hit: true },
+    { text: hit.snippet.slice(end), hit: false },
+  ];
+}
+
+function jumpToHit(hit: BodySearchHit): void {
+  void jumpToMessage(hit.sessionId, hit.messageId);
+}
+
+/** The whole project list folds under the 项目 header, Cursor-style. */
+const projectsOpen = ref(true);
 
 // ── tag filter shelf ────────────────────────────────────────────────
 
@@ -945,13 +1205,16 @@ function focusRenameInput(el: unknown): void {
 
 function onDocMousedown(): void {
   closeMenu();
+  boostOpen.value = false;
 }
 
 function onDocKeydown(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
-  if (!menu.value && !dirMenu.value && !tagMenu.value && !shelfTagMenu.value) return;
+  if (!menu.value && !dirMenu.value && !tagMenu.value && !shelfTagMenu.value && !boostOpen.value)
+    return;
   event.preventDefault();
   closeMenu();
+  boostOpen.value = false;
 }
 
 onMounted(() => {
@@ -969,7 +1232,7 @@ const selectedId = computed(() => store.selectedId);
 const searching = computed(() => query.value.trim().length > 0);
 
 function isDirOpen(directory: string): boolean {
-  if (searching.value) return true;
+  if (queryActive.value) return true;
   const override = expandedOverride.value[directory];
   return override ?? directory === selectedDirectory.value;
 }
@@ -992,21 +1255,34 @@ function rowArchive(sessionId: string): void {
 }
 
 const visibleGroups = computed<SessionGroup[]>(() => {
-  const needle = query.value.trim().toLowerCase();
+  const parsed = parsedQuery.value;
   const filters = activeTagFilters.value;
+  if (!queryActive.value) return sessionGroups.value;
+  const hitIds = bodyHits.value;
   return (
     sessionGroups.value
       .map((group) => {
-        if (!needle && filters.length === 0) return group;
         const keep = (node: SessionTreeNode): SessionTreeNode | null => {
           const children = node.children.map(keep).filter((n): n is SessionTreeNode => n !== null);
           const tags = tagsOf(node.session.id);
+          const context = {
+            title: node.session.title,
+            tags,
+            directory: node.session.directory,
+            pinned: store.pins.includes(node.session.id),
+            fork: node.session.origin === "fork",
+            running: Boolean(store.running[node.session.id]),
+          };
+          // Gates fail the session everywhere; body exclusions veto title hits too.
+          const gateHit = gatesOk(parsed, context) && !bodyExcluded.value.has(node.session.id);
+          // With no include terms this is a pure filter (tags/flags/dir) — gates decide.
           const textHit =
-            !needle ||
-            node.session.title.toLowerCase().includes(needle) ||
-            tags.some((t) => t.toLowerCase().includes(needle));
+            parsed.includes.length === 0
+              ? true
+              : localTextMatched(parsed, context, searchScopes) ||
+                (bodyScopeWanted.value && hitIds.has(node.session.id));
           const filterHit = filters.every((f) => tags.includes(f));
-          return textHit && filterHit
+          return gateHit && textHit && filterHit
             ? { ...node, children }
             : children.length > 0
               ? { ...node, children }
@@ -1017,7 +1293,7 @@ const visibleGroups = computed<SessionGroup[]>(() => {
       })
       // Empty groups (hand-added directories) survive only the unfiltered
       // view — a search or tag filter is asking for conversations, not homes.
-      .filter((group) => group.roots.length > 0 || (!needle && filters.length === 0))
+      .filter((group) => group.roots.length > 0)
   );
 });
 
@@ -1050,8 +1326,9 @@ function selectDirectory(directory: string): void {
 function emitRefresh(): void {
   void refreshSessions();
 }
-function emitCreate(): void {
-  void createSession();
+/** Per-directory ＋: the new conversation lands in that project directly. */
+function emitCreateIn(directory: string): void {
+  void createSession(directory);
 }
 function emitAddDir(): void {
   void addDirectory();

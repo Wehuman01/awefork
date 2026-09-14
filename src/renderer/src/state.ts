@@ -1015,6 +1015,29 @@ export function requestSessionMenu(sessionId: string, x: number, y: number): voi
   state.sessionMenuRequest = { sessionId, x, y };
 }
 
+/**
+ * Jump from a sidebar body-search hit: select the session, then lock the
+ * pane onto the turn containing that message and ask the canvas to center
+ * on it. The hit's message may be an assistant row — its turn is the user
+ * message anchoring the range it falls in.
+ */
+export async function jumpToMessage(sessionId: string, messageId: string): Promise<void> {
+  await selectSession(sessionId, { focus: true });
+  const messages = state.messagesBySession[sessionId] ?? [];
+  const index = messages.findIndex((m) => m.id === messageId);
+  const anchor =
+    messages[index]?.role === "user"
+      ? messageId
+      : messages
+          .slice(0, Math.max(index, 0) + 1)
+          .filter((m) => m.role === "user")
+          .at(-1)?.id;
+  if (!anchor) return;
+  const nodeId = `${sessionId}:${anchor}`;
+  state.selectedTurnId = nodeId;
+  state.turnJumpRequest = { nodeId, nonce: Date.now() };
+}
+
 /** Take (and clear) the pending session-menu request, if any. */
 export function takeSessionMenuRequest(): { sessionId: string; x: number; y: number } | null {
   const request = state.sessionMenuRequest;

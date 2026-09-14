@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AweforkApi,
+  BodySearchRequest,
+  BodySearchResult,
   CheckUpdatesResult,
+  SessionSearchTarget,
   TagStore,
   UpdateDownloadProgress,
 } from "../shared/awefork-api.js";
@@ -41,6 +44,12 @@ const api: AweforkApi = {
   }> => ipcRenderer.invoke("awefork:sessions", backend),
   messages: (backend: BackendId, sessionId: string): Promise<ChatMessage[]> =>
     ipcRenderer.invoke("awefork:messages", backend, sessionId),
+  searchMessages: (
+    backend: BackendId,
+    targets: SessionSearchTarget[],
+    request: BodySearchRequest,
+  ): Promise<BodySearchResult> =>
+    ipcRenderer.invoke("awefork:searchMessages", backend, targets, request),
   models: (backend: BackendId): Promise<ModelOption[]> =>
     ipcRenderer.invoke("awefork:models", backend),
   messageAttachments: (

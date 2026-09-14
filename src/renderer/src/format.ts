@@ -14,6 +14,18 @@ export function formatTokens(count: number): string {
   return `${(count / 1000).toFixed(1)}k tok`;
 }
 
+/** Compact age of a timestamp for sidebar rows: 刚刚 / 5分 / 3时 / 2天 / 3月. */
+export function relTime(ms: number): string {
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes}分`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}时`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}天`;
+  return `${Math.floor(days / 30)}月`;
+}
+
 /** Last two segments of a directory for compact display ("/" and "\\" both split). */
 export function shortPath(directory: string): string {
   const parts = directory.split(/[\\/]/).filter(Boolean);

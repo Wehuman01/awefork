@@ -39,6 +39,38 @@ export interface TagStore {
   colors: Record<string, number>;
 }
 
+/** One session the renderer asks main to scan, with its updatedAt so cached
+ *  bodies can be reused across keystrokes. */
+export interface SessionSearchTarget {
+  id: string;
+  updatedAt: number;
+}
+
+/** Terms the session BODY owes the query, pre-lowercased (search-query.ts). */
+export interface BodySearchRequest {
+  terms: string[];
+  /** Substrings that veto a session when found in its body. */
+  excludes: string[];
+}
+
+export interface BodySearchHit {
+  sessionId: string;
+  messageId: string;
+  /** Window of the message text around the first match, "…" where trimmed. */
+  snippet: string;
+  /** Where the match starts inside `snippet`. */
+  matchStart: number;
+  matchLength: number;
+}
+
+export interface BodySearchResult {
+  hits: BodySearchHit[];
+  /** Sessions whose body contains an exclusion — vetoed everywhere. */
+  excludedSessionIds: string[];
+  /** Sessions whose messages were actually read (fetch failures excluded). */
+  scanned: number;
+}
+
 /**
  * The full window.awefork surface exposed by the preload bridge. Declared once
  * so the preload implementation and the renderer's Window typing can't drift:
@@ -57,6 +89,16 @@ export interface AweforkApi {
     backend: BackendId,
   ): Promise<{ sessions: SessionSummary[]; lineage: Record<string, ForkRecord> }>;
   messages(backend: BackendId, sessionId: string): Promise<ChatMessage[]>;
+  /**
+   * Sidebar enhanced search: scan the listed sessions' bodies (message text
+   * + tool names) for the pre-lowercased terms. Hits are capped per session
+   * and overall; bodies are cached per sessionId+updatedAt in main.
+   */
+  searchMessages(
+    backend: BackendId,
+    targets: SessionSearchTarget[],
+    request: BodySearchRequest,
+  ): Promise<BodySearchResult>;
   models(backend: BackendId): Promise<ModelOption[]>;
   messageAttachments(
     backend: BackendId,

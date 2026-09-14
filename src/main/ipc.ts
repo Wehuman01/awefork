@@ -37,6 +37,7 @@ import {
   terminalDefaultCodexHome,
 } from "./codex-homes.js";
 import { convertDocumentToText } from "./document-convert.js";
+import { createMessageSearcher, type MessageSearcher } from "./message-search.js";
 import { openSessionInTerminal } from "./session-terminal.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
 import { downloadAndInstallUpdate } from "./update-install.js";
@@ -50,6 +51,8 @@ import { downloadAndInstallUpdate } from "./update-install.js";
  *   ready(backend)          -> { ok, error? }       adapter status after startup
  *   sessions(backend)       -> {sessions, lineage}  sessions + lineage merged
  *   messages(backend, id)   -> ChatMessage[]        flat message list of a session
+ *   searchMessages(backend, targets, request) -> BodySearchResult
+ *                                                sidebar body scan (cached)
  *   models(backend)         -> ModelOption[]        models offered by the agent config
  *   messageAttachments(backend, session, message) -> PromptAttachment[] (retry prefill)
  *   createSession(backend, directory?) -> SessionSummary
@@ -108,6 +111,35 @@ export function registerIpc(registry: BackendRegistry): void {
     async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string) => {
       const adapter = await withAdapter(storeBackend(backend));
       return adapter.messages(sessionId);
+    },
+  );
+
+  // Sidebar enhanced search: body scan with a per-backend session cache.
+  // One searcher per backend keeps codex/opencode caches from cross-filling.
+  const searchers = new Map<BackendId, MessageSearcher>();
+  ipcMain.handle(
+    "awefork:searchMessages",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, targets: unknown, request: unknown) => {
+      const id = storeBackend(backend);
+      let searcher = searchers.get(id);
+      if (!searcher) {
+        searcher = createMessageSearcher(() => withAdapter(id));
+        searchers.set(id, searcher);
+      }
+      // IPC boundary: trust nothing about the shape, keep the searcher pure.
+      const safeTargets = (Array.isArray(targets) ? targets : []).filter(
+        (target): target is { id: string; updatedAt: number } =>
+          typeof target?.id === "string" && typeof target?.updatedAt === "number",
+      );
+      const raw = (request ?? {}) as { terms?: unknown; excludes?: unknown };
+      const strings = (value: unknown): string[] =>
+        Array.isArray(value)
+          ? value.filter((term): term is string => typeof term === "string")
+          : [];
+      return searcher.search(safeTargets, {
+        terms: strings(raw.terms),
+        excludes: strings(raw.excludes),
+      });
     },
   );
 
