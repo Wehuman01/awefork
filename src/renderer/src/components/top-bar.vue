@@ -61,6 +61,7 @@
       title="命令面板（⌘K / Ctrl+K）"
       @click="togglePalette()"
     >⌘K</button>
+    <HistoryButton />
     <div class="version-wrap" @click.stop>
       <button type="button" class="version-btn" @click="toggleVersionMenu">
         <span>{{ versionLabel }}</span>
@@ -80,6 +81,7 @@ import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { togglePalette } from "../layout";
 import { checkForUpdates, directories, store, switchBackend, switchDirectory } from "../state";
+import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);

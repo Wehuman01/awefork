@@ -54,7 +54,6 @@
     </div>
     <CommandPalette />
     <InteractionDialog />
-    <HistoryButton />
     <HistoryPanel />
     <div
       v-if="store.actionError"
@@ -95,7 +94,6 @@
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
 import CommandPalette from "./components/command-palette.vue";
-import HistoryButton from "./components/history-button.vue";
 import HistoryPanel from "./components/history-panel.vue";
 import InteractionDialog from "./components/interaction-dialog.vue";
 import SessionCanvas from "./components/session-canvas.vue";

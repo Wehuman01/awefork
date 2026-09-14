@@ -3,7 +3,7 @@
     <div v-if="history.panelOpen" class="history-panel">
       <div class="history-panel-head">
         <span class="history-panel-title">操作历史</span>
-        <span class="history-panel-meta">{{ history.entries.length }} 条记录 · 可撤销 {{ undoDepth }} 步</span>
+        <span class="history-panel-meta">{{ history.entries.length }} 条记录 · 可撤销 {{ undoDepth() }} 步</span>
         <button
           type="button"
           class="history-panel-close"

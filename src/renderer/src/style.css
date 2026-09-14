@@ -3972,71 +3972,59 @@ code.md-code {
   padding: 6px 12px 8px;
   white-space: normal;
 }
-/* ── history fab + panel ─────────────────────────────────────────── */
+/* ── history topbar button + panel ────────────────────────────────── */
 
-.history-fab {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--card);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  font-size: 18px;
-  display: grid;
-  place-items: center;
-  z-index: 80;
-  box-shadow: var(--shadow-lift);
+/* Sits next to ⌘K, so it borrows the same pill sizing (.icon-btn base). */
+.history-btn {
+  position: relative;
+  height: 28px;
+  flex: 0 0 auto;
+  margin-left: 0;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 11.5px;
   transition:
     background 0.15s,
     border-color 0.15s,
-    box-shadow 0.15s;
+    color 0.15s;
 }
 
-.history-fab:hover {
-  background: var(--primary-soft);
-  border-color: var(--primary-border);
-}
-
-.history-fab-open {
+.history-btn-open {
   background: var(--primary-soft);
   border-color: var(--primary);
-  box-shadow:
-    0 0 0 3px var(--primary-soft),
-    var(--shadow-lift);
+  color: var(--primary-deep);
 }
 
-.history-fab-icon {
+.history-btn-icon {
+  font-size: 14px;
   line-height: 1;
-  pointer-events: none;
 }
 
-.history-fab-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--danger);
-  color: #fff;
-  font-size: 10px;
+.history-btn-text {
   font-weight: 800;
-  line-height: 16px;
+}
+
+/* Undoable-step counter: informational, so a soft warm chip rather than
+   the alarm-red danger dot the old fab used. */
+.history-btn-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 17px;
   text-align: center;
-  box-shadow: 0 2px 6px rgba(196, 138, 92, 0.3);
-  pointer-events: none;
 }
 
 .history-panel {
   position: fixed;
-  right: 16px;
-  bottom: 64px;
+  top: 56px;
+  right: 12px;
   width: 380px;
-  max-height: 70vh;
+  max-height: calc(100vh - 132px);
   display: flex;
   flex-direction: column;
   background: var(--card);
