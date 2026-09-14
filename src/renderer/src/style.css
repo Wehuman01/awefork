@@ -1884,6 +1884,14 @@ textarea {
   cursor: pointer;
 }
 
+/* one transform carries the map's zoom (see mmLayerStyle); origin 0 0 keeps
+   the translate math anchored at the fit mapping's top-left */
+.mm-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
 .mm-node {
   position: absolute;
   border-radius: 2px;
@@ -1931,6 +1939,31 @@ textarea {
   border-radius: 3px;
   background: rgba(255, 138, 92, 0.08);
   pointer-events: none;
+}
+
+/* quiet caption on the map itself; ignores the pointer so clicks and drags
+   pass through, and warms up only while the cursor is on the map. the fade
+   strip keeps the caption readable when dots pass underneath. */
+.mm-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 0 5px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--ink-soft);
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+
+.minimap:hover .mm-hint {
+  opacity: 1;
 }
 
 /* ── branch context panel ──────────────────────────────────────────── */

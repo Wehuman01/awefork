@@ -256,25 +256,30 @@
       v-if="showMinimap"
       ref="minimapEl"
       class="minimap"
-      title="小地图 — 点击飞行 · 拖拽移动 · ⌘/Ctrl+滚轮缩放小地图"
       @mousedown.stop.prevent="onMinimapDown"
       @wheel="onMinimapWheel"
     >
-      <div
-        v-for="n in mmNodes"
-        :key="`mm-${n.id}`"
-        class="mm-node"
-        :class="{
-          stub: n.kind === 'stub',
-          on: activePathIds.has(n.id),
-          desc: childTurnIds.has(n.id),
-          running: isNodeRunning(n),
-          recent: isNodeRecent(n),
-          hit: searchHitIds.has(n.id),
-        }"
-        :style="{ ...mmNodeStyle(n), '--recent-alpha': recentAlpha(n) }"
-      ></div>
+      <!-- The layer carries the map's zoom as one transform; the dots keep
+           their static fit positions, so panning/zooming never rewrites
+           per-node styles (that churn was the jank on large graphs). -->
+      <div class="mm-layer" :style="mmLayerStyle">
+        <div
+          v-for="n in mmNodes"
+          :key="`mm-${n.id}`"
+          class="mm-node"
+          :class="{
+            stub: n.kind === 'stub',
+            on: activePathIds.has(n.id),
+            desc: childTurnIds.has(n.id),
+            running: isNodeRunning(n),
+            recent: isNodeRecent(n),
+            hit: searchHitIds.has(n.id),
+          }"
+          :style="{ ...mmNodeStyle(n), '--recent-alpha': recentAlpha(n) }"
+        ></div>
+      </div>
       <div class="mm-view" :style="mmViewStyle"></div>
+      <div class="mm-hint">滚轮缩放画布 · ⌘滚轮缩放地图</div>
     </div>
   </main>
 </template>
@@ -755,6 +760,8 @@ onUnmounted(() => {
   draftObserver.disconnect();
   mmAnimating = false;
   camTarget = null;
+  mmWheelQueued = false;
+  mmWheelDeltaY = 0;
   if (activeDrag) {
     window.removeEventListener("mousemove", activeDrag.move);
     window.removeEventListener("mouseup", activeDrag.up);
@@ -808,16 +815,28 @@ const mmGeom = computed<MmGeom | null>(() => {
   };
 });
 
-function mmNodeStyle(node: TurnNode): Record<string, string> {
+/** The map's camera as ONE layer transform: fit-positioned dots land on
+ *  `MM_WIDTH/2 + (x - camX) * s` by scaling about the origin and translating
+ *  (fit mode is the identity). Per-frame updates touch this element and the
+ *  view rect only — never the node dots. */
+const mmLayerStyle = computed(() => {
   const g = mmGeom.value;
-  if (!g) return { display: "none" };
-  const [left, top] =
-    g.kind === "fit"
-      ? [g.offX + (node.x - g.minX) * g.s, g.offY + (node.y - g.minY) * g.s]
-      : [MM_WIDTH / 2 + (node.x - g.camX) * g.s, MM_HEIGHT / 2 + (node.y - g.camY) * g.s];
+  const fit = minimapGeometry.value;
+  if (!g || !fit || g.kind === "fit") return {};
+  const k = g.s / fit.s;
   return {
-    left: `${left}px`,
-    top: `${top}px`,
+    transform: `translate(${MM_WIDTH / 2 + (fit.minX - g.camX) * g.s - fit.offX * k}px, ${
+      MM_HEIGHT / 2 + (fit.minY - g.camY) * g.s - fit.offY * k
+    }px) scale(${k})`,
+  };
+});
+
+function mmNodeStyle(node: TurnNode): Record<string, string> {
+  const g = minimapGeometry.value;
+  if (!g) return { display: "none" };
+  return {
+    left: `${g.offX + (node.x - g.minX) * g.s}px`,
+    top: `${g.offY + (node.y - g.minY) * g.s}px`,
     width: `${Math.max(4, NODE_WIDTH * g.s)}px`,
     height: `${Math.max(3, node.height * g.s)}px`,
     // at this size the 1px outline is half the footprint and reads as mush
@@ -964,31 +983,48 @@ function onMinimapDown(event: MouseEvent): void {
 }
 
 /** ⌘/Ctrl+wheel zooms the minimap itself, cursor-anchored; a plain wheel
- *  falls through and keeps zooming the canvas — that behavior is untouched. */
+ *  falls through and keeps zooming the canvas — that behavior is untouched.
+ *  Deltas accumulate and apply once per animation frame: trackpad momentum
+ *  emits wheel events faster than frames render, and each apply re-renders
+ *  the map. */
+let mmWheelDeltaY = 0;
+let mmWheelQueued = false;
+let mmWheelCursor = { x: 0, y: 0 };
+
 function onMinimapWheel(event: WheelEvent): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   event.preventDefault();
   event.stopPropagation();
+  mmWheelDeltaY += event.deltaY;
+  mmWheelCursor = { x: event.clientX, y: event.clientY };
+  if (mmWheelQueued) return;
+  mmWheelQueued = true;
+  requestAnimationFrame(() => {
+    mmWheelQueued = false;
+    applyMmZoom();
+  });
+}
+
+function applyMmZoom(): void {
+  const deltaY = mmWheelDeltaY;
+  mmWheelDeltaY = 0;
   const g = mmGeom.value;
-  if (!g) return;
   const rect = minimapEl.value?.getBoundingClientRect();
-  if (!rect) return;
-  const mx = event.clientX - rect.left;
-  const my = event.clientY - rect.top;
-  const anchor =
-    g.kind === "fit"
-      ? { x: (mx - g.offX) / g.s + g.minX, y: (my - g.offY) / g.s + g.minY }
-      : { x: g.camX + (mx - MM_WIDTH / 2) / g.s, y: g.camY + (my - MM_HEIGHT / 2) / g.s };
+  if (!g || !rect) return;
+  const point = minimapWorldPoint(mmWheelCursor.x, mmWheelCursor.y);
+  if (!point) return;
+  const mx = mmWheelCursor.x - rect.left;
+  const my = mmWheelCursor.y - rect.top;
   const fitS = minimapGeometry.value?.s ?? g.s;
-  const next = Math.min(fitS * MM_MAX_ZOOM, Math.max(fitS, g.s * Math.exp(-event.deltaY * 0.0016)));
+  const next = Math.min(fitS * MM_MAX_ZOOM, Math.max(fitS, g.s * Math.exp(-deltaY * 0.0016)));
   if (next <= fitS * 1.0001) {
     mmZoom.value = null;
     mmCam.value = { x: -tx.value / scale.value, y: -ty.value / scale.value };
   } else {
     mmZoom.value = next;
     mmCam.value = {
-      x: anchor.x - (mx - MM_WIDTH / 2) / next,
-      y: anchor.y - (my - MM_HEIGHT / 2) / next,
+      x: point.x - (mx - MM_WIDTH / 2) / next,
+      y: point.y - (my - MM_HEIGHT / 2) / next,
     };
   }
 }
