@@ -896,7 +896,8 @@ mark.hl {
 }
 
 .pin-star,
-.sess-archive {
+.sess-archive,
+.sess-confirm {
   flex: 0 0 24px;
   width: 24px;
   height: 24px;
@@ -922,6 +923,22 @@ mark.hl {
 
 .pin-star.on {
   color: #f0b429;
+}
+
+.sess-confirm {
+  flex-basis: 48px;
+  width: 48px;
+  padding: 0 7px;
+  border-radius: 7px;
+  background: #ff5a68;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.sess-confirm:hover {
+  background: #e84756;
 }
 
 .sess-row:hover .pin-star,

@@ -230,17 +230,37 @@
                 >+{{ rowTags(row.session.id, 2).more }}</span>
               </button>
               <button
+                v-if="pendingAction?.sessionId === row.session.id && pendingAction.kind === 'pin'"
+                type="button"
+                class="sess-confirm"
+                :title="store.pins.includes(row.session.id) ? '确认取消置顶' : '确认置顶'"
+                @mousedown.stop
+                @click.stop="confirmRowAction(row.session.id, 'pin')"
+              >确认</button>
+              <button
+                v-else
                 type="button"
                 class="pin-star"
                 :class="{ on: store.pins.includes(row.session.id) }"
-                :title="store.pins.includes(row.session.id) ? '取消收藏' : '收藏'"
-                @click.stop="pinToggle(row.session.id)"
+                :title="store.pins.includes(row.session.id) ? '取消置顶' : '置顶'"
+                @mousedown.stop
+                @click.stop="armRowAction(row.session.id, 'pin')"
               >{{ store.pins.includes(row.session.id) ? "★" : "☆" }}</button>
               <button
+                v-if="pendingAction?.sessionId === row.session.id && pendingAction.kind === 'archive'"
+                type="button"
+                class="sess-confirm"
+                title="确认归档会话"
+                @mousedown.stop
+                @click.stop="confirmRowAction(row.session.id, 'archive')"
+              >确认</button>
+              <button
+                v-else
                 type="button"
                 class="sess-archive"
                 title="归档会话（在下方归档区可恢复）"
-                @click.stop="rowArchive(row.session.id)"
+                @mousedown.stop
+                @click.stop="armRowAction(row.session.id, 'archive')"
               >📦</button>
             </div>
             <div v-if="bodyHits.has(row.session.id)" class="sess-snips">
@@ -580,6 +600,8 @@ import {
 } from "../state";
 
 const query = ref("");
+/** Sidebar row action awaiting its second, explicit click. */
+const pendingAction = ref<{ sessionId: string; kind: "pin" | "archive" } | null>(null);
 /** Per-directory expansion overrides; a directory defaults open when selected. */
 const expandedOverride = ref<Record<string, boolean>>({});
 
@@ -1204,15 +1226,24 @@ function focusRenameInput(el: unknown): void {
 }
 
 function onDocMousedown(): void {
+  pendingAction.value = null;
   closeMenu();
   boostOpen.value = false;
 }
 
 function onDocKeydown(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
-  if (!menu.value && !dirMenu.value && !tagMenu.value && !shelfTagMenu.value && !boostOpen.value)
+  if (
+    !pendingAction.value &&
+    !menu.value &&
+    !dirMenu.value &&
+    !tagMenu.value &&
+    !shelfTagMenu.value &&
+    !boostOpen.value
+  )
     return;
   event.preventDefault();
+  pendingAction.value = null;
   closeMenu();
   boostOpen.value = false;
 }
@@ -1245,13 +1276,15 @@ function toggleDir(directory: string): void {
   expandedOverride.value = { ...expandedOverride.value, [directory]: !isDirOpen(directory) };
 }
 
-function pinToggle(sessionId: string): void {
-  void togglePin(sessionId);
+function armRowAction(sessionId: string, kind: "pin" | "archive"): void {
+  pendingAction.value = { sessionId, kind };
 }
 
-/** One-click row archive — reversible from the archive section, so no confirm. */
-function rowArchive(sessionId: string): void {
-  void archiveSession(sessionId);
+function confirmRowAction(sessionId: string, kind: "pin" | "archive"): void {
+  if (pendingAction.value?.sessionId !== sessionId || pendingAction.value.kind !== kind) return;
+  pendingAction.value = null;
+  if (kind === "pin") void togglePin(sessionId);
+  else void archiveSession(sessionId);
 }
 
 const visibleGroups = computed<SessionGroup[]>(() => {
