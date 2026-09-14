@@ -109,6 +109,28 @@ describe("message searcher", () => {
     expect(result.hits).toHaveLength(MAX_HITS_PER_SESSION);
   });
 
+  it("matches terms case-insensitively and highlights the right span", async () => {
+    const adapter = adapterWith({
+      s1: [message("m1", "推荐用 Neon + Vercel 部署网站")],
+    });
+    const searcher = createMessageSearcher(() => Promise.resolve(adapter));
+    const result = await searcher.search([target("s1")], { terms: ["neon"], excludes: [] });
+    expect(result.hits).toHaveLength(1);
+    // The snippet must surface the original-case "Neon", and the highlight
+    // span must land on those four characters, not somewhere else.
+    const hit = result.hits[0]!;
+    expect(hit.snippet).toContain("Neon");
+    expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength)).toBe("Neon");
+  });
+
+  it("treats uppercase excludes the same as lowercase", async () => {
+    const adapter = adapterWith({ s1: [message("m1", "I mentioned Neon yesterday")] });
+    const searcher = createMessageSearcher(() => Promise.resolve(adapter));
+    const result = await searcher.search([target("s1")], { terms: ["yesterday"], excludes: ["neon"] });
+    expect(result.hits).toEqual([]);
+    expect(result.excludedSessionIds).toEqual(["s1"]);
+  });
+
   it("does nothing without terms or excludes", async () => {
     const calls: string[] = [];
     const adapter = adapterWith({}, calls);

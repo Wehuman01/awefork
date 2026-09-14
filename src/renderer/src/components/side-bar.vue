@@ -27,17 +27,14 @@
           ><input v-model="searchScopes.body" type="checkbox" />正文·全文</label
         >
       </div>
-      <div class="boost-head">修饰符（点选插入）</div>
-      <div class="boost-chips">
-        <button
-          v-for="chip in flagChips"
-          :key="chip.token"
-          type="button"
-          class="boost-chip"
-          :class="{ on: parsedQuery.flags.has(chip.flag) }"
-          :title="`在搜索框里${parsedQuery.flags.has(chip.flag) ? '移除' : '加入'} ${chip.token}`"
-          @click="toggleQueryToken(chip.token)"
-        >{{ chip.token }}</button>
+      <div class="boost-head">项目</div>
+      <div class="boost-project">
+        <select v-model="projectScope" aria-label="把搜索限定到某个项目">
+          <option value="">全部项目</option>
+          <option v-for="dir in projectOptions" :key="dir" :value="dir">
+            {{ shortPath(dir) }}
+          </option>
+        </select>
       </div>
       <div class="boost-head">语法</div>
       <dl class="boost-syntax">
@@ -558,7 +555,6 @@ import {
   localTextMatched,
   parseSearchQuery,
   type ScopeSet,
-  type SearchFlag,
 } from "../../../shared/search-query";
 import type { SessionGroup, SessionTreeNode } from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
@@ -611,6 +607,11 @@ const expandedOverride = ref<Record<string, boolean>>({});
 const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
 const boostOpen = ref(false);
 
+/** Pin a search to one project directory. Empty = search every project (default). */
+const projectScope = ref<string>("");
+/** Options: every directory the sidebar knows about, in session-recency order. */
+const projectOptions = computed(() => sessionGroups.value.map((group) => group.directory));
+
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
 /** Any filtering active — includes the tag shelf, so pure #bug/is: queries count. */
@@ -622,10 +623,14 @@ const queryActive = computed(
     activeTagFilters.value.length > 0,
 );
 
+/** Project scope only narrows an active search; with no query it stays a no-op. */
+const projectScopeActive = computed(() => queryActive.value && projectScope.value !== "");
+
 /** ✦ lights up while the panel is open or a non-default search is in effect. */
 const boostActive = computed(
   () =>
     boostOpen.value ||
+    projectScope.value !== "" ||
     searchScopes.body ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
@@ -640,20 +645,6 @@ const searchPlaceholder = computed(() => {
   ].filter(Boolean);
   return `搜索${parts.join("、")}…`;
 });
-
-const flagChips: { token: string; flag: SearchFlag }[] = [
-  { token: "is:收藏", flag: "pinned" },
-  { token: "is:fork", flag: "fork" },
-  { token: "is:运行中", flag: "running" },
-];
-
-/** Append (or remove) one whole token like is:收藏 — chip state reads the parsed query. */
-function toggleQueryToken(token: string): void {
-  const tokens = query.value.split(/\s+/).filter(Boolean);
-  const kept = tokens.filter((item) => item.toLowerCase() !== token.toLowerCase());
-  query.value =
-    kept.length === tokens.length ? `${query.value.trim()} ${token}`.trim() : kept.join(" ");
-}
 
 // ── body scan (main-process, two-phase) ─────────────────────────────
 
@@ -692,10 +683,10 @@ function scheduleBodySearch(): void {
 
 async function runBodySearch(token: number, terms: string[], excludes: string[]): Promise<void> {
   const backend = store.activeBackend;
-  const targets = visibleSessions.value.map((session) => ({
-    id: session.id,
-    updatedAt: session.updatedAt,
-  }));
+  const scoped = projectScope.value !== "" && queryActive.value;
+  const targets = visibleSessions.value
+    .filter((session) => !scoped || session.directory === projectScope.value)
+    .map((session) => ({ id: session.id, updatedAt: session.updatedAt }));
   try {
     const result = await window.awefork.searchMessages(backend, targets, { terms, excludes });
     if (token !== searchSequence || backend !== store.activeBackend) return;
@@ -713,7 +704,7 @@ async function runBodySearch(token: number, terms: string[], excludes: string[])
   }
 }
 
-watch([query, () => searchScopes.body], scheduleBodySearch);
+watch([query, () => searchScopes.body, projectScope], scheduleBodySearch);
 // A backend switch invalidates every hit: ids never collide, but the bodies do.
 watch(
   () => store.activeBackend,
@@ -1292,8 +1283,13 @@ const visibleGroups = computed<SessionGroup[]>(() => {
   const filters = activeTagFilters.value;
   if (!queryActive.value) return sessionGroups.value;
   const hitIds = bodyHits.value;
+  // Project scope is a top-level gate, not a per-session match: it prunes the
+  // group list before the body/local matchers run, so a scoped search only
+  // renders its target directory's group.
+  const scopedDir = projectScopeActive.value ? projectScope.value : null;
   return (
     sessionGroups.value
+      .filter((group) => scopedDir === null || group.directory === scopedDir)
       .map((group) => {
         const keep = (node: SessionTreeNode): SessionTreeNode | null => {
           const children = node.children.map(keep).filter((n): n is SessionTreeNode => n !== null);

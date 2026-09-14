@@ -67,23 +67,27 @@ function toRows(messages: ChatMessage[]): BodyRow[] {
 
 /**
  * A session body-match: the session-wide verdict plus the rows worth a
- * snippet (each contains at least one term).
+ * snippet (each contains at least one term). All comparisons are case
+ * insensitive — the query terms arrive lowercased, but session bodies
+ * preserve their original casing, so naive `String#includes` would miss
+ * any uppercase occurrence.
  */
 function matchSession(
   rows: BodyRow[],
   request: BodySearchRequest,
 ): { matched: boolean; excluded: boolean; snippetRows: BodyRow[] } {
-  const joined = rows.map((row) => row.searchable).join("\n");
-  if (request.excludes.some((term) => joined.includes(term))) {
+  const joinedLowered = rows.map((row) => row.searchable.toLowerCase()).join("\n");
+  if (request.excludes.some((term) => joinedLowered.includes(term))) {
     return { matched: false, excluded: true, snippetRows: [] };
   }
   // AND across the whole body: terms may sit in different messages.
-  if (!request.terms.every((term) => joined.includes(term))) {
+  if (!request.terms.every((term) => joinedLowered.includes(term))) {
     return { matched: false, excluded: false, snippetRows: [] };
   }
   const snippetRows: BodyRow[] = [];
   for (const row of rows) {
-    if (request.terms.some((term) => row.searchable.includes(term))) {
+    const rowLowered = row.searchable.toLowerCase();
+    if (request.terms.some((term) => rowLowered.includes(term))) {
       snippetRows.push(row);
       if (snippetRows.length >= MAX_HITS_PER_SESSION) break;
     }
@@ -93,13 +97,15 @@ function matchSession(
 
 function hitForRow(sessionId: string, row: BodyRow, request: BodySearchRequest): BodySearchHit {
   // Snippet from the prose text when it matched there; tool line otherwise.
-  const source = request.terms.some((term) => row.text.toLowerCase().includes(term))
-    ? row.text
-    : row.tools;
-  const lowered = source.toLowerCase();
+  // The chosen source is then lowercased for the index lookup, so the offset
+  // feeds snippetAround the original-case string in a position-correct way.
+  const textLowered = row.text.toLowerCase();
+  const fromText = request.terms.some((term) => textLowered.includes(term));
+  const source = fromText ? row.text : row.tools;
+  const sourceLowered = fromText ? textLowered : row.tools.toLowerCase();
   let best: { index: number; length: number } | null = null;
   for (const term of request.terms) {
-    const index = lowered.indexOf(term);
+    const index = sourceLowered.indexOf(term);
     if (index !== -1 && (best === null || index < best.index)) {
       best = { index, length: term.length };
     }

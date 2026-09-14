@@ -537,33 +537,21 @@ textarea {
   cursor: pointer;
 }
 
-.boost-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.boost-chip {
-  border: 1px solid var(--line);
-  background: none;
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-size: 11.5px;
-  font-weight: 700;
+.boost-project select {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
   color: var(--ink-soft);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
   cursor: pointer;
 }
 
-.boost-chip:hover {
-  color: var(--primary-deep);
-  border-color: var(--primary-border);
-  background: var(--primary-soft);
-}
-
-.boost-chip.on {
-  color: var(--primary-deep);
-  border-color: var(--primary-border);
-  background: var(--primary-soft);
+.boost-project select:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: 1px;
 }
 
 .boost-syntax {
