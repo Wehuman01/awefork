@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.9
+
+Every management operation you make now has a history. Pins, tags, archives, directories, session create/clone/rename/delete all journal their inverse, so a ⌘Z after a season of clicking walks the workspace backward exactly the way you built it forward — and the sidebar grew up around it: a search bar with explicit scopes, unfamiliar case-insensitive body scans, caps you set, a clear button, a one-click way back to defaults, and directory rows you add and remove yourself. Search no longer shrugs when a query has no local hits.
+
+### Highlights
+
+- **Operation history with undo/redo** — every management operation (pins, tags, archive, directories, session create/clone/rename/delete) appends to a journal with its inverse closure; sends, turn deletes, aborts, and incidents seal the history below them. ⌘⇧Z / ⌘Z — or the history panel (shift+⌘H) — walk the journal through a serialized queue, and entries carry their backend, so undo routes across opencode and codex.
+- **Enhanced sidebar search** — an ✕ button clears a live query in one click (and refocuses the field), a search-limit selector (100 / 300 / 1000 / no cap) re-scopes body scans on the fly, and a "restore defaults" chip returns every boost option to its out-of-the-box value. Searches are case-insensitive across title, tag, and body, and can be restricted to a chosen project scope.
+- **Body search after empty local hits** — a search that missed every available local term no longer gives up; if local misses occur, the result re-scans the message bodies before settling.
+- **Hand-managed directories** — sidebar directory rows can be added and removed by hand, so the project list is no longer only what a server decides to surface.
+
+### Install
+
+Installers are not yet attached; the build for this version is pending.
+
 ## v0.2.8
 
 The minimap stops being a postcard. ⌘/Ctrl+wheel over the map now magnifies the map's own view — cursor-anchored, like the canvas zoom you already know — so a graph with hundreds of nodes stops reading as a smear of 3×2 dots, and zooming back out returns the whole-world overview. Clicking the map flies the canvas to the spot with an ease instead of a jump, drags follow the cursor directly, and once zoomed in the map's view window trails the viewport through the middle band, so you never lose where you are. The canvas around it gets friendlier too: right-clicking a card opens the same session menu as its sidebar row, rows grow a one-click archive button, and the tag bands that used to paint a story's labels on every fork now stay on the session's own turns.
