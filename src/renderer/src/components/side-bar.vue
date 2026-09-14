@@ -36,6 +36,13 @@
           </option>
         </select>
       </div>
+      <div class="boost-head">搜索上限</div>
+      <div class="boost-scopes">
+        <label class="boost-opt"><input v-model="searchLimit" type="radio" value="100" /> 100</label>
+        <label class="boost-opt"><input v-model="searchLimit" type="radio" value="300" /> 300</label>
+        <label class="boost-opt"><input v-model="searchLimit" type="radio" value="1000" /> 1000</label>
+        <label class="boost-opt"><input v-model="searchLimit" type="radio" value="all" /> 全部</label>
+      </div>
       <div class="boost-head">语法</div>
       <dl class="boost-syntax">
         <dt><code>body:词</code></dt>
@@ -611,6 +618,8 @@ const boostOpen = ref(false);
 const projectScope = ref<string>("");
 /** Options: every directory the sidebar knows about, in session-recency order. */
 const projectOptions = computed(() => sessionGroups.value.map((group) => group.directory));
+/** How many sessions to scan for body hits; "all" means no cap. */
+const searchLimit = ref<string>("1000");
 
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
@@ -632,6 +641,7 @@ const boostActive = computed(
     boostOpen.value ||
     projectScope.value !== "" ||
     searchScopes.body ||
+    searchLimit.value !== "1000" ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
     parsedQuery.value.includes.some((term) => term.scope !== null),
@@ -684,8 +694,10 @@ function scheduleBodySearch(): void {
 async function runBodySearch(token: number, terms: string[], excludes: string[]): Promise<void> {
   const backend = store.activeBackend;
   const scoped = projectScope.value !== "" && queryActive.value;
+  const maxTargets = searchLimit.value === "all" ? Infinity : Number(searchLimit.value);
   const targets = visibleSessions.value
     .filter((session) => !scoped || session.directory === projectScope.value)
+    .slice(0, maxTargets)
     .map((session) => ({ id: session.id, updatedAt: session.updatedAt }));
   try {
     const result = await window.awefork.searchMessages(backend, targets, { terms, excludes });
@@ -704,7 +716,7 @@ async function runBodySearch(token: number, terms: string[], excludes: string[])
   }
 }
 
-watch([query, () => searchScopes.body, projectScope], scheduleBodySearch);
+watch([query, () => searchScopes.body, projectScope, searchLimit], scheduleBodySearch);
 // A backend switch invalidates every hit: ids never collide, but the bodies do.
 watch(
   () => store.activeBackend,

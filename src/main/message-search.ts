@@ -13,6 +13,13 @@
  * exclusion does. Sessions whose body contains an exclusion come back in
  * `excludedSessionIds`: exclusions veto the whole session (title hits too),
  * so the renderer must know about them even though they carry no hits.
+ *
+ * Each adapter fetch costs one or two IPC round trips, so the scan is shaped
+ * around them: bodies are cached pre-lowered (repeat searches only run
+ * substring checks), fetches are matched as they land instead of after every
+ * target has been fetched, and a scan with no exclusions stops fetching once
+ * the hit quota is filled. Exclusion-bearing scans must visit every target —
+ * a veto is only knowable from the body itself.
  */
 
 import type {
@@ -24,16 +31,20 @@ import type {
 import { snippetAround } from "../shared/turn-search.js";
 import type { AgentAdapter, ChatMessage } from "../shared/types.js";
 
-/** Sessions scanned per search — the sidebar stays usable on huge projects. */
-export const MAX_SEARCH_TARGETS = 300;
+/** Hard safety cap for the main-process scan, only hit when the renderer
+ * explicitly asks for "all". The UI default is 1000; raise this only if the
+ * renderer lets users pick a larger number. */
+export const MAX_SEARCH_TARGETS = 5000;
 /** Sessions that may report hits; later matches only count toward `scanned`. */
 export const MAX_HIT_SESSIONS = 60;
 /** Snippet rows shown per matched session. */
 export const MAX_HITS_PER_SESSION = 2;
-/** Cached sessions kept per backend; over the cap the cache resets wholesale. */
-const MAX_CACHE_SESSIONS = 800;
+/** Cached sessions kept per backend; least recently used evicted first. Must
+ * comfortably cover the renderer's default scan size or every keystroke
+ * refetches the overflow. */
+const MAX_CACHE_SESSIONS = 1200;
 /** Concurrent adapter message fetches while scanning. */
-const FETCH_POOL = 8;
+export const FETCH_POOL = 8;
 
 /** One cached searchable message row. */
 interface BodyRow {
@@ -41,13 +52,21 @@ interface BodyRow {
   text: string;
   /** Tool names joined into one searchable line ("" when none). */
   tools: string;
-  /** `text` and `tools` joined — the surface terms are matched against. */
-  searchable: string;
+  /** `text` + `tools` pre-lowered at fetch time — terms run `indexOf`
+   * against this, so repeat searches never re-lower whole bodies. */
+  lowered: string;
 }
 
 interface CachedSession {
   updatedAt: number;
   rows: BodyRow[];
+}
+
+/** A session's scan verdict: `snippetRows` only on a match, empty otherwise. */
+interface Verdict {
+  matched: boolean;
+  excluded: boolean;
+  snippetRows: BodyRow[];
 }
 
 export interface MessageSearcher {
@@ -60,23 +79,19 @@ function toRows(messages: ChatMessage[]): BodyRow[] {
     const text = message.text.trim();
     const tools = message.toolNames.join(" ");
     if (text.length === 0 && tools.length === 0) continue;
-    rows.push({ id: message.id, text, tools, searchable: `${text}\n${tools}` });
+    rows.push({ id: message.id, text, tools, lowered: `${text}\n${tools}`.toLowerCase() });
   }
   return rows;
 }
 
 /**
  * A session body-match: the session-wide verdict plus the rows worth a
- * snippet (each contains at least one term). All comparisons are case
- * insensitive — the query terms arrive lowercased, but session bodies
- * preserve their original casing, so naive `String#includes` would miss
- * any uppercase occurrence.
+ * snippet (each contains at least one term). Terms arrive lowercased and
+ * rows are cached pre-lowered, so every comparison here is a plain
+ * case-insensitive `includes`/`indexOf`.
  */
-function matchSession(
-  rows: BodyRow[],
-  request: BodySearchRequest,
-): { matched: boolean; excluded: boolean; snippetRows: BodyRow[] } {
-  const joinedLowered = rows.map((row) => row.searchable.toLowerCase()).join("\n");
+function matchSession(rows: BodyRow[], request: BodySearchRequest): Verdict {
+  const joinedLowered = rows.map((row) => row.lowered).join("\n");
   if (request.excludes.some((term) => joinedLowered.includes(term))) {
     return { matched: false, excluded: true, snippetRows: [] };
   }
@@ -86,8 +101,7 @@ function matchSession(
   }
   const snippetRows: BodyRow[] = [];
   for (const row of rows) {
-    const rowLowered = row.searchable.toLowerCase();
-    if (request.terms.some((term) => rowLowered.includes(term))) {
+    if (request.terms.some((term) => row.lowered.includes(term))) {
       snippetRows.push(row);
       if (snippetRows.length >= MAX_HITS_PER_SESSION) break;
     }
@@ -125,23 +139,45 @@ export function createMessageSearcher(
   resolveAdapter: () => Promise<AgentAdapter>,
 ): MessageSearcher {
   const cache = new Map<string, CachedSession>();
+  /** Fetches in flight, keyed `id\nupdatedAt` — overlapping searches (a new
+   * keystroke, the churn watcher) share them instead of double-fetching. */
+  const pending = new Map<string, Promise<BodyRow[] | null>>();
 
-  const rowsFor = async (
+  const rowsFor = (
     adapter: AgentAdapter,
     target: SessionSearchTarget,
   ): Promise<BodyRow[] | null> => {
     const cached = cache.get(target.id);
-    if (cached && cached.updatedAt === target.updatedAt) return cached.rows;
-    try {
-      const rows = toRows(await adapter.messages(target.id));
-      if (cache.size >= MAX_CACHE_SESSIONS) cache.clear();
-      cache.set(target.id, { updatedAt: target.updatedAt, rows });
-      return rows;
-    } catch {
-      // One unreadable session (deleted mid-scan, backend hiccup) must not
-      // fail the search — it just reports as unscanned.
-      return null;
+    if (cached && cached.updatedAt === target.updatedAt) {
+      // Re-insert so the LRU evicts least-recently-used, not scan order.
+      cache.delete(target.id);
+      cache.set(target.id, cached);
+      return Promise.resolve(cached.rows);
     }
+    const key = `${target.id}\n${target.updatedAt}`;
+    const inFlight = pending.get(key);
+    if (inFlight) return inFlight;
+    const fetch = adapter
+      .messages(target.id)
+      .then((messages) => {
+        const rows = toRows(messages);
+        if (cache.size >= MAX_CACHE_SESSIONS) {
+          // Evict just the oldest entry: a wholesale clear here thrashes once
+          // scans outgrow the cap — every later search refetches nearly all.
+          const oldest = cache.keys().next().value;
+          if (oldest !== undefined) cache.delete(oldest);
+        }
+        cache.set(target.id, { updatedAt: target.updatedAt, rows });
+        return rows;
+      })
+      .catch(() => {
+        // One unreadable session (deleted mid-scan, backend hiccup) must not
+        // fail the search — it just reports as unscanned.
+        return null;
+      })
+      .finally(() => pending.delete(key));
+    pending.set(key, fetch);
+    return fetch;
   };
 
   return {
@@ -154,30 +190,47 @@ export function createMessageSearcher(
         .filter((target) => typeof target?.id === "string")
         .slice(0, MAX_SEARCH_TARGETS);
 
-      // Pool the fetches: a sequential scan pays full latency per session.
+      // Pool the fetches and match each body the moment it lands: matching
+      // after every fetch completes would hold the first result hostage to
+      // the slowest session. Targets arrive most-recent-first, so tracking
+      // the decided prefix lets a quota-filling scan stop fetching early —
+      // with no exclusions, bodies past the 60th matched session can never
+      // add a hit. Exclusion scans keep fetching everything: a veto is only
+      // knowable from the body itself.
+      const verdicts = new Array<Verdict | undefined>(capped.length);
       let cursor = 0;
-      const bodies = new Array<BodyRow[] | null>(capped.length);
+      let frontier = 0;
+      let prefixMatched = 0;
+      const stopEarly = request.excludes.length === 0;
       const workers = Array.from({ length: Math.min(FETCH_POOL, capped.length) }, async () => {
-        while (cursor < capped.length) {
+        while (cursor < capped.length && !(stopEarly && prefixMatched >= MAX_HIT_SESSIONS)) {
           const index = cursor++;
           const target = capped[index];
           if (target === undefined) continue;
-          bodies[index] = await rowsFor(adapter, target);
+          const rows = await rowsFor(adapter, target);
+          if (rows === null) continue;
+          verdicts[index] = matchSession(rows, request);
+          // Advance the decided prefix; its matched count gates the stop.
+          while (verdicts[frontier] !== undefined) {
+            if (verdicts[frontier]?.matched) prefixMatched++;
+            frontier++;
+          }
         }
       });
       await Promise.all(workers);
 
+      // Collect in target order so the hit set is exactly the first
+      // MAX_HIT_SESSIONS matched sessions in recency order, whatever the
+      // fetch completion order was.
       const hits: BodySearchHit[] = [];
       const excludedSessionIds: string[] = [];
       let scanned = 0;
       let hitSessions = 0;
       for (let index = 0; index < capped.length; index++) {
-        const rows = bodies[index] ?? null;
+        const verdict = verdicts[index];
         const target = capped[index];
-        if (rows === null || target === undefined) continue;
+        if (verdict === undefined || target === undefined) continue;
         scanned++;
-        // Exclusions run even past the hit cap — they veto sessions globally.
-        const verdict = matchSession(rows, request);
         if (verdict.excluded) {
           excludedSessionIds.push(target.id);
           continue;
