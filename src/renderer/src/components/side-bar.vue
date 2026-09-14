@@ -5,6 +5,12 @@
       <button type="button" class="icon-btn wide" title="在当前项目里开一条新对话" @click="emitCreate">
         ＋ 新对话
       </button>
+      <button
+        type="button"
+        class="icon-btn wide"
+        title="选择一个项目目录加进侧栏，可在其中新建对话"
+        @click="emitAddDir"
+      >＋ 新目录</button>
       <button type="button" class="icon-btn wide" title="重新加载会话" @click="emitRefresh">↻ 刷新</button>
     </div>
     <div class="search">
@@ -235,8 +241,27 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginDirArchive">
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginDirCreate">
+        ＋ 在此目录新建对话
+      </button>
+      <button
+        v-if="dirSessionCount(dirMenu.directory) > 0"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        @click="beginDirArchive"
+      >
         📦 归档这个目录…
+      </button>
+      <button
+        v-else
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        title="只从侧栏移除这个空目录，不动磁盘"
+        @click="beginDirRemove"
+      >
+        ✕ 移除这个目录
       </button>
     </div>
 
@@ -424,6 +449,7 @@ import type { SessionSummary } from "../../../shared/types";
 import { shortPath } from "../format";
 import { panels, persistLayout } from "../layout";
 import {
+  addDirectory,
   allTags,
   archiveDirectory,
   archivedDirectoryViews,
@@ -437,6 +463,7 @@ import {
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
+  removeDirectory,
   renameSession,
   restoreDirectory,
   restoreSession,
@@ -850,6 +877,31 @@ function beginArchive(): void {
   void archiveSession(active.sessionId);
 }
 
+/** Right-click create: the new session lands in this directory and becomes
+ * the open project — selectSession inside createSession switches to it. */
+function beginDirCreate(): void {
+  const active = dirMenu.value;
+  if (!active) return;
+  closeMenu();
+  void createSession(active.directory);
+}
+
+/** Sessions under a path across every view filter — decides which dir-menu
+ * items apply: archiving needs rows to hide, removal empties the group. */
+function dirSessionCount(directory: string): number {
+  const group = sessionGroups.value.find((g) => g.directory === directory);
+  return group ? flatSessions(group).length : 0;
+}
+
+/** Only offered on empty groups: forgetting the registration hides the row,
+ * and no session data moves — the disk directory is untouched. */
+function beginDirRemove(): void {
+  const active = dirMenu.value;
+  if (!active) return;
+  closeMenu();
+  void removeDirectory(active.directory);
+}
+
 /** Whole-directory archive is just as reversible from the archive section. */
 function beginDirArchive(): void {
   const active = dirMenu.value;
@@ -942,27 +994,31 @@ function rowArchive(sessionId: string): void {
 const visibleGroups = computed<SessionGroup[]>(() => {
   const needle = query.value.trim().toLowerCase();
   const filters = activeTagFilters.value;
-  return sessionGroups.value
-    .map((group) => {
-      if (!needle && filters.length === 0) return group;
-      const keep = (node: SessionTreeNode): SessionTreeNode | null => {
-        const children = node.children.map(keep).filter((n): n is SessionTreeNode => n !== null);
-        const tags = tagsOf(node.session.id);
-        const textHit =
-          !needle ||
-          node.session.title.toLowerCase().includes(needle) ||
-          tags.some((t) => t.toLowerCase().includes(needle));
-        const filterHit = filters.every((f) => tags.includes(f));
-        return textHit && filterHit
-          ? { ...node, children }
-          : children.length > 0
+  return (
+    sessionGroups.value
+      .map((group) => {
+        if (!needle && filters.length === 0) return group;
+        const keep = (node: SessionTreeNode): SessionTreeNode | null => {
+          const children = node.children.map(keep).filter((n): n is SessionTreeNode => n !== null);
+          const tags = tagsOf(node.session.id);
+          const textHit =
+            !needle ||
+            node.session.title.toLowerCase().includes(needle) ||
+            tags.some((t) => t.toLowerCase().includes(needle));
+          const filterHit = filters.every((f) => tags.includes(f));
+          return textHit && filterHit
             ? { ...node, children }
-            : null;
-      };
-      const roots = group.roots.map(keep).filter((n): n is SessionTreeNode => n !== null);
-      return { directory: group.directory, roots };
-    })
-    .filter((group) => group.roots.length > 0);
+            : children.length > 0
+              ? { ...node, children }
+              : null;
+        };
+        const roots = group.roots.map(keep).filter((n): n is SessionTreeNode => n !== null);
+        return { directory: group.directory, roots };
+      })
+      // Empty groups (hand-added directories) survive only the unfiltered
+      // view — a search or tag filter is asking for conversations, not homes.
+      .filter((group) => group.roots.length > 0 || (!needle && filters.length === 0))
+  );
 });
 
 interface SessionRow {
@@ -996,5 +1052,8 @@ function emitRefresh(): void {
 }
 function emitCreate(): void {
   void createSession();
+}
+function emitAddDir(): void {
+  void addDirectory();
 }
 </script>

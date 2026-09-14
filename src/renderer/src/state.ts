@@ -116,6 +116,12 @@ interface AppState {
    * Pure awefork overlay: the data keeps living in the agent backend.
    */
   archive: ArchiveState;
+  /**
+   * Directories the user added by hand (dirs.json sidecar): they keep a
+   * sidebar group even with zero conversations, so 新建对话 has somewhere to
+   * land. Per-backend like every overlay store.
+   */
+  knownDirs: string[];
   selectedDirectory: string | null;
   selectedId: string | null;
   /**
@@ -215,6 +221,7 @@ const state = reactive<AppState>({
   tagColors: {},
   tagDeletedToast: null,
   archive: { sessions: [], directories: [] },
+  knownDirs: [],
   selectedDirectory: null,
   selectedId: null,
   selectedTurnId: null,
@@ -266,9 +273,18 @@ export const visibleSessions = computed<SessionSummary[]>(() => {
   );
 });
 
-export const sessionGroups = computed<SessionGroup[]>(() =>
-  buildSessionTree(visibleSessions.value, state.lineage),
-);
+export const sessionGroups = computed<SessionGroup[]>(() => {
+  const groups = buildSessionTree(visibleSessions.value, state.lineage);
+  // Registered-but-empty directories keep their group so the sidebar offers
+  // 新建对话 somewhere to land. Archived paths hide entirely — registration
+  // included — until restored from the archive section.
+  const present = new Set(groups.map((group) => group.directory));
+  const archived = new Set(state.archive.directories.map((entry) => entry.path));
+  const extras = state.knownDirs
+    .filter((directory) => !present.has(directory) && !archived.has(directory))
+    .map((directory): SessionGroup => ({ directory, roots: [] }));
+  return [...groups, ...extras];
+});
 
 export const directories = computed<string[]>(() => {
   const latest = new Map<string, number>();
@@ -765,6 +781,11 @@ async function bootBackend(backend: BackendId): Promise<void> {
     state.archive = { sessions: [], directories: [] };
   }
   try {
+    state.knownDirs = await window.awefork.dirs(backend);
+  } catch {
+    state.knownDirs = [];
+  }
+  try {
     state.trash = (await window.awefork.trash(backend)).map((entry) => entry.id);
   } catch {
     state.trash = [];
@@ -928,6 +949,17 @@ export async function switchDirectory(directory: string): Promise<void> {
  * a directory as soon as one becomes visible again (e.g. after a restore).
  */
 async function leaveEmptiedDirectory(): Promise<void> {
+  // A registered directory keeps its (now empty) group — stay put so the
+  // next 新建对话 lands right back in it. An archived path hides entirely,
+  // registration included, so that case still moves away.
+  const current = state.selectedDirectory;
+  if (
+    current !== null &&
+    state.knownDirs.includes(current) &&
+    !state.archive.directories.some((entry) => entry.path === current)
+  ) {
+    return;
+  }
   const next = directories.value.find((d) => d !== state.selectedDirectory);
   if (next) await switchDirectory(next);
   else state.selectedDirectory = null;
@@ -1945,12 +1977,13 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
 }
 
 /**
- * Start a brand-new, empty session in the open project and land in it: the
- * sidebar gains a tracked row whose first prompt — typed straight into the
- * freshly focused pane composer — turns it into a conversation. Without an
- * open project the backend picks the directory (its server cwd).
+ * Start a brand-new, empty session and land in it: the sidebar gains a tracked
+ * row whose first prompt — typed straight into the freshly focused pane
+ * composer — turns it into a conversation. The directory comes from
+ * `directory` when given (e.g. the sidebar's per-directory right-click),
+ * otherwise the open project; with neither the backend picks (its cwd).
  */
-export async function createSession(): Promise<void> {
+export async function createSession(directory?: string): Promise<void> {
   const backend = state.activeBackend;
   state.actionError = null;
   // Creating is a new operation: older pending deletes become final.
@@ -1958,13 +1991,58 @@ export async function createSession(): Promise<void> {
   try {
     const created = await window.awefork.createSession(
       backend,
-      state.selectedDirectory ?? undefined,
+      directory ?? state.selectedDirectory ?? undefined,
     );
     await refreshSessions();
     await selectSession(created.id, { focus: true });
     state.composerFocusRequest = Date.now();
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * ＋ 新目录：system folder picker registers the path as a sidebar group —
+ * zero conversations and all — then opens it as the current project, ready
+ * for the next 新建对话. Canceling the picker changes nothing.
+ */
+export async function addDirectory(): Promise<void> {
+  state.actionError = null;
+  let picked: string | null;
+  try {
+    picked = await window.awefork.pickDirectory();
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  if (!picked) return;
+  try {
+    state.knownDirs = await window.awefork.dirsAdd(state.activeBackend, picked);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  if (state.selectedDirectory !== picked) await switchDirectory(picked);
+}
+
+/**
+ * Forget a hand-added directory. The sidebar only offers this once the group
+ * is empty, so nothing visible is lost — and no session data moves: the
+ * registration is the whole payload.
+ */
+export async function removeDirectory(directory: string): Promise<void> {
+  state.actionError = null;
+  try {
+    state.knownDirs = await window.awefork.dirsRemove(state.activeBackend, directory);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  if (
+    state.selectedDirectory === directory &&
+    !visibleSessions.value.some((session) => session.directory === directory)
+  ) {
+    await leaveEmptiedDirectory();
   }
 }
 
@@ -2645,6 +2723,7 @@ interface WorkspaceSnapshot {
   tagColors: Record<string, number>;
   trash: string[];
   archive: ArchiveState;
+  knownDirs: string[];
   selectedDirectory: string | null;
   selectedId: string | null;
   selectedTurnId: string | null;
@@ -2669,6 +2748,7 @@ function parkWorkspace(backend: BackendId): void {
       sessions: [...state.archive.sessions],
       directories: [...state.archive.directories],
     },
+    knownDirs: [...state.knownDirs],
     selectedDirectory: state.selectedDirectory,
     selectedId: state.selectedId,
     selectedTurnId: state.selectedTurnId,
@@ -2696,6 +2776,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.tagColors = snapshot.tagColors;
   state.trash = snapshot.trash;
   state.archive = snapshot.archive;
+  state.knownDirs = snapshot.knownDirs;
   state.selectedDirectory = snapshot.selectedDirectory;
   state.selectedId = snapshot.selectedId;
   state.selectedTurnId = snapshot.selectedTurnId;
@@ -2756,6 +2837,7 @@ function resetWorkspace(): void {
   state.trash = [];
   state.deletedToast = null;
   state.archive = { sessions: [], directories: [] };
+  state.knownDirs = [];
   state.selectedDirectory = null;
   state.selectedId = null;
   state.selectedTurnId = null;

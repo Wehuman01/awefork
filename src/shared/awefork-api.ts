@@ -112,6 +112,13 @@ export interface AweforkApi {
   archive(backend: BackendId): Promise<ArchiveState>;
   archiveAdd(backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState>;
   archiveRemove(backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState>;
+  /** Directories the user added by hand (dirs.json sidecar): they keep a
+   *  sidebar group even with zero conversations. */
+  dirs(backend: BackendId): Promise<string[]>;
+  /** Register a directory (dedupes); returns the whole list. */
+  dirsAdd(backend: BackendId, directory: string): Promise<string[]>;
+  /** Forget a registration — no session data moves; returns the whole list. */
+  dirsRemove(backend: BackendId, directory: string): Promise<string[]>;
   /** The backend's unsent draft + pane model picks (composer.json sidecar). */
   composer(backend: BackendId): Promise<PersistedComposer | null>;
   saveComposer(backend: BackendId, value: PersistedComposer | null): Promise<void>;
@@ -132,6 +139,8 @@ export interface AweforkApi {
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
+  /** Native folder picker for ＋ 新目录; null when the user canceled. */
+  pickDirectory(): Promise<string | null>;
   openExternal(url: string): Promise<void>;
   convertDocument(filename: string, bytes: Uint8Array): Promise<string>;
   checkUpdates(respectSkip: boolean): Promise<CheckUpdatesResult>;

@@ -105,6 +105,11 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:archiveAdd", backend, kind, key),
   archiveRemove: (backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState> =>
     ipcRenderer.invoke("awefork:archiveRemove", backend, kind, key),
+  dirs: (backend: BackendId): Promise<string[]> => ipcRenderer.invoke("awefork:dirs", backend),
+  dirsAdd: (backend: BackendId, directory: string): Promise<string[]> =>
+    ipcRenderer.invoke("awefork:dirsAdd", backend, directory),
+  dirsRemove: (backend: BackendId, directory: string): Promise<string[]> =>
+    ipcRenderer.invoke("awefork:dirsRemove", backend, directory),
   composer: (backend: BackendId): Promise<PersistedComposer | null> =>
     ipcRenderer.invoke("awefork:composer", backend),
   saveComposer: (backend: BackendId, value: PersistedComposer | null): Promise<void> =>
@@ -125,6 +130,7 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:capabilities", backend),
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("awefork:openExternal", url),
   convertDocument: (filename: string, bytes: Uint8Array): Promise<string> =>
     ipcRenderer.invoke("awefork:convertDocument", filename, bytes),

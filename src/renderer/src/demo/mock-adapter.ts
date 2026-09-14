@@ -426,6 +426,10 @@ export function installMockAdapter(): void {
   let pins: string[] = [];
   let trash: TrashEntry[] = [];
   let archive: ArchiveState = { sessions: [], directories: [] };
+  // Hand-added directories keep their group here too; the browser tab can't
+  // open a native picker, so ＋ 新目录 hands out invented paths instead.
+  let knownDirs: string[] = [];
+  let pickedCount = 0;
   // Session tags, seeded from the defs and mutated through setSessionTags —
   // the demo's stand-in for the real tags.json sidecar.
   let tagMap: Record<string, string[]> = Object.fromEntries(
@@ -644,6 +648,19 @@ export function installMockAdapter(): void {
         ? pins.filter((id) => id !== sessionId)
         : [...pins, sessionId];
       return pins;
+    },
+    dirs: async () => knownDirs,
+    dirsAdd: async (_backend, directory) => {
+      knownDirs = knownDirs.includes(directory) ? knownDirs : [...knownDirs, directory];
+      return knownDirs;
+    },
+    dirsRemove: async (_backend, directory) => {
+      knownDirs = knownDirs.filter((dir) => dir !== directory);
+      return knownDirs;
+    },
+    pickDirectory: async () => {
+      pickedCount += 1;
+      return `/demo/picked-${pickedCount}`;
     },
     tags: async () => cloneStore(),
     setSessionTags: async (_backend, sessionId, tags) => {

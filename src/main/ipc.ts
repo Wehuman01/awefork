@@ -1,8 +1,9 @@
-import { type IpcMainInvokeEvent, ipcMain, shell } from "electron";
+import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
 import { readArchive, setArchived } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
+import { addDir, readDirs, removeDir } from "../shared/dirs-store.js";
 import {
   clearSessionChanges,
   type FileChangeEntry,
@@ -64,17 +65,20 @@ import { downloadAndInstallUpdate } from "./update-install.js";
  * Overlay-store channels (per-backend files, no adapter spawn):
  *   pins / togglePin / tags / setSessionTags / setTagColor /
  *   deleteTag / trash / trashAdd / trashRemove /
- *   archive / archiveAdd / archiveRemove / composer / saveComposer — same
+ *   archive / archiveAdd / archiveRemove / dirs / dirsAdd / dirsRemove /
+ *   composer / saveComposer — same
  *   shapes as before, backend-routed (composer holds the unsent draft + pane
- *   model picks; tags returns { sessions, colors }).
+ *   model picks; tags returns { sessions, colors }; dirs is the hand-added
+ *   sidebar directories).
  * Backend switcher:
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
  *   capabilities  -> { deleteMessage, attachments }
- * App-level (backend-free): openExternal, openPath, convertDocument,
- * checkUpdates, skipUpdate, openRelease, downloadUpdate. Update download
- * progress arrives on channel "awefork:update-progress" as {downloaded,total}.
- * Events are forwarded on channel "awefork:event" as {backend, event}.
+ * App-level (backend-free): openExternal, openPath, pickDirectory,
+ * convertDocument, checkUpdates, skipUpdate, openRelease, downloadUpdate.
+ * Update download progress arrives on channel "awefork:update-progress" as
+ * {downloaded,total}. Events are forwarded on channel "awefork:event" as
+ * {backend, event}.
  */
 export function registerIpc(registry: BackendRegistry): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
@@ -331,6 +335,24 @@ export function registerIpc(registry: BackendRegistry): void {
       setArchived(registry.storePaths(storeBackend(backend)).archive, kind, key, false),
   );
 
+  // Directories the user registered by hand (＋ 新目录): they render as a
+  // sidebar group even before the first conversation exists there.
+  ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
+    readDirs(registry.storePaths(storeBackend(backend)).dirs),
+  );
+
+  ipcMain.handle(
+    "awefork:dirsAdd",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
+      addDir(registry.storePaths(storeBackend(backend)).dirs, directory),
+  );
+
+  ipcMain.handle(
+    "awefork:dirsRemove",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
+      removeDir(registry.storePaths(storeBackend(backend)).dirs, directory),
+  );
+
   // The unsent draft's crash-recovery sidecar, one file per backend — the
   // draft anchors to a session, and sessions belong to their backend. Written
   // by the renderer's debounced flush, read back after every backend boot.
@@ -414,6 +436,20 @@ export function registerIpc(registry: BackendRegistry): void {
     if (!isLocalPath(target)) return { ok: false, error: "不是本地路径" };
     const error = await shell.openPath(target);
     return error ? { ok: false, error } : { ok: true };
+  });
+
+  // Native folder picker behind ＋ 新目录 — anchored to the requesting window
+  // so the dialog stays with the app. Null on cancel, first pick otherwise.
+  ipcMain.handle("awefork:pickDirectory", async (event: IpcMainInvokeEvent) => {
+    const options: Electron.OpenDialogOptions = {
+      title: "选择要添加的项目目录",
+      properties: ["openDirectory", "createDirectory"],
+    };
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
   // Word/RTF attachments are converted here in the main process; the renderer
