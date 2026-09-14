@@ -256,11 +256,12 @@
       v-if="showMinimap"
       ref="minimapEl"
       class="minimap"
-      title="小地图 — 点击或拖拽移动视图"
+      title="小地图 — 点击飞行 · 拖拽移动 · ⌘/Ctrl+滚轮缩放小地图"
       @mousedown.stop.prevent="onMinimapDown"
+      @wheel="onMinimapWheel"
     >
       <div
-        v-for="n in graph.nodes"
+        v-for="n in mmNodes"
         :key="`mm-${n.id}`"
         class="mm-node"
         :class="{
@@ -752,6 +753,8 @@ onUnmounted(() => {
   resizeObserver?.disconnect();
   cardObserver.disconnect();
   draftObserver.disconnect();
+  mmAnimating = false;
+  camTarget = null;
   if (activeDrag) {
     window.removeEventListener("mousemove", activeDrag.move);
     window.removeEventListener("mouseup", activeDrag.up);
@@ -781,45 +784,175 @@ const minimapGeometry = computed(() => {
   return { minX, minY, s, offX: (MM_WIDTH - worldW * s) / 2, offY: (MM_HEIGHT - worldH * s) / 2 };
 });
 
-function mmNodeStyle(node: TurnNode): Record<string, string> {
-  const g = minimapGeometry.value;
-  if (!g) return { display: "none" };
+// The map's own zoom (方案3): ⌘/Ctrl+wheel magnifies the minimap itself,
+// cursor-anchored, so colors stay readable no matter how big the world gets.
+// null = the classic whole-world overview. Stale values self-heal: mmGeom
+// clamps against the current fit, so a project switch falls back to overview.
+const mmZoom = ref<number | null>(null);
+const mmCam = ref({ x: 0, y: 0 });
+const MM_MAX_ZOOM = 28;
+
+type MmGeom =
+  | { kind: "fit"; minX: number; minY: number; s: number; offX: number; offY: number }
+  | { kind: "free"; s: number; camX: number; camY: number };
+
+const mmGeom = computed<MmGeom | null>(() => {
+  const fit = minimapGeometry.value;
+  if (!fit) return null;
+  if (mmZoom.value == null || mmZoom.value <= fit.s * 1.0001) return { kind: "fit", ...fit };
   return {
-    left: `${g.offX + (node.x - g.minX) * g.s}px`,
-    top: `${g.offY + (node.y - g.minY) * g.s}px`,
-    width: `${Math.max(3, NODE_WIDTH * g.s)}px`,
-    height: `${Math.max(2, node.height * g.s)}px`,
+    kind: "free",
+    s: Math.min(mmZoom.value, fit.s * MM_MAX_ZOOM),
+    camX: mmCam.value.x,
+    camY: mmCam.value.y,
   };
+});
+
+function mmNodeStyle(node: TurnNode): Record<string, string> {
+  const g = mmGeom.value;
+  if (!g) return { display: "none" };
+  const [left, top] =
+    g.kind === "fit"
+      ? [g.offX + (node.x - g.minX) * g.s, g.offY + (node.y - g.minY) * g.s]
+      : [MM_WIDTH / 2 + (node.x - g.camX) * g.s, MM_HEIGHT / 2 + (node.y - g.camY) * g.s];
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${Math.max(4, NODE_WIDTH * g.s)}px`,
+    height: `${Math.max(3, node.height * g.s)}px`,
+    // at this size the 1px outline is half the footprint and reads as mush
+    borderWidth: g.s > 0.09 ? "1px" : "0",
+  };
+}
+
+/** Paint order for overlapping minimap dots: plain → stub → subtree → hit →
+ *  active path → running, so the states a user is hunting for stay visible. */
+const mmNodes = computed(() =>
+  [...graph.value.nodes].sort((a, b) => mmNodeRank(a) - mmNodeRank(b)),
+);
+
+function mmNodeRank(node: TurnNode): number {
+  if (isNodeRunning(node)) return 5;
+  if (activePathIds.value.has(node.id)) return 4;
+  if (searchHitIds.value.has(node.id)) return 3;
+  if (childTurnIds.value.has(node.id)) return 2;
+  return node.kind === "stub" ? 1 : 0;
 }
 
 /** The viewport's current slice of world space, drawn on the minimap. */
 const mmViewStyle = computed(() => {
-  const g = minimapGeometry.value;
+  const g = mmGeom.value;
   const { w, h } = viewportSize.value;
   if (!g || w === 0 || h === 0) return { display: "none" };
+  const vw = (w / scale.value) * g.s;
+  const vh = (h / scale.value) * g.s;
+  if (g.kind === "fit") {
+    return {
+      left: `${g.offX + (-tx.value / scale.value - g.minX) * g.s}px`,
+      top: `${g.offY + (-ty.value / scale.value - g.minY) * g.s}px`,
+      width: `${vw}px`,
+      height: `${vh}px`,
+    };
+  }
   return {
-    left: `${g.offX + (-tx.value / scale.value - g.minX) * g.s}px`,
-    top: `${g.offY + (-ty.value / scale.value - g.minY) * g.s}px`,
-    width: `${(w / scale.value) * g.s}px`,
-    height: `${(h / scale.value) * g.s}px`,
+    left: `${MM_WIDTH / 2 + (-tx.value / scale.value - g.camX) * g.s - vw / 2}px`,
+    top: `${MM_HEIGHT / 2 + (-ty.value / scale.value - g.camY) * g.s - vh / 2}px`,
+    width: `${vw}px`,
+    height: `${vh}px`,
   };
 });
 
-function minimapPan(event: MouseEvent): void {
-  const g = minimapGeometry.value;
+/** World coords under a minimap point, in the map's current mapping. */
+function minimapWorldPoint(clientX: number, clientY: number): { x: number; y: number } | null {
+  const g = mmGeom.value;
   const rect = minimapEl.value?.getBoundingClientRect();
-  if (!g || !rect) return;
-  const worldX = (event.clientX - rect.left - g.offX) / g.s + g.minX;
-  const worldY = (event.clientY - rect.top - g.offY) / g.s + g.minY;
+  if (!g || !rect) return null;
+  const mx = clientX - rect.left;
+  const my = clientY - rect.top;
+  if (g.kind === "fit") {
+    return { x: (mx - g.offX) / g.s + g.minX, y: (my - g.offY) / g.s + g.minY };
+  }
+  return { x: g.camX + (mx - MM_WIDTH / 2) / g.s, y: g.camY + (my - MM_HEIGHT / 2) / g.s };
+}
+
+function minimapPan(event: MouseEvent): void {
+  const point = minimapWorldPoint(event.clientX, event.clientY);
+  if (!point) return;
   const { w, h } = viewportSize.value;
-  tx.value = w / 2 - worldX * scale.value;
-  ty.value = h / 2 - worldY * scale.value;
+  tx.value = w / 2 - point.x * scale.value;
+  ty.value = h / 2 - point.y * scale.value;
+}
+
+// Click = fly (eased, not a jump); drag past a few px = direct follow.
+const MM_EASE = 0.14;
+const MM_FOLLOW_EASE = 0.06;
+let camTarget: { x: number; y: number } | null = null;
+let mmAnimating = false;
+
+function ensureMmFlight(): void {
+  if (mmAnimating) return;
+  mmAnimating = true;
+  const step = (): void => {
+    if (!mmAnimating) return;
+    let busy = false;
+    const { w, h } = viewportSize.value;
+    if (camTarget && w > 0) {
+      const goalTx = w / 2 - camTarget.x * scale.value;
+      const goalTy = h / 2 - camTarget.y * scale.value;
+      tx.value += (goalTx - tx.value) * MM_EASE;
+      ty.value += (goalTy - ty.value) * MM_EASE;
+      if (Math.abs(goalTx - tx.value) + Math.abs(goalTy - ty.value) > 1 / scale.value) {
+        busy = true;
+      } else {
+        tx.value = goalTx;
+        ty.value = goalTy;
+        camTarget = null;
+      }
+    }
+    if (followViewportInMinimap()) busy = true;
+    if (busy) requestAnimationFrame(step);
+    else mmAnimating = false;
+  };
+  requestAnimationFrame(step);
+}
+
+/** While the map is zoomed in, ease its view center after the viewport once
+ *  the viewport rect drifts past the middle band — the rect never gets lost. */
+function followViewportInMinimap(): boolean {
+  const g = mmGeom.value;
+  if (g?.kind !== "free") return false;
+  const viewX = -tx.value / scale.value;
+  const viewY = -ty.value / scale.value;
+  const mx = MM_WIDTH / 2 + (viewX - g.camX) * g.s;
+  const my = MM_HEIGHT / 2 + (viewY - g.camY) * g.s;
+  const outside =
+    mx < MM_WIDTH * 0.28 || mx > MM_WIDTH * 0.72 || my < MM_HEIGHT * 0.28 || my > MM_HEIGHT * 0.72;
+  if (!outside) return false;
+  const dx = viewX - g.camX;
+  const dy = viewY - g.camY;
+  if (Math.abs(dx) * g.s < 0.5 && Math.abs(dy) * g.s < 0.5) {
+    mmCam.value = { x: viewX, y: viewY };
+    return false;
+  }
+  mmCam.value = { x: g.camX + dx * MM_FOLLOW_EASE, y: g.camY + dy * MM_FOLLOW_EASE };
+  return true;
 }
 
 function onMinimapDown(event: MouseEvent): void {
   if (event.button !== 0) return;
-  minimapPan(event);
-  const move = (moveEvent: MouseEvent): void => minimapPan(moveEvent);
+  const point = minimapWorldPoint(event.clientX, event.clientY);
+  camTarget = point ? { ...point } : null;
+  ensureMmFlight();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let moved = false;
+  const move = (moveEvent: MouseEvent): void => {
+    if (!moved && Math.abs(moveEvent.clientX - startX) + Math.abs(moveEvent.clientY - startY) <= 4)
+      return;
+    moved = true;
+    camTarget = null;
+    minimapPan(moveEvent);
+  };
   const up = (): void => {
     window.removeEventListener("mousemove", move);
     window.removeEventListener("mouseup", up);
@@ -829,6 +962,42 @@ function onMinimapDown(event: MouseEvent): void {
   window.addEventListener("mouseup", up);
   activeDrag = { move, up };
 }
+
+/** ⌘/Ctrl+wheel zooms the minimap itself, cursor-anchored; a plain wheel
+ *  falls through and keeps zooming the canvas — that behavior is untouched. */
+function onMinimapWheel(event: WheelEvent): void {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const g = mmGeom.value;
+  if (!g) return;
+  const rect = minimapEl.value?.getBoundingClientRect();
+  if (!rect) return;
+  const mx = event.clientX - rect.left;
+  const my = event.clientY - rect.top;
+  const anchor =
+    g.kind === "fit"
+      ? { x: (mx - g.offX) / g.s + g.minX, y: (my - g.offY) / g.s + g.minY }
+      : { x: g.camX + (mx - MM_WIDTH / 2) / g.s, y: g.camY + (my - MM_HEIGHT / 2) / g.s };
+  const fitS = minimapGeometry.value?.s ?? g.s;
+  const next = Math.min(fitS * MM_MAX_ZOOM, Math.max(fitS, g.s * Math.exp(-event.deltaY * 0.0016)));
+  if (next <= fitS * 1.0001) {
+    mmZoom.value = null;
+    mmCam.value = { x: -tx.value / scale.value, y: -ty.value / scale.value };
+  } else {
+    mmZoom.value = next;
+    mmCam.value = {
+      x: anchor.x - (mx - MM_WIDTH / 2) / next,
+      y: anchor.y - (my - MM_HEIGHT / 2) / next,
+    };
+  }
+}
+
+// Canvas pans/zooms move the viewport; when the map is zoomed in, that may
+// need the follow camera. The loop itself re-entrance-guards.
+watch([tx, ty, scale], () => {
+  if (mmZoom.value != null) ensureMmFlight();
+});
 
 // ── formatting ──────────────────────────────────────────────────────
 
