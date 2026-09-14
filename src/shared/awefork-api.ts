@@ -27,6 +27,12 @@ export interface CheckUpdatesResult {
   updateAvailable: boolean;
 }
 
+/** Live bytes of an in-flight update download; total is 0 when unknown. */
+export interface UpdateDownloadProgress {
+  downloaded: number;
+  total: number;
+}
+
 /** The tags.json sidecar's shape (see tags-store.ts on the main side). */
 export interface TagStore {
   sessions: Record<string, string[]>;
@@ -131,5 +137,13 @@ export interface AweforkApi {
   checkUpdates(respectSkip: boolean): Promise<CheckUpdatesResult>;
   skipUpdate(version: string): Promise<{ ok: boolean; error?: string }>;
   openRelease(version: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Download the release artifact and swap the app in place. macOS verifies
+   * the DMG, replaces the bundle and relaunches (never resolves on success);
+   * Windows launches the NSIS installer and resolves once it is running.
+   */
+  downloadAndInstallUpdate(version: string): Promise<{ ok: boolean; error?: string }>;
+  /** Subscribe to update download progress; returns an unsubscribe function. */
+  onUpdateProgress(handler: (progress: UpdateDownloadProgress) => void): () => void;
   onEvent(handler: (envelope: BackendEventEnvelope) => void): () => void;
 }

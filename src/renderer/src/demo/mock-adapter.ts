@@ -749,6 +749,9 @@ export function installMockAdapter(): void {
     }),
     skipUpdate: async () => ({ ok: true }),
     openRelease: async () => ({ ok: true }),
+    // No install to swap from a browser tab; the demo can only decline.
+    downloadAndInstallUpdate: async () => ({ ok: false, error: "demo 不支持应用内更新" }),
+    onUpdateProgress: () => () => {},
     onEvent: (handler) => {
       handlers.add(handler);
       return () => handlers.delete(handler);

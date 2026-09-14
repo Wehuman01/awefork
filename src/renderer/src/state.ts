@@ -192,6 +192,12 @@ interface AppState {
   updateBannerDismissed: boolean;
   /** One-line feedback for manual update checks; auto-clears like the undo toast. */
   updateToast: string | null;
+  /** True while the update artifact is downloading; the banner swaps to progress. */
+  downloadingUpdate: boolean;
+  /** Bytes moved so far and the expected total (0 when the server didn't say). */
+  updateDownloadProgress: { downloaded: number; total: number } | null;
+  /** Why the in-app update failed; shown in the banner until cleared. */
+  updateDownloadError: string | null;
 }
 
 const state = reactive<AppState>({
@@ -241,6 +247,9 @@ const state = reactive<AppState>({
   checkingUpdates: false,
   updateBannerDismissed: false,
   updateToast: null,
+  downloadingUpdate: false,
+  updateDownloadProgress: null,
+  updateDownloadError: null,
 });
 
 export const store = readonly(state);
@@ -2546,6 +2555,42 @@ export async function openReleaseNotes(): Promise<void> {
   } catch {
     showUpdateToast("Couldn't open release page");
   }
+}
+
+/**
+ * Download the pending release and swap the app in place. On macOS the backend
+ * replaces the bundle and relaunches, so this promise never resolves on the
+ * success path; on Windows it resolves once the installer has been launched.
+ */
+export async function startUpdateDownload(): Promise<void> {
+  const version = state.updateLatest;
+  if (!version || state.downloadingUpdate) return;
+  state.downloadingUpdate = true;
+  state.updateDownloadProgress = null;
+  state.updateDownloadError = null;
+  const unsubscribe = window.awefork.onUpdateProgress((progress) => {
+    state.updateDownloadProgress = progress;
+  });
+  try {
+    const result = await window.awefork.downloadAndInstallUpdate(version);
+    if (result.ok) {
+      // Windows path: the NSIS installer is up and takes it from here.
+      state.updateBannerDismissed = true;
+      showUpdateToast("更新安装器已启动，按提示完成安装");
+    } else {
+      state.updateDownloadError = result.error ?? "下载失败";
+    }
+  } catch {
+    state.updateDownloadError = "下载失败，可重试或手动下载";
+  } finally {
+    unsubscribe();
+    state.downloadingUpdate = false;
+  }
+}
+
+/** Clear a failed-download message; the Update button becomes clickable again. */
+export function dismissUpdateDownloadError(): void {
+  state.updateDownloadError = null;
 }
 
 function latestSessionId(sessions: SessionSummary[]): string | null {

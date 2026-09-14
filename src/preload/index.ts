@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AweforkApi, CheckUpdatesResult, TagStore } from "../shared/awefork-api.js";
+import type {
+  AweforkApi,
+  CheckUpdatesResult,
+  TagStore,
+  UpdateDownloadProgress,
+} from "../shared/awefork-api.js";
 import type {
   BackendCapabilities,
   BackendEventEnvelope,
@@ -129,6 +134,14 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:skip-update", version),
   openRelease: (version: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:open-release", version),
+  downloadAndInstallUpdate: (version: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:download-update", version),
+  onUpdateProgress: (handler: (progress: UpdateDownloadProgress) => void): (() => void) => {
+    const listener = (_event: unknown, payload: unknown) =>
+      handler(payload as UpdateDownloadProgress);
+    ipcRenderer.on("awefork:update-progress", listener);
+    return () => ipcRenderer.removeListener("awefork:update-progress", listener);
+  },
   onEvent: (handler: (envelope: BackendEventEnvelope) => void): (() => void) => {
     const listener = (_event: unknown, payload: unknown) =>
       handler(payload as BackendEventEnvelope);

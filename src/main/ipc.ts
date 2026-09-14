@@ -38,6 +38,7 @@ import {
 import { convertDocumentToText } from "./document-convert.js";
 import { openSessionInTerminal } from "./session-terminal.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
+import { downloadAndInstallUpdate } from "./update-install.js";
 
 /**
  * IPC surface (all invoke-channels, prefixed awefork:). Every method that
@@ -71,7 +72,8 @@ import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
  *   capabilities  -> { deleteMessage, attachments }
  * App-level (backend-free): openExternal, openPath, convertDocument,
- * checkUpdates, skipUpdate, openRelease.
+ * checkUpdates, skipUpdate, openRelease, downloadUpdate. Update download
+ * progress arrives on channel "awefork:update-progress" as {downloaded,total}.
  * Events are forwarded on channel "awefork:event" as {backend, event}.
  */
 export function registerIpc(registry: BackendRegistry): void {
@@ -457,4 +459,14 @@ export function registerIpc(registry: BackendRegistry): void {
   ipcMain.handle("awefork:open-release", (_event: IpcMainInvokeEvent, version: string) =>
     openRelease(version),
   );
+
+  // In-place install: the renderer supplies only a version string; progress
+  // streams back on awefork:update-progress until the download finishes (and,
+  // on macOS, the process is replaced by the relaunch).
+  ipcMain.handle("awefork:download-update", (event: IpcMainInvokeEvent, version: string) => {
+    const sender = event.sender;
+    return downloadAndInstallUpdate(String(version ?? ""), (progress) => {
+      if (!sender.isDestroyed()) sender.send("awefork:update-progress", progress);
+    });
+  });
 }

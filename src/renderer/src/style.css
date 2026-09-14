@@ -2895,6 +2895,28 @@ code.md-code {
   color: var(--primary-deep);
 }
 
+.update-banner-btn.update-now {
+  background: var(--primary-deep);
+  border-color: var(--primary-deep);
+  color: #fff;
+}
+
+.update-banner-btn.update-now:hover {
+  filter: brightness(1.08);
+}
+
+.update-banner-progress {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.update-banner-error-text {
+  color: var(--danger);
+}
+
 .banner {
   margin: 10px 16px 0;
   padding: 8px 12px;

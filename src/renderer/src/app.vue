@@ -7,13 +7,32 @@
       role="status"
     >
       <span class="update-banner-icon">⬆</span>
-      <span class="update-banner-text">
-        v{{ store.updateLatest }} available · current v{{ store.currentVersion }}
+      <span
+        class="update-banner-text"
+        :class="{ 'update-banner-error-text': store.updateDownloadError }"
+      >
+        <template v-if="store.updateDownloadError">
+          Update failed: {{ store.updateDownloadError }}
+        </template>
+        <template v-else-if="store.downloadingUpdate">
+          Downloading v{{ store.updateLatest }}…
+        </template>
+        <template v-else>
+          v{{ store.updateLatest }} available · current v{{ store.currentVersion }}
+        </template>
       </span>
       <div class="update-banner-actions">
-        <button type="button" class="update-banner-btn" @click="openReleaseNotes()">Release Notes ↗</button>
-        <button type="button" class="update-banner-btn" @click="skipUpdateVersion()">Skip this version</button>
-        <button type="button" class="update-banner-x" @click="dismissUpdateBanner()">✕</button>
+        <template v-if="store.downloadingUpdate">
+          <span class="update-banner-progress">{{ downloadSummary }}</span>
+        </template>
+        <template v-else>
+          <button type="button" class="update-banner-btn update-now" @click="startUpdateDownload()">
+            Update &amp; Restart
+          </button>
+          <button type="button" class="update-banner-btn" @click="openReleaseNotes()">Release Notes ↗</button>
+          <button type="button" class="update-banner-btn" @click="skipUpdateVersion()">Skip this version</button>
+          <button type="button" class="update-banner-x" @click="dismissUpdateBanner()">✕</button>
+        </template>
       </div>
     </div>
     <div class="shell">
@@ -68,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
 import CommandPalette from "./components/command-palette.vue";
 import InteractionDialog from "./components/interaction-dialog.vue";
@@ -83,10 +102,21 @@ import {
   latestPendingDeleteId,
   openReleaseNotes,
   skipUpdateVersion,
+  startUpdateDownload,
   store,
   undoDelete,
   undoDeleteTag,
 } from "./state";
+
+/** "12.3 / 28.5 MB" while a total is known, else "12.3 MB" so far. */
+const downloadSummary = computed(() => {
+  const progress = store.updateDownloadProgress;
+  if (!progress) return "";
+  const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)}`;
+  return progress.total
+    ? `${mb(progress.downloaded)} / ${mb(progress.total)} MB`
+    : `${mb(progress.downloaded)} MB`;
+});
 
 onMounted(() => {
   void init();
