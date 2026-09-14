@@ -114,6 +114,17 @@ describe("gatesOk", () => {
     expect(gatesOk(parseSearchQuery("dir:elsewhere"), ctx())).toBe(false);
   });
 
+  it("never gates a plain term on the directory path", () => {
+    // The regression: unscoped terms leaked into the dir gate, so any query
+    // word absent from every directory path ("awesh", CJK words) hid all
+    // sessions — and words that happened to sit in a path ("awes" inside
+    // …/awesome/…) passed only that directory's sessions.
+    expect(gatesOk(parseSearchQuery("awesh"), ctx())).toBe(true);
+    expect(gatesOk(parseSearchQuery("登录"), ctx())).toBe(true);
+    expect(gatesOk(parseSearchQuery("awes dir:awefork"), ctx())).toBe(true);
+    expect(gatesOk(parseSearchQuery("awes dir:elsewhere"), ctx())).toBe(false);
+  });
+
   it("vetoes the session when an exclude hits title, tags, or directory", () => {
     expect(gatesOk(parseSearchQuery("-登录"), ctx())).toBe(false);
     expect(gatesOk(parseSearchQuery("-bug"), ctx())).toBe(false);

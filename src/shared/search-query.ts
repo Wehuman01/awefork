@@ -161,7 +161,11 @@ export function gatesOk(parsed: ParsedSearchQuery, ctx: LocalMatchContext): bool
   for (const flag of parsed.flags) {
     if (!ctx[flag]) return false;
   }
-  const dirTerms = termsOwed(parsed.includes, "dir");
+  // Only dir-SCOPED terms gate here. `termsOwed` would sweep the unscoped
+  // terms in too — its contract serves the match scopes (title/tag/body owe
+  // plain terms; dir never does) — and a plain term forced onto the directory
+  // path hides every session outside a path that spells the term.
+  const dirTerms = parsed.includes.filter((term) => term.scope === "dir").map((term) => term.text);
   if (dirTerms.length > 0 && !textHasAll(ctx.directory, dirTerms)) return false;
   if (parsed.excludes.length > 0) {
     const surface = `${ctx.title}\n${ctx.tags.join("\n")}\n${ctx.directory}`;
