@@ -29,6 +29,7 @@ import type {
   AgentEvent,
   AgentInteractionRequest,
   AgentInteractionResponse,
+  ArchiveKind,
   ArchiveState,
   ChatMessage,
   ForkRecord,
@@ -41,6 +42,8 @@ import type {
   SessionSummary,
 } from "../../shared/types";
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
+import { shortPath } from "./format";
+import { track, trackEvent } from "./history";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -88,8 +91,9 @@ interface AppState {
    * still alive on the server until the hard delete fires (or undo cancels it).
    */
   trash: string[];
-  /** The latest soft delete, driving the undo toast; null = no toast. */
-  deletedToast: { sessionId: string; title: string } | null;
+  /** The latest soft delete, driving the undo toast; null = no toast. The
+   *  entryId lets the toast's 撤销 jump straight to the undo walk. */
+  deletedToast: { sessionId: string; title: string; entryId: number } | null;
   lineage: Record<string, ForkRecord>;
   /** Session ids the user starred (persisted in pins.json). */
   pins: string[];
@@ -103,14 +107,9 @@ interface AppState {
   tagColors: Record<string, number>;
   /**
    * The latest global tag delete, driving the tag undo toast; null = no toast.
-   * `sessionIds` identifies every affected session at delete time.
+   * `entryId` indexes the history entry so the toast's 撤销 can undo it.
    */
-  tagDeletedToast: {
-    backend: BackendId;
-    tag: string;
-    hue: number | null;
-    sessionIds: string[];
-  } | null;
+  tagDeletedToast: { tag: string; entryId: number } | null;
   /**
    * Sessions and directories tucked away (persisted in archive.json).
    * Pure awefork overlay: the data keeps living in the agent backend.
@@ -1282,6 +1281,16 @@ export function respondInteraction(
 ): void {
   const backend = state.activeBackend;
   dropInteraction(backend, request.requestId);
+  // Irreversible: the reply already went out, so record it as a journal lock.
+  const label =
+    response.decision === "allow"
+      ? "允许交互请求"
+      : response.decision === "deny"
+        ? "拒绝交互请求"
+        : response.decision === "cancel"
+          ? "取消交互请求"
+          : "回答交互问题";
+  trackEvent({ backend, kind: "respondInteraction", label });
   void window.awefork.respondInteraction(backend, request.requestId, response).catch((error) => {
     state.actionError = error instanceof Error ? error.message : String(error);
   });
@@ -1426,17 +1435,92 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
   }
 }
 
-/** Pin or unpin a session: pinned branch stories stay on the canvas. */
+// ── cross-backend overlay writes ──────────────────────────────────────
+// Every undo/redo closure routes its IPCs through the entry's own backend,
+// then writes the reply back to the right slot: the live visible maps when
+// that backend is active, else its parked workspace snapshot (see
+// applyTagStore / setCachedTagStore for the same pattern).
+function applyPins(backend: BackendId, pins: string[]): void {
+  if (backend === state.activeBackend) {
+    state.pins = pins;
+    return;
+  }
+  const snap = workspaceCache.get(backend);
+  if (snap) snap.pins = pins;
+}
+
+function applyArchive(backend: BackendId, archive: ArchiveState): void {
+  if (backend === state.activeBackend) {
+    state.archive = archive;
+    return;
+  }
+  const snap = workspaceCache.get(backend);
+  if (snap) snap.archive = archive;
+}
+
+function applyKnownDirs(backend: BackendId, dirs: string[]): void {
+  if (backend === state.activeBackend) {
+    state.knownDirs = dirs;
+    return;
+  }
+  const snap = workspaceCache.get(backend);
+  if (snap) snap.knownDirs = dirs;
+}
+
+function applyTrash(backend: BackendId, ids: string[]): void {
+  if (backend === state.activeBackend) {
+    state.trash = ids;
+    return;
+  }
+  const snap = workspaceCache.get(backend);
+  if (snap) snap.trash = ids;
+}
+
+/** The session's current title, falling back to its id (undo after switch). */
+function titleOf(sessionId: string): string {
+  return state.sessions.find((s) => s.id === sessionId)?.title ?? sessionId;
+}
+
+function isSessionRunning(backend: BackendId, sessionId: string): boolean {
+  if (backend === state.activeBackend) return !!state.running[sessionId];
+  return !!state.backgroundRuns[backend]?.running[sessionId];
+}
+
+function findSessionAnywhere(backend: BackendId, sessionId: string): SessionSummary | undefined {
+  if (backend === state.activeBackend) return state.sessions.find((s) => s.id === sessionId);
+  return workspaceCache.get(backend)?.sessions.find((s) => s.id === sessionId);
+}
+
+function truncate(text: string, max = 18): string {
+  const t = text.trim().replace(/\s+/g, " ");
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** Pure toggle + visible-map write; throws on failure (undo/redo re-use it). */
+async function togglePinOrThrow(backend: BackendId, sessionId: string): Promise<boolean> {
+  const pins = await window.awefork.togglePin(backend, sessionId);
+  applyPins(backend, pins);
+  // Only the on-screen backend needs the canvas re-scoped for the new pins.
+  if (backend === state.activeBackend) await ensureCanvasMessages();
+  return true;
+}
+
 export async function togglePin(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
-  // Pinning is a new operation: older pending deletes become final.
-  await flushPendingDeletes();
+  const wasPinned = state.pins.includes(sessionId);
   try {
-    state.pins = await window.awefork.togglePin(backend, sessionId);
-    await ensureCanvasMessages();
+    await togglePinOrThrow(backend, sessionId);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  track({
+    backend,
+    kind: "pin",
+    label: `${wasPinned ? "取消置顶" : "置顶"}「${titleOf(sessionId)}」`,
+    undo: () => togglePinOrThrow(backend, sessionId),
+    redo: () => togglePinOrThrow(backend, sessionId),
+  });
 }
 
 // ── session tags (执行 / 实验设计 / 咨询 …) ────────────────────────────
@@ -1521,55 +1605,121 @@ function removeLocalSessionTags(sessionId: string): void {
   );
 }
 
-async function saveSessionTags(
+/** Pure tag write (throws on failure); undo/redo route through it. */
+async function saveSessionTagsOrThrow(
   backend: BackendId,
   sessionId: string,
   tags: string[],
-): Promise<boolean> {
+): Promise<void> {
   const generation = workspaceGeneration;
   const next = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
-  try {
-    const store = await window.awefork.setSessionTags(backend, sessionId, next);
-    applyTagStore(backend, generation, store);
-    return true;
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return false;
-  }
+  const store = await window.awefork.setSessionTags(backend, sessionId, next);
+  applyTagStore(backend, generation, store);
 }
 
 /** Replace one session's tags; trims, drops empties and duplicates. */
 export async function setSessionTags(sessionId: string, tags: string[]): Promise<boolean> {
-  return saveSessionTags(state.activeBackend, sessionId, tags);
+  const backend = state.activeBackend;
+  const prev = tagsOf(sessionId);
+  const next = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
+  try {
+    await saveSessionTagsOrThrow(backend, sessionId, next);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return false;
+  }
+  // Label by the tag diff; a mixed edit collapses to a generic "modify".
+  const added = next.filter((tag) => !prev.includes(tag));
+  const removed = prev.filter((tag) => !next.includes(tag));
+  let label: string;
+  if (added.length > 0 && removed.length === 0) {
+    label = `添加标签「${added.join("、")}」到「${titleOf(sessionId)}」`;
+  } else if (removed.length > 0 && added.length === 0) {
+    label = `从「${titleOf(sessionId)}」移除标签「${removed.join("、")}」`;
+  } else {
+    label = `修改「${titleOf(sessionId)}」的标签`;
+  }
+  track({
+    backend,
+    kind: "tags",
+    label,
+    undo: async () => {
+      await saveSessionTagsOrThrow(backend, sessionId, prev);
+      return true;
+    },
+    redo: async () => {
+      await saveSessionTagsOrThrow(backend, sessionId, next);
+      return true;
+    },
+  });
+  return true;
 }
 
 /** Set (null clears to the hash color) one tag's user-chosen hue. */
 export async function setTagColor(tag: string, hue: number | null): Promise<boolean> {
   const backend = state.activeBackend;
-  const generation = workspaceGeneration;
+  const prev = state.tagColors[tag] ?? null;
   try {
-    const store = await window.awefork.setTagColor(backend, tag, hue);
-    applyTagStore(backend, generation, store);
-    return true;
+    await setTagColorOrThrow(backend, tag, hue);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
     return false;
   }
+  track({
+    backend,
+    kind: "tagColor",
+    label: hue === null ? `恢复标签「${tag}」默认色` : `设置标签「${tag}」颜色`,
+    undo: () => setTagColorOrThrow(backend, tag, prev),
+    redo: () => setTagColorOrThrow(backend, tag, hue),
+  });
+  return true;
+}
+
+/** Pure hue write (throws on failure); undo/redo re-use it. */
+async function setTagColorOrThrow(
+  backend: BackendId,
+  tag: string,
+  hue: number | null,
+): Promise<boolean> {
+  const generation = workspaceGeneration;
+  const store = await window.awefork.setTagColor(backend, tag, hue);
+  applyTagStore(backend, generation, store);
+  return true;
 }
 
 /**
- * Remove a tag from every session (and its color). The delete is final on
- * disk, but a short toast window offers 撤销, which re-attaches the tag to
- * every session that had it and restores its picked hue.
+ * Remove a tag from every session (and its color). Undoable for the whole
+ * run: undo re-attaches it to every session that had it and restores the hue.
  */
 export async function deleteTag(tag: string): Promise<void> {
   const backend = state.activeBackend;
-  const generation = workspaceGeneration;
   // Undo snapshot, taken before any local strip mutates state.tags.
   const hue = state.tagColors[tag] ?? null;
   const sessionIds = Object.entries(state.tags)
     .filter(([, tags]) => tags.includes(tag))
     .map(([id]) => id);
+  try {
+    await deleteTagOrThrow(backend, tag);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  const entry = track({
+    backend,
+    kind: "tagDelete",
+    label: `删除标签「${tag}」`,
+    undo: () => restoreTag(backend, tag, hue, sessionIds),
+    redo: async () => {
+      await deleteTagOrThrow(backend, tag);
+      return true;
+    },
+  });
+  showTagToast(tag, entry.id);
+}
+
+/** Pure strip + write (throws on failure); undo/redo re-use it. */
+async function deleteTagOrThrow(backend: BackendId, tag: string): Promise<void> {
+  const generation = workspaceGeneration;
   const previous: TagStore = { sessions: state.tags, colors: state.tagColors };
   // Strip locally before the write lands: a checkbox toggle in the still-open
   // tag menu must not read the stale snapshot and write the tag back.
@@ -1584,61 +1734,132 @@ export async function deleteTag(tag: string): Promise<void> {
   try {
     const store = await window.awefork.deleteTag(backend, tag);
     applyTagStore(backend, generation, store);
-    showTagDeleteToast(backend, tag, hue, sessionIds);
   } catch (error) {
+    // Roll the local strip back so the view and the disk agree; the failure
+    // then propagates to the caller's actionError / history.
     applyTagStore(backend, generation, previous);
-    state.actionError = error instanceof Error ? error.message : String(error);
+    throw error;
   }
 }
 
-/** The toast is pure UI: fading it only ends the undo window. */
-function showTagDeleteToast(
+/** Re-attach the tag everywhere it lived, then restore its hue. Fails loudly
+ *  (throws) so history marks the undo red rather than half-restoring. */
+async function restoreTag(
   backend: BackendId,
   tag: string,
   hue: number | null,
   sessionIds: string[],
-): void {
-  state.tagDeletedToast = { backend, tag, hue, sessionIds };
+): Promise<boolean> {
+  if (backend === state.activeBackend) {
+    // Only sessions still in the sidebar keep the tag on undo — a session
+    // hard-deleted underneath (or in another window) can't carry it.
+    const liveSessionIds = new Set(state.sessions.map((session) => session.id));
+    // Keep the active backend's state stable for the whole restore. A backend
+    // switch can repaint state.tags while the sequential writes are in flight.
+    const tagsAtUndo = state.tags;
+    for (const sessionId of sessionIds) {
+      if (!liveSessionIds.has(sessionId)) continue;
+      const current = tagsAtUndo[sessionId] ?? [];
+      if (current?.includes(tag)) continue;
+      await saveSessionTagsOrThrow(backend, sessionId, [...current, tag]);
+    }
+  } else {
+    // Non-active backend: the snapshot is authoritative and static between
+    // flips, so re-attach to every recorded session best effort. Any step
+    // failing throws, which marks the undo entry failed.
+    for (const sessionId of sessionIds) {
+      const snap = workspaceCache.get(backend)?.tags[sessionId] ?? [];
+      if (snap.includes(tag)) continue;
+      await saveSessionTagsOrThrow(backend, sessionId, [...snap, tag]);
+    }
+  }
+  // Color last: the store ignores a hue for a tag nothing references.
+  if (hue !== null) {
+    await setTagColorOrThrow(backend, tag, hue);
+  }
+  return true;
+}
+
+/** The tag toast is pure UI: fading it only ends the toast, not the undo. */
+function showTagToast(tag: string, entryId: number): void {
+  state.tagDeletedToast = { tag, entryId };
   setTimeout(() => {
     if (state.tagDeletedToast?.tag === tag) state.tagDeletedToast = null;
   }, TOAST_MS);
 }
 
-/** Re-attach the last deleted tag everywhere it lived, hue included. */
-export async function undoDeleteTag(): Promise<void> {
-  const snap = state.tagDeletedToast;
-  if (!snap) return;
-  state.tagDeletedToast = null;
-  const liveSessionIds = new Set(state.sessions.map((session) => session.id));
-  // Keep the active backend's state stable for the whole restore. A backend
-  // switch can repaint state.tags while the sequential writes are in flight.
-  const tagsAtUndo = state.tags;
-  for (const sessionId of snap.sessionIds) {
-    if (!liveSessionIds.has(sessionId)) continue;
-    const current = tagsAtUndo[sessionId] ?? [];
-    if (current?.includes(snap.tag)) continue;
-    await saveSessionTags(snap.backend, sessionId, [...current, snap.tag]);
+/**
+ * Soft-delete a session: it vanishes from every view at once and stays in the
+ * trash (persisted) until the user undoes it or the app restarts, when the
+ * boot flow flushes the trash for real. Undo reaches the delete through the
+ * history journal — no time window, no "next operation finalizes it". Refused
+ * while the session has a run in flight. Throws on persist failure.
+ */
+async function softDeleteSession(backend: BackendId, sessionId: string): Promise<void> {
+  if (isSessionRunning(backend, sessionId)) {
+    throw new Error("会话正在运行，先停止再删除。");
   }
-  // Color last: the store ignores a hue for a tag nothing references.
-  if (snap.hue !== null) {
-    const generation = workspaceGeneration;
-    try {
-      const store = await window.awefork.setTagColor(snap.backend, snap.tag, snap.hue);
-      applyTagStore(snap.backend, generation, store);
-    } catch (error) {
-      state.actionError = error instanceof Error ? error.message : String(error);
-    }
+  const active = backend === state.activeBackend;
+  // Neighbor comes from the pre-delete sidebar order: whatever row now sits
+  // where the deleted one was, so the selection doesn't jump across the list.
+  let neighbor: string | null = null;
+  let landing: string | null = null;
+  if (active) {
+    neighbor = pickNeighborId(flatDirectorySessionIds(), sessionId);
+    // Same-story landing (fork parent, else oldest child), computed before the
+    // trash push hides the deleted session from the directory pool.
+    landing = landingAfterHide(sessionId);
+    state.trash = [...state.trash, sessionId];
+    if (state.draft?.sessionId === sessionId) state.draft = null;
+  }
+  const session = findSessionAnywhere(backend, sessionId);
+  try {
+    const ids = (
+      await window.awefork.trashAdd(backend, sessionId, session?.title ?? sessionId)
+    ).map((entry) => entry.id);
+    applyTrash(backend, ids);
+  } catch (error) {
+    // Could not persist the soft delete — show the session again rather than
+    // risk hiding it with no way to complete or undo the deletion.
+    if (active) state.trash = state.trash.filter((id) => id !== sessionId);
+    throw error;
+  }
+
+  if (active && state.selectedId === sessionId) {
+    state.selectedId = null;
+    state.selectedTurnId = null;
+    const target = landing ?? neighbor ?? latestSessionId(directorySessions.value);
+    if (target) await selectSession(target);
+    else await leaveEmptiedDirectory();
   }
 }
 
-/**
- * Soft-delete a session: it vanishes from every view at once and stays
- * undoable (the toast's 撤销 button or Ctrl+Z) until the user starts a new
- * operation, which flushes pending deletes for real. The toast text fades on
- * its own short schedule — fading never finalizes the delete. Flushing prunes
- * pins, drops caches; child forks survive and re-root themselves. Refused
- * while the session has a run in flight.
- */
+/** Put a soft-deleted session back: drop it from the trash, walk back in. */
+async function restoreTrashedSession(backend: BackendId, sessionId: string): Promise<boolean> {
+  const ids = (await window.awefork.trashRemove(backend, sessionId)).map((entry) => entry.id);
+  applyTrash(backend, ids);
+  if (backend === state.activeBackend) {
+    if (state.deletedToast?.sessionId === sessionId) state.deletedToast = null;
+    // The session was never server-deleted; walk straight back into it.
+    if (state.sessions.some((s) => s.id === sessionId)) {
+      await selectSession(sessionId, { focus: true });
+    }
+  }
+  return true;
+}
+
+/** The redo guard for a soft delete: re-confirm, then hide again. */
+async function confirmSoftDelete(backend: BackendId, sessionId: string): Promise<boolean> {
+  if (isSessionRunning(backend, sessionId)) {
+    throw new Error("会话正在运行，先停止再删除。");
+  }
+  const session = findSessionAnywhere(backend, sessionId);
+  if (!session) throw new Error("会话已不存在，无法重做删除。");
+  if (!window.confirm(`再删除会话「${session.title}」？`)) return false;
+  await softDeleteSession(backend, sessionId);
+  return true;
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
   if (state.running[sessionId]) {
@@ -1651,52 +1872,32 @@ export async function deleteSession(sessionId: string): Promise<void> {
   // One explicit confirm before the sweep: a card's 🗑 removes the WHOLE
   // session — a fork's copied prefix turns share it, so without this the
   // neighbouring card reads as "collateral damage". Turn deletes confirm at
-  // the call site; this is the only gate session deletes get, so it must
+  // the call site; this is the only gate session deletes get, and it must
   // also carry the undo promise.
   const ok = window.confirm(
-    `删除会话「${session.title}」？\n` +
-      `将删除这条会话的全部回合（不只是这张卡片），分出去的子分支保留。\n` +
-      `删除后在提示消失前可点「撤销」或按 Ctrl+Z 恢复。`,
+    `删除会话「${session.title}」？\n将删除这条会话的全部回合（不只是这张卡片），分出去的子分支保留。\n删除后可随时按 ⌘/Ctrl+Z 撤销，或在右下角历史面板回退。`,
   );
   if (!ok) return;
   state.actionError = null;
-  // Deleting is itself a new operation: older pending deletes become final.
-  await flushPendingDeletes();
-
-  // Neighbor comes from the pre-delete sidebar order: whatever row now sits
-  // where the deleted one was, so the selection doesn't jump across the list.
-  const neighbor = pickNeighborId(flatDirectorySessionIds(), sessionId);
-  // Same-story landing (fork parent, else oldest child), computed before the
-  // trash push hides the deleted session from the directory pool.
-  const landing = landingAfterHide(sessionId);
-
-  state.trash = [...state.trash, sessionId];
-  if (state.draft?.sessionId === sessionId) state.draft = null;
   try {
-    state.trash = (await window.awefork.trashAdd(backend, sessionId, session.title)).map(
-      (entry) => entry.id,
-    );
+    await softDeleteSession(backend, sessionId);
   } catch (error) {
-    // Could not persist the pending delete — show the session again rather
-    // than risk hiding it with no way to complete or undo the deletion.
-    state.trash = state.trash.filter((id) => id !== sessionId);
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
   }
-
-  // Toast + pending entry first: the undo window must be armed even if the
-  // neighbor-selection round-trip below fails. The window stays open until
-  // the next operation flushes it — even after the toast text has faded.
-  showDeleteToast(sessionId, session.title);
-  pendingDeletes.push({ sessionId, backend });
-
-  if (state.selectedId === sessionId) {
-    state.selectedId = null;
-    state.selectedTurnId = null;
-    const target = landing ?? neighbor ?? latestSessionId(directorySessions.value);
-    if (target) await selectSession(target);
-    else await leaveEmptiedDirectory();
-  }
+  const entry = track({
+    backend,
+    kind: "deleteSession",
+    label: `删除会话「${titleOf(sessionId)}」`,
+    undo: () => restoreTrashedSession(backend, sessionId),
+    redo: () => confirmSoftDelete(backend, sessionId),
+  });
+  // The toast is pure UI: fading it only hides the 撤销 button — the history
+  // entry stays undoable until the restart flush.
+  state.deletedToast = { sessionId, title: session.title, entryId: entry.id };
+  setTimeout(() => {
+    if (state.deletedToast?.sessionId === sessionId) state.deletedToast = null;
+  }, TOAST_MS);
 }
 
 /**
@@ -1716,31 +1917,43 @@ function landingAfterHide(deletedId: string): string | null {
   return children[0]?.id ?? null;
 }
 
-/**
- * Tuck a single session into the archive: hidden from every view at once,
- * fully recoverable from the sidebar's archive section. Child forks stay
- * visible and re-root themselves. Pure awefork-side overlay — the session
- * keeps living in the agent backend, so runs in flight are left alone.
- */
-export async function archiveSession(sessionId: string): Promise<void> {
-  const backend = state.activeBackend;
-  const session = state.sessions.find((s) => s.id === sessionId);
-  if (!session || state.archive.sessions.some((e) => e.id === sessionId)) return;
-  state.actionError = null;
-  // Archiving is a new operation: older pending deletes become final.
-  await flushPendingDeletes();
+/** Pure archive write (throws on failure); undo/redo re-use it. */
+async function archiveAddOrThrow(
+  backend: BackendId,
+  kind: ArchiveKind,
+  key: string,
+): Promise<void> {
+  const archive = await window.awefork.archiveAdd(backend, kind, key);
+  applyArchive(backend, archive);
+}
 
+/** Pure archive removal (throws on failure); undo/redo re-use it. */
+async function archiveRemoveOrThrow(
+  backend: BackendId,
+  kind: ArchiveKind,
+  key: string,
+): Promise<boolean> {
+  const archive = await window.awefork.archiveRemove(backend, kind, key);
+  applyArchive(backend, archive);
+  return true;
+}
+
+/**
+ * Tuck a single session into the archive and move the selection along the same
+ * landing rules as delete. Active-backend only: the hidden session keeps
+ * living server-side, so runs in flight are left alone. A duplicate archive
+ * returns quietly — the redo path is idempotent.
+ */
+async function archiveSessionFlow(backend: BackendId, sessionId: string): Promise<boolean> {
+  const session = state.sessions.find((s) => s.id === sessionId);
+  // Already archived (redo path) — idempotent, nothing to do.
+  if (!session) return true;
   // Same landing rule as delete: same-story branch first, else the sidebar
   // neighbor — both computed while the session is still in the pool.
   const neighbor = pickNeighborId(flatDirectorySessionIds(), sessionId);
   const landing = landingAfterHide(sessionId);
 
-  try {
-    state.archive = await window.awefork.archiveAdd(backend, "session", sessionId);
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
+  await archiveAddOrThrow(backend, "session", sessionId);
   if (state.draft?.sessionId === sessionId) state.draft = null;
   if (state.selectedId === sessionId) {
     state.selectedId = null;
@@ -1749,20 +1962,31 @@ export async function archiveSession(sessionId: string): Promise<void> {
     if (target) await selectSession(target);
     else await leaveEmptiedDirectory();
   }
+  return true;
 }
 
-/**
- * Tuck a whole project directory into the archive: every session under the
- * path hides — including sessions created there later — until the directory
- * is restored. Sessions under it that were archived individually stay
- * archived after a restore (the two lists combine independently).
- */
-export async function archiveDirectory(directory: string): Promise<void> {
+export async function archiveSession(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
-  if (state.archive.directories.some((e) => e.path === directory)) return;
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session || state.archive.sessions.some((e) => e.id === sessionId)) return;
   state.actionError = null;
-  await flushPendingDeletes();
+  try {
+    await archiveSessionFlow(backend, sessionId);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  track({
+    backend,
+    kind: "archiveSession",
+    label: `归档会话「${titleOf(sessionId)}」`,
+    undo: () => archiveRemoveOrThrow(backend, "session", sessionId),
+    redo: () => archiveSessionFlow(backend, sessionId),
+  });
+}
 
+/** Full-fledged archive of a directory: every session under the path hides. */
+async function archiveDirectoryFlow(backend: BackendId, directory: string): Promise<boolean> {
   const selectedHere =
     state.selectedDirectory === directory ||
     state.sessions.some((s) => s.id === state.selectedId && s.directory === directory);
@@ -1770,14 +1994,9 @@ export async function archiveDirectory(directory: string): Promise<void> {
     (s) => s.id === state.draft?.sessionId && s.directory === directory,
   );
 
-  try {
-    state.archive = await window.awefork.archiveAdd(backend, "directory", directory);
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
+  await archiveAddOrThrow(backend, "directory", directory);
   if (draftedHere) state.draft = null;
-  if (!selectedHere) return;
+  if (!selectedHere) return true;
   state.selectedId = null;
   state.selectedTurnId = null;
   if (state.selectedDirectory === directory) {
@@ -1790,24 +2009,62 @@ export async function archiveDirectory(directory: string): Promise<void> {
     const target = latestSessionId(directorySessions.value);
     if (target) await selectSession(target);
   }
+  return true;
+}
+
+export async function archiveDirectory(directory: string): Promise<void> {
+  const backend = state.activeBackend;
+  if (state.archive.directories.some((e) => e.path === directory)) return;
+  state.actionError = null;
+  try {
+    await archiveDirectoryFlow(backend, directory);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  track({
+    backend,
+    kind: "archiveDirectory",
+    label: `归档目录「${shortPath(directory)}」`,
+    undo: () => archiveRemoveOrThrow(backend, "directory", directory),
+    redo: () => archiveDirectoryFlow(backend, directory),
+  });
 }
 
 /** Restore one archived session: back in the sidebar; the data never moved. */
 export async function restoreSession(sessionId: string): Promise<void> {
+  const backend = state.activeBackend;
   try {
-    state.archive = await window.awefork.archiveRemove(state.activeBackend, "session", sessionId);
+    await archiveRemoveOrThrow(backend, "session", sessionId);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  track({
+    backend,
+    kind: "restoreSession",
+    label: `恢复会话「${titleOf(sessionId)}」`,
+    undo: () => archiveSessionFlow(backend, sessionId),
+    redo: () => archiveRemoveOrThrow(backend, "session", sessionId),
+  });
 }
 
 /** Restore an archived directory: everything hidden under the path reappears. */
 export async function restoreDirectory(directory: string): Promise<void> {
+  const backend = state.activeBackend;
   try {
-    state.archive = await window.awefork.archiveRemove(state.activeBackend, "directory", directory);
+    await archiveRemoveOrThrow(backend, "directory", directory);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  track({
+    backend,
+    kind: "restoreDirectory",
+    label: `恢复目录「${shortPath(directory)}」`,
+    undo: () => archiveDirectoryFlow(backend, directory),
+    redo: () => archiveRemoveOrThrow(backend, "directory", directory),
+  });
 }
 
 /**
@@ -1845,12 +2102,26 @@ export async function deleteTurn(node: TurnNode): Promise<void> {
   if (!range) return;
   const ids = messages.slice(range.start, range.end).map((m) => m.id);
   state.actionError = null;
+  let deleted = 0;
   try {
     for (const id of ids) {
       await window.awefork.deleteMessage(backend, sessionId, id);
+      deleted += 1;
     }
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+  }
+  // A partial failure keeps whatever the server removed; only log a lock when
+  // at least one message actually disappeared so an empty "delete" is not
+  // recorded. The label falls back to the first removed row's text.
+  if (deleted >= 1) {
+    const firstText =
+      messages.slice(range.start, range.start + deleted).find((m) => m.text)?.text ?? "";
+    trackEvent({
+      backend,
+      kind: "deleteTurn",
+      label: `删除回合「${truncate(node.title ?? firstText)}」`,
+    });
   }
   if (state.selectedTurnId === node.id) state.selectedTurnId = null;
   // Show what the server actually has now, whether the delete fully landed
@@ -1874,73 +2145,7 @@ function flatDirectorySessionIds(): string[] {
   return ids;
 }
 
-/** Undo a pending delete: drop it from the queue, put the session back. */
-export async function undoDelete(sessionId: string): Promise<void> {
-  // The trash record lives on the backend the delete was queued on — not
-  // necessarily the one on screen now.
-  const backend =
-    pendingDeletes.find((p) => p.sessionId === sessionId)?.backend ?? state.activeBackend;
-  if (state.deletedToast?.sessionId === sessionId) state.deletedToast = null;
-  try {
-    state.trash = (await window.awefork.trashRemove(backend, sessionId)).map((entry) => entry.id);
-  } catch (error) {
-    // The record survived, so the delete is still pending — leave it
-    // queued and a later Ctrl+Z can retry the undo.
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
-  removePendingDelete(sessionId);
-  // The session was never server-deleted; walk straight back into it.
-  if (state.sessions.some((s) => s.id === sessionId)) {
-    await selectSession(sessionId, { focus: true });
-  }
-}
-
 const TOAST_MS = 6000;
-/** Sessions soft-deleted and still undoable, oldest first; Ctrl+Z pops LIFO. */
-interface PendingDelete {
-  sessionId: string;
-  backend: BackendId;
-}
-const pendingDeletes: PendingDelete[] = [];
-
-/**
- * Most recent soft delete still undoable; null once flushed (or undone).
- * Ctrl+Z walks these LIFO — one press per delete.
- */
-export function latestPendingDeleteId(): string | null {
-  for (let i = pendingDeletes.length - 1; i >= 0; i -= 1) {
-    const entry = pendingDeletes[i];
-    if (entry !== undefined && state.trash.includes(entry.sessionId)) return entry.sessionId;
-  }
-  return null;
-}
-
-function removePendingDelete(sessionId: string): void {
-  const index = pendingDeletes.findIndex((p) => p.sessionId === sessionId);
-  if (index >= 0) pendingDeletes.splice(index, 1);
-}
-
-/**
- * Finalize the pending soft deletes: the user just started a new operation,
- * which closes the undo window for the older ones. Best effort per session —
- * a failed server delete involuntarily restores that one (hardDeleteSession),
- * the rest still flush. Each entry carries the backend its trash store lives
- * in, so a flush during a backend switch still routes correctly.
- */
-async function flushPendingDeletes(): Promise<void> {
-  for (const entry of [...pendingDeletes]) {
-    await hardDeleteSession(entry.backend, entry.sessionId);
-  }
-}
-
-/** The toast is pure UI: fading it must never finalize the delete beneath. */
-function showDeleteToast(sessionId: string, title: string): void {
-  state.deletedToast = { sessionId, title };
-  setTimeout(() => {
-    if (state.deletedToast?.sessionId === sessionId) state.deletedToast = null;
-  }, TOAST_MS);
-}
 
 /**
  * One-line update-channel toast (manual check progress/result). Auto-clears on
@@ -1954,46 +2159,59 @@ function showUpdateToast(text: string): void {
 }
 
 async function hardDeleteSession(backend: BackendId, sessionId: string): Promise<void> {
-  // Leaves the pending queue only when the outcome is decided: restored,
-  // deleted, or (below) still pending after a double failure.
-  if (state.deletedToast?.sessionId === sessionId) state.deletedToast = null;
-  try {
-    state.pins = await window.awefork.deleteSession(backend, sessionId);
-  } catch (error) {
-    // The server delete failed. An involuntary undo beats a session stuck
-    // invisible — but the pending-delete record must be cleared first, or
-    // the next startup flush would destroy the session we just restored.
-    const reason = error instanceof Error ? error.message : String(error);
-    try {
-      state.trash = (await window.awefork.trashRemove(backend, sessionId)).map((entry) => entry.id);
-      removePendingDelete(sessionId);
-      state.actionError = `删除失败，已把会话放回：${reason}`;
-    } catch {
-      // Record could not be cleared either: stay hidden and stay queued,
-      // so Ctrl+Z can still undo and the next flush can still retry.
-      state.actionError = `删除失败：${reason}（记录无法清除，会话暂时保持隐藏，可 Ctrl+Z 撤销）`;
-    }
-    return;
+  const active = backend === state.activeBackend;
+  if (isSessionRunning(backend, sessionId)) {
+    throw new Error("会话正在运行，先停止再删除。");
   }
-  removePendingDelete(sessionId);
-  stopWatch(backend, sessionId);
-  streamBuffers.delete(streamKey(backend, sessionId));
-  setStreamTail(backend, sessionId, null);
-  setRunning(backend, sessionId, false);
-  clearRecent(backend, sessionId);
-  // Main prunes the tags sidecar with the delete; mirror it locally so the
-  // filter shelf and right-click menu don't offer a dead session's labels.
-  removeLocalSessionTags(sessionId);
-  const { [sessionId]: goneMessages, ...keptMessages } = state.messagesBySession;
-  void goneMessages;
-  state.messagesBySession = keptMessages;
-  attemptedMessages.delete(sessionId);
-  const { [sessionId]: goneLineage, ...keptLineage } = state.lineage;
-  void goneLineage;
-  state.lineage = keptLineage;
-  state.sessions = state.sessions.filter((s) => s.id !== sessionId);
+  // Neighbor + same-story landing, computed while the session is still pooled.
+  let landing: string | null = null;
+  let neighbor: string | null = null;
+  if (active) {
+    neighbor = pickNeighborId(flatDirectorySessionIds(), sessionId);
+    landing = landingAfterHide(sessionId);
+  }
+  const pins = await window.awefork.deleteSession(backend, sessionId);
+  applyPins(backend, pins);
+  if (active) {
+    stopWatch(backend, sessionId);
+    streamBuffers.delete(streamKey(backend, sessionId));
+    setStreamTail(backend, sessionId, null);
+    setRunning(backend, sessionId, false);
+    clearRecent(backend, sessionId);
+    // Main prunes the tags sidecar with the delete; mirror it locally so the
+    // filter shelf and right-click menu don't offer a dead session's labels.
+    removeLocalSessionTags(sessionId);
+    const { [sessionId]: goneMessages, ...keptMessages } = state.messagesBySession;
+    void goneMessages;
+    state.messagesBySession = keptMessages;
+    attemptedMessages.delete(sessionId);
+    const { [sessionId]: goneLineage, ...keptLineage } = state.lineage;
+    void goneLineage;
+    state.lineage = keptLineage;
+    state.sessions = state.sessions.filter((s) => s.id !== sessionId);
+    if (state.selectedId === sessionId) {
+      state.selectedId = null;
+      state.selectedTurnId = null;
+      const target = landing ?? neighbor ?? latestSessionId(directorySessions.value);
+      if (target) await selectSession(target);
+      else await leaveEmptiedDirectory();
+    }
+  } else {
+    // A parked backend has no live view; prune its cached snapshot's session
+    // list and lineage so a switch back renders the true remaining set.
+    const snap = workspaceCache.get(backend);
+    if (snap) {
+      snap.sessions = snap.sessions.filter((s) => s.id !== sessionId);
+      const { [sessionId]: goneLineage, ...keptLineage } = snap.lineage;
+      void goneLineage;
+      snap.lineage = keptLineage;
+    }
+  }
   try {
-    state.trash = (await window.awefork.trashRemove(backend, sessionId)).map((entry) => entry.id);
+    applyTrash(
+      backend,
+      (await window.awefork.trashRemove(backend, sessionId)).map((e) => e.id),
+    );
   } catch {
     // Left in the persisted trash; the next startup flush retries the cleanup.
   }
@@ -2009,19 +2227,69 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
 export async function createSession(directory?: string): Promise<void> {
   const backend = state.activeBackend;
   state.actionError = null;
-  // Creating is a new operation: older pending deletes become final.
-  await flushPendingDeletes();
+  let created: SessionSummary;
   try {
-    const created = await window.awefork.createSession(
+    created = await window.awefork.createSession(
       backend,
       directory ?? state.selectedDirectory ?? undefined,
     );
-    await refreshSessions();
-    await selectSession(created.id, { focus: true });
-    state.composerFocusRequest = Date.now();
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  const box = { id: created.id };
+  track({
+    backend,
+    kind: "createSession",
+    label: `新建会话「${created.title}」`,
+    undo: async () => {
+      await hardDeleteSession(backend, box.id);
+      return true;
+    },
+    redo: async () => {
+      const s = await window.awefork.createSession(
+        backend,
+        directory ?? state.selectedDirectory ?? undefined,
+      );
+      box.id = s.id;
+      await refreshSessions();
+      if (backend === state.activeBackend) await selectSession(s.id);
+      return true;
+    },
+  });
+  await refreshSessions();
+  await selectSession(created.id, { focus: true });
+  state.composerFocusRequest = Date.now();
+}
+
+// ── directories (＋ 新目录 / forget) ──────────────────────────────────
+
+/** Pure dirs write (throws on failure); undo/redo re-use it. */
+async function dirsAddOrThrow(backend: BackendId, directory: string): Promise<boolean> {
+  const dirs = await window.awefork.dirsAdd(backend, directory);
+  applyKnownDirs(backend, dirs);
+  return true;
+}
+
+/** Pure dirs removal (throws on failure); undo/redo re-use it. */
+async function dirsRemoveOrThrow(backend: BackendId, directory: string): Promise<boolean> {
+  const dirs = await window.awefork.dirsRemove(backend, directory);
+  applyKnownDirs(backend, dirs);
+  return true;
+}
+
+/** Remove a directory registration and bail out of the project if it was open.
+ *  Active-backend only; the redo path is idempotent. */
+async function dirsRemoveFlow(backend: BackendId, directory: string): Promise<boolean> {
+  await dirsRemoveOrThrow(backend, directory);
+  if (
+    backend === state.activeBackend &&
+    state.selectedDirectory === directory &&
+    !visibleSessions.value.some((session) => session.directory === directory)
+  ) {
+    await leaveEmptiedDirectory();
+  }
+  return true;
 }
 
 /**
@@ -2040,11 +2308,20 @@ export async function addDirectory(): Promise<void> {
   }
   if (!picked) return;
   try {
-    state.knownDirs = await window.awefork.dirsAdd(state.activeBackend, picked);
+    await dirsAddOrThrow(state.activeBackend, picked);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
   }
+  track({
+    backend: state.activeBackend,
+    kind: "addDirectory",
+    label: `添加目录「${shortPath(picked)}」`,
+    undo: () => dirsRemoveFlow(state.activeBackend, picked),
+    redo: () => dirsAddOrThrow(state.activeBackend, picked),
+  });
+  // Only the initial add opens the project; undoing/redoing the registration
+  // never yanks the current directory around.
   if (state.selectedDirectory !== picked) await switchDirectory(picked);
 }
 
@@ -2054,19 +2331,21 @@ export async function addDirectory(): Promise<void> {
  * registration is the whole payload.
  */
 export async function removeDirectory(directory: string): Promise<void> {
+  const backend = state.activeBackend;
   state.actionError = null;
   try {
-    state.knownDirs = await window.awefork.dirsRemove(state.activeBackend, directory);
+    await dirsRemoveOrThrow(backend, directory);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
   }
-  if (
-    state.selectedDirectory === directory &&
-    !visibleSessions.value.some((session) => session.directory === directory)
-  ) {
-    await leaveEmptiedDirectory();
-  }
+  track({
+    backend,
+    kind: "removeDirectory",
+    label: `移除目录「${shortPath(directory)}」`,
+    undo: () => dirsAddOrThrow(backend, directory),
+    redo: () => dirsRemoveFlow(backend, directory),
+  });
 }
 
 /**
@@ -2078,15 +2357,49 @@ export async function cloneSelectedSession(): Promise<void> {
   const sessionId = state.selectedId;
   if (!sessionId || state.running[sessionId]) return;
   state.actionError = null;
-  // Cloning is a new operation: older pending deletes become final.
-  await flushPendingDeletes();
+  let forked: SessionSummary;
   try {
-    const forked = await window.awefork.fork(backend, sessionId, null);
-    await refreshSessions();
-    await selectSession(forked.id, { focus: true });
+    forked = await window.awefork.fork(backend, sessionId, null);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  const box = { id: forked.id };
+  track({
+    backend,
+    kind: "cloneSession",
+    label: `克隆会话「${titleOf(sessionId)}」`,
+    undo: async () => {
+      await hardDeleteSession(backend, box.id);
+      return true;
+    },
+    redo: async () => {
+      const f = await window.awefork.fork(backend, sessionId, null);
+      box.id = f.id;
+      await refreshSessions();
+      if (backend === state.activeBackend) await selectSession(f.id);
+      return true;
+    },
+  });
+  await refreshSessions();
+  await selectSession(forked.id, { focus: true });
+}
+
+/** Pure rename write + local title update; throws on failure. */
+async function renameOrThrow(
+  backend: BackendId,
+  sessionId: string,
+  trimmed: string,
+): Promise<boolean> {
+  await window.awefork.renameSession(backend, sessionId, trimmed);
+  if (backend === state.activeBackend) {
+    state.sessions = state.sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
+  } else {
+    const snap = workspaceCache.get(backend);
+    if (snap)
+      snap.sessions = snap.sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
+  }
+  return true;
 }
 
 /** Rename a session through the agent's native API and update local state. */
@@ -2094,14 +2407,20 @@ export async function renameSession(sessionId: string, title: string): Promise<v
   const backend = state.activeBackend;
   const trimmed = title.trim();
   if (!trimmed) return;
-  // Renaming is a new operation: older pending deletes become final.
-  await flushPendingDeletes();
+  const prev = titleOf(sessionId);
   try {
-    await window.awefork.renameSession(backend, sessionId, trimmed);
-    state.sessions = state.sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
+    await renameOrThrow(backend, sessionId, trimmed);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  track({
+    backend,
+    kind: "renameSession",
+    label: `重命名「${prev}」→「${trimmed}」`,
+    undo: () => renameOrThrow(backend, sessionId, prev),
+    redo: () => renameOrThrow(backend, sessionId, trimmed),
+  });
 }
 
 /**
@@ -2439,8 +2758,6 @@ export async function sendDraft(): Promise<void> {
   state.draftSending = true;
   let targetId: string | null = null;
   try {
-    // Sending is a new operation: older pending deletes become final.
-    await flushPendingDeletes();
     // The draft was already persisted to the outgoing backend's store by the
     // switch, so dropping the send here hands it back on the next visit
     // instead of firing an invisible run and writing over the new backend.
@@ -2470,6 +2787,9 @@ export async function sendDraft(): Promise<void> {
     const attachments = toPromptAttachments(draft.attachments);
     appendLocalMessage(targetId, text, model, attachments);
     await window.awefork.prompt(backend, targetId, text, model, attachments);
+    // The run is real (it streams through the parked runtime): record it as a
+    // journal lock. One entry covers both the continue and fork branches.
+    trackEvent({ backend, kind: "sendPrompt", label: `发送消息「${truncate(text)}」` });
     watchCompletion(backend, targetId, sentAt);
     if (!stale()) {
       state.draft = null;
@@ -2555,19 +2875,18 @@ export async function sendPrompt(
   const generation = workspaceGeneration;
   if (!sessionId || !text.trim()) return;
   state.actionError = null;
-  // Sending is a new operation: older pending deletes become final. The
-  // session is captured before the flush because the flush awaits IPC —
-  // the prompt must reach the session the composer was typing into, even
-  // if the user switches selection mid-flush. A backend switch is the one
-  // mid-flush change that aborts: the target session left the screen, and
-  // firing the run anyway would start something the user cannot see.
-  await flushPendingDeletes();
+  // The target session is captured before the prompt request goes out — a
+  // backend switch is the one mid-flight change that aborts: the target left
+  // the screen, and firing the run anyway would start something the user
+  // cannot see.
   if (generation !== workspaceGeneration) return;
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
   appendLocalMessage(sessionId, text, model, attachments);
   try {
     await window.awefork.prompt(backend, sessionId, text, plainModel(model), attachments);
+    // Irreversible: the run is out, so seal the journal with a lock entry.
+    trackEvent({ backend, kind: "sendPrompt", label: `发送消息「${truncate(text)}」` });
     watchCompletion(backend, sessionId, sentAt);
   } catch (error) {
     setRunning(backend, sessionId, false);
@@ -2586,13 +2905,17 @@ export function requestCanvasFit(): void {
 }
 
 export async function abortRun(): Promise<void> {
+  const backend = state.activeBackend;
   const sessionId = state.selectedId;
   if (!sessionId) return;
   try {
-    await window.awefork.abort(state.activeBackend, sessionId);
+    await window.awefork.abort(backend, sessionId);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
+    return;
   }
+  // Irreversible (the run is gone); a lock entry seals the journal.
+  trackEvent({ backend, kind: "abortRun", label: `停止运行「${titleOf(sessionId)}」` });
 }
 
 export function dismissActionError(): void {
@@ -2880,9 +3203,8 @@ function resetWorkspace(): void {
 let switchingBackend = false;
 
 /**
- * Switch the whole workspace to another agent backend. Pending deletes flush
- * FIRST (each entry's trash store is bound to its backend), then the choice
- * is persisted — a failed probe bounces back with the current view intact.
+ * Switch the whole workspace to another agent backend. The choice is
+ * persisted — a failed probe bounces back with the current view intact.
  * The switch itself never touches runs in flight: the old backend's runtime
  * parks in its slot and keeps streaming there, the target's restores, and a
  * backend visited before repaints from its parked workspace at once (with a
@@ -2893,7 +3215,6 @@ export async function switchBackend(backend: BackendId): Promise<void> {
   switchingBackend = true;
   try {
     state.actionError = null;
-    await flushPendingDeletes();
     // The unsent draft belongs to the outgoing backend's store; write it
     // before the workspace resets, or the debounced flush would fire with
     // cleared state and eat it.

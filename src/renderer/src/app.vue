@@ -54,6 +54,8 @@
     </div>
     <CommandPalette />
     <InteractionDialog />
+    <HistoryButton />
+    <HistoryPanel />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -63,12 +65,12 @@
       {{ store.actionError }}（点击关闭）
     </div>
     <div v-if="store.deletedToast" class="toast banner-undo" role="status" aria-live="polite">
-      <span class="undo-text">已删除「{{ store.deletedToast.title }}」（⌘/Ctrl+Z 也可撤销）</span>
+      <span class="undo-text">已删除「{{ store.deletedToast.title }}」（⌘/Ctrl+Z 或历史面板可撤销）</span>
       <button
         type="button"
         class="undo-btn"
         title="把会话放回来"
-        @click="undoDelete(store.deletedToast.sessionId)"
+        @click="undoTo(store.deletedToast.entryId)"
       >撤销</button>
     </div>
     <div v-if="store.tagDeletedToast" class="toast banner-undo tag-undo" role="status" aria-live="polite">
@@ -77,11 +79,14 @@
         type="button"
         class="undo-btn"
         title="把标签加回所有会话"
-        @click="undoDeleteTag()"
+        @click="undoTo(store.tagDeletedToast.entryId)"
       >撤销</button>
     </div>
     <div v-if="store.updateToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.updateToast }}
+    </div>
+    <div v-if="historyStore.toast" class="toast banner-update" role="status" aria-live="polite">
+      {{ historyStore.toast }}
     </div>
   </div>
 </template>
@@ -90,22 +95,28 @@
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
 import CommandPalette from "./components/command-palette.vue";
+import HistoryButton from "./components/history-button.vue";
+import HistoryPanel from "./components/history-panel.vue";
 import InteractionDialog from "./components/interaction-dialog.vue";
 import SessionCanvas from "./components/session-canvas.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
+import {
+  history as historyStore,
+  redoSteps,
+  togglePanel as toggleHistoryPanel,
+  undoSteps,
+  undoTo,
+} from "./history";
 import { PANEL_LIMITS, panelStyle, panels, persistLayout, togglePanel } from "./layout";
 import {
   dismissActionError,
   dismissUpdateBanner,
   init,
-  latestPendingDeleteId,
   openReleaseNotes,
   skipUpdateVersion,
   startUpdateDownload,
   store,
-  undoDelete,
-  undoDeleteTag,
 } from "./state";
 
 /** "12.3 / 28.5 MB" while a total is known, else "12.3 MB" so far. */
@@ -130,14 +141,17 @@ onUnmounted(() => {
   }
 });
 
-// ── Ctrl/⌘+Z: undo the most recent delete still awaiting its flush ──
-// Works even after the toast has faded; the undo window only closes when a
-// new operation flushes the pending deletes. While typing, the keystroke
-// stays a native text undo.
-
+// ── Ctrl/⌘+Z: undo the most recent history entry. While typing, the
+// keystroke stays a native text undo. ⌘/Ctrl+Shift+H toggles the history panel.
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key.toLowerCase() !== "z" || !(event.metaKey || event.ctrlKey)) return;
-  if (event.shiftKey || event.altKey) return;
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const key = event.key.toLowerCase();
+  if (key === "h" && event.shiftKey) {
+    event.preventDefault();
+    toggleHistoryPanel();
+    return;
+  }
+  if (key !== "z" || event.altKey) return;
   const target = event.target as HTMLElement | null;
   if (
     target &&
@@ -145,10 +159,8 @@ function onKeydown(event: KeyboardEvent): void {
   ) {
     return;
   }
-  const sessionId = latestPendingDeleteId();
-  if (!sessionId) return;
   event.preventDefault();
-  void undoDelete(sessionId);
+  void (event.shiftKey ? redoSteps(1) : undoSteps(1));
 }
 
 // ── panel drag handles ───────────────────────────────────────────────

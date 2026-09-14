@@ -106,9 +106,11 @@ async function bootState(
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");
+  const history = await import("../src/renderer/src/history");
   await state.init();
   return {
     store: state.store,
+    history: history.history,
     api,
     replies,
     send: (backend: BackendId, event: AgentEvent) => onEnvelope?.({ backend, event }),
@@ -116,8 +118,8 @@ async function bootState(
     sendPrompt: state.sendPrompt,
     respondInteraction: state.respondInteraction,
     deleteTag: state.deleteTag,
-    undoDeleteTag: state.undoDeleteTag,
     setSessionTags: state.setSessionTags,
+    undoSteps: history.undoSteps,
   };
 }
 
@@ -201,9 +203,16 @@ describe("renderer interaction state", () => {
     await h.deleteTag("执行");
     // The user removed the remaining tag before clicking undo.
     await h.setSessionTags("s1", []);
-    await h.undoDeleteTag();
+    // Undo the tag edit back to its pre-edit value, then undo the deleteTag
+    // itself — the journal walks them LIFO, most recent first. Because the
+    // "clear to []" edit lands between the delete and the undo, the deleteTag
+    // undo re-attaches 执行 onto the tags that edit restored, so the final
+    // re-create call carries both 咨询 and 执行 (the old single-op undo that
+    // only reversed the delete produced just ["执行"]).
+    await h.undoSteps(1);
+    await h.undoSteps(1);
 
-    expect(h.api.setSessionTags).toHaveBeenCalledWith("codex", "s1", ["执行"]);
+    expect(h.api.setSessionTags).toHaveBeenCalledWith("codex", "s1", ["咨询", "执行"]);
     expect(h.api.setSessionTags).not.toHaveBeenCalledWith("codex", "gone", expect.anything());
     expect(h.api.setTagColor).toHaveBeenCalledWith("codex", "执行", 210);
   });
