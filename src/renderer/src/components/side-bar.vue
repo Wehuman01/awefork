@@ -3,11 +3,20 @@
     <div class="search">
       <span>⌕</span>
       <input
+        ref="searchInputEl"
         v-model="query"
         type="text"
         :placeholder="searchPlaceholder"
         aria-label="搜索会话"
       />
+      <button
+        v-if="query.length > 0"
+        type="button"
+        class="search-clear"
+        title="清空搜索文本"
+        aria-label="清空搜索文本"
+        @click="clearQuery"
+      >✕</button>
       <button
         type="button"
         class="search-boost"
@@ -59,6 +68,13 @@
         <dd>排除含它的结果</dd>
       </dl>
       <p class="boost-note">勾选正文后：标题命中立即显示，正文命中扫描完成后补上。</p>
+      <button
+        v-if="boostOffDefault"
+        type="button"
+        class="boost-reset"
+        title="范围、项目、上限全部还原成默认"
+        @click="resetBoost"
+      >↺ 恢复默认搜索</button>
     </div>
     <p v-if="bodyScanning" class="body-scan">⟳ 正在搜索正文…</p>
     <div v-if="allTags.length > 0" class="tag-shelf-zone">
@@ -614,10 +630,17 @@ import {
 } from "../state";
 
 const query = ref("");
+const searchInputEl = ref<HTMLInputElement | null>(null);
 /** Sidebar row action awaiting its second, explicit click. */
 const pendingAction = ref<{ sessionId: string; kind: "pin" | "archive" } | null>(null);
 /** Per-directory expansion overrides; a directory defaults open when selected. */
 const expandedOverride = ref<Record<string, boolean>>({});
+
+/** ✕ in the input row: wipe the text, keep typing from a clean slate. */
+function clearQuery(): void {
+  query.value = "";
+  searchInputEl.value?.focus();
+}
 
 // ── enhanced search (✦) ─────────────────────────────────────────────
 
@@ -666,6 +689,25 @@ const searchPlaceholder = computed(() => {
   ].filter(Boolean);
   return `搜索${parts.join("、")}…`;
 });
+
+/** Any boost option off its out-of-the-box value — the reset button's cue. */
+const boostOffDefault = computed(
+  () =>
+    projectScope.value !== "" ||
+    !searchScopes.title ||
+    !searchScopes.tag ||
+    searchScopes.body ||
+    searchLimit.value !== "1000",
+);
+
+/** One click back to 标题+标签、全部项目、上限 1000. */
+function resetBoost(): void {
+  searchScopes.title = true;
+  searchScopes.tag = true;
+  searchScopes.body = false;
+  projectScope.value = "";
+  searchLimit.value = "1000";
+}
 
 // ── body scan (main-process, two-phase) ─────────────────────────────
 

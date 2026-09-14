@@ -482,6 +482,22 @@ textarea {
   color: var(--ink-faint);
 }
 
+/* ✕ clear — only rendered while the input holds text. */
+.search-clear {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.search-clear:hover {
+  color: var(--ink);
+}
+
 /* ✦ enhanced search — scope checkboxes, modifier chips, syntax card. */
 .search-boost {
   flex: 0 0 auto;
@@ -571,6 +587,24 @@ textarea {
   font-size: 11px;
   color: var(--ink-faint);
   margin: 8px 0 0;
+}
+
+/* ↺ restore defaults — shown only while some option is off default. */
+.boost-reset {
+  display: block;
+  margin: 8px 0 0 auto;
+  border: 1px solid var(--line);
+  background: none;
+  border-radius: 7px;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.boost-reset:hover {
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
 }
 
 .body-scan {
