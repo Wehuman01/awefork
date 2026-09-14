@@ -82,12 +82,27 @@ function truncateRedo(): void {
 }
 
 function pushEntry(entry: HistoryEntry): HistoryEntry {
+  if (pending > 0) {
+    // A walk is mid-flight and can span seconds of IPC. Its cursor writes
+    // must land before this entry resets the cursor, or the journal
+    // misreads the just-performed op as undone — so append through the
+    // same serialized queue instead of cutting in front of the walk.
+    queue = queue.then(() => {
+      appendEntry(entry);
+    });
+    return entry;
+  }
+  appendEntry(entry);
+  return entry;
+}
+
+function appendEntry(entry: HistoryEntry): void {
+  truncateRedo();
   state.entries.push(entry);
   if (state.entries.length > MAX_ENTRIES) {
     state.entries.splice(0, state.entries.length - MAX_ENTRIES);
   }
   state.cursor = state.entries.length;
-  return entry;
 }
 
 /**
@@ -159,11 +174,12 @@ function messageOf(error: unknown): string {
  */
 async function undoRange(toIdx: number): Promise<boolean> {
   let last: HistoryEntry | null = null;
+  let stopped: string | null = null;
   while (state.cursor - 1 >= toIdx) {
     const entry = state.entries[state.cursor - 1];
     if (!entry) break;
     if (!entry.undoable || !entry.undo) {
-      notice(`「${entry.label}」不可撤销，更早的操作已被锁定`);
+      stopped = `「${entry.label}」不可撤销，更早的操作已被锁定`;
       break;
     }
     try {
@@ -173,17 +189,20 @@ async function undoRange(toIdx: number): Promise<boolean> {
       last = entry;
     } catch (error) {
       entry.failed = true;
-      notice(`撤销失败：${messageOf(error)}`);
+      stopped = `撤销失败：${messageOf(error)}`;
       break;
     }
   }
-  if (last) notice(`已撤销：${last.label}`);
+  // Why the walk stopped short outranks what it managed before stopping.
+  if (stopped) notice(stopped);
+  else if (last) notice(`已撤销：${last.label}`);
   return last !== null;
 }
 
 /** Redo entries from the cursor up to `toIdx` inclusive. */
 async function redoRange(toIdx: number): Promise<boolean> {
   let last: HistoryEntry | null = null;
+  let stopped: string | null = null;
   while (state.cursor <= toIdx && state.cursor < state.entries.length) {
     const entry = state.entries[state.cursor];
     if (!entry?.redo) break;
@@ -194,11 +213,12 @@ async function redoRange(toIdx: number): Promise<boolean> {
       last = entry;
     } catch (error) {
       entry.failed = true;
-      notice(`重做失败：${messageOf(error)}`);
+      stopped = `重做失败：${messageOf(error)}`;
       break;
     }
   }
-  if (last) notice(`已重做：${last.label}`);
+  if (stopped) notice(stopped);
+  else if (last) notice(`已重做：${last.label}`);
   return last !== null;
 }
 

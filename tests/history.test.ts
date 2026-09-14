@@ -142,6 +142,44 @@ describe("history journal", () => {
     expect(h.history.toast).toContain("server 500");
   });
 
+  it("a mid-walk failure toasts the reason, not the earlier success", async () => {
+    const h = await boot();
+    const bad = recordEntry(h, async () => {
+      throw new Error("boom");
+    });
+    recordEntry(h); // undoes fine; LIFO walks it first
+    await h.undoSteps(2);
+    expect(bad.entry.failed).toBe(true);
+    expect(h.history.cursor).toBe(1);
+    // The failure must not be overwritten by the step that did succeed.
+    expect(h.history.toast).toContain("boom");
+    expect(h.history.toast).not.toContain("已撤销");
+  });
+
+  it("appends an op that lands mid-walk only after the walk finishes", async () => {
+    const h = await boot();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const a = recordEntry(h, async () => {
+      await gate;
+      return true;
+    });
+    const walk = h.undoSteps(1); // in flight: its cursor write is still pending
+    const b = recordEntry(h); // must queue behind the walk, not cut in front
+    release();
+    await walk;
+    // The deferred append lands a couple of microtasks after the walk resolves.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(a.undo).toHaveBeenCalledTimes(1);
+    // The walk finished first, so a is undone; b then truncates it like any
+    // new op after an undo. Without the deferral b would read as undone
+    // while its side effects are live.
+    expect(h.history.entries.map((e) => e.id)).toEqual([b.entry.id]);
+    expect(h.history.cursor).toBe(1);
+  });
+
   it("stops silently and keeps the entry clean when undo returns false", async () => {
     const h = await boot();
     const { entry } = recordEntry(h, async () => false);

@@ -1290,10 +1290,16 @@ export function respondInteraction(
         : response.decision === "cancel"
           ? "取消交互请求"
           : "回答交互问题";
-  trackEvent({ backend, kind: "respondInteraction", label });
-  void window.awefork.respondInteraction(backend, request.requestId, response).catch((error) => {
-    state.actionError = error instanceof Error ? error.message : String(error);
-  });
+  void window.awefork
+    .respondInteraction(backend, request.requestId, response)
+    .then(() => {
+      // Recorded on success like every other lock: a reply that never
+      // landed must not seal the journal.
+      trackEvent({ backend, kind: "respondInteraction", label });
+    })
+    .catch((error) => {
+      state.actionError = error instanceof Error ? error.message : String(error);
+    });
 }
 
 function queueInteraction(backend: BackendId, request: AgentInteractionRequest): void {
@@ -1777,6 +1783,9 @@ async function restoreTag(
   if (hue !== null) {
     await setTagColorOrThrow(backend, tag, hue);
   }
+  // Undone through the toast's own button or ⌘Z alike: retire the toast so
+  // its now-dead 撤销 button doesn't linger until the timeout.
+  if (state.tagDeletedToast?.tag === tag) state.tagDeletedToast = null;
   return true;
 }
 
