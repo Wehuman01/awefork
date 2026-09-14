@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.8
+
+The minimap stops being a postcard. ⌘/Ctrl+wheel over the map now magnifies the map's own view — cursor-anchored, like the canvas zoom you already know — so a graph with hundreds of nodes stops reading as a smear of 3×2 dots, and zooming back out returns the whole-world overview. Clicking the map flies the canvas to the spot with an ease instead of a jump, drags follow the cursor directly, and once zoomed in the map's view window trails the viewport through the middle band, so you never lose where you are. The canvas around it gets friendlier too: right-clicking a card opens the same session menu as its sidebar row, rows grow a one-click archive button, and the tag bands that used to paint a story's labels on every fork now stay on the session's own turns.
+
+### Highlights
+
+- **A magnifier on the map** — ⌘/Ctrl+wheel over the minimap zooms the map's own view, anchored at the cursor (plain wheel still zooms the canvas — that path is untouched); zooming back out returns the whole-world overview.
+- **A viewfinder that trails** — once zoomed in, the map's view window follows the viewport through the middle band, so drifting across the canvas never loses it off-map.
+- **Flying, not jumping** — clicking the minimap eases the canvas to the destination instead of teleporting, and drags follow directly on both navigation paths.
+- **Overlaps that keep their states visible** — canvas nodes paint layered (plain → stub → subtree → hit → active path → running) and drop their 1px outline at low scale, so the states you're hunting stay readable in a dense graph.
+- **A calm hand on the wheel** — the map renders through a single-layer transform with ⌘/Ctrl+wheel deltas coalesced to one zoom per frame, removing the re-render storm and trackpad-momentum jank on large graphs.
+- **One menu, both surfaces** — canvas cards and sidebar rows now share a single session context menu: right-click a card and the menu opens at the click point, fixed over the canvas; Rename, which edits the row in place, first un-collapses the sidebar and opens the session's group so the edit is visible.
+- **One-click archive** — session rows grow a 📦 button that archives the session with no confirm; the archive section is one click away as the undo path, so nothing is lost.
+- **Tag bands stay on their story** — the selected session's tags were painting stripes onto every canvas card, so child forks looked like they inherited the label; the bands now mark only the session's own turns, while forks and the inherited parent prefix stay unmarked.
+
+### Install
+
+Installers are attached: `awefork-0.2.8-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.2.8-x64-setup.exe` (Windows x64 — SmartScreen may warn; choose More info → Run anyway).
+
 ## v0.2.7
 
 Sessions gain a second dimension: tags. A colored filter shelf turns a flat run of directories into something you can slice by purpose, and the canvas wears each story's labels as identity bands. The composer learns to write code — a markdown preview, Tab indentation, and a paste that fences itself — and three state bugs that only surfaced mid-flight are closed: a stale refresh landing after a backend switch, an archive pruned by a cold server's empty list, and a tag filter outliving its tag.
