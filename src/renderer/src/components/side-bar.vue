@@ -100,32 +100,43 @@
         <span class="proj-count">{{ favoriteSessions.length }}</span>
       </button>
       <div v-if="favOpen" id="favorite-list" class="fav-list">
-        <button
+        <div
           v-for="sess in favoriteSessions"
           :key="sess.id"
-          type="button"
           class="fav-row"
           :class="{ active: sess.id === selectedId, running: store.running[sess.id] }"
-          :title="`${sess.title || '(untitled)'} · ${shortPath(sess.directory)}`"
-          @click="openFavorite(sess)"
         >
-          <span class="fav-dot"></span>
-          <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
-          <span
-            v-for="tag in rowTags(sess.id, 1).tags"
-            :key="tag"
-            class="tag-chip clickable"
-            :style="{ color: tagColor(tag), background: tagBg(tag) }"
-            title="只看带这个标签的会话"
-            @click.stop="filterByTag(tag)"
-          >{{ tag }}</span>
-          <span
-            v-if="rowTags(sess.id, 1).more > 0"
-            class="tag-chip tag-more"
-            :title="rowTags(sess.id, 1).hidden.join('、')"
-          >+{{ rowTags(sess.id, 1).more }}</span>
-          <span class="fav-time">{{ relTime(sess.updatedAt) }}</span>
-        </button>
+          <button
+            type="button"
+            class="fav-session"
+            :title="`${sess.title || '(untitled)'} · ${shortPath(sess.directory)}`"
+            @click="openFavorite(sess)"
+          >
+            <span class="fav-dot"></span>
+            <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
+            <span
+              v-for="tag in rowTags(sess.id, 1).tags"
+              :key="tag"
+              class="tag-chip clickable"
+              :style="{ color: tagColor(tag), background: tagBg(tag) }"
+              title="只看带这个标签的会话"
+              @click.stop="filterByTag(tag)"
+            >{{ tag }}</span>
+            <span
+              v-if="rowTags(sess.id, 1).more > 0"
+              class="tag-chip tag-more"
+              :title="rowTags(sess.id, 1).hidden.join('、')"
+            >+{{ rowTags(sess.id, 1).more }}</span>
+            <span class="fav-time">{{ relTime(sess.updatedAt) }}</span>
+          </button>
+          <button
+            type="button"
+            class="fav-unpin"
+            title="取消置顶"
+            aria-label="取消置顶"
+            @click="unpinFavorite(sess.id)"
+          >×</button>
+        </div>
       </div>
     </div>
     <div class="proj-head">
@@ -1203,6 +1214,10 @@ const favOpen = ref(true);
 function openFavorite(session: SessionSummary): void {
   // selectSession switches directory itself when the star lives elsewhere.
   void selectSession(session.id, { focus: true });
+}
+
+function unpinFavorite(sessionId: string): void {
+  void togglePin(sessionId);
 }
 
 const archiveOpen = ref(false);

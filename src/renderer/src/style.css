@@ -978,19 +978,50 @@ mark.hl {
 .fav-row {
   display: flex;
   align-items: center;
-  gap: 8px;
   width: 100%;
-  text-align: left;
-  padding: 6px 8px;
+  min-width: 0;
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-soft);
-  min-width: 0;
 }
 
 .fav-row:hover {
   background: var(--primary-soft);
+}
+
+.fav-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0 6px 8px;
+  text-align: left;
+  color: inherit;
+}
+
+.fav-unpin {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.fav-row:hover .fav-unpin,
+.fav-unpin:focus-visible {
+  opacity: 1;
+}
+
+.fav-unpin:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
 }
 
 .fav-row.active {
