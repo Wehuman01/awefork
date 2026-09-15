@@ -16,6 +16,12 @@ export interface BranchDigest {
   title: string;
   /** Where this branch forked from; null for story roots. */
   forkedFrom: { sessionId: string; sessionTitle: string; turnTitle: string } | null;
+  /**
+   * 1-based attempt among the forks that split off the same turn carrying the
+   * same first prompt — the retry-as-fork family. null when the branch is
+   * alone (no retries happened), so UIs only label actual repeats.
+   */
+  attempt: number | null;
   /** Turns the branch itself added (inherited turns belong to the parent). */
   turnCount: number;
   outputTokens: number;
@@ -65,6 +71,7 @@ export function buildBranchDigests(
         sessionId,
         title: session.title,
         forkedFrom,
+        attempt: null,
         turnCount: turns.length,
         outputTokens: turns.reduce((sum, n) => sum + n.outputTokens, 0),
         lastTurnTitle: last?.title ?? "",
@@ -74,6 +81,8 @@ export function buildBranchDigests(
       },
     });
   }
+
+  numberRetryAttempts(entries, lineage, nodesBySession);
 
   // Story order: a parent is always created before its forks, so creation
   // time keeps roots ahead of the branches that split off them.
@@ -93,4 +102,44 @@ function forkPointTitle(graph: TurnGraph, parentId: string, atMessageId: string 
     ? parentNodes.find((n) => n.messageId === atMessageId)
     : parentNodes[parentNodes.length - 1];
   return forkNode?.title ?? "";
+}
+
+/**
+ * Label retry families: forks off the same turn whose first own turn repeats
+ * the same prompt are attempts of one another (a retried turn grows the retry
+ * as a new fork). Deliberate parallel branches — different prompts off the
+ * same fork point — never join a family, so they stay unlabeled.
+ */
+function numberRetryAttempts(
+  entries: Array<{ createdAt: number; digest: BranchDigest }>,
+  lineage: LineageMap,
+  nodesBySession: Map<string, TurnNode[]>,
+): void {
+  const firstTurnTitle = (sessionId: string): string => {
+    let first: TurnNode | undefined;
+    for (const node of nodesBySession.get(sessionId) ?? []) {
+      if (node.kind !== "turn") continue;
+      if (!first || node.col < first.col) first = node;
+    }
+    return first?.title ?? "";
+  };
+
+  const families = new Map<string, Array<{ createdAt: number; digest: BranchDigest }>>();
+  for (const entry of entries) {
+    const record = lineage[entry.digest.sessionId];
+    if (!record || !entry.digest.forkedFrom) continue;
+    const key = `${record.parentId}\u0000${record.atMessageId ?? ""}\u0000${firstTurnTitle(entry.digest.sessionId)}`;
+    const family = families.get(key);
+    if (family) family.push(entry);
+    else families.set(key, [entry]);
+  }
+  for (const family of families.values()) {
+    if (family.length < 2) continue;
+    const ordered = [...family].sort(
+      (a, b) => a.createdAt - b.createdAt || a.digest.sessionId.localeCompare(b.digest.sessionId),
+    );
+    ordered.forEach((member, index) => {
+      member.digest.attempt = index + 1;
+    });
+  }
 }
