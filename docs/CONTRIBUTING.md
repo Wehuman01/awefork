@@ -35,6 +35,7 @@ src/
     opencode-client.ts   # thin typed fetch client for opencode's HTTP API
     opencode-adapter.ts  # AgentAdapter implementation (first backend)
     lineage-store.ts     # fork lineage sidecar (JSON)
+    marks-store.ts       # key-turn mark sidecar (sessionId:messageId)
     session-tree.ts      # pure projection: sessions + lineage -> display tree
     sse.ts               # SSE frame parser for /event
   renderer/        # Vue 3 app (no state library; plain reactive state in state.ts)

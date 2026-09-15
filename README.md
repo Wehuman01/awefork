@@ -63,6 +63,7 @@ The idea of treating sessions as a branching graph originates from [PiX](https:/
 - **File changes per turn** — as edit/write tool events stream in, awefork snapshots the touched files on the spot; the turn carries a file card with status, +/− line counts, the saved diff (unchanged by later edits), and an open-file action. Turns that ran outside awefork — forked or offline — say "not recorded" instead of guessing. opencode only.
 - **Continue** — send messages from awefork; replies stream in live. Replying while an older turn is selected branches from that turn.
 - **Canvas** — selecting a turn highlights its full path from the root and dims the rest; fit view, and an always-on minimap with a live viewport rectangle.
+- **Key turn marks** — star any turn with ★ (card chip or pane header). Marked turns get a rose ring on the canvas, a rose dot on the minimap, and a ★ 关键节点 panel listing them for one-click jump. Pure overlay (`marks.json`), never touches agent storage.
 - **Command palette** — ⌘K / Ctrl+K to jump between sessions and fire actions; drag the column handles to resize, double-click to fold.
 - **Native sessions** — forking calls `opencode serve`'s fork API; the result is a real session (open it in the TUI anytime).
 
