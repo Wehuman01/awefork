@@ -374,7 +374,14 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="togglePinFromMenu">
+      <!-- 置顶只留在侧边栏会话行的菜单里；画布右键不提供 -->
+      <button
+        v-if="!menu.fromCanvas"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        @click="togglePinFromMenu"
+      >
         {{ menuPinned ? "★ 取消置顶" : "☆ 置顶" }}
       </button>
       <button

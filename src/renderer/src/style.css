@@ -1851,11 +1851,11 @@ mark.hl {
     var(--shadow-lift);
 }
 
-/* key-turn mark: rose ring + wash; stays readable when the path dims it */
+/* key-turn mark: rose ring + glow only — no interior wash, so the card
+   content stays clean; stays readable when the path dims it */
 .turn.marked {
   border-color: var(--mark);
   border-width: 2px;
-  background-color: color-mix(in srgb, var(--mark-soft) 55%, var(--card));
   box-shadow:
     0 0 0 4px rgba(225, 29, 72, 0.22),
     var(--shadow-lift);
@@ -1874,7 +1874,7 @@ mark.hl {
     var(--shadow-lift);
 }
 
-/* a hit's butter ring still wins the border on shared cards, but the wash stays */
+/* a hit's butter ring still wins the border on shared cards */
 .turn.hit.marked {
   border-color: var(--butter);
 }
@@ -2128,15 +2128,11 @@ mark.hl {
   color: var(--mark-deep);
 }
 
-/* marked cards keep the star readable without hover */
+/* marked cards keep the star visible without hover, but stay neutral: the
+   rose ring on the card carries the mark, and a filled chip would cover the
+   title behind it */
 .turn.marked .mark-chip {
   opacity: 1;
-  background: var(--mark);
-  color: #fff;
-}
-
-.turn.marked .mark-chip:hover {
-  background: var(--mark-deep);
 }
 
 /* when retry is also showing, shift mark left of it */
