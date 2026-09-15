@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readBackendSelection, writeBackendSelection } from "../src/main/settings-store";
+import {
+  readBackendSelection,
+  readOpencodePort,
+  writeBackendSelection,
+  writeOpencodePort,
+} from "../src/main/settings-store";
 
 const dirs: string[] = [];
 
@@ -61,5 +66,36 @@ describe("writeBackendSelection", () => {
     await writeFile(path, "]]]garbage", "utf8");
     await writeBackendSelection(path, "codex");
     expect(await readBackendSelection(path)).toBe("codex");
+  });
+});
+
+describe("opencodePort", () => {
+  it("defaults to null when never recorded", async () => {
+    expect(await readOpencodePort(await tempSettingsPath())).toBeNull();
+  });
+
+  it("round-trips a port and keeps the backend selection", async () => {
+    const path = await tempSettingsPath();
+    await writeBackendSelection(path, "codex");
+    await writeOpencodePort(path, 18765);
+    expect(await readOpencodePort(path)).toBe(18765);
+    expect(await readBackendSelection(path)).toBe("codex");
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      backend: "codex",
+      opencodePort: 18765,
+    });
+  });
+
+  it("ignores out-of-range or non-integer writes", async () => {
+    const path = await tempSettingsPath();
+    await writeOpencodePort(path, 0);
+    await writeOpencodePort(path, 70000);
+    expect(await readOpencodePort(path)).toBeNull();
+  });
+
+  it("reads back null on a corrupt value type", async () => {
+    const path = await tempSettingsPath();
+    await writeFile(path, JSON.stringify({ opencodePort: "4096" }), "utf8");
+    expect(await readOpencodePort(path)).toBeNull();
   });
 });

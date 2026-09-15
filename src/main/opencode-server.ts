@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -178,6 +179,86 @@ export async function resolveSpawnEnv(
 }
 
 /**
+ * True when nothing is bound to 127.0.0.1:port. Binding is the only reliable
+ * free-port probe on a user machine: another GUI tool can already hold the
+ * port with a foreign HTTP server that answers every path (or 401s) — a
+ * REST probe would still look "maybe alive" while spawn would die with
+ * EADDRINUSE. Fail before spawn so the caller can try the next candidate.
+ */
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => {
+      probe.close(() => resolve(true));
+    });
+    probe.listen(port, "127.0.0.1");
+  });
+}
+
+/**
+ * Reuse a running opencode on `port` when its REST + event stream are both
+ * ready. Returns null otherwise — never spawns. Callers use this to walk
+ * remembered / discovered ports before starting a new child.
+ */
+export async function tryReuseOpencodeServer(port: number): Promise<{ baseUrl: string } | null> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const client = createOpencodeClient(baseUrl);
+  return (await isFullyReady(client, baseUrl)) ? { baseUrl } : null;
+}
+
+/**
+ * Ports with a LISTEN socket on this machine (best-effort). Used to find a
+ * `opencode serve` the user started on a non-default port after the usual
+ * candidates miss. Failures yield [] — discovery must never block boot.
+ */
+export async function findListeningLocalPorts(
+  execFn: typeof execFileAsync = execFileAsync,
+  platform: NodeJS.Platform = process.platform,
+): Promise<number[]> {
+  try {
+    if (platform === "win32") {
+      const { stdout } = await execFn("netstat", ["-ano", "-p", "tcp"], {
+        timeout: 3000,
+        windowsHide: true,
+      });
+      return parseNetstatListeningPorts(stdout);
+    }
+    const { stdout } = await execFn("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN"], { timeout: 3000 });
+    return parseLsofListeningPorts(stdout);
+  } catch {
+    return [];
+  }
+}
+
+export function parseLsofListeningPorts(stdout: string): number[] {
+  const ports = new Set<number>();
+  for (const line of stdout.split("\n")) {
+    if (!line.includes("(LISTEN)")) continue;
+    const match = line.match(/:(\d+)\s+\(LISTEN\)/);
+    if (match?.[1]) {
+      const port = Number(match[1]);
+      if (port > 0 && port < 65536) ports.add(port);
+    }
+  }
+  return [...ports];
+}
+
+export function parseNetstatListeningPorts(stdout: string): number[] {
+  const ports = new Set<number>();
+  for (const line of stdout.split("\n")) {
+    if (!/\bLISTENING\b/i.test(line)) continue;
+    // "TCP    127.0.0.1:4096         0.0.0.0:0              LISTENING  pid"
+    const match = line.match(/\s\S+:(\d+)\s+\S+\s+LISTENING/i);
+    if (match?.[1]) {
+      const port = Number(match[1]);
+      if (port > 0 && port < 65536) ports.add(port);
+    }
+  }
+  return [...ports];
+}
+
+/**
  * Reuse a running `opencode serve` on the port when possible; otherwise
  * spawn one as a child of this app and keep it alive until quit.
  * `spawnFn` is injectable for tests.
@@ -190,6 +271,17 @@ export async function ensureOpencodeServer(
   const client = createOpencodeClient(baseUrl);
   if (await isFullyReady(client, baseUrl)) {
     return { spawned: false, baseUrl };
+  }
+  // Held by a process that does not even answer /session with a sessions
+  // array (Xiaomi MiMo's 401 Basic Auth, another tool, a leftover proxy):
+  // never opencode, so do not spawn into EADDRINUSE. Callers walk the next
+  // port candidate. A port that answers /session is left to the spawn race —
+  // a cold opencode or a half-compatible foreign server still gets the
+  // post-loop diagnosis below.
+  if (!(await isPortFree(port)) && !(await isReachable(client))) {
+    throw new Error(
+      `${baseUrl} is already in use by another process (not an opencode server). Free port ${port}, or start opencode on another port.`,
+    );
   }
 
   const child = spawnFn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {

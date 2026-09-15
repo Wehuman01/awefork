@@ -8,7 +8,12 @@ import {
   probeOpencode,
 } from "../src/main/backend-registry";
 import type { CodexJsonRpc } from "../src/main/codex-jsonrpc";
-import { readBackendSelection, writeBackendSelection } from "../src/main/settings-store";
+import {
+  readBackendSelection,
+  readOpencodePort,
+  writeBackendSelection,
+  writeOpencodePort,
+} from "../src/main/settings-store";
 import type { BackendEventEnvelope } from "../src/shared/backend";
 
 /**
@@ -21,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   isCodexInstalled: vi.fn(),
   stopCodexServer: vi.fn(),
   ensureOpencodeServer: vi.fn(),
+  tryReuseOpencodeServer: vi.fn(),
+  findListeningLocalPorts: vi.fn(),
   stopManagedServer: vi.fn(),
   resolveSpawnEnv: vi.fn(),
   execFile: vi.fn(),
@@ -42,6 +49,8 @@ vi.mock("../src/main/codex-homes.js", async (importOriginal) => ({
 
 vi.mock("../src/main/opencode-server", () => ({
   ensureOpencodeServer: mocks.ensureOpencodeServer,
+  tryReuseOpencodeServer: mocks.tryReuseOpencodeServer,
+  findListeningLocalPorts: mocks.findListeningLocalPorts,
   stopManagedServer: mocks.stopManagedServer,
   resolveSpawnEnv: mocks.resolveSpawnEnv,
 }));
@@ -110,6 +119,9 @@ beforeEach(async () => {
   mockDefaultHomeOnly();
   // Passthrough so probeOpencode's env handling runs against a stable object.
   mocks.resolveSpawnEnv.mockImplementation(async (env: unknown) => env);
+  // Default: nothing already listening looks like opencode; spawn path runs.
+  mocks.tryReuseOpencodeServer.mockResolvedValue(null);
+  mocks.findListeningLocalPorts.mockResolvedValue([]);
   userDataDir = await mkdtemp(join(tmpdir(), "awefork-registry-"));
   registry = createBackendRegistry(userDataDir);
   // By default the opencode CLI "is on PATH" with a version inside the
@@ -143,6 +155,88 @@ describe("routing and adapter lifecycle", () => {
     expect(first.kind).toBe("opencode");
     expect(mocks.ensureOpencodeServer).toHaveBeenCalledTimes(1);
     expect(mocks.ensureCodexServer).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the next port when 4096 is held by a foreign process", async () => {
+    mocks.ensureOpencodeServer
+      .mockRejectedValueOnce(
+        new Error(
+          "http://127.0.0.1:4096 is already in use by another process (not an opencode server).",
+        ),
+      )
+      .mockResolvedValueOnce({ baseUrl: "http://127.0.0.1:4097", spawned: true });
+
+    const adapter = await registry.get("opencode");
+    expect(adapter.kind).toBe("opencode");
+    expect(mocks.ensureOpencodeServer).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureOpencodeServer).toHaveBeenNthCalledWith(1, 4096);
+    expect(mocks.ensureOpencodeServer).toHaveBeenNthCalledWith(2, 4097);
+  });
+
+  it("aborts port fallback when the opencode CLI is missing", async () => {
+    mocks.ensureOpencodeServer.mockRejectedValue(
+      new Error(
+        'Could not start opencode serve: spawn opencode ENOENT. Is the "opencode" CLI on PATH?',
+      ),
+    );
+
+    await expect(registry.get("opencode")).rejects.toThrow(/ENOENT/);
+    expect(mocks.ensureOpencodeServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses a listening opencode on a non-default port and remembers it", async () => {
+    mocks.findListeningLocalPorts.mockResolvedValue([18765]);
+    mocks.tryReuseOpencodeServer.mockImplementation(async (port: number) =>
+      port === 18765 ? { baseUrl: "http://127.0.0.1:18765" } : null,
+    );
+
+    const adapter = await registry.get("opencode");
+    expect(adapter.kind).toBe("opencode");
+    expect(mocks.ensureOpencodeServer).not.toHaveBeenCalled();
+    expect(await readOpencodePort(join(userDataDir, "settings.json"))).toBe(18765);
+  });
+
+  it("prefers the last-good port from settings before classic candidates", async () => {
+    await writeOpencodePort(join(userDataDir, "settings.json"), 5555);
+    mocks.tryReuseOpencodeServer.mockImplementation(async (port: number) =>
+      port === 5555 ? { baseUrl: "http://127.0.0.1:5555" } : null,
+    );
+
+    await registry.get("opencode");
+    expect(mocks.tryReuseOpencodeServer).toHaveBeenCalledWith(5555);
+    expect(mocks.tryReuseOpencodeServer.mock.calls[0]?.[0]).toBe(5555);
+    expect(mocks.ensureOpencodeServer).not.toHaveBeenCalled();
+  });
+
+  it("honors AWEFORK_OPENCODE_PORT as the first reuse probe", async () => {
+    const previous = process.env.AWEFORK_OPENCODE_PORT;
+    process.env.AWEFORK_OPENCODE_PORT = "7777";
+    try {
+      mocks.tryReuseOpencodeServer.mockImplementation(async (port: number) =>
+        port === 7777 ? { baseUrl: "http://127.0.0.1:7777" } : null,
+      );
+
+      await registry.get("opencode");
+      expect(mocks.tryReuseOpencodeServer.mock.calls[0]?.[0]).toBe(7777);
+      expect(await readOpencodePort(join(userDataDir, "settings.json"))).toBe(7777);
+    } finally {
+      if (previous === undefined) delete process.env.AWEFORK_OPENCODE_PORT;
+      else process.env.AWEFORK_OPENCODE_PORT = previous;
+    }
+  });
+
+  it("persists the port a successful spawn landed on", async () => {
+    mocks.ensureOpencodeServer.mockImplementation(async (port: number) => ({
+      baseUrl: `http://127.0.0.1:${port}`,
+      spawned: true,
+    }));
+    // First preferred port is held (foreign), second spawn succeeds.
+    mocks.ensureOpencodeServer.mockRejectedValueOnce(
+      new Error("http://127.0.0.1:4096 is already in use by another process"),
+    );
+
+    await registry.get("opencode");
+    expect(await readOpencodePort(join(userDataDir, "settings.json"))).toBe(4097);
   });
 
   it("creates the codex facade without spawning until first used", async () => {

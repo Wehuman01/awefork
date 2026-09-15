@@ -17,12 +17,28 @@ import { createOpencodeAdapter } from "../shared/opencode-adapter.js";
 import type { AgentAdapter } from "../shared/types.js";
 import { createCodexMultiHomeAdapter } from "./codex-multihome.js";
 import { isCodexInstalled, stopCodexServer } from "./codex-server.js";
-import { ensureOpencodeServer, resolveSpawnEnv, stopManagedServer } from "./opencode-server.js";
-import { readBackendSelection, writeBackendSelection } from "./settings-store.js";
+import {
+  ensureOpencodeServer,
+  findListeningLocalPorts,
+  resolveSpawnEnv,
+  stopManagedServer,
+  tryReuseOpencodeServer,
+} from "./opencode-server.js";
+import {
+  readBackendSelection,
+  readOpencodePort,
+  writeBackendSelection,
+  writeOpencodePort,
+} from "./settings-store.js";
 
 const execFileAsync = promisify(execFile);
 
-const OPENCODE_PORT = 4096;
+/**
+ * Historical default first. 4096 is a common local-tool port (another agent
+ * UI, Xiaomi MiMo, leftover `opencode serve`) — later entries are spawn
+ * fallbacks when the earlier ones are held by a non-opencode process.
+ */
+const OPENCODE_PORT_CANDIDATES = [4096, 4097, 4098, 14096];
 const STORE_BASES = ["lineage", "pins", "tags", "trash", "archive", "composer", "dirs"] as const;
 type StoreBase = (typeof STORE_BASES)[number];
 type StorePaths = Record<StoreBase, string>;
@@ -42,6 +58,70 @@ export interface BackendRegistry {
   /** Forward every spawned backend's events as tagged envelopes, forever. */
   forward(send: (envelope: BackendEventEnvelope) => void): void;
   dispose(): void;
+}
+
+/**
+ * Build the port search order: explicit env override, last success from
+ * settings, then the classic candidates. Duplicates drop out later.
+ */
+async function preferredOpenCodePorts(settingsPath: string): Promise<number[]> {
+  const envRaw = process.env.AWEFORK_OPENCODE_PORT;
+  const envPort = envRaw !== undefined && /^\d+$/.test(envRaw) ? Number(envRaw) : Number.NaN;
+  const saved = await readOpencodePort(settingsPath);
+  const ports = [
+    Number.isInteger(envPort) && envPort > 0 && envPort < 65536 ? envPort : null,
+    saved,
+    ...OPENCODE_PORT_CANDIDATES,
+  ];
+  return ports.filter((port): port is number => typeof port === "number");
+}
+
+function uniquePorts(ports: number[]): number[] {
+  return [...new Set(ports)];
+}
+
+/**
+ * Locate (reuse first, then spawn) a ready opencode and remember the port.
+ *
+ * Order:
+ *  1. AWEFORK_OPENCODE_PORT, last-good settings port, classic candidates
+ *  2. Any other local LISTEN port (finds a manually started `opencode serve`
+ *     after a port move) — reuse only, never spawn into an occupied socket
+ *  3. Spawn on the preferred list; CLI-missing aborts immediately
+ *
+ * On success the winning port is written back to settings so the next boot
+ * skips the hunt. Codex has no port (stdio app-server) and never lands here.
+ */
+async function resolveOpenCodeServer(settingsPath: string): Promise<{ baseUrl: string }> {
+  const preferred = uniquePorts(await preferredOpenCodePorts(settingsPath));
+  const listening = uniquePorts(await findListeningLocalPorts());
+  const reuseOrder = uniquePorts([...preferred, ...listening]);
+
+  for (const port of reuseOrder) {
+    const reused = await tryReuseOpencodeServer(port);
+    if (reused) {
+      await writeOpencodePort(settingsPath, port);
+      return reused;
+    }
+  }
+
+  let lastError: unknown = null;
+  for (const port of preferred) {
+    try {
+      const spawned = await ensureOpencodeServer(port);
+      await writeOpencodePort(settingsPath, port);
+      return spawned;
+    } catch (error) {
+      lastError = error;
+      // Missing CLI fails the same on every port — no point walking further.
+      if (error instanceof Error && error.message.includes("ENOENT")) {
+        throw error;
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(String(lastError ?? "opencode server did not start"));
 }
 
 /**
@@ -90,7 +170,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     if (existing) return existing;
     const promise =
       backend === "opencode"
-        ? ensureOpencodeServer(OPENCODE_PORT).then(({ baseUrl }) => {
+        ? resolveOpenCodeServer(settingsPath).then(({ baseUrl }) => {
             const adapter = createOpencodeAdapter({
               baseUrl,
               lineagePath: storePaths("opencode").lineage,

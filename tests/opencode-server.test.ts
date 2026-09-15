@@ -8,7 +8,10 @@ import { describe, expect, test } from "vitest";
 import {
   buildSpawnEnv,
   ensureOpencodeServer,
+  parseLsofListeningPorts,
+  parseNetstatListeningPorts,
   resolveSpawnEnv,
+  tryReuseOpencodeServer,
 } from "../src/main/opencode-server.js";
 
 function fakeHome(): string {
@@ -308,6 +311,7 @@ describe("ensureOpencodeServer", () => {
 
   test("does not reuse a server whose /session is not a sessions array", async () => {
     // A JSON 200 that isn't the sessions array is a foreign server too.
+    // Detected before spawn: the port is held and /session is not opencode.
     const server = createServer((req, res) => {
       const { pathname } = new URL(req.url ?? "/", "http://localhost");
       if (pathname === "/session") {
@@ -325,13 +329,55 @@ describe("ensureOpencodeServer", () => {
       });
     });
     try {
-      const child = fakeRunningChild();
-      queueMicrotask(() => {
-        child.exitCode = 1;
-      });
-      await expect(ensureOpencodeServer(port, () => child)).rejects.toThrow(/did not become ready/);
+      const spawnFn: typeof spawn = (() => {
+        throw new Error("must not spawn into a foreign server");
+      }) as typeof spawn;
+      await expect(ensureOpencodeServer(port, spawnFn)).rejects.toThrow(
+        /already in use by another process/,
+      );
     } finally {
       await closeServer(server);
+    }
+  });
+});
+
+describe("listening-port discovery", () => {
+  test("parses lsof LISTEN lines, skipping non-listen rows", () => {
+    const stdout = [
+      "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME",
+      "opencode 123 peng   11u  IPv4 0x1      0t0    TCP 127.0.0.1:4096 (LISTEN)",
+      "opencode 123 peng   12u  IPv4 0x2      0t0    TCP *:18765 (LISTEN)",
+      "curl     999 peng   3u   IPv4 0x3      0t0    TCP 127.0.0.1:5555->1.2.3.4:443 (ESTABLISHED)",
+      "Xiaomi   186 peng   83u  IPv4 0x4      0t0    TCP 127.0.0.1:4096 (LISTEN)",
+    ].join("\n");
+    expect(parseLsofListeningPorts(stdout).sort((a, b) => a - b)).toEqual([4096, 18765]);
+  });
+
+  test("parses netstat LISTENING lines on win32", () => {
+    const stdout = [
+      "  Proto  Local Address          Foreign Address        State           PID",
+      "  TCP    127.0.0.1:4096         0.0.0.0:0              LISTENING       1866",
+      "  TCP    0.0.0.0:7777           0.0.0.0:0              LISTENING       42",
+      "  TCP    127.0.0.1:5555         127.0.0.1:443          ESTABLISHED     99",
+    ].join("\r\n");
+    expect(parseNetstatListeningPorts(stdout).sort((a, b) => a - b)).toEqual([4096, 7777]);
+  });
+
+  test("tryReuse adopts a fully-ready server and skips one without /event", async () => {
+    const { server, port } = await startGateServer({ sessionFailures: 0, eventFailures: 0 });
+    try {
+      await expect(tryReuseOpencodeServer(port)).resolves.toMatchObject({
+        baseUrl: `http://127.0.0.1:${port}`,
+      });
+    } finally {
+      await closeServer(server);
+    }
+
+    const cold = await startGateServer({ sessionFailures: 0, eventFailures: Infinity });
+    try {
+      await expect(tryReuseOpencodeServer(cold.port)).resolves.toBeNull();
+    } finally {
+      await closeServer(cold.server);
     }
   });
 });

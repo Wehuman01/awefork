@@ -4,43 +4,70 @@ import { writeFileAtomic } from "../shared/atomic-write.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 
 /**
- * Persisted app settings (userData/settings.json). Today this is only the
- * selected agent backend; the shape stays open so future keys have a home.
- * Corrupt or missing files read as defaults — settings must never block boot.
+ * Persisted app settings (userData/settings.json). Shape stays open so future
+ * keys have a home. Corrupt or missing files read as defaults — settings must
+ * never block boot.
  */
 
 interface Settings {
   /** Agent backend the app boots into; default "opencode". */
   backend?: unknown;
+  /** Last port an opencode serve answered on; next boot reuses it first. */
+  opencodePort?: unknown;
 }
 
-export async function readBackendSelection(filePath: string): Promise<BackendId> {
+async function readSettings(filePath: string): Promise<Record<string, unknown>> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch {
-    return "opencode";
+    return {};
   }
   try {
-    const parsed = JSON.parse(raw) as Settings;
-    return isBackendId(parsed.backend) ? parsed.backend : "opencode";
-  } catch {
-    return "opencode";
-  }
-}
-
-export async function writeBackendSelection(filePath: string, backend: BackendId): Promise<void> {
-  await fs.mkdir(dirname(filePath), { recursive: true });
-  // Read-modify-write keeps unknown future keys intact.
-  let settings: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
+    const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      settings = parsed as Record<string, unknown>;
+      return parsed as Record<string, unknown>;
     }
   } catch {
     // Missing or corrupt — start over.
   }
-  settings.backend = backend;
+  return {};
+}
+
+async function patchSettings(
+  filePath: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  await fs.mkdir(dirname(filePath), { recursive: true });
+  // Read-modify-write keeps unknown future keys intact.
+  const settings = { ...(await readSettings(filePath)), ...patch };
   await writeFileAtomic(filePath, `${JSON.stringify(settings, null, 2)}\n`);
+  return settings;
+}
+
+function asPort(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value < 65536
+    ? value
+    : null;
+}
+
+export async function readBackendSelection(filePath: string): Promise<BackendId> {
+  const backend = (await readSettings(filePath)).backend;
+  return isBackendId(backend) ? backend : "opencode";
+}
+
+export async function writeBackendSelection(filePath: string, backend: BackendId): Promise<void> {
+  await patchSettings(filePath, { backend });
+}
+
+/** Last-known-good opencode port; null when never recorded or corrupt. */
+export async function readOpencodePort(filePath: string): Promise<number | null> {
+  return asPort((await readSettings(filePath)).opencodePort);
+}
+
+/** Record the port an opencode server was last seen on, for the next boot. */
+export async function writeOpencodePort(filePath: string, port: number): Promise<void> {
+  const safe = asPort(port);
+  if (safe === null) return;
+  await patchSettings(filePath, { opencodePort: safe });
 }
