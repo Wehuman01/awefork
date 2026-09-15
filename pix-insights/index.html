@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PiX → awefork · 更新启示可视化</title>
+<style>
+  :root {
+    --bg: #0e1016;
+    --panel: #161923;
+    --panel-2: #1c2030;
+    --line: #262b3d;
+    --text: #e6e8f0;
+    --muted: #9aa1b5;
+    --accent: #7c3aed;
+    --accent-soft: rgba(124, 58, 237, 0.16);
+    --rose: #f43f5e;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --blue: #38bdf8;
+    font-size: 15px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 500px at 80% -10%, rgba(124, 58, 237, 0.13), transparent 60%),
+      radial-gradient(900px 420px at -10% 0%, rgba(56, 189, 248, 0.07), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ---------- top bar ---------- */
+  header.top {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(14, 16, 22, 0.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top-inner {
+    max-width: 1080px; margin: 0 auto; padding: 10px 24px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; font-weight: 700; }
+  .brand .a { color: var(--accent); }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+  nav a {
+    color: var(--muted); text-decoration: none; font-size: 13px;
+    padding: 5px 10px; border-radius: 999px; transition: 0.15s;
+  }
+  nav a:hover { color: var(--text); background: var(--accent-soft); }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 52px 0 8px; }
+  .hero h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: 0.5px; }
+  .hero h1 .arrow { color: var(--accent); }
+  .hero p.sub { color: var(--muted); margin: 0 0 22px; max-width: 720px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .stat b { display: block; font-size: 26px; color: var(--accent); }
+  .stat.green b { color: var(--green); }
+  .stat span { color: var(--muted); font-size: 12.5px; }
+
+  .pr-banner {
+    margin-top: 18px; display: flex; gap: 12px; align-items: flex-start;
+    background: linear-gradient(90deg, rgba(52, 211, 153, 0.09), rgba(52, 211, 153, 0.03));
+    border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 12px; padding: 12px 16px;
+    font-size: 13.5px;
+  }
+  .pr-banner .tag {
+    flex: none; color: var(--green); border: 1px solid rgba(52, 211, 153, 0.45);
+    border-radius: 999px; padding: 1px 10px; font-size: 12px; margin-top: 2px;
+  }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+  code { background: #222739; padding: 1px 6px; border-radius: 6px; color: #c9d2f0; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 64px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .sec-head .no { color: var(--accent); font-weight: 800; font-size: 13px; letter-spacing: 2px; }
+  .sec-head h2 { margin: 0; font-size: 22px; }
+  .sec-desc { color: var(--muted); margin: 0 0 22px; font-size: 14px; max-width: 780px; }
+
+  .reveal { opacity: 0; transform: translateY(14px); transition: 0.5s ease; }
+  .reveal.on { opacity: 1; transform: none; }
+
+  /* ---------- matrix ---------- */
+  .matrix-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .matrix-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .plot {
+    position: relative; height: 430px; border-radius: 12px;
+    background:
+      linear-gradient(to right, transparent calc(50% - 1px), rgba(255,255,255,0.07) 50%, transparent calc(50% + 1px)),
+      linear-gradient(to top, transparent calc(50% - 1px), rgba(255,255,255,0.07) 50%, transparent calc(50% + 1px)),
+      var(--panel-2);
+    border: 1px solid var(--line);
+  }
+  .plot::before, .plot::after {
+    position: absolute; font-size: 11.5px; color: var(--muted);
+  }
+  .plot .q { position: absolute; font-size: 11px; letter-spacing: 1px; color: rgba(255,255,255,0.16); font-weight: 700; }
+  .q.tl { top: 12px; left: 14px; color: rgba(52, 211, 153, 0.5); }
+  .q.tr { top: 12px; right: 14px; color: rgba(56, 189, 248, 0.4); }
+  .q.bl { bottom: 12px; left: 14px; color: rgba(251, 191, 36, 0.4); }
+  .q.br { bottom: 12px; right: 14px; }
+  .axis-y {
+    position: absolute; left: -8px; top: 50%; transform: rotate(-90deg) translateX(50%);
+    transform-origin: left top; font-size: 11.5px; color: var(--muted); white-space: nowrap;
+  }
+  .axis-x { position: absolute; right: 0; bottom: -26px; font-size: 11.5px; color: var(--muted); }
+  .pt {
+    position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 11.5px; font-weight: 700; cursor: default;
+    background: var(--accent); color: #fff; box-shadow: 0 0 0 5px var(--accent-soft);
+    transition: transform 0.15s;
+  }
+  .pt:hover, .pt.hover { transform: scale(1.25); z-index: 5; }
+  .pt.green { background: var(--green); color: #06281c; box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.16); }
+  .pt.amber { background: var(--amber); color: #2d2103; box-shadow: 0 0 0 5px rgba(251, 191, 36, 0.15); }
+  .pt.blue { background: var(--blue); color: #04222f; box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.15); }
+  .tooltip {
+    position: absolute; z-index: 20; pointer-events: none; opacity: 0; transition: 0.12s;
+    background: #20243a; border: 1px solid #323a5a; border-radius: 10px;
+    padding: 9px 12px; font-size: 12.5px; width: 230px; box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+  }
+  .tooltip b { display: block; margin-bottom: 2px; }
+  .tooltip .src { color: var(--accent); font-size: 11.5px; }
+  .tooltip .meta { color: var(--muted); font-size: 11.5px; }
+
+  /* ---------- suggestion cards ---------- */
+  .sug { display: grid; gap: 18px; }
+  .sug-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px 24px; display: grid; grid-template-columns: 1fr 1.15fr; gap: 24px;
+  }
+  .sug-card.full { grid-template-columns: 1fr; }
+  @media (max-width: 860px) { .sug-card { grid-template-columns: 1fr; } }
+  .sug-no {
+    width: 30px; height: 30px; border-radius: 9px; background: var(--accent);
+    color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; margin-bottom: 10px;
+  }
+  .sug-card h3 { margin: 0 0 4px; font-size: 18px; }
+  .sug-src { color: var(--accent); font-size: 12px; margin-bottom: 10px; }
+  .sug-card p { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 11.5px; padding: 2px 10px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel-2);
+  }
+  .chip.hot { border-color: rgba(244, 63, 94, 0.5); color: var(--rose); }
+  .chip.ok { border-color: rgba(52, 211, 153, 0.45); color: var(--green); }
+
+  /* mockup shell */
+  .mock {
+    background: var(--panel-2); border: 1px solid #2b3148; border-radius: 12px;
+    overflow: hidden; font-size: 12.5px;
+  }
+  .mock-title {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid #2b3148; background: #191d2c; color: var(--muted); font-size: 11.5px;
+  }
+  .mock-title .dots { display: flex; gap: 5px; }
+  .mock-title .dots i { width: 8px; height: 8px; border-radius: 50%; background: #38405f; }
+  .mock-body { padding: 14px; }
+
+  /* mock A: compare */
+  .tree-svg { width: 100%; height: 96px; display: block; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .cmp-pane { border: 1px solid #323a5a; border-radius: 10px; padding: 10px 12px; background: #141826; }
+  .cmp-pane h5 { margin: 0 0 8px; font-size: 11.5px; display: flex; justify-content: space-between; }
+  .cmp-pane.l h5 b { color: var(--blue); }
+  .cmp-pane.r h5 b { color: var(--rose); }
+  .bubble { border-radius: 9px; padding: 7px 10px; margin-bottom: 7px; font-size: 12px; }
+  .bubble.u { background: #232941; color: #dbe3ff; }
+  .bubble.a { background: #1b2133; color: #a9b2c9; border: 1px solid #272e46; }
+  .bubble .model { display: block; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .sync-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  .toggle { width: 30px; height: 17px; border-radius: 999px; background: var(--green); position: relative; }
+  .toggle i { position: absolute; right: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #06281c; }
+
+  /* mock B: export flow */
+  .flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .step { flex: 1 1 150px; background: #141826; border: 1px solid #323a5a; border-radius: 10px; padding: 10px 12px; position: relative; }
+  .step b { display: block; font-size: 12px; margin-bottom: 3px; }
+  .step span { color: var(--muted); font-size: 11.5px; }
+  .step .n { color: var(--accent); font-weight: 800; margin-right: 4px; }
+  .flow .sep { flex: none; display: flex; align-items: center; padding: 0 6px; color: var(--accent); }
+  .warn {
+    margin-top: 12px; border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px;
+    background: rgba(251, 191, 36, 0.07); padding: 9px 12px; color: #e8d9a8; font-size: 12px;
+  }
+
+  /* mock C: model picker */
+  .picker { border: 1px solid #323a5a; border-radius: 10px; background: #141826; overflow: hidden; }
+  .picker .search { padding: 8px 10px; border-bottom: 1px solid #272e46; color: var(--muted); background: #191d2c; }
+  .picker .row { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #20263a; }
+  .picker .row.last { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+  .picker .row .badge { color: var(--accent); font-size: 11px; }
+
+  /* mock D: pin surfaces */
+  .surfaces { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 860px) { .surfaces { grid-template-columns: repeat(2, 1fr); } }
+  .surface { border: 1px solid #323a5a; border-radius: 10px; background: #141826; padding: 10px; }
+  .surface h6 { margin: 0 0 8px; font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .srow {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    background: #191d2c; border-radius: 7px; padding: 6px 9px; margin-bottom: 6px; font-size: 11.5px;
+  }
+  .srow .pin { color: var(--rose); }
+  .srow .miss {
+    color: #7a2733; border: 1px dashed var(--rose); border-radius: 6px;
+    font-size: 10px; padding: 0 5px;
+  }
+  .canvasmini { height: 74px; position: relative; border-radius: 8px; background: #10131f; border: 1px solid #272e46; }
+  .cnode { position: absolute; width: 12px; height: 12px; border-radius: 4px; background: #39415f; }
+  .cnode.on { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .cnode .p { position: absolute; top: -7px; right: -5px; color: var(--rose); font-size: 10px; }
+  .fix-note { margin-top: 10px; font-size: 11.5px; color: var(--green); }
+
+  /* ---------- roadmap ---------- */
+  .road { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 860px) { .road { grid-template-columns: 1fr; } }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .lane h4 { margin: 0 0 12px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .lane .cnt { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .lane.now h4 { color: var(--green); }
+  .lane.next h4 { color: var(--blue); }
+  .lane.later h4 { color: var(--muted); }
+  .task {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 9px; font-size: 12.5px;
+  }
+  .task b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .task span { color: var(--muted); font-size: 11.5px; }
+  .task .ref { color: var(--accent); }
+
+  /* ---------- lists (robustness / validated) ---------- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .item {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+    font-size: 13px;
+  }
+  .item b { display: block; margin-bottom: 3px; font-size: 13.5px; }
+  .item p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .item .where { margin-top: 7px; font-size: 11.5px; color: var(--blue); }
+  .item .src { color: var(--accent); }
+  .item.ok { border-color: rgba(52, 211, 153, 0.3); }
+  .item.ok b::before { content: "✓ "; color: var(--green); }
+
+  footer { margin-top: 70px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><span class="a">PiX</span><span>→</span><span>awefork</span></div>
+    <nav>
+      <a href="#matrix">优先级矩阵</a>
+      <a href="#suggest">四大建议</a>
+      <a href="#roadmap">路线图</a>
+      <a href="#robust">稳定性</a>
+      <a href="#validated">已验证领先</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ================= HERO ================= -->
+  <div class="hero reveal">
+    <h1>上游 PiX 落下的 94 个更新，<span class="arrow">对 awefork 意味着什么</span></h1>
+    <p class="sub">
+      参考仓库 <code>ref/PiX</code>（fork 自 huang-sh/PiX）落后 upstream 94 个提交，横跨 v0.0.15 → v0.0.18。
+      逐块对照 awefork 现状后的结论：<b>会话生命周期类 awefork 已领先；真正值得吸收的是 4 个功能 + 5 项工程加固。</b>
+    </p>
+    <div class="stats">
+      <div class="stat"><b>94</b><span>落后提交数（已 fetch upstream）</span></div>
+      <div class="stat"><b>4</b><span>版本跨度 v0.0.15 → v0.0.18</span></div>
+      <div class="stat"><b>9</b><span>落点建议（4 功能 + 5 工程）</span></div>
+      <div class="stat green"><b>3</b><span>awefork 已领先、被上游验证</span></div>
+    </div>
+    <div class="pr-banner">
+      <span class="tag">顺带</span>
+      <div>
+        你在 PiX 分支 <code>feat/markdown-updates-pins</code> 上的 4 个提交中，<b>pin/archive（928cd47）和 release 横幅（60358e8）已被 upstream 原样合入</b>（patch-id 一致）；
+        剩余 markdown 提交 <code>ed81b88</code> 与 upstream 零文件冲突，记得 rebase 后提 PR。
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MATRIX ================= -->
+  <section id="matrix" class="reveal">
+    <div class="sec-head"><span class="no">01</span><h2>优先级矩阵</h2></div>
+    <p class="sec-desc">横轴实现成本、纵轴预期收益。左上绿色区「先做」，右上蓝色区「排期规划」，左下顺手做，右下缓做。悬停查看依据提交。</p>
+    <div class="matrix-card">
+      <div class="matrix-legend">
+        <span><i class="dot" style="background:var(--green)"></i>工程速赢</span>
+        <span><i class="dot" style="background:var(--accent)"></i>功能主线</span>
+        <span><i class="dot" style="background:var(--blue)"></i>规划项</span>
+        <span><i class="dot" style="background:var(--amber)"></i>打磨</span>
+      </div>
+      <div class="plot" id="plot">
+        <span class="axis-y">预期收益 →</span>
+        <span class="axis-x">实现成本 →</span>
+        <span class="q tl">先做</span><span class="q tr">规划</span>
+        <span class="q bl">顺手</span><span class="q br">缓做</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SUGGESTIONS ================= -->
+  <section id="suggest" class="reveal">
+    <div class="sec-head"><span class="no">02</span><h2>四大功能建议（附交互示意）</h2></div>
+    <p class="sec-desc">每张卡片右侧是建议落地后的界面示意，可直接作为实现参考。</p>
+    <div class="sug">
+
+      <!-- 1 compare -->
+      <div class="sug-card">
+        <div>
+          <div class="sug-no">1</div>
+          <h3>分支对比双栏</h3>
+          <div class="sug-src">来源 4e875da（PiX v0.0.15 头牌功能）</div>
+          <p>
+            awefork 的核心动作是 fork，但 fork 之后用户最自然的问题是「两条路各自走成了什么样」。
+            现在只能看画布结构、逐个点开内容。把 turn pane 扩展为可并排两栏，同源分支左右对照，
+            直接补全 fork 工作流闭环。<b>这是 94 个提交里对 awefork 启示最大的一条。</b>
+          </p>
+          <div class="chips">
+            <span class="chip hot">收益最高</span><span class="chip">成本 中</span>
+            <span class="chip">复用 turn pane 组件</span>
+          </div>
+        </div>
+        <div class="mock">
+          <div class="mock-title"><span class="dots"><i></i><i></i><i></i></span>分支对比模式 — 选中同源两张卡片触发</div>
+          <div class="mock-body">
+            <svg class="tree-svg" viewBox="0 0 360 96" preserveAspectRatio="none">
+              <path d="M20 78 H120 M120 78 V38 M120 38 H230 M120 78 H250" stroke="#39415f" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <path d="M230 38 H330" stroke="#38bdf8" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <path d="M250 78 V62 H350" stroke="#f43f5e" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <rect x="12" y="70" width="16" height="16" rx="5" fill="#39415f"/>
+              <rect x="112" y="70" width="16" height="16" rx="5" fill="#39415f"/>
+              <rect x="222" y="30" width="16" height="16" rx="5" fill="#38bdf8"/>
+              <rect x="242" y="70" width="16" height="16" rx="5" fill="#f43f5e"/>
+              <rect x="322" y="30" width="16" height="16" rx="5" fill="#38bdf8"/>
+              <rect x="334" y="54" width="16" height="16" rx="5" fill="#f43f5e"/>
+              <text x="150" y="14" fill="#9aa1b5" font-size="9">同源 fork 点</text>
+            </svg>
+            <div class="cmp">
+              <div class="cmp-pane l">
+                <h5><b>分支 A · sonnet-4-6</b><span>7 turns</span></h5>
+                <div class="bubble u">用 PostgreSQL 重写存储层</div>
+                <div class="bubble a">已建 <code>pg.pool</code>，迁移脚本就绪…<span class="model">▸ 12.4s · 8,210 tok</span></div>
+              </div>
+              <div class="cmp-pane r">
+                <h5><b>分支 B · gpt-5-codex</b><span>5 turns</span></h5>
+                <div class="bubble u">用 SQLite 保持零依赖</div>
+                <div class="bubble a">单文件库已接入，WAL 开启…<span class="model">▸ 9.1s · 6,730 tok</span></div>
+              </div>
+            </div>
+            <div class="sync-row"><span class="toggle"><i></i></span>同步滚动 · 按 turn 序号对齐 · ‹ › 同时翻页</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2 export -->
+      <div class="sug-card">
+        <div>
+          <div class="sug-no">2</div>
+          <h3>分支导出为独立会话</h3>
+          <div class="sug-src">来源 9efa821 / 8b277a6 / b3ecde9（v0.0.18）</div>
+          <p>
+            把当前查看的分支尖端或任意节点导出成一份<b>纯 opencode 会话</b>——可分享、可在任何地方单独继续。
+            与 awefork「零锁定、纯原生会话」的身份完美契合。已确认 <code>awefork-api.ts</code> 目前没有对应端点，需新增 IPC。
+          </p>
+          <div class="chips">
+            <span class="chip ok">契合产品身份</span><span class="chip">新增 IPC + 写入</span>
+            <span class="chip hot">注意 off-path 引用</span>
+          </div>
+        </div>
+        <div class="mock">
+          <div class="mock-title"><span class="dots"><i></i><i></i><i></i></span>导出流程</div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="step"><b><span class="n">1</span>选中节点</b><span>卡片右键 / pane 菜单</span></div>
+              <div class="sep">→</div>
+              <div class="step"><b><span class="n">2</span>导出为独立会话</b><span>仅该分支路径上的 turns</span></div>
+              <div class="sep">→</div>
+              <div class="step"><b><span class="n">3</span>纯 opencode 会话</b><span>TUI 可直接打开</span></div>
+              <div class="sep">→</div>
+              <div class="step"><b><span class="n">4</span>分享 / 继续</b><span>跨机器、跨工具</span></div>
+            </div>
+            <div class="warn">
+              ⚠ PiX 的教训（b3ecde9）：turn 引用了不在此路径上的内容时导出会失败 —— 导出前做引用预检，失败时给出明确文案，而不是静默坏文件。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3 model default -->
+      <div class="sug-card">
+        <div>
+          <div class="sug-no">3</div>
+          <h3>模型默认记住上次选择</h3>
+          <div class="sug-src">来源 02c1d6b（v0.0.17）</div>
+          <p>
+            在 <code>composer-store.ts</code> / <code>state.ts</code> 中未找到任何 last-used 持久化——
+            目前每次 fork 都要从 70+ 模型里重新搜索。PiX 的做法：新会话默认沿用上次挑的模型并继承节点模型。<b>小改动、高频收益。</b>
+          </p>
+          <div class="chips">
+            <span class="chip ok">成本 极低</span><span class="chip">composer-store 加一个字段</span>
+          </div>
+        </div>
+        <div class="mock">
+          <div class="mock-title"><span class="dots"><i></i><i></i><i></i></span>模型选择器</div>
+          <div class="mock-body">
+            <div class="picker">
+              <div class="search">🔍 搜索模型…</div>
+              <div class="row last"><span>claude-sonnet-4-6</span><span class="badge">上次使用 · 默认 ⭐</span></div>
+              <div class="row"><span>gpt-5-codex</span><span class="badge"></span></div>
+              <div class="row"><span>glm-5.3</span><span></span></div>
+              <div class="row"><span>kimi-k3</span><span></span></div>
+            </div>
+            <div class="sync-row" style="margin-top:10px"><span class="toggle"><i></i></span>新 fork / 新会话默认沿用上次选择（可按会话覆盖）</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 pin consistency -->
+      <div class="sug-card full">
+        <div>
+          <div class="sug-no">4</div>
+          <h3>Pin 标记的全表面一致性</h3>
+          <div class="sug-src">来源 b3ecde9 之后续 baf2fec · 对应你刚合入的 9b5710e</div>
+          <p>
+            awefork 的 pin（<code>9b5710e</code>，pins-store）目前只在 <code>side-bar.vue</code> 一处渲染。
+            PiX 在 pin PR 合入后专门追加了修复 <code>baf2fec</code>：pin / 归档标记必须在<b>所有</b>列表表面保持一致。
+            awefork 的表面更多：搜索结果、命令面板、收藏架、画布卡片。现成的审计项。
+          </p>
+        </div>
+        <div class="mock">
+          <div class="mock-title"><span class="dots"><i></i><i></i><i></i></span>四个表面 · 理想状态（画布卡片为待补齐项）</div>
+          <div class="mock-body">
+            <div class="surfaces">
+              <div class="surface">
+                <h6>侧栏（已实现 ✓）</h6>
+                <div class="srow"><span>重构解析器</span><span class="pin">📌</span></div>
+                <div class="srow"><span>修端口发现</span><span class="pin">📌</span></div>
+              </div>
+              <div class="surface">
+                <h6>搜索结果（待审计）</h6>
+                <div class="srow"><span>重构解析器</span><span class="pin">📌</span></div>
+                <div class="srow" style="color:#6b7286"><span>普通会话…</span><span></span></div>
+              </div>
+              <div class="surface">
+                <h6>命令面板（待审计）</h6>
+                <div class="srow"><span>重构解析器</span><span class="pin">📌</span></div>
+                <div class="srow" style="color:#6b7286"><span>普通会话…</span><span></span></div>
+              </div>
+              <div class="surface">
+                <h6>画布卡片（缺失）</h6>
+                <div class="canvasmini">
+                  <span class="cnode on" style="left:10px;top:40px"><span class="p">📌</span></span>
+                  <span class="cnode" style="left:44px;top:16px"></span>
+                  <span class="cnode" style="left:44px;top:52px"></span>
+                  <span class="cnode" style="left:80px;top:52px"><span class="p" style="color:#7a2733">✕</span></span>
+                </div>
+                <div class="srow" style="border:1px dashed var(--rose);color:#e8909f"><span>pin 会话的卡片</span><span class="miss">缺失</span></div>
+              </div>
+            </div>
+            <div class="fix-note">✓ 补齐后：任何表面看到 📌 即 pinned，归档同理（archive 已有，检查同源问题）。</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= ROADMAP ================= -->
+  <section id="roadmap" class="reveal">
+    <div class="sec-head"><span class="no">03</span><h2>建议路线图</h2></div>
+    <p class="sec-desc">按「先做 → 规划 → 观察」排列；Now 列四项均为一天内可完成的小改动。</p>
+    <div class="road">
+      <div class="lane now">
+        <h4>⏱ Now <span class="cnt">本周可完成</span></h4>
+        <div class="task"><b>模型默认记忆上次选择</b><span><span class="ref">02c1d6b</span> · composer-store 加 last-used 字段，成本≈半天</span></div>
+        <div class="task"><b>Pin 全表面一致性审计</b><span><span class="ref">baf2fec</span> · side-bar 之外的 3 个表面补 📌 渲染</span></div>
+        <div class="task"><b>图片附件显式限额</b><span><span class="ref">4073acf</span> · 现状 verbatim 无上限，建议 20MB/张 · 40MB 总</span></div>
+        <div class="task"><b>重试次数展示</b><span><span class="ref">c30c7e0</span> · retry-as-fork 只在有重试时标「第 n 次」</span></div>
+      </div>
+      <div class="lane next">
+        <h4>🗺 Next <span class="cnt">排入版本</span></h4>
+        <div class="task"><b>分支对比双栏</b><span><span class="ref">4e875da</span> · turn pane 双栏 + 同步滚动，fork 工作流闭环</span></div>
+        <div class="task"><b>分支导出独立会话</b><span><span class="ref">9efa821</span> · 新 IPC；off-path 引用预检（b3ecde9 教训）</span></div>
+        <div class="task"><b>崩溃中途守卫</b><span><span class="ref">c17c131</span> · 流式回复与 file-change 快照防 opencode 中途死亡</span></div>
+      </div>
+      <div class="lane later">
+        <h4>🔭 Later <span class="cnt">观察 / 远期</span></h4>
+        <div class="task"><b>Registry · 路径规范化加固</b><span><span class="ref">1ef0da8</span> · macOS /var vs /private/var；配合你正在修的端口发现问题</span></div>
+        <div class="task"><b>新版本提示横幅</b><span><span class="ref">60358e8</span> · 已有 GitHub Releases，加 dismissible 横幅即可，优先级低</span></div>
+        <div class="task"><b>i18n 键位一致性测试</b><span><span class="ref">e22a7d8</span> · 仅在将来做界面本地化时启用</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ROBUSTNESS ================= -->
+  <section id="robust" class="reveal">
+    <div class="sec-head"><span class="no">04</span><h2>稳定性启示</h2></div>
+    <p class="sec-desc">对应 awefork 最近在修的方向（opencode 端口发现 / 目录归组）。PiX 的 registry 重构是现成参考图纸。</p>
+    <div class="grid2">
+      <div class="item">
+        <b>路径规范化只做一次</b>
+        <p>每次 listing 只做一次 realpath 规范化；配套 fixture 处理 macOS <code>/var</code> vs <code>/private/var</code>。awefork 按目录归组会话，同一经典陷阱。</p>
+        <div class="where">落点 dirs-store.ts · <span class="src">1ef0da8 / 9ed3c39</span></div>
+      </div>
+      <div class="item">
+        <b>运行时中途关闭要设防</b>
+        <p>PiX 给 stop 快照加了「runtime 在请求中途关闭」守卫。awefork 的流式回复与快照同样暴露在 opencode 崩溃风险下。</p>
+        <div class="where">落点 state.ts · sse.ts · <span class="src">c17c131</span></div>
+      </div>
+      <div class="item">
+        <b>图片附件显式限额</b>
+        <p><code>attachments.ts</code> 目前图片 verbatim 发送、无上限，渲染层还要整段 base64。PiX 定为每张 20MB / 总 40MB——要有上限，且定在用户不抱怨的水平。</p>
+        <div class="where">落点 attachments.ts · <span class="src">4073acf / 5e06a50</span></div>
+      </div>
+      <div class="item">
+        <b>CI 在 PR 上也跑 verify</b>
+        <p>PiX 把验证矩阵扩到 pull_request 触发。awefork 已有 <code>npm run verify</code>（awecontrib 体系），确认 PR 也触发即可。</p>
+        <div class="where">落点 .github/workflows · <span class="src">d1502ff</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VALIDATED ================= -->
+  <section id="validated" class="reveal">
+    <div class="sec-head"><span class="no">05</span><h2>awefork 已领先 · 被上游验证</h2></div>
+    <p class="sec-desc">PiX 这批更新反过来说明 awefork 以下设计早已到位——它们在补 awefork 已有的课。</p>
+    <div class="grid2">
+      <div class="item ok">
+        <b>后台运行会话 + parked streams</b>
+        <p>切视图 / 切项目会话保持运行、后台流存活、回来重放——PiX v0.0.16 花了整个版本补的能力，<code>state.ts</code> 早已实现（running map、卡片级尾部流）。</p>
+        <div class="where">对比 587157b / 5acf419 / 8e4e896</div>
+      </div>
+      <div class="item ok">
+        <b>file-change 快照 2 MiB 封顶</b>
+        <p>PiX v0.0.16–18 才开始做「有界预览与工具输出内存」；awefork 的快照录制器一开始就封了 2 MiB 并跳过二进制。</p>
+        <div class="where">对比 e766636 / df03a9a</div>
+      </div>
+      <div class="item ok">
+        <b>列宽拖拽 / 折叠</b>
+        <p>设置侧栏可拖宽（窄窗口保持宽度）是 PiX v0.0.17 的新功能；awefork 的列拖拽 + 双击折叠已在。</p>
+        <div class="where">对比 d1e8530 / 2a0bfa9</div>
+      </div>
+      <div class="item ok">
+        <b>归档体系</b>
+        <p>会话 / 目录归档、隐藏与恢复，awefork 的 archive-store + trash-store 体系完整；PiX 的归档是随 pin PR（你贡献的）才补齐的。</p>
+        <div class="where">对比 928cd47（你的 PR）</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：<code>git log HEAD..upstream/main</code> @ ref/PiX（fetch 于 2026-09-15，94 commits，v0.0.15→v0.0.18）·
+    awefork @ dev (52c2921) · 本页为静态预览，不需要时可删除 <code>pix-insights/</code> 目录。
+  </footer>
+</div>
+
+<script>
+  // ---- priority matrix data ----
+  const items = [
+    { n: 1, t: "分支对比双栏",        x: 64, y: 8,  cls: "",      src: "4e875da", meta: "收益最高 · 成本中" },
+    { n: 2, t: "分支导出独立会话",    x: 60, y: 16, cls: "",      src: "9efa821 / 8b277a6", meta: "契合零锁定身份 · 需新 IPC" },
+    { n: 3, t: "模型默认记忆",        x: 20, y: 24, cls: "green", src: "02c1d6b", meta: "成本≈半天 · 高频收益" },
+    { n: 4, t: "Pin 全表面一致",      x: 24, y: 34, cls: "green", src: "baf2fec", meta: "3 个表面补渲染" },
+    { n: 5, t: "图片附件限额",        x: 18, y: 44, cls: "green", src: "4073acf / 5e06a50", meta: "20MB/张 · 40MB 总" },
+    { n: 6, t: "崩溃中途守卫",        x: 44, y: 30, cls: "green", src: "c17c131", meta: "流式 + 快照防中途死亡" },
+    { n: 7, t: "Registry 加固",       x: 80, y: 22, cls: "blue",  src: "1ef0da8 / 9ed3c39", meta: "realpath 一次化 · 配合端口发现修复" },
+    { n: 8, t: "重试次数展示",        x: 22, y: 66, cls: "amber", src: "c30c7e0", meta: "只重试时标「第 n 次」" },
+    { n: 9, t: "更新提示横幅",        x: 16, y: 80, cls: "amber", src: "60358e8（你的 PR）", meta: "低优先级" },
+  ];
+  const plot = document.getElementById("plot");
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  plot.appendChild(tip);
+  for (const it of items) {
+    const el = document.createElement("div");
+    el.className = "pt " + it.cls;
+    el.style.left = it.x + "%";
+    el.style.top = it.y + "%";
+    el.textContent = it.n;
+    el.addEventListener("mouseenter", () => {
+      tip.innerHTML = "<b>" + it.n + ". " + it.t + "</b>" +
+        "<span class='src'>" + it.src + "</span><div class='meta'>" + it.meta + "</div>";
+      const px = Math.min(Math.max(it.x, 12), 74);
+      tip.style.left = "calc(" + px + "% + 18px)";
+      tip.style.top = "calc(" + it.y + "% - 10px)";
+      tip.style.opacity = 1;
+      el.classList.add("hover");
+    });
+    el.addEventListener("mouseleave", () => { tip.style.opacity = 0; el.classList.remove("hover"); });
+    plot.appendChild(el);
+  }
+
+  // ---- scroll reveal ----
+  const io = new IntersectionObserver((es) => {
+    for (const e of es) if (e.isIntersecting) { e.target.classList.add("on"); io.unobserve(e.target); }
+  }, { threshold: 0.08 });
+  document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+</script>
+</body>
+</html>
