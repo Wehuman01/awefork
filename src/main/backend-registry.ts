@@ -86,18 +86,18 @@ function uniquePorts(ports: number[]): number[] {
  * Order:
  *  1. AWEFORK_OPENCODE_PORT, last-good settings port, classic candidates
  *  2. Any other local LISTEN port (finds a manually started `opencode serve`
- *     after a port move) — reuse only, never spawn into an occupied socket
- *  3. Spawn on the preferred list; CLI-missing aborts immediately
+ *     after a port move), probed concurrently — a silent foreign socket
+ *     costs a full probe timeout, and dozens in sequence would stall boot
+ *  3. Spawn on the preferred list; a missing CLI aborts before the walk,
+ *     which on Windows (shims hide ENOENT) would otherwise burn a spawn per
+ *     port and surface an error naming the last port tried
  *
  * On success the winning port is written back to settings so the next boot
  * skips the hunt. Codex has no port (stdio app-server) and never lands here.
  */
 async function resolveOpenCodeServer(settingsPath: string): Promise<{ baseUrl: string }> {
   const preferred = uniquePorts(await preferredOpenCodePorts(settingsPath));
-  const listening = uniquePorts(await findListeningLocalPorts());
-  const reuseOrder = uniquePorts([...preferred, ...listening]);
-
-  for (const port of reuseOrder) {
+  for (const port of preferred) {
     const reused = await tryReuseOpencodeServer(port);
     if (reused) {
       await writeOpencodePort(settingsPath, port);
@@ -105,6 +105,26 @@ async function resolveOpenCodeServer(settingsPath: string): Promise<{ baseUrl: s
     }
   }
 
+  // Nothing preferred is alive — hunt a manually started `opencode serve` on
+  // any other LISTEN port. Reuse only; never spawn into an occupied socket.
+  const alreadyProbed = new Set(preferred);
+  const discovered = uniquePorts(await findListeningLocalPorts())
+    .filter((port) => !alreadyProbed.has(port))
+    .sort((a, b) => a - b);
+  const hits = await Promise.all(
+    discovered.map(async (port) => ({ port, reused: await tryReuseOpencodeServer(port) })),
+  );
+  // First hit in scan order, not first to settle — the pick between two live
+  // instances stays deterministic across boots.
+  const winner = hits.find((hit) => hit.reused !== null);
+  if (winner?.reused) {
+    await writeOpencodePort(settingsPath, winner.port);
+    return winner.reused;
+  }
+
+  if (!(await probeOpencode()).installed) {
+    throw new Error("未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。");
+  }
   let lastError: unknown = null;
   for (const port of preferred) {
     try {

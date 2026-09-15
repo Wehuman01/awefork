@@ -153,6 +153,9 @@ export function createOpencodeClient(
 ): OpencodeClient {
   const descriptor = config.descriptor ?? opencodeDescriptor();
   const url = (path: string) => `${baseUrl.replace(/\/$/, "")}${path}`;
+  // Guidance names the port this client actually talks to — after dynamic
+  // port discovery that often is not the historical default 4096.
+  const serveHint = `opencode serve --port ${baseUrl.match(/:(\d+)\s*$/)?.[1] ?? "4096"}`;
   /** Descriptor endpoint with `{id}` / `{messageId}` filled in. */
   const endpoint = (key: keyof AgentEndpoints, params: Record<string, string> = {}): string => {
     let path = descriptor.endpoints[key];
@@ -177,13 +180,13 @@ export function createOpencodeClient(
       if (timer?.aborted) {
         throw new OpencodeApiError(
           0,
-          `opencode API ${path} timed out after ${timeoutMs}ms — the server is not responding. Restart it with: opencode serve --port 4096`,
+          `opencode API ${path} timed out after ${timeoutMs}ms — the server is not responding. Restart it with: ${serveHint}`,
         );
       }
       const reason = error instanceof Error ? error.message : String(error);
       throw new OpencodeApiError(
         0,
-        `Cannot reach opencode server at ${baseUrl} (${reason}). Start it with: opencode serve --port 4096`,
+        `Cannot reach opencode server at ${baseUrl} (${reason}). Start it with: ${serveHint}`,
       );
     }
     if (!response.ok) {

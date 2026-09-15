@@ -239,6 +239,46 @@ describe("routing and adapter lifecycle", () => {
     expect(await readOpencodePort(join(userDataDir, "settings.json"))).toBe(4097);
   });
 
+  it("probes discovered listening ports concurrently, not one probe-timeout at a time", async () => {
+    // Regression shape: a sequential scan sits blocked on the first silent
+    // port for a full probe deadline while a live opencode waits behind it.
+    const pending: Array<(value: { baseUrl: string } | null) => void> = [];
+    mocks.findListeningLocalPorts.mockResolvedValue([20001, 20002, 20003, 20004]);
+    mocks.tryReuseOpencodeServer.mockImplementation((port: number) =>
+      port >= 20000 ? new Promise((resolve) => pending.push(resolve)) : Promise.resolve(null),
+    );
+    mocks.ensureOpencodeServer.mockResolvedValue({
+      baseUrl: "http://127.0.0.1:4096",
+      spawned: true,
+    });
+
+    const adapter = registry.get("opencode");
+    // All four discovered probes are in flight before any of them resolves.
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
+    for (const resolve of pending) resolve(null);
+
+    await expect(adapter).resolves.toMatchObject({ kind: "opencode" });
+    expect(mocks.ensureOpencodeServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails fast with the install hint when the opencode CLI is missing", async () => {
+    // On Windows npm shims hide ENOENT, so the port walk would burn a spawn
+    // per candidate and surface an error naming the last port tried.
+    mocks.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _opts: unknown,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(new Error("spawn opencode ENOENT"), "", "");
+      },
+    );
+
+    await expect(registry.get("opencode")).rejects.toThrow(/opencode CLI/);
+    expect(mocks.ensureOpencodeServer).not.toHaveBeenCalled();
+  });
+
   it("creates the codex facade without spawning until first used", async () => {
     mocks.ensureCodexServer.mockResolvedValue({
       client: listCodexClient(),

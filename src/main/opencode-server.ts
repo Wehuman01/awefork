@@ -179,6 +179,15 @@ export async function resolveSpawnEnv(
 }
 
 /**
+ * Deadline for reuse / readiness probes. A healthy local opencode answers in
+ * single-digit milliseconds, so the probe only needs to tell "answers like
+ * opencode" from "dead or foreign" quickly: port discovery walks every LISTEN
+ * socket on the machine, and the 15 s API default would let a few silent
+ * foreign sockets (TLS listeners, binary protocols) stall boot for minutes.
+ */
+const PROBE_TIMEOUT_MS = 2_000;
+
+/**
  * True when nothing is bound to 127.0.0.1:port. Binding is the only reliable
  * free-port probe on a user machine: another GUI tool can already hold the
  * port with a foreign HTTP server that answers every path (or 401s) — a
@@ -203,7 +212,7 @@ function isPortFree(port: number): Promise<boolean> {
  */
 export async function tryReuseOpencodeServer(port: number): Promise<{ baseUrl: string } | null> {
   const baseUrl = `http://127.0.0.1:${port}`;
-  const client = createOpencodeClient(baseUrl);
+  const client = createOpencodeClient(baseUrl, { timeoutMs: PROBE_TIMEOUT_MS });
   return (await isFullyReady(client, baseUrl)) ? { baseUrl } : null;
 }
 
@@ -268,7 +277,7 @@ export async function ensureOpencodeServer(
   spawnFn: typeof spawn = spawn,
 ): Promise<EnsureServerResult> {
   const baseUrl = `http://127.0.0.1:${port}`;
-  const client = createOpencodeClient(baseUrl);
+  const client = createOpencodeClient(baseUrl, { timeoutMs: PROBE_TIMEOUT_MS });
   if (await isFullyReady(client, baseUrl)) {
     return { spawned: false, baseUrl };
   }

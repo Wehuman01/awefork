@@ -2,6 +2,7 @@ import type { ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -79,6 +80,38 @@ function startGateServer(options: {
 function closeServer(server: Server): Promise<void> {
   server.closeAllConnections();
   return new Promise((resolve) => server.close(() => resolve()));
+}
+
+/**
+ * A TCP listener that accepts connections and never answers — the worst
+ * discovery-scan case (TLS listeners, binary-protocol services). Sockets are
+ * tracked so close() can tear them down; server.close() alone would wait on
+ * them forever.
+ */
+function startSilentServer(): Promise<{
+  server: import("node:net").Server;
+  port: number;
+  close: () => Promise<void>;
+}> {
+  const sockets = new Set<Socket>();
+  const server = createNetServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.resume();
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve({
+        server,
+        port: typeof address === "object" && address ? address.port : 0,
+        close: () => {
+          for (const socket of sockets) socket.destroy();
+          return new Promise((done) => server.close(() => done()));
+        },
+      });
+    });
+  });
 }
 
 describe("buildSpawnEnv", () => {
@@ -378,6 +411,35 @@ describe("listening-port discovery", () => {
       await expect(tryReuseOpencodeServer(cold.port)).resolves.toBeNull();
     } finally {
       await closeServer(cold.server);
+    }
+  });
+
+  test("reuse probe gives up on a silent socket within the probe deadline, not the API default", async () => {
+    // Port discovery walks every LISTEN socket on the machine; with the 15 s
+    // API default, a handful of silent foreign listeners would stall boot.
+    const silent = await startSilentServer();
+    try {
+      const started = Date.now();
+      await expect(tryReuseOpencodeServer(silent.port)).resolves.toBeNull();
+      expect(Date.now() - started).toBeLessThan(6_000);
+    } finally {
+      await silent.close();
+    }
+  });
+
+  test("names a silent port holder quickly instead of idling at the API timeout", async () => {
+    const silent = await startSilentServer();
+    try {
+      const spawnFn = (() => {
+        throw new Error("must not spawn into a foreign port");
+      }) as typeof spawn;
+      const started = Date.now();
+      await expect(ensureOpencodeServer(silent.port, spawnFn)).rejects.toThrow(
+        /already in use by another process/,
+      );
+      expect(Date.now() - started).toBeLessThan(6_000);
+    } finally {
+      await silent.close();
     }
   });
 });
