@@ -877,6 +877,14 @@ describe("createCodexAdapter unsupported surfaces", () => {
     );
   });
 
+  it("refuses detached export — codex fork linkage lives in the backend", async () => {
+    const { client } = fakeClient({});
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+    await expect(adapter.exportSession("s1", null)).rejects.toThrow(
+      "codex does not support exporting a detached session",
+    );
+  });
+
   it("deletes a thread and its lineage record", async () => {
     const { client, callsOf } = fakeClient({
       "thread/delete": () => ({}),

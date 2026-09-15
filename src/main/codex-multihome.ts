@@ -278,6 +278,12 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       return forked;
     },
 
+    // Export is capability-gated off for codex (fork linkage lives in the
+    // backend); the underlying adapter's rejection is the honest answer.
+    async exportSession(sessionId, atMessageId) {
+      return (await adapterFor(sessionId)).exportSession(sessionId, atMessageId);
+    },
+
     async deleteSession(sessionId) {
       const ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
       await (await adapterFor(sessionId)).deleteSession(sessionId);

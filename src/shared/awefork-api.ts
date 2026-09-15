@@ -114,6 +114,16 @@ export interface AweforkApi {
   ): Promise<PromptAttachment[]>;
   createSession(backend: BackendId, directory?: string): Promise<SessionSummary>;
   fork(backend: BackendId, sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
+  /**
+   * Copy the branch through `atMessageId` into a standalone native session
+   * (no lineage, no canvas branch) that any opencode client can continue.
+   * atMessageId null copies at the session's latest state.
+   */
+  exportSession(
+    backend: BackendId,
+    sessionId: string,
+    atMessageId: string | null,
+  ): Promise<SessionSummary>;
   deleteSession(backend: BackendId, sessionId: string): Promise<string[]>;
   deleteMessage(backend: BackendId, sessionId: string, messageId: string): Promise<void>;
   prompt(

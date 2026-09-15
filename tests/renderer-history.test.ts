@@ -20,6 +20,17 @@ const SESSION: SessionSummary = {
   updatedAt: 1_726_000_000_000,
 };
 
+/** The standalone copy exportSessionAt creates; older so boot still lands on s1. */
+const EXPORTED: SessionSummary = {
+  id: "sx",
+  title: "登录接口排查（导出）",
+  directory: "/demo/shop-api",
+  parentSessionId: null,
+  origin: "root",
+  createdAt: 1_725_999_000_000,
+  updatedAt: 1_725_999_000_000,
+};
+
 async function bootState(
   options: {
     tags?: { sessions: Record<string, string[]>; colors: Record<string, number> };
@@ -31,12 +42,13 @@ async function bootState(
   const confirm = vi.fn(() => true);
   const api: AweforkApi = {
     ready: async () => ({ ok: true }),
-    sessions: async () => ({ sessions: [SESSION], lineage: {} }),
+    sessions: async () => ({ sessions: [SESSION, EXPORTED], lineage: {} }),
     messages: vi.fn(async () => []),
     models: async () => [],
     messageAttachments: async () => [],
     createSession: async () => SESSION,
     fork: async () => SESSION,
+    exportSession: vi.fn(async () => EXPORTED),
     deleteSession: vi.fn(async () => []),
     deleteMessage: async () => {},
     prompt: vi.fn(async () => {}),
@@ -106,6 +118,7 @@ async function bootState(
     deleteTag: state.deleteTag,
     renameSession: state.renameSession,
     createSession: state.createSession,
+    exportSessionAt: state.exportSessionAt,
     sendPrompt: state.sendPrompt,
   };
 }
@@ -155,6 +168,25 @@ describe("history-wired renderer operations", () => {
     expect(h.confirm).toHaveBeenCalledTimes(2);
     expect(h.api.trashAdd).toHaveBeenCalledTimes(2);
     expect(h.store.trash).toContain("s1");
+  });
+
+  it("exports a standalone copy, lands on it, and undo deletes the copy", async () => {
+    const h = await bootState();
+    await h.exportSessionAt("s1", null);
+
+    expect(h.api.exportSession).toHaveBeenCalledWith("codex", "s1", null);
+    expect(h.store.selectedId).toBe("sx");
+    expect(h.history.history.entries.at(-1)).toMatchObject({
+      kind: "exportSession",
+      undoable: true,
+    });
+
+    await h.history.undoSteps(1);
+    expect(h.api.deleteSession).toHaveBeenCalledWith("codex", "sx");
+
+    await h.history.redoSteps(1);
+    expect(h.api.exportSession).toHaveBeenCalledTimes(2);
+    expect(h.store.selectedId).toBe("sx");
   });
 
   it("does not hard-delete after a soft delete when a new op runs (no flush)", async () => {
