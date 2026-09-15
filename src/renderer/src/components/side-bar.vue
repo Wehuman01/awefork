@@ -1,31 +1,46 @@
 <template>
   <aside class="sidebar">
-    <div class="search">
-      <span>⌕</span>
-      <input
-        ref="searchInputEl"
-        v-model="query"
-        type="text"
-        :placeholder="searchPlaceholder"
-        aria-label="搜索会话"
-      />
+    <div class="search-row">
+      <div class="search">
+        <span>⌕</span>
+        <input
+          ref="searchInputEl"
+          v-model="query"
+          type="text"
+          :placeholder="searchPlaceholder"
+          aria-label="搜索会话"
+        />
+        <button
+          v-if="query.length > 0"
+          type="button"
+          class="search-clear"
+          title="清空搜索文本"
+          aria-label="清空搜索文本"
+          @click="clearQuery"
+        >✕</button>
+        <button
+          type="button"
+          class="search-boost"
+          :class="{ on: boostActive }"
+          :title="boostOpen ? '收起增强搜索' : '增强搜索：范围、标签、状态筛选'"
+          :aria-expanded="boostOpen"
+          @mousedown.stop
+          @click.stop="boostOpen = !boostOpen"
+        >✦</button>
+      </div>
       <button
-        v-if="query.length > 0"
         type="button"
-        class="search-clear"
-        title="清空搜索文本"
-        aria-label="清空搜索文本"
-        @click="clearQuery"
-      >✕</button>
-      <button
-        type="button"
-        class="search-boost"
-        :class="{ on: boostActive }"
-        :title="boostOpen ? '收起增强搜索' : '增强搜索：范围、标签、状态筛选'"
-        :aria-expanded="boostOpen"
-        @mousedown.stop
-        @click.stop="boostOpen = !boostOpen"
-      >✦</button>
+        class="search-refresh"
+        :class="{ refreshing }"
+        :disabled="refreshing"
+        title="刷新会话列表"
+        aria-label="刷新会话列表"
+        @click="emitRefresh"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 11a8 8 0 0 0-14.9-4L3 10m0-6v6h6M4 13a8 8 0 0 0 14.9 4l2.1-3m0 6v-6h-6" />
+        </svg>
+      </button>
     </div>
     <div v-if="boostOpen" class="boost-menu" @mousedown.stop>
       <div class="boost-head">搜索范围</div>
@@ -165,7 +180,6 @@
       >{{ projectsOpen ? "▾" : "▸" }}</button>
       <button type="button" class="head-label" @click="projectsOpen = !projectsOpen">项目</button>
       <span class="head-actions">
-        <button type="button" class="head-icon" title="重新加载会话" @click="emitRefresh">↻</button>
         <button
           type="button"
           class="head-icon"
@@ -631,6 +645,7 @@ import {
 
 const query = ref("");
 const searchInputEl = ref<HTMLInputElement | null>(null);
+const refreshing = ref(false);
 /** Sidebar row action awaiting its second, explicit click. */
 const pendingAction = ref<{ sessionId: string; kind: "pin" | "archive" } | null>(null);
 /** Per-directory expansion overrides; a directory defaults open when selected. */
@@ -1467,8 +1482,14 @@ function selectDirectory(directory: string): void {
   void switchDirectory(directory);
 }
 
-function emitRefresh(): void {
-  void refreshSessions();
+async function emitRefresh(): Promise<void> {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  try {
+    await refreshSessions();
+  } finally {
+    refreshing.value = false;
+  }
 }
 /** Per-directory ＋: the new conversation lands in that project directly. */
 function emitCreateIn(directory: string): void {
