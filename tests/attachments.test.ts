@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   type DocumentTextExtractor,
   draftFromPrompt,
+  MAX_IMAGE_BYTES,
   MAX_TEXT_BYTES,
   readAttachments,
   toPromptAttachments,
@@ -63,6 +64,25 @@ describe("readAttachments", () => {
     expect(staged).toHaveLength(1);
     expect(staged[0]?.mime).toBe("image/png");
     expect(staged[0]?.dataUrl).toBe("data:image/png;base64,AQID");
+  });
+
+  test("skips a single image over the per-image cap and says so", async () => {
+    const file = new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], "huge.png", {
+      type: "image/png",
+    });
+    const { staged, notes } = await readAttachments([file], noDocuments);
+    expect(staged).toEqual([]);
+    expect(notes.join()).toContain("huge.png 超过 20 MB，未添加");
+  });
+
+  test("stops staging images once the batch total passes the cap", async () => {
+    // 15 MB each: two fit (30 MB), the third would cross 40 MB.
+    const blob = new Uint8Array(15 * 1024 * 1024);
+    const files = [1, 2, 3].map((n) => new File([blob], `shot${n}.png`, { type: "image/png" }));
+    const { staged, notes } = await readAttachments(files, noDocuments);
+    expect(staged.map((a) => a.name)).toEqual(["shot1.png", "shot2.png"]);
+    expect(notes.join()).toContain("总量超过 40 MB");
+    expect(notes.join()).toContain("shot3.png");
   });
 
   test("normalizes text files to text/plain and keeps the filename", async () => {

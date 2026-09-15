@@ -35,6 +35,16 @@ const extractViaIpc: DocumentTextExtractor = (filename, bytes) =>
  */
 export const MAX_TEXT_BYTES = 1_000_000;
 
+/**
+ * Images ride along verbatim and render as whole base64 blobs in every
+ * message row, replay and retry — an oversized screenshot hurts long after
+ * the send. Skip single images past this size instead of staging them.
+ */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** Cap on the images staged in one batch, so a folder drop can't pile up. */
+export const MAX_IMAGE_TOTAL_BYTES = 40 * 1024 * 1024;
+
 let seq = 0;
 
 function nextId(): string {
@@ -70,6 +80,7 @@ export async function readAttachments(
 ): Promise<StageResult> {
   const staged: DraftAttachment[] = [];
   const notes: string[] = [];
+  let imageBytes = 0;
   for (const file of [...files]) {
     const kind = fileKind(file);
     if (kind === "unsupported") {
@@ -77,11 +88,21 @@ export async function readAttachments(
       continue;
     }
     if (kind === "image") {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (bytes.byteLength > MAX_IMAGE_BYTES) {
+        notes.push(`${file.name || "图片"} 超过 20 MB，未添加`);
+        continue;
+      }
+      if (imageBytes + bytes.byteLength > MAX_IMAGE_TOTAL_BYTES) {
+        notes.push(`这批图片总量超过 40 MB，${file.name || "这张图片"} 未添加`);
+        continue;
+      }
+      imageBytes += bytes.byteLength;
       staged.push({
         id: nextId(),
         name: file.name || "图片",
         mime: file.type,
-        dataUrl: `data:${file.type};base64,${bytesToBase64(new Uint8Array(await file.arrayBuffer()))}`,
+        dataUrl: `data:${file.type};base64,${bytesToBase64(bytes)}`,
       });
       continue;
     }
