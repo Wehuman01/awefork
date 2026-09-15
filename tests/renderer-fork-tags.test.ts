@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi, TagStore } from "../src/shared/awefork-api";
-import type { SessionSummary } from "../src/shared/types";
+import type { TurnNode } from "../src/shared/canvas-graph";
+import type { ChatMessage, SessionSummary } from "../src/shared/types";
 
 /**
  * Fork tag inheritance (rule B) and subtree application (rule A), driven
@@ -58,10 +59,27 @@ async function bootState(options: { tags?: TagStore } = {}) {
     colors: { ...store.colors },
     ...(store.forkPref ? { forkPref: { ...store.forkPref } } : {}),
   });
+  const userMessage = (id: string, text: string): ChatMessage => ({
+    id,
+    role: "user",
+    text,
+    thinking: "",
+    toolNames: [],
+    modelId: null,
+    providerId: null,
+    variant: null,
+    attachmentNames: [],
+    createdAt: 1,
+    completedAt: 1,
+    finish: null,
+    outputTokens: null,
+    error: null,
+  });
   const api: AweforkApi = {
     ready: async () => ({ ok: true }),
     sessions: async () => ({ sessions: [ROOT, CHILD, GRAND], lineage: {} }),
-    messages: async () => [],
+    messages: async (_backend, sessionId) =>
+      sessionId === "root" ? [userMessage("m1", "第一问"), userMessage("m2", "第二问")] : [],
     models: async () => [],
     messageAttachments: async () => [],
     createSession: async () => ROOT,
@@ -144,12 +162,18 @@ async function bootState(options: { tags?: TagStore } = {}) {
   const state = await import("../src/renderer/src/state");
   const history = await import("../src/renderer/src/history");
   await state.init();
+  // Rule B rides the mid-turn fork path: load root's turns, open a draft on
+  // the non-tip m1 turn, arm its text. sendMidTurnFork runs synchronously up
+  // to the ask, so tests can observe the pending dialog before answering.
+  await state.selectSession("root");
+  state.openDraft({ kind: "turn", sessionId: "root", messageId: "m1" } as TurnNode);
+  state.setDraftText("换个方向试试");
   return {
     store: state.store,
     api,
     tagStore: clone,
     answerForkTagAsk: state.answerForkTagAsk,
-    cloneSelectedSession: state.cloneSelectedSession,
+    sendMidTurnFork: () => state.sendDraft(),
     applyTagsToSubtree: state.applyTagsToSubtree,
     setForkTagPref: state.setForkTagPref,
     undoSteps: history.undoSteps,
@@ -168,7 +192,7 @@ afterEach(() => {
 describe("fork tag inheritance (rule B)", () => {
   it("asks before forking a tagged session with no stored preference", async () => {
     const h = await bootState({ tags: { sessions: { root: ["执行"] }, colors: {} } });
-    const pending = h.cloneSelectedSession();
+    const pending = h.sendMidTurnFork();
 
     // The ask opened synchronously — the fork has NOT fired yet.
     expect(h.store.forkTagAsk).toMatchObject({ parentSessionId: "root" });
@@ -177,7 +201,7 @@ describe("fork tag inheritance (rule B)", () => {
     h.answerForkTagAsk("inherit", false);
     await pending;
 
-    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", null);
+    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", "m1");
     expect(h.api.setSessionTags).toHaveBeenCalledWith("opencode", "fork-1", ["执行"]);
     // No remember-me: the preference stays ask-every-time.
     expect(h.api.setForkTagPref).not.toHaveBeenCalled();
@@ -186,7 +210,7 @@ describe("fork tag inheritance (rule B)", () => {
 
   it("persists the preference when the ask is answered with remember-me", async () => {
     const h = await bootState({ tags: { sessions: { root: ["执行"] }, colors: {} } });
-    const pending = h.cloneSelectedSession();
+    const pending = h.sendMidTurnFork();
 
     h.answerForkTagAsk("skip", true);
     await pending;
@@ -202,7 +226,7 @@ describe("fork tag inheritance (rule B)", () => {
     const h = await bootState({
       tags: { sessions: { root: ["执行", "咨询"] }, colors: {}, forkPref: { root: true } },
     });
-    await h.cloneSelectedSession();
+    await h.sendMidTurnFork();
 
     expect(h.store.forkTagAsk).toBeNull();
     expect(h.api.fork).toHaveBeenCalled();
@@ -211,16 +235,16 @@ describe("fork tag inheritance (rule B)", () => {
 
   it("never asks nor inherits for an untagged parent", async () => {
     const h = await bootState();
-    await h.cloneSelectedSession();
+    await h.sendMidTurnFork();
 
     expect(h.store.forkTagAsk).toBeNull();
     expect(h.api.fork).toHaveBeenCalled();
     expect(h.api.setSessionTags).not.toHaveBeenCalled();
   });
 
-  it("canceling the ask aborts the clone before anything fires", async () => {
+  it("canceling the ask aborts the fork before anything fires", async () => {
     const h = await bootState({ tags: { sessions: { root: ["执行"] }, colors: {} } });
-    const pending = h.cloneSelectedSession();
+    const pending = h.sendMidTurnFork();
 
     h.answerForkTagAsk("cancel", false);
     await pending;
