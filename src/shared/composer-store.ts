@@ -65,6 +65,7 @@ export async function readComposer(filePath: string): Promise<PersistedComposer 
     return {
       draft: sanitizeDraft(v.draft),
       paneModels: sanitizePaneModels(v.paneModels),
+      lastModel: sanitizeModel(v.lastModel),
     };
   } catch {
     return null;

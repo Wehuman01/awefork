@@ -20,6 +20,7 @@ const composer: PersistedComposer = {
     ],
   },
   paneModels: { ses_2: { providerId: "glmp", modelId: "glm-5.3", variant: null } },
+  lastModel: { providerId: "glmp", modelId: "glm-5.3", variant: "high" },
 };
 
 describe("composer store", () => {
@@ -35,8 +36,8 @@ describe("composer store", () => {
 
   it("round-trips an empty composer (no draft, no picks)", async () => {
     const path = await tempComposerPath();
-    await writeComposer(path, { draft: null, paneModels: {} });
-    expect(await readComposer(path)).toEqual({ draft: null, paneModels: {} });
+    await writeComposer(path, { draft: null, paneModels: {}, lastModel: null });
+    expect(await readComposer(path)).toEqual({ draft: null, paneModels: {}, lastModel: null });
   });
 
   it("treats corrupted files as empty", async () => {
@@ -52,6 +53,7 @@ describe("composer store", () => {
       JSON.stringify({
         draft: { sessionId: "ses_1", atMessageId: 7, text: "留存的文本", attachments: ["junk"] },
         paneModels: { ses_2: { providerId: "x" }, ses_3: { providerId: "y", modelId: "m" } },
+        lastModel: { providerId: "z", modelId: "bad", variant: 3 },
       }),
       "utf8",
     );
@@ -64,6 +66,7 @@ describe("composer store", () => {
         attachments: [],
       },
       paneModels: { ses_3: { providerId: "y", modelId: "m", variant: null } },
+      lastModel: { providerId: "z", modelId: "bad", variant: null },
     });
   });
 
@@ -76,7 +79,7 @@ describe("composer store", () => {
 
   it("serializes concurrent writes so the last state wins cleanly", async () => {
     const path = await tempComposerPath();
-    const emptied: PersistedComposer = { draft: null, paneModels: {} };
+    const emptied: PersistedComposer = { draft: null, paneModels: {}, lastModel: null };
     // Without serialization both writes race the rename; the queue keeps
     // them ordered so the file never ends up mid-flight.
     await Promise.all([writeComposer(path, composer), writeComposer(path, emptied)]);

@@ -168,6 +168,7 @@ describe("composer persistence × backend switch", () => {
         attachments: [],
       },
       paneModels: {},
+      lastModel: null,
     };
     const h = await bootState({ composer: codexDraft });
     // Mid-story draft on opencode → sendDraft goes through the fork branch.
@@ -217,7 +218,7 @@ describe("composer persistence × backend switch", () => {
 
   it("filters restored pane model picks down to sessions that still exist", async () => {
     const h = await bootState({
-      composer: { draft: null, paneModels: { s1: MODEL, gone: MODEL } },
+      composer: { draft: null, paneModels: { s1: MODEL, gone: MODEL }, lastModel: null },
     });
     // Let the void-restore settle without arming the debounce flush.
     await vi.advanceTimersByTimeAsync(0);
@@ -320,5 +321,33 @@ describe("pane composer follows the selected session", () => {
     const h = await bootState({ messages: { s1: [] } });
 
     expect(h.mod.paneComposerModel.value).toBeNull();
+  });
+
+  it("falls back to the last hand-picked model for a fresh, model-less session", async () => {
+    const h = await bootState({
+      composer: { draft: null, paneModels: {}, lastModel: MODEL },
+      messages: { s1: [] },
+    });
+
+    expect(h.mod.paneComposerModel.value).toEqual(MODEL);
+  });
+
+  it("a hand-picked pane model becomes the fresh-session default; 默认模型 doesn't", async () => {
+    const h = await bootState({ messages: { s1: [] } });
+
+    h.mod.setPaneModel("s1", MODEL);
+    expect(h.store.lastModel).toEqual(MODEL);
+
+    // A deliberate 默认模型 is a per-session choice, not a new default.
+    h.mod.setPaneModel("s1", null);
+    expect(h.store.lastModel).toEqual(MODEL);
+
+    // The memory rides along on the next debounced sidecar flush (the IPC
+    // payload always carries an explicit variant field).
+    await vi.advanceTimersByTimeAsync(600);
+    expect(h.saves).toContainEqual({
+      backend: "opencode",
+      value: expect.objectContaining({ lastModel: { ...MODEL, variant: null } }),
+    });
   });
 });

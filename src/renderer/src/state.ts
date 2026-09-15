@@ -184,6 +184,12 @@ interface AppState {
   forkTagAsk: { parentSessionId: string; parentTitle: string; tags: string[] } | null;
   /** Model the pane composer will use next, per session; null = agent default. */
   paneModels: Record<string, ModelChoice | null>;
+  /**
+   * Last model the user hand-picked in any composer (null until one happens).
+   * Seeds brand-new sessions — no turns of their own to mirror — so the next
+   * fork or conversation starts where the last one left off.
+   */
+  lastModel: ModelChoice | null;
   /** Bumped to ask the canvas to center on a session's latest node. */
   focusRequest: { sessionId: string; nonce: number } | null;
   /**
@@ -228,7 +234,7 @@ const state = reactive<AppState>({
   booted: false,
   activeBackend: "opencode",
   backendList: [],
-  capabilities: { deleteMessage: true, attachments: true, fileChanges: true },
+  capabilities: { deleteMessage: true, attachments: true, fileChanges: true, exportBranch: true },
   sessions: [],
   trash: [],
   deletedToast: null,
@@ -265,6 +271,7 @@ const state = reactive<AppState>({
   draftSending: false,
   forkTagAsk: null,
   paneModels: {},
+  lastModel: null,
   focusRequest: null,
   fitRequest: null,
   turnJumpRequest: null,
@@ -488,13 +495,16 @@ export const paneTurn = computed<{ turn: Turn; index: number; total: number } | 
  * session — including a deliberate 默认模型 — always wins, otherwise the
  * composer mirrors the branch itself and shows the model and variant that
  * wrote the turn the pane is on. Selecting a session therefore selects its
- * setup with it, and only a hand-picked model ever overrides that.
+ * setup with it, and only a hand-picked model ever overrides that. A session
+ * with no model of its own yet (a fresh one, no turns so far) falls back to
+ * the last model the user picked anywhere, so it doesn't restart from the
+ * agent default every time.
  */
 export const paneComposerModel = computed<ModelChoice | null>(() => {
   const id = state.selectedId;
   if (!id) return null;
   if (id in state.paneModels) return state.paneModels[id] ?? null;
-  return paneTurn.value?.turn.model ?? null;
+  return paneTurn.value?.turn.model ?? state.lastModel;
 });
 
 /**
@@ -716,6 +726,8 @@ interface CompletionWatch {
   ticks: number;
   /** Last observed message-list fingerprint; a change is liveness. */
   signature: string;
+  /** Consecutive polls whose fetch itself failed (backend unreachable). */
+  misses: number;
 }
 
 const completionWatches = new Map<string, CompletionWatch>();
@@ -729,6 +741,13 @@ const WATCH_INTERVAL_MS = 1500;
 // that went fully silent (or a lost connection) can reach the cap; settling is
 // then the right backstop.
 const WATCH_MAX_TICKS = 160;
+// A dead backend (opencode killed mid-run) fails every poll fetch while the
+// reconnect loop keeps retrying the event stream. Waiting out the full 4-minute
+// cap leaves those sessions spinning "运行中" and undeletable for minutes after
+// the crash was obvious; ~30 s of consecutive fetch failures settles them as
+// failed instead. Recovery stays possible: a revived backend reconnects the
+// stream, and a still-running session's next delta re-lights it.
+const WATCH_UNREACHABLE_TICKS = 20;
 
 // One interval drives every watch. Parallel branches are the app's core move,
 // and an interval per session made N running sessions poll N times per tick;
@@ -1152,6 +1171,7 @@ function watchCompletion(backend: BackendId, sessionId: string, sentAt: number):
     sentAt,
     ticks: 0,
     signature: "",
+    misses: 0,
   });
   startWatchTicker();
 }
@@ -1171,10 +1191,23 @@ async function pollForCompletion(key: string): Promise<void> {
   // prompt's completion rows.
   const live = completionWatches.get(key);
   if (!live) return;
+  // The fetch itself failed: the backend is unreachable (crashed mid-run),
+  // so this poll carries no evidence either way. Count the streak and settle
+  // as failed once it's long enough to rule out a blip — see
+  // WATCH_UNREACHABLE_TICKS.
+  if (messages === null) {
+    live.misses += 1;
+    if (live.misses >= WATCH_UNREACHABLE_TICKS) {
+      stopWatch(live.backend, sessionId);
+      settleRun(live.backend, sessionId, true);
+    }
+    return;
+  }
+  live.misses = 0;
   // Message rows still appearing is liveness too — on opencode builds that
   // stream no deltas, this is the only progress signal the watchdog sees.
-  const last = messages?.[messages.length - 1];
-  const signature = `${messages?.length ?? 0}:${last?.id ?? ""}:${last?.completedAt ?? ""}`;
+  const last = messages[messages.length - 1];
+  const signature = `${messages.length}:${last?.id ?? ""}:${last?.completedAt ?? ""}`;
   if (signature !== live.signature) {
     live.ticks = 0;
     live.signature = signature;
@@ -1184,7 +1217,7 @@ async function pollForCompletion(key: string): Promise<void> {
   // run early and froze the turn at "(工具调用，无文本回复)" while the
   // follow-up step was still thinking — with no idle event ever coming on
   // this opencode build, nothing reloaded the final text.
-  const done = messages?.some(
+  const done = messages.some(
     (m) =>
       m.role === "assistant" &&
       m.completedAt !== null &&
@@ -2720,8 +2753,9 @@ export function openDraft(node: TurnNode): void {
     // Session tip: keep talking in place; a mid-story turn grows a fork.
     atMessageId: isSessionTip(node) ? null : node.messageId,
     text: "",
-    // Preselect the model that wrote the turn being forked from, when known.
-    model: node.kind === "turn" ? node.model : null,
+    // Preselect the model that wrote the turn being forked from, when known;
+    // a stub (no turns of its own) starts from the last model picked.
+    model: node.kind === "turn" ? node.model : state.lastModel,
     attachments: [],
   });
 }
@@ -2800,7 +2834,9 @@ export function setDraftText(text: string): void {
 }
 
 export function setDraftModel(model: ModelChoice | null): void {
-  if (state.draft) state.draft.model = model;
+  if (!state.draft) return;
+  state.draft.model = model;
+  rememberLastModel(model);
 }
 
 /** Swap the draft's reasoning-effort variant, keeping its model. */
@@ -2814,6 +2850,47 @@ export function setDraftAttachments(attachments: readonly DraftAttachment[]): vo
 
 export function dismissDraft(): void {
   state.draft = null;
+}
+
+/**
+ * Copy a branch out as a standalone native session — the same server-side
+ * primitive a fork uses, but detached: no lineage entry, no canvas branch, no
+ * inherited tags. The copy is a plain root session in its directory, openable
+ * and continuable by the backend's own tools (opencode TUI, another machine).
+ * `atMessageId` bounds the copy through that turn; null copies the whole
+ * session at its tip. The exported session lands selected, so the user sees
+ * exactly what got copied; undo hard-deletes the copy again.
+ */
+export async function exportSessionAt(
+  sessionId: string,
+  atMessageId: string | null,
+): Promise<void> {
+  const backend = state.activeBackend;
+  state.actionError = null;
+  try {
+    const exported = await window.awefork.exportSession(backend, sessionId, atMessageId);
+    const box = { id: exported.id };
+    await refreshSessions();
+    await selectSession(exported.id, { focus: true });
+    track({
+      backend,
+      kind: "exportSession",
+      label: `导出独立会话「${titleOf(sessionId)}」`,
+      undo: async () => {
+        await hardDeleteSession(backend, box.id);
+        return true;
+      },
+      redo: async () => {
+        const copy = await window.awefork.exportSession(backend, sessionId, atMessageId);
+        box.id = copy.id;
+        await refreshSessions();
+        if (backend === state.activeBackend) await selectSession(copy.id);
+        return true;
+      },
+    });
+  } catch (error) {
+    state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 // ── composer persistence ──────────────────────────────────────────────
@@ -2854,7 +2931,9 @@ function composerSnapshot(): PersistedComposer | null {
     if (model && state.sessions.some((s) => s.id === id)) paneModels[id] = model;
   }
   const draft = plainPersistedDraft();
-  return draft === null && Object.keys(paneModels).length === 0 ? null : { draft, paneModels };
+  return draft === null && Object.keys(paneModels).length === 0 && state.lastModel === null
+    ? null
+    : { draft, paneModels, lastModel: plainModel(state.lastModel) };
 }
 
 function scheduleComposerPersist(): void {
@@ -2925,6 +3004,7 @@ async function restoreComposer(): Promise<void> {
       if (state.sessions.some((s) => s.id === id)) paneModels[id] = model;
     }
     state.paneModels = paneModels;
+    state.lastModel = persisted?.lastModel ?? null;
     const draft = persisted?.draft ?? null;
     // An empty draft is nothing to hand back; a fresh openDraft is better.
     if (draft && draft.text.trim() !== "") {
@@ -3166,6 +3246,16 @@ export async function sendPrompt(
 /** Remember the model the pane composer should use for this session's next run. */
 export function setPaneModel(sessionId: string, model: ModelChoice | null): void {
   state.paneModels = { ...state.paneModels, [sessionId]: model };
+  rememberLastModel(model);
+}
+
+/**
+ * Track the last deliberate model pick for future fresh sessions. Only an
+ * actual model counts — picking 默认模型 is a per-session choice and must
+ * not overwrite what a new session should start from.
+ */
+function rememberLastModel(model: ModelChoice | null): void {
+  if (model) state.lastModel = { ...model };
 }
 
 /** Ask the canvas to fit the whole working set in view (command palette). */
@@ -3468,6 +3558,9 @@ function resetWorkspace(): void {
   state.models = [];
   modelsRequested = false;
   state.draft = null;
+  // Backend-specific like the draft: the incoming backend's own composer
+  // sidecar refills it during boot.
+  state.lastModel = null;
   state.focusRequest = null;
   state.composerFocusRequest = null;
   state.fitRequest = null;
