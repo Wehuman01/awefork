@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0
+
+A session's important turns stop drowning in the scroll: star any conversation as a key turn and the mark follows it across the workbench — a rose ring on the card, a rose dot on the minimap, a jump panel that lists them all. Forks can now carry their parent's tags, a squatted port can no longer keep opencode from connecting, and the sidebar session menu learned pin/unpin.
+
+### Highlights
+
+- **Key turn marks** — star any turn with ★ (card chip, pane header, or the turn's right-click menu): the card wears a rose ring and glow, the minimap grows a rose dot, and a ★ 关键节点 panel lists every mark in the graph for one-click jump. Marks are a pure overlay sidecar (`marks.json`) keyed by sessionId:messageId — agent storage is never touched.
+- **Tags inherit on fork** — forking asks whether the new branch should carry the parent's tags, with a per-session "remember this choice" switch (changeable later in the tag menu); a tag-menu action can also paint tags onto a whole fork subtree in one write.
+- **Pin/unpin in the session menu** — right-click a sidebar row for ★ 置顶 / 取消置顶 without hunting for the favorites shelf; the canvas right-click stays session-only.
+- **Refresh beside search** — the reload control moved out of the directory header into the search row and shows a spinning state while the list refreshes.
+- **opencode connects around a squatted port** — the hardcoded 4096 meant any other local tool holding it left awefork stuck at "opencode 未连接"; discovery now walks the env override, the last-good port, classic candidates, and any local LISTEN port that answers like opencode, remembers the winner for the next boot, and reuses a manually started server on any port. Silent foreign listeners can no longer stall a cold boot either: reuse and readiness probes carry their own 2s deadline, candidates are probed concurrently, and a missing CLI aborts before the port walk (on Windows, where npm shims hide ENOENT, the error no longer blames the last port tried). Codex is untouched (stdio app-server, no port).
+
+### Install
+
+This release ships notes only — no installers attached yet. Build them yourself with `npm run dist` (unsigned macOS arm64) or `npm run dist:win` (Windows x64); on first launch on macOS, right-click the app and choose Open (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
+
 ## v0.2.9
 
 Every management operation you make now has a history. Pins, tags, archives, directories, session create/clone/rename/delete all journal their inverse, so a ⌘Z after a season of clicking walks the workspace backward exactly the way you built it forward — and the sidebar grew up around it: a search bar with explicit scopes, unfamiliar case-insensitive body scans, caps you set, a clear button, a one-click way back to defaults, and directory rows you add and remove yourself. Search no longer shrugs when a query has no local hits.
