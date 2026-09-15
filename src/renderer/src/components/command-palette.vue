@@ -37,7 +37,6 @@ import type { SessionSummary } from "../../../shared/types";
 import { shortPath as shortDir } from "../format";
 import { paletteOpen, panels, togglePalette, togglePanel } from "../layout";
 import {
-  cloneSelectedSession,
   createSession,
   refreshSessions,
   requestCanvasFit,
@@ -79,13 +78,6 @@ const items = computed<PaletteItem[]>(() => {
       run: () => void createSession(),
     },
     { key: "act:fit", icon: "⛶", label: "适配视图", hint: "画布", run: requestCanvasFit },
-    {
-      key: "act:clone",
-      icon: "⎇",
-      label: "克隆当前分支",
-      hint: "checkpoint",
-      run: () => void cloneSelectedSession(),
-    },
     {
       key: "act:refresh",
       icon: "↻",

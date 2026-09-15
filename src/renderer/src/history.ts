@@ -27,7 +27,6 @@ export type HistoryKind =
   | "addDirectory"
   | "removeDirectory"
   | "createSession"
-  | "cloneSession"
   | "renameSession"
   | "deleteSession"
   | "sendPrompt"

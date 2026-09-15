@@ -1895,8 +1895,8 @@ let forkTagAskAnswer: ((choice: "inherit" | "skip" | "cancel") => void) | null =
 /**
  * Resolve tag inheritance for forking `sessionId` (rule B): no tags = never
  * inherit and never ask; a stored preference = honored silently; otherwise a
- * modal ask with a remember-this-session checkbox. Clone and mid-turn fork
- * both route through here BEFORE the fork fires.
+ * modal ask with a remember-this-session checkbox. A mid-turn fork routes
+ * through here BEFORE the fork fires.
  */
 function askForkTags(sessionId: string): Promise<ForkTagDecision> {
   const tags = tagsOf(sessionId);
@@ -2630,52 +2630,6 @@ export async function removeDirectory(directory: string): Promise<void> {
     undo: () => dirsAddOrThrow(backend, directory),
     redo: () => dirsRemoveFlow(backend, directory),
   });
-}
-
-/**
- * Fork the selected session at its latest state — a checkpoint branch holding
- * the full story with nothing prompted yet. Lands you in the clone.
- */
-export async function cloneSelectedSession(): Promise<void> {
-  const backend = state.activeBackend;
-  const sessionId = state.selectedId;
-  if (!sessionId || state.running[sessionId]) return;
-  state.actionError = null;
-  // Rule B ask (or stored preference) BEFORE the fork fires; dismissing the
-  // dialog cancels the clone — nothing has happened yet.
-  const decision = await askForkTags(sessionId);
-  if (decision.canceled) return;
-  // Captured at decision time: undo→redo replays exactly this list, whatever
-  // the parent's tags look like by then.
-  const inheritTags = decision.inherit ? [...tagsOf(sessionId)] : [];
-  let forked: SessionSummary;
-  try {
-    forked = await window.awefork.fork(backend, sessionId, null);
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
-  await inheritTagsOnFork(backend, forked.id, inheritTags);
-  const box = { id: forked.id };
-  track({
-    backend,
-    kind: "cloneSession",
-    label: `克隆会话「${titleOf(sessionId)}」`,
-    undo: async () => {
-      await hardDeleteSession(backend, box.id);
-      return true;
-    },
-    redo: async () => {
-      const f = await window.awefork.fork(backend, sessionId, null);
-      box.id = f.id;
-      await inheritTagsOnFork(backend, f.id, inheritTags);
-      await refreshSessions();
-      if (backend === state.activeBackend) await selectSession(f.id);
-      return true;
-    },
-  });
-  await refreshSessions();
-  await selectSession(forked.id, { focus: true });
 }
 
 /** Pure rename write + local title update; throws on failure. */
