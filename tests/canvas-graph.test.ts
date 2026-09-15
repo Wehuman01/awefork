@@ -146,6 +146,28 @@ describe("buildTurnGraph", () => {
     ]);
   });
 
+  it("draws nothing for a loaded turn-less root (a brand-new session)", () => {
+    const graph = buildTurnGraph({
+      sessions: [session("a", { title: "新会话" })],
+      lineage: {},
+      messages: { a: [] },
+    });
+
+    expect(graph.nodes).toEqual([]);
+    expect(graph.edges).toEqual([]);
+  });
+
+  it("keeps the stub for an unloaded root (loading placeholder) and for empty forks", () => {
+    const graph = buildTurnGraph({
+      sessions: [session("a"), session("b", { origin: "fork", createdAt: 500 })],
+      lineage: { b: fork("a", null) },
+      messages: { b: [] }, // a's messages not loaded yet
+    });
+
+    const stubs = graph.nodes.filter((n) => n.kind === "stub");
+    expect(stubs.map((n) => n.sessionId).sort()).toEqual(["a", "b"]);
+  });
+
   it("stacks sibling forks below each other without collisions", () => {
     const graph = buildTurnGraph({
       sessions: [

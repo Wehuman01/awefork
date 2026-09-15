@@ -6,8 +6,10 @@ import type { ChatMessage, LineageMap, ModelChoice, SessionSummary } from "./typ
  *
  * A node is a turn (user prompt + its reply) or a "stub" (a session with no
  * turns of its own — a fresh fork, or a session whose messages failed to
- * load). Edges: "sequence" chains turns inside a session; "fork" connects the
- * forked-from turn to the first turn the child branch added.
+ * load). A brand-new root session (loaded, no turns) renders nothing until
+ * its first turn exists. Edges: "sequence" chains turns inside a session;
+ * "fork" connects the forked-from turn to the first turn the child branch
+ * added.
  *
  * Forked sessions inherit a copy of the parent's history, so only the child's
  * turns AFTER the inherited prefix are rendered — otherwise every branch
@@ -224,21 +226,30 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     const fresh = turns.slice(sharedCount.get(session.id) ?? 0);
 
     if (fresh.length === 0) {
-      const stub = addNode(session, startCol, fromRow, {
-        id: `${session.id}::stub`,
-        kind: "stub",
-        messageId: null,
-        title: session.title || "空会话",
-        preview: "",
-        toolNames: [],
-        modelIds: [],
-        model: null,
-        createdAt: session.createdAt,
-        durationMs: null,
-        outputTokens: 0,
-        error: null,
-      });
-      connect(sourceNodeId, stub.id, edgeKind);
+      // A loaded, turn-less root is a brand-new session: nothing to draw
+      // until its first turn exists, so the canvas stays clean for the
+      // composer-first flow. Other empty sessions keep the stub — a forked
+      // branch's stub marks where the branch will grow, and an unloaded
+      // root's stub is the loading placeholder.
+      const isEmptyRoot =
+        parentOf.get(session.id) === null && options.messages[session.id] !== undefined;
+      if (!isEmptyRoot) {
+        const stub = addNode(session, startCol, fromRow, {
+          id: `${session.id}::stub`,
+          kind: "stub",
+          messageId: null,
+          title: session.title || "空会话",
+          preview: "",
+          toolNames: [],
+          modelIds: [],
+          model: null,
+          createdAt: session.createdAt,
+          durationMs: null,
+          outputTokens: 0,
+          error: null,
+        });
+        connect(sourceNodeId, stub.id, edgeKind);
+      }
     }
 
     let previousId = sourceNodeId;

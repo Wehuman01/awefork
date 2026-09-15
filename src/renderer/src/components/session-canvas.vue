@@ -242,6 +242,14 @@
       v-else-if="graph.nodes.length === 0 && !store.booted && !store.loadingMessages"
       class="canvas-loading"
     >正在连接 {{ backendLabel }}…</div>
+    <div
+      v-else-if="graph.nodes.length === 0 && !store.loadingMessages && selectedSessionEmpty"
+      class="canvas-empty"
+    >
+      <div class="empty-mascot">✨</div>
+      <p class="empty-title">这场对话还是空的</p>
+      <p class="empty-sub">在右侧写下第一条消息，发出后它会作为第一个节点出现在这里</p>
+    </div>
     <div v-else-if="graph.nodes.length === 0 && !store.loadingMessages" class="canvas-empty">
       <div class="empty-mascot">🍑</div>
       <p class="empty-title">这个项目还没有会话</p>
@@ -352,6 +360,18 @@ const panning = ref(false);
 
 const graph = computed(() => turnGraph.value);
 const selectedTurnId = computed(() => store.selectedTurnId);
+
+/**
+ * Zero canvas nodes because the selected session itself is empty (loaded,
+ * message-less): a brand-new conversation waiting for its first prompt —
+ * distinct from a project with no sessions at all.
+ */
+const selectedSessionEmpty = computed(() => {
+  const id = store.selectedId;
+  if (!id) return false;
+  const messages = store.messagesBySession[id];
+  return messages != null && messages.length === 0;
+});
 
 /** Backend whose canvas is (or is coming) on screen — drives the connect /
  *  offline copy, which is otherwise opencode-specific by accident of birth. */
