@@ -374,6 +374,9 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="togglePinFromMenu">
+        {{ menuPinned ? "★ 取消置顶" : "☆ 置顶" }}
+      </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
@@ -981,6 +984,18 @@ function openMenu(session: SessionSummary, x: number, y: number, fromCanvas = fa
     directory: session.directory,
   };
   placeAndFocusMenu();
+}
+
+const menuPinned = computed(() => {
+  const active = menu.value;
+  return active != null && store.pins.includes(active.sessionId);
+});
+
+function togglePinFromMenu(): void {
+  const active = menu.value;
+  if (!active) return;
+  closeMenu();
+  void togglePin(active.sessionId);
 }
 
 // Canvas cards right-click into this same menu: they only know the session,
