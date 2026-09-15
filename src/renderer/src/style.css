@@ -2128,12 +2128,8 @@ mark.hl {
   color: var(--mark-deep);
 }
 
-/* marked cards keep the star visible without hover, but stay neutral: the
-   rose ring on the card carries the mark, and a filled chip would cover the
-   title behind it */
-.turn.marked .mark-chip {
-  opacity: 1;
-}
+/* the rose ring announces the mark; the star hover-reveals like the delete
+   chip, so nothing ever sits over the title */
 
 /* when retry is also showing, shift mark left of it */
 .turn:has(.retry-chip) .mark-chip {
