@@ -95,6 +95,9 @@ const api: AweforkApi = {
   pins: (backend: BackendId): Promise<string[]> => ipcRenderer.invoke("awefork:pins", backend),
   togglePin: (backend: BackendId, sessionId: string): Promise<string[]> =>
     ipcRenderer.invoke("awefork:togglePin", backend, sessionId),
+  marks: (backend: BackendId): Promise<string[]> => ipcRenderer.invoke("awefork:marks", backend),
+  toggleMark: (backend: BackendId, sessionId: string, messageId: string): Promise<string[]> =>
+    ipcRenderer.invoke("awefork:toggleMark", backend, sessionId, messageId),
   tags: (backend: BackendId): Promise<TagStore> => ipcRenderer.invoke("awefork:tags", backend),
   setSessionTags: (backend: BackendId, sessionId: string, tags: string[]): Promise<TagStore> =>
     ipcRenderer.invoke("awefork:setSessionTags", backend, sessionId, tags),

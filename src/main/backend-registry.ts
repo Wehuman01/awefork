@@ -39,7 +39,16 @@ const execFileAsync = promisify(execFile);
  * fallbacks when the earlier ones are held by a non-opencode process.
  */
 const OPENCODE_PORT_CANDIDATES = [4096, 4097, 4098, 14096];
-const STORE_BASES = ["lineage", "pins", "tags", "trash", "archive", "composer", "dirs"] as const;
+const STORE_BASES = [
+  "lineage",
+  "pins",
+  "marks",
+  "tags",
+  "trash",
+  "archive",
+  "composer",
+  "dirs",
+] as const;
 type StoreBase = (typeof STORE_BASES)[number];
 type StorePaths = Record<StoreBase, string>;
 

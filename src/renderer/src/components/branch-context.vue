@@ -18,6 +18,14 @@
       </div>
       <div class="ctx-nav">
         <button
+          v-if="paneTurnNode"
+          type="button"
+          class="nav-btn"
+          :class="{ 'mark-on': isTurnMarked(paneTurnNode.id) }"
+          :title="isTurnMarked(paneTurnNode.id) ? '取消关键标记' : '标记为关键对话'"
+          @click="toggleMark"
+        >{{ isTurnMarked(paneTurnNode.id) ? "★" : "☆" }}</button>
+        <button
           v-if="pane?.turn.error"
           type="button"
           class="nav-btn"
@@ -117,6 +125,7 @@ import { formatDuration, formatTokens } from "../format";
 import {
   abortRun,
   activeChain,
+  isTurnMarked,
   paneComposerModel,
   paneMessages,
   paneTurn,
@@ -130,12 +139,27 @@ import {
   tagBg,
   tagColor,
   tagsOf,
+  toggleTurnMark,
+  turnGraph,
 } from "../state";
 import ChatInput from "./chat-input.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import MessageList from "./message-list.vue";
 
 const pane = computed(() => paneTurn.value);
+
+/** The canvas node backing the pane's current turn — the ★ mark target. */
+const paneTurnNode = computed(() => {
+  const current = pane.value;
+  if (!current || !store.selectedId || !current.turn.messageId) return null;
+  const id = `${store.selectedId}:${current.turn.messageId}`;
+  return turnGraph.value.nodes.find((n) => n.id === id) ?? null;
+});
+
+function toggleMark(): void {
+  const node = paneTurnNode.value;
+  if (node) void toggleTurnMark(node);
+}
 
 /** The selected session's tags — identity chips under the pane header. */
 const selectedTags = computed(() => (store.selectedId ? tagsOf(store.selectedId) : []));

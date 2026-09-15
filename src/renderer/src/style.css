@@ -23,6 +23,11 @@
   --shadow-card: 0 6px 18px rgba(196, 138, 92, 0.12);
   --shadow-lift: 0 10px 24px rgba(196, 138, 92, 0.18);
   --shadow-pop: 0 4px 10px rgba(255, 138, 92, 0.35);
+  /* key-turn marks: rose, never used by selected/hit/running/subtree */
+  --mark: #e11d48;
+  --mark-soft: #ffe4e6;
+  --mark-border: #fb7185;
+  --mark-deep: #be123c;
 }
 
 * {
@@ -1756,6 +1761,34 @@ mark.hl {
     var(--shadow-lift);
 }
 
+/* key-turn mark: rose ring + wash; stays readable when the path dims it */
+.turn.marked {
+  border-color: var(--mark);
+  border-width: 2px;
+  background-color: color-mix(in srgb, var(--mark-soft) 55%, var(--card));
+  box-shadow:
+    0 0 0 4px rgba(225, 29, 72, 0.22),
+    var(--shadow-lift);
+}
+
+.turn.marked.dimmed {
+  opacity: 0.85;
+}
+
+/* selected + marked: keep both rings — peach outer, rose inner border */
+.turn.marked.selected {
+  border-color: var(--mark);
+  box-shadow:
+    0 0 0 4px rgba(225, 29, 72, 0.22),
+    0 0 0 8px var(--primary-soft),
+    var(--shadow-lift);
+}
+
+/* a hit's butter ring still wins the border on shared cards, but the wash stays */
+.turn.hit.marked {
+  border-color: var(--butter);
+}
+
 .turn.stub {
   border-style: dashed;
   border-color: var(--primary-border);
@@ -1972,6 +2005,53 @@ mark.hl {
   opacity: 1;
   background: #fdeceb;
   color: #c4544a;
+}
+
+/* hover-reveal key-turn mark; left of the delete chip */
+.mark-chip {
+  position: absolute;
+  right: 36px;
+  top: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    color 0.15s;
+  z-index: 2;
+}
+
+.turn:hover .mark-chip {
+  opacity: 0.75;
+}
+
+.mark-chip:hover {
+  opacity: 1;
+  background: var(--mark-soft);
+  color: var(--mark-deep);
+}
+
+/* marked cards keep the star readable without hover */
+.turn.marked .mark-chip {
+  opacity: 1;
+  background: var(--mark);
+  color: #fff;
+}
+
+.turn.marked .mark-chip:hover {
+  background: var(--mark-deep);
+}
+
+/* when retry is also showing, shift mark left of it */
+.turn:has(.retry-chip) .mark-chip {
+  right: 64px;
 }
 
 .stub-hint {
@@ -2276,6 +2356,12 @@ mark.hl {
   border-color: #d9a52e;
 }
 
+/* key marks: above the active path, below a live run */
+.mm-node.marked {
+  background: var(--mark);
+  border-color: var(--mark-deep);
+}
+
 /* last so a running node stays visible even when on the active path */
 .mm-node.running {
   background: var(--mint);
@@ -2406,6 +2492,19 @@ mark.hl {
   border-color: var(--primary-border);
   color: var(--primary-deep);
   background: var(--primary-soft);
+}
+
+/* key-turn mark toggle in the pane header */
+.nav-btn.mark-on {
+  background: var(--mark);
+  border-color: var(--mark);
+  color: #fff;
+}
+
+.nav-btn.mark-on:hover:not(:disabled) {
+  background: var(--mark-deep);
+  border-color: var(--mark-deep);
+  color: #fff;
 }
 
 .nav-btn:disabled {
@@ -3492,6 +3591,136 @@ code.md-code {
 .panel-pill:hover {
   color: var(--primary-deep);
   border-color: var(--primary-border);
+}
+
+.panel-pill.marks {
+  color: var(--mark-deep);
+  border-color: var(--mark-border);
+  background: rgba(255, 228, 230, 0.92);
+}
+
+.panel-pill.marks:hover {
+  border-color: var(--mark);
+  color: var(--mark-deep);
+}
+
+.marks-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--mark);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+}
+
+/* key-turn marks jump list */
+
+.marks-panel {
+  width: 300px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 253, 251, 0.96);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--mark-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.marks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--mark-deep);
+  border-bottom: 1px solid var(--line);
+}
+
+.marks-head button {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+}
+
+.marks-head button:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.marks-list {
+  overflow: auto;
+  padding: 6px;
+  min-height: 0;
+}
+
+.mark-row {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+.mark-row:hover {
+  background: var(--mark-soft);
+  border-color: var(--mark-border);
+}
+
+.mark-star {
+  color: var(--mark);
+  font-size: 12px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.mark-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mark-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mark-preview {
+  font-size: 11px;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mark-meta {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.marks-empty {
+  padding: 18px 14px 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+  line-height: 1.5;
 }
 
 /* story search */

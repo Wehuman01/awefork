@@ -14,6 +14,7 @@ import {
 } from "../shared/file-changes.js";
 import { readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
+import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
 import {
   deleteTag,
@@ -66,7 +67,7 @@ import { downloadAndInstallUpdate } from "./update-install.js";
  *   renameSession(backend, id, title) -> void
  *   openSessionTerminal(backend, id) -> {ok, error?}  TUI in a system terminal
  * Overlay-store channels (per-backend files, no adapter spawn):
- *   pins / togglePin / tags / setSessionTags / setTagColor /
+ *   pins / togglePin / marks / toggleMark / tags / setSessionTags / setTagColor /
  *   deleteTag / trash / trashAdd / trashRemove /
  *   archive / archiveAdd / archiveRemove / dirs / dirsAdd / dirsRemove /
  *   composer / saveComposer — same
@@ -200,6 +201,7 @@ export function registerIpc(registry: BackendRegistry): void {
       );
       // Tags outlive nothing: the session is gone, prune the label too.
       void pruneTags(registry.storePaths(id).tags, sessionId).catch(() => {});
+      void pruneSessionMarks(registry.storePaths(id).marks, sessionId).catch(() => {});
       return prunePin(registry.storePaths(id).pins, sessionId);
     },
   );
@@ -253,8 +255,11 @@ export function registerIpc(registry: BackendRegistry): void {
       sessionId: string,
       messageId: string,
     ) => {
-      const adapter = await withAdapter(storeBackend(backend));
+      const id = storeBackend(backend);
+      const adapter = await withAdapter(id);
       await adapter.deleteMessage(sessionId, messageId);
+      // The mark pointed at a turn that no longer exists; drop it with the row.
+      void pruneTurnMark(registry.storePaths(id).marks, sessionId, messageId).catch(() => {});
     },
   );
 
@@ -311,6 +316,16 @@ export function registerIpc(registry: BackendRegistry): void {
     "awefork:togglePin",
     (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string) =>
       togglePin(registry.storePaths(storeBackend(backend)).pins, sessionId),
+  );
+
+  ipcMain.handle("awefork:marks", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
+    readMarks(registry.storePaths(storeBackend(backend)).marks),
+  );
+
+  ipcMain.handle(
+    "awefork:toggleMark",
+    (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string, messageId: string) =>
+      toggleMark(registry.storePaths(storeBackend(backend)).marks, sessionId, messageId),
   );
 
   ipcMain.handle("awefork:tags", async (_event: IpcMainInvokeEvent, backend: BackendId) =>

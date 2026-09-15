@@ -424,6 +424,7 @@ export function installMockAdapter(): void {
     });
 
   let pins: string[] = [];
+  let marks: string[] = [];
   let trash: TrashEntry[] = [];
   let archive: ArchiveState = { sessions: [], directories: [] };
   // Hand-added directories keep their group here too; the browser tab can't
@@ -543,6 +544,7 @@ export function installMockAdapter(): void {
       messages.delete(sessionId);
       delete lineage[sessionId];
       pins = pins.filter((id) => id !== sessionId);
+      marks = marks.filter((k) => !k.startsWith(`${sessionId}:`));
       const { [sessionId]: _goneTags, ...keptTags } = tagMap;
       void _goneTags;
       tagMap = keptTags;
@@ -553,6 +555,7 @@ export function installMockAdapter(): void {
       const list = ensureMessages(sessionId);
       const index = list.findIndex((m) => m.id === messageId);
       if (index >= 0) list.splice(index, 1);
+      marks = marks.filter((k) => k !== `${sessionId}:${messageId}`);
     },
     prompt: async (_backend, sessionId, text, model, attachments) => {
       promptSeq += 1;
@@ -681,6 +684,12 @@ export function installMockAdapter(): void {
         ? pins.filter((id) => id !== sessionId)
         : [...pins, sessionId];
       return pins;
+    },
+    marks: async () => marks,
+    toggleMark: async (_backend, sessionId, messageId) => {
+      const key = `${sessionId}:${messageId}`;
+      marks = marks.includes(key) ? marks.filter((k) => k !== key) : [...marks, key];
+      return marks;
     },
     dirs: async () => knownDirs,
     dirsAdd: async (_backend, directory) => {

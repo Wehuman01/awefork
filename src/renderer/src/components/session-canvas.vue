@@ -48,6 +48,7 @@
           dimmed: isDimmed(node),
           descendant: isSubtreeNode(node),
           hit: searchHitIds.has(node.id),
+          marked: isTurnMarked(node.id),
         }"
         :style="{
           left: `${node.x}px`,
@@ -77,6 +78,14 @@
           :title="isTurnDelete(node) ? '删除这个回合（更早的对话保留）' : '删除这个会话（整条分支故事）'"
           @click.stop="removeNode(node)"
         >🗑</button>
+        <button
+          v-if="node.kind === 'turn' && node.messageId"
+          type="button"
+          class="mark-chip"
+          :class="{ on: isTurnMarked(node.id) }"
+          :title="isTurnMarked(node.id) ? '取消关键标记' : '标记为关键对话'"
+          @click.stop="toggleTurnMark(node)"
+        >{{ isTurnMarked(node.id) ? "★" : "☆" }}</button>
         <button
           v-if="node.kind === 'turn' && node.error"
           type="button"
@@ -250,6 +259,7 @@
     <div class="canvas-panels" @mousedown.stop @wheel.stop>
       <StorySearch @jump="centerOnNode" />
       <BranchDigest @jump="centerOnNode" />
+      <MarksPanel @jump="centerOnNode" />
     </div>
 
     <div
@@ -274,6 +284,7 @@
             running: isNodeRunning(n),
             recent: isNodeRecent(n),
             hit: searchHitIds.has(n.id),
+            marked: isTurnMarked(n.id),
           }"
           :style="{ ...mmNodeStyle(n), '--recent-alpha': recentAlpha(n) }"
         ></div>
@@ -302,6 +313,7 @@ import {
   forkedFromSelection,
   isSessionTip,
   isTurnDelete,
+  isTurnMarked,
   openDraft,
   recentAlphaFor,
   requestSessionMenu,
@@ -316,9 +328,11 @@ import {
   storySearchHits,
   tagColor,
   tagsOf,
+  toggleTurnMark,
   turnGraph,
 } from "../state";
 import BranchDigest from "./branch-digest.vue";
+import MarksPanel from "./marks-panel.vue";
 import ModelPicker from "./model-picker.vue";
 import StorySearch from "./story-search.vue";
 import VariantPicker from "./variant-picker.vue";
@@ -845,13 +859,15 @@ function mmNodeStyle(node: TurnNode): Record<string, string> {
 }
 
 /** Paint order for overlapping minimap dots: plain → stub → subtree → hit →
- *  active path → running, so the states a user is hunting for stay visible. */
+ *  active path → mark → running, so the states a user is hunting for stay
+ *  visible. */
 const mmNodes = computed(() =>
   [...graph.value.nodes].sort((a, b) => mmNodeRank(a) - mmNodeRank(b)),
 );
 
 function mmNodeRank(node: TurnNode): number {
-  if (isNodeRunning(node)) return 5;
+  if (isNodeRunning(node)) return 6;
+  if (isTurnMarked(node.id)) return 5;
   if (activePathIds.value.has(node.id)) return 4;
   if (searchHitIds.value.has(node.id)) return 3;
   if (childTurnIds.value.has(node.id)) return 2;

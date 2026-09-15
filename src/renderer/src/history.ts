@@ -14,6 +14,7 @@ import type { BackendId } from "../../shared/backend";
 
 export type HistoryKind =
   | "pin"
+  | "mark"
   | "tags"
   | "tagColor"
   | "tagDelete"

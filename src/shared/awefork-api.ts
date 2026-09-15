@@ -140,6 +140,12 @@ export interface AweforkApi {
   ): Promise<{ ok: boolean; error?: string }>;
   pins(backend: BackendId): Promise<string[]>;
   togglePin(backend: BackendId, sessionId: string): Promise<string[]>;
+  /**
+   * Key-turn marks (marks.json): `sessionId:messageId` keys the user starred.
+   * Same overlay pattern as pins; keys match canvas turn node ids.
+   */
+  marks(backend: BackendId): Promise<string[]>;
+  toggleMark(backend: BackendId, sessionId: string, messageId: string): Promise<string[]>;
   /** Session tags (tags.json sidecar): sessions map + per-tag color hues. */
   tags(backend: BackendId): Promise<TagStore>;
   /** Replace one session's tags (empty clears it); returns the whole store. */

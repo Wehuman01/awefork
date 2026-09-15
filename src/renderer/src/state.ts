@@ -98,6 +98,11 @@ interface AppState {
   /** Session ids the user starred (persisted in pins.json). */
   pins: string[];
   /**
+   * Key-turn marks: `sessionId:messageId` keys (persisted in marks.json).
+   * Same overlay as pins; keys match canvas turn node ids.
+   */
+  marks: string[];
+  /**
    * The user's session labels, e.g. 执行 / 实验设计 / 咨询 (persisted in
    * tags.json as sessionId → ordered tag names). Pure awefork overlay like
    * pins: the sessions themselves keep living in the agent backend.
@@ -216,6 +221,7 @@ const state = reactive<AppState>({
   deletedToast: null,
   lineage: {},
   pins: [],
+  marks: [],
   tags: {},
   tagColors: {},
   tagDeletedToast: null,
@@ -765,6 +771,11 @@ async function bootBackend(backend: BackendId): Promise<void> {
     state.pins = await window.awefork.pins(backend);
   } catch {
     state.pins = [];
+  }
+  try {
+    state.marks = await window.awefork.marks(backend);
+  } catch {
+    state.marks = [];
   }
   try {
     const store = await window.awefork.tags(backend);
@@ -1455,6 +1466,15 @@ function applyPins(backend: BackendId, pins: string[]): void {
   if (snap) snap.pins = pins;
 }
 
+function applyMarks(backend: BackendId, marks: string[]): void {
+  if (backend === state.activeBackend) {
+    state.marks = marks;
+    return;
+  }
+  const snap = workspaceCache.get(backend);
+  if (snap) snap.marks = marks;
+}
+
 function applyArchive(backend: BackendId, archive: ArchiveState): void {
   if (backend === state.activeBackend) {
     state.archive = archive;
@@ -1526,6 +1546,50 @@ export async function togglePin(sessionId: string): Promise<void> {
     label: `${wasPinned ? "取消置顶" : "置顶"}「${titleOf(sessionId)}」`,
     undo: () => togglePinOrThrow(backend, sessionId),
     redo: () => togglePinOrThrow(backend, sessionId),
+  });
+}
+
+// ── key-turn marks (sessionId:messageId) ─────────────────────────────
+
+/** True when this turn node is marked as a key conversation. */
+export function isTurnMarked(nodeId: string): boolean {
+  return state.marks.includes(nodeId);
+}
+
+/** Every marked turn node currently on the canvas, graph order. */
+export const markedTurnNodes = computed<TurnNode[]>(() => {
+  if (state.marks.length === 0) return [];
+  const set = new Set(state.marks);
+  return turnGraph.value.nodes.filter((n) => n.kind === "turn" && set.has(n.id));
+});
+
+async function toggleMarkOrThrow(
+  backend: BackendId,
+  sessionId: string,
+  messageId: string,
+): Promise<boolean> {
+  const marks = await window.awefork.toggleMark(backend, sessionId, messageId);
+  applyMarks(backend, marks);
+  return true;
+}
+
+export async function toggleTurnMark(node: TurnNode): Promise<void> {
+  if (node.kind !== "turn" || !node.messageId) return;
+  const backend = state.activeBackend;
+  const key = node.id;
+  const wasMarked = state.marks.includes(key);
+  try {
+    await toggleMarkOrThrow(backend, node.sessionId, node.messageId);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  track({
+    backend,
+    kind: "mark",
+    label: `${wasMarked ? "取消关键标记" : "标记关键对话"}「${truncate(node.title)}」`,
+    undo: () => toggleMarkOrThrow(backend, node.sessionId, node.messageId ?? ""),
+    redo: () => toggleMarkOrThrow(backend, node.sessionId, node.messageId ?? ""),
   });
 }
 
@@ -2133,6 +2197,12 @@ export async function deleteTurn(node: TurnNode): Promise<void> {
     });
   }
   if (state.selectedTurnId === node.id) state.selectedTurnId = null;
+  // IPC already pruned the sidecar; drop the key from the live map too so the
+  // marks panel doesn't keep a ghost row until the next boot.
+  const markKey = node.id;
+  if (state.marks.includes(markKey)) {
+    state.marks = state.marks.filter((k) => k !== markKey);
+  }
   // Show what the server actually has now, whether the delete fully landed
   // or stopped halfway; the session's updatedAt changed either way.
   await loadSessionMessages(sessionId);
@@ -2190,6 +2260,11 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
     // Main prunes the tags sidecar with the delete; mirror it locally so the
     // filter shelf and right-click menu don't offer a dead session's labels.
     removeLocalSessionTags(sessionId);
+    // Same for key-turn marks: drop every key of this session from the live map.
+    applyMarks(
+      backend,
+      state.marks.filter((k) => !k.startsWith(`${sessionId}:`)),
+    );
     const { [sessionId]: goneMessages, ...keptMessages } = state.messagesBySession;
     void goneMessages;
     state.messagesBySession = keptMessages;
@@ -3074,6 +3149,7 @@ interface WorkspaceSnapshot {
   sessions: SessionSummary[];
   lineage: Record<string, ForkRecord>;
   pins: string[];
+  marks: string[];
   tags: Record<string, string[]>;
   tagColors: Record<string, number>;
   trash: string[];
@@ -3096,6 +3172,7 @@ function parkWorkspace(backend: BackendId): void {
     sessions: [...state.sessions],
     lineage: { ...state.lineage },
     pins: [...state.pins],
+    marks: [...state.marks],
     tags: { ...state.tags },
     tagColors: { ...state.tagColors },
     trash: [...state.trash],
@@ -3127,6 +3204,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.sessions = snapshot.sessions;
   state.lineage = snapshot.lineage;
   state.pins = snapshot.pins;
+  state.marks = snapshot.marks;
   state.tags = snapshot.tags;
   state.tagColors = snapshot.tagColors;
   state.trash = snapshot.trash;
@@ -3186,6 +3264,7 @@ function resetWorkspace(): void {
   state.sessions = [];
   state.lineage = {};
   state.pins = [];
+  state.marks = [];
   state.tags = {};
   state.tagColors = {};
   state.tagDeletedToast = null;
