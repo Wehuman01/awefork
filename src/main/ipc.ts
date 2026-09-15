@@ -1,6 +1,7 @@
 import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
 import { readArchive, setArchived } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
+import { canonicalDirectory } from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
 import { addDir, readDirs, removeDir } from "../shared/dirs-store.js";
@@ -60,6 +61,8 @@ import { downloadAndInstallUpdate } from "./update-install.js";
  *   messageAttachments(backend, session, message) -> PromptAttachment[] (retry prefill)
  *   createSession(backend, directory?) -> SessionSummary
  *   fork(backend, id, atMessageId | null) -> SessionSummary (turn-preserving)
+ *   exportSession(backend, id, atMessageId | null) -> SessionSummary
+ *                           standalone native copy, no lineage recorded
  *   deleteSession(backend, id) -> string[]          delete, pruned pins back
  *   deleteMessage(backend, session, message) -> void (native DELETE)
  *   prompt(backend, id, text, model, attachments?) -> void
@@ -184,6 +187,26 @@ export function registerIpc(registry: BackendRegistry): void {
     ) => {
       const adapter = await withAdapter(storeBackend(backend));
       return adapter.fork(sessionId, atMessageId);
+    },
+  );
+
+  // Standalone copy of a branch: same native fork primitive, no lineage
+  // record — the exported session lands as a plain root session. Rejects on
+  // backends whose fork linkage lives in the backend itself (capabilities).
+  ipcMain.handle(
+    "awefork:exportSession",
+    async (
+      _event: IpcMainInvokeEvent,
+      backend: BackendId,
+      sessionId: string,
+      atMessageId: string | null,
+    ) => {
+      const id = storeBackend(backend);
+      const adapter = await withAdapter(id);
+      if (!registry.capabilities(id).exportBranch) {
+        throw new Error("这个后端不支持导出独立会话");
+      }
+      return adapter.exportSession(sessionId, atMessageId);
     },
   );
 
@@ -380,38 +403,65 @@ export function registerIpc(registry: BackendRegistry): void {
       removeTrashEntry(registry.storePaths(storeBackend(backend)).trash, sessionId),
   );
 
-  ipcMain.handle("awefork:archive", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
-    readArchive(registry.storePaths(storeBackend(backend)).archive),
-  );
+  // Archive keys on directory paths canonicalize on the way in and out, so a
+  // hidden project stays hidden however its sessions report their directory.
+  ipcMain.handle("awefork:archive", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
+    const archive = await readArchive(registry.storePaths(storeBackend(backend)).archive);
+    return {
+      ...archive,
+      directories: await Promise.all(
+        archive.directories.map(async (entry) => ({
+          ...entry,
+          path: await canonicalDirectory(entry.path),
+        })),
+      ),
+    };
+  });
 
   ipcMain.handle(
     "awefork:archiveAdd",
     async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) =>
-      setArchived(registry.storePaths(storeBackend(backend)).archive, kind, key, true),
+      setArchived(
+        registry.storePaths(storeBackend(backend)).archive,
+        kind,
+        kind === "directory" ? await canonicalDirectory(key) : key,
+        true,
+      ),
   );
 
   ipcMain.handle(
     "awefork:archiveRemove",
     async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) =>
-      setArchived(registry.storePaths(storeBackend(backend)).archive, kind, key, false),
+      setArchived(
+        registry.storePaths(storeBackend(backend)).archive,
+        kind,
+        kind === "directory" ? await canonicalDirectory(key) : key,
+        false,
+      ),
   );
 
   // Directories the user registered by hand (＋ 新目录): they render as a
-  // sidebar group even before the first conversation exists there.
-  ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
-    readDirs(registry.storePaths(storeBackend(backend)).dirs),
-  );
+  // sidebar group even before the first conversation exists there. Stored and
+  // served canonicalized, so a hand-added spelling matches the session rows'
+  // directories however the shell reported them.
+  ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
+    const dirs = await readDirs(registry.storePaths(storeBackend(backend)).dirs);
+    return Promise.all(dirs.map((dir) => canonicalDirectory(dir)));
+  });
 
   ipcMain.handle(
     "awefork:dirsAdd",
     async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
-      addDir(registry.storePaths(storeBackend(backend)).dirs, directory),
+      addDir(registry.storePaths(storeBackend(backend)).dirs, await canonicalDirectory(directory)),
   );
 
   ipcMain.handle(
     "awefork:dirsRemove",
     async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
-      removeDir(registry.storePaths(storeBackend(backend)).dirs, directory),
+      removeDir(
+        registry.storePaths(storeBackend(backend)).dirs,
+        await canonicalDirectory(directory),
+      ),
   );
 
   // The unsent draft's crash-recovery sidecar, one file per backend — the

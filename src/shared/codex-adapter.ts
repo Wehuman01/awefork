@@ -1,3 +1,4 @@
+import { canonicalizeSessionDirectories } from "./canonical-paths.js";
 import { recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
@@ -403,7 +404,11 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         threads.push(...(page.data ?? []));
         cursor = page.nextCursor ?? null;
       } while (cursor);
-      return threads.map(mapThread).sort((a, b) => b.updatedAt - a.updatedAt);
+      // Same once-per-listing canonicalization as the opencode side: thread
+      // cwds arrive as the shell spelled them, symlink variants included.
+      return canonicalizeSessionDirectories(
+        threads.map(mapThread).sort((a, b) => b.updatedAt - a.updatedAt),
+      );
     },
 
     async messages(sessionId) {
@@ -493,6 +498,13 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         createdAt: summary.createdAt,
       });
       return { ...summary, origin: "fork", parentSessionId: sessionId };
+    },
+
+    // A codex fork's parent linkage lives in codex itself (thread.forkedFrom),
+    // so a detached copy cannot be produced — the renderer hides the export
+    // affordance (capabilities.exportBranch === false); this throws if reached.
+    async exportSession() {
+      throw new Error("codex does not support exporting a detached session");
     },
 
     async deleteSession(sessionId) {

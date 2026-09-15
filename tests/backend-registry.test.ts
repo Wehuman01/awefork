@@ -513,11 +513,13 @@ describe("capabilities and store paths", () => {
       deleteMessage: false,
       attachments: false,
       fileChanges: false,
+      exportBranch: false,
     });
     expect(registry.capabilities("opencode")).toEqual({
       deleteMessage: true,
       attachments: true,
       fileChanges: true,
+      exportBranch: true,
     });
   });
 
