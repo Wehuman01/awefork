@@ -377,6 +377,15 @@
       <button type="button" role="menuitem" class="ctx-menu-item" @click="togglePinFromMenu">
         {{ menuPinned ? "★ 取消置顶" : "☆ 置顶" }}
       </button>
+      <button
+        v-if="menu.turnId"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        @click="toggleMarkFromMenu"
+      >
+        {{ menuMarked ? "★ 取消关键标记" : "☆ 标记为关键对话" }}
+      </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
@@ -672,6 +681,7 @@ import {
   favoriteSessions,
   forkTagPrefOf,
   hueOf,
+  isTurnMarked,
   jumpToMessage,
   openSessionTerminal,
   recentAlphaFor,
@@ -694,6 +704,8 @@ import {
   tagsOf,
   takeSessionMenuRequest,
   togglePin,
+  toggleTurnMark,
+  turnGraph,
   visibleSessions,
 } from "../state";
 
@@ -1016,6 +1028,8 @@ const menu = ref<{
   fromCanvas: boolean;
   /** The session's directory — opens its group when revealing the row. */
   directory: string | null;
+  /** The right-clicked turn card's id when it can take a key-turn mark. */
+  turnId: string | null;
 } | null>(null);
 const renaming = ref<{ sessionId: string; title: string } | null>(null);
 const renameText = ref("");
@@ -1023,7 +1037,13 @@ const dirMenu = ref<{ directory: string; x: number; y: number } | null>(null);
 /** Right-clicked shelf tag awaiting delete confirmation. */
 const shelfTagMenu = ref<{ tag: string; x: number; y: number } | null>(null);
 
-function openMenu(session: SessionSummary, x: number, y: number, fromCanvas = false): void {
+function openMenu(
+  session: SessionSummary,
+  x: number,
+  y: number,
+  fromCanvas = false,
+  turnId: string | null = null,
+): void {
   dirMenu.value = null;
   shelfTagMenu.value = null;
   menu.value = {
@@ -1033,6 +1053,7 @@ function openMenu(session: SessionSummary, x: number, y: number, fromCanvas = fa
     y,
     fromCanvas,
     directory: session.directory,
+    turnId,
   };
   placeAndFocusMenu();
 }
@@ -1049,6 +1070,22 @@ function togglePinFromMenu(): void {
   void togglePin(active.sessionId);
 }
 
+/** The menu's turn card, resolved live so marking tracks the current graph. */
+const menuTurn = computed(() => {
+  const id = menu.value?.turnId;
+  if (!id) return null;
+  return turnGraph.value.nodes.find((n) => n.id === id && n.kind === "turn") ?? null;
+});
+
+const menuMarked = computed(() => (menuTurn.value ? isTurnMarked(menuTurn.value.id) : false));
+
+function toggleMarkFromMenu(): void {
+  const node = menuTurn.value;
+  if (!node) return;
+  closeMenu();
+  void toggleTurnMark(node);
+}
+
 // Canvas cards right-click into this same menu: they only know the session,
 // so look the summary up and hand the click point to openMenu.
 watch(
@@ -1058,7 +1095,7 @@ watch(
     takeSessionMenuRequest();
     const session = store.sessions.find((s) => s.id === request.sessionId);
     if (!session) return;
-    openMenu(session, request.x, request.y, true);
+    openMenu(session, request.x, request.y, true, request.turnId);
   },
 );
 

@@ -201,8 +201,10 @@ interface AppState {
   /**
    * A right-click on a canvas card asking the sidebar to open its session
    * context menu at that screen point; consumed and cleared by side-bar.
+   * `turnId` is the right-clicked turn card's id when it can be marked, so
+   * the menu can offer the key-turn toggle too.
    */
-  sessionMenuRequest: { sessionId: string; x: number; y: number } | null;
+  sessionMenuRequest: { sessionId: string; x: number; y: number; turnId: string | null } | null;
   /** Installed app version, filled in by the first update check (or the last one). */
   currentVersion: string | null;
   /** Newest release on GitHub; non-null while an update is available. */
@@ -1034,10 +1036,16 @@ export async function selectTurn(
 
 /**
  * Ask the sidebar to open its session context menu at a screen point — for
- * right-clicks outside the sidebar (canvas cards). side-bar consumes it.
+ * right-clicks outside the sidebar (canvas cards). A markable turn card also
+ * passes its id so the menu offers the key-turn toggle. side-bar consumes it.
  */
-export function requestSessionMenu(sessionId: string, x: number, y: number): void {
-  state.sessionMenuRequest = { sessionId, x, y };
+export function requestSessionMenu(
+  sessionId: string,
+  x: number,
+  y: number,
+  turnId: string | null = null,
+): void {
+  state.sessionMenuRequest = { sessionId, x, y, turnId };
 }
 
 /**
@@ -1064,7 +1072,12 @@ export async function jumpToMessage(sessionId: string, messageId: string): Promi
 }
 
 /** Take (and clear) the pending session-menu request, if any. */
-export function takeSessionMenuRequest(): { sessionId: string; x: number; y: number } | null {
+export function takeSessionMenuRequest(): {
+  sessionId: string;
+  x: number;
+  y: number;
+  turnId: string | null;
+} | null {
   const request = state.sessionMenuRequest;
   state.sessionMenuRequest = null;
   return request;

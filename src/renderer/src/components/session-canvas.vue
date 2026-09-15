@@ -58,7 +58,14 @@
         }"
         @mousedown.stop
         @click="selectNode(node)"
-        @contextmenu.prevent="requestSessionMenu(node.sessionId, $event.clientX, $event.clientY)"
+        @contextmenu.prevent="
+          requestSessionMenu(
+            node.sessionId,
+            $event.clientX,
+            $event.clientY,
+            node.kind === 'turn' && node.messageId ? node.id : null,
+          )
+        "
       >
         <div
           v-if="node.sessionId === store.selectedId && storyTagColors.length > 0"
