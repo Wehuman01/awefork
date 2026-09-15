@@ -46,10 +46,16 @@ async function bootState(options: { runError?: string | null } = {}) {
   vi.resetModules();
   const rows = [USER_ROW, assistantRow(options.runError ?? null)];
   let onEnvelope: ((envelope: BackendEventEnvelope) => void) | null = null;
+  // Flip to make the messages IPC reject — the "backend died mid-run" signal
+  // the unreachable guard is built around.
+  let failMessages = false;
   const api: AweforkApi = {
     ready: async () => ({ ok: true }),
     sessions: async () => ({ sessions: [SESSION], lineage: {} }),
-    messages: async () => rows,
+    messages: async () => {
+      if (failMessages) throw new Error("backend gone");
+      return rows;
+    },
     models: async () => [],
     messageAttachments: async () => [],
     createSession: async () => SESSION,
@@ -107,6 +113,9 @@ async function bootState(options: { runError?: string | null } = {}) {
     store: state.store,
     alphaFor: state.recentAlphaFor,
     send: (event: AgentEvent) => onEnvelope?.({ backend: "codex", event }),
+    failMessages: (value: boolean) => {
+      failMessages = value;
+    },
   };
 }
 
@@ -167,5 +176,27 @@ describe("renderer run settle", () => {
     expect(h.store.running.s1).toBeFalsy();
     expect(h.store.recent.s1).toBeUndefined();
     expect(h.alphaFor("s1")).toBe(0);
+  });
+
+  it("settles a mid-run session as failed once the backend stays unreachable", async () => {
+    const h = await bootState();
+    h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
+    // The backend died mid-run: every watchdog poll now fails outright.
+    h.failMessages(true);
+    await vi.advanceTimersByTimeAsync(20 * 1500);
+    expect(h.store.running.s1).toBeFalsy();
+    expect(h.store.recent.s1).toBeUndefined();
+    expect(h.alphaFor("s1")).toBe(0);
+  });
+
+  it("rides out a brief outage without settling the run", async () => {
+    const h = await bootState();
+    h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.failMessages(true);
+    await vi.advanceTimersByTimeAsync(3 * 1500);
+    // Backend came back; the run never completed, so it must still be live.
+    h.failMessages(false);
+    await vi.advanceTimersByTimeAsync(40 * 1500);
+    expect(h.store.running.s1).toBeTruthy();
   });
 });

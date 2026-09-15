@@ -119,6 +119,12 @@ export interface PersistedDraft {
 export interface PersistedComposer {
   draft: PersistedDraft | null;
   paneModels: Record<string, ModelChoice>;
+  /**
+   * The last model the user hand-picked in any composer. A brand-new session
+   * (no turns, no pick of its own) starts from it instead of the agent's
+   * configured default; picking 默认模型 never overwrites the memory.
+   */
+  lastModel: ModelChoice | null;
 }
 
 /** Fork lineage recorded by awefork when it forks a session. */
@@ -373,6 +379,15 @@ export interface AgentAdapter {
    */
   createSession(directory?: string | null): Promise<SessionSummary>;
   fork(sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
+  /**
+   * Copy the branch through `atMessageId` into a standalone native session —
+   * the same server-side copy primitive as fork, but detached: no lineage
+   * record, no canvas branch, just a plain root session the backend's own
+   * tools can open and continue anywhere. `atMessageId === null` copies the
+   * session at its latest state. Backends whose fork linkage lives inside
+   * the backend itself (and therefore cannot detach) reject.
+   */
+  exportSession(sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
   /** Permanently remove a session (and awefork's lineage record for it). */
   deleteSession(sessionId: string): Promise<void>;
   /** Remove a single message row through the backend's native API. */

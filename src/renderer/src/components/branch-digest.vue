@@ -28,6 +28,9 @@
         <span v-if="digest.forkedFrom" class="digest-fork">
           从「{{ digest.forkedFrom.sessionTitle }}」的『{{ digest.forkedFrom.turnTitle }}』分出
         </span>
+        <span v-if="digest.attempt !== null && digest.attempt > 1" class="digest-attempt" title="同一回合的重试分支，按创建先后编号">
+          第 {{ digest.attempt }} 次
+        </span>
         <span class="digest-meta">
           {{ digest.turnCount }} 个回合 · {{ formatTokens(digest.outputTokens) }} · 最近：{{
             digest.lastTurnTitle || "还没有回合"

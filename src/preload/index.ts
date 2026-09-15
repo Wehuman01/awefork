@@ -65,6 +65,12 @@ const api: AweforkApi = {
     sessionId: string,
     atMessageId: string | null,
   ): Promise<SessionSummary> => ipcRenderer.invoke("awefork:fork", backend, sessionId, atMessageId),
+  exportSession: (
+    backend: BackendId,
+    sessionId: string,
+    atMessageId: string | null,
+  ): Promise<SessionSummary> =>
+    ipcRenderer.invoke("awefork:exportSession", backend, sessionId, atMessageId),
   deleteSession: (backend: BackendId, sessionId: string): Promise<string[]> =>
     ipcRenderer.invoke("awefork:deleteSession", backend, sessionId),
   deleteMessage: (backend: BackendId, sessionId: string, messageId: string): Promise<void> =>

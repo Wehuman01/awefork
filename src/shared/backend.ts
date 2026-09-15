@@ -35,6 +35,12 @@ export interface BackendCapabilities {
   attachments: boolean;
   /** Per-turn file-change recording from tool events (observer sidecar). */
   fileChanges: boolean;
+  /**
+   * Copying a branch out as a standalone native session. Needs a fork whose
+   * parent linkage awefork owns (opencode's sidecar lineage) — a backend
+   * that records fork parents itself cannot offer a detached copy.
+   */
+  exportBranch: boolean;
 }
 
 /**
@@ -63,12 +69,14 @@ export function isBackendId(value: unknown): value is BackendId {
  * its differences migrate to a descriptor too.
  */
 export function backendCapabilities(backend: BackendId): BackendCapabilities {
-  if (backend === "codex") return { deleteMessage: false, attachments: false, fileChanges: false };
+  if (backend === "codex")
+    return { deleteMessage: false, attachments: false, fileChanges: false, exportBranch: false };
   return {
     ...opencodeDescriptor().capabilities,
     // The descriptor's optional fileChanges section is the capability: no
     // section, no recorder, no card.
     fileChanges: opencodeDescriptor().fileChanges !== undefined,
+    exportBranch: true,
   };
 }
 

@@ -5,6 +5,7 @@ import {
   opencodeDescriptor,
   readPath,
 } from "./agent-descriptor.js";
+import { canonicalizeSessionDirectories } from "./canonical-paths.js";
 import { createFileChangeRecorder, type FileChangeRecorder } from "./file-change-recorder.js";
 import { recordFork, removeFork } from "./lineage-store.js";
 import {
@@ -195,7 +196,12 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       for (const sessions of perWorktree) {
         for (const session of sessions) byId.set(session.id, session);
       }
-      return [...byId.values()].map(mapSession).sort((a, b) => b.updatedAt - a.updatedAt);
+      // Directories canonicalize once per listing, so a project reported via
+      // different symlink spellings (macOS /var vs /private/var) stays one
+      // sidebar group instead of splitting.
+      return canonicalizeSessionDirectories(
+        [...byId.values()].map(mapSession).sort((a, b) => b.updatedAt - a.updatedAt),
+      );
     },
 
     async messages(sessionId) {
@@ -241,6 +247,16 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         createdAt: forked.time.created,
       });
       return { ...mapSession(forked), origin: "fork", parentSessionId: sessionId };
+    },
+
+    async exportSession(sessionId, atMessageId) {
+      // Same cut translation and stale-anchor error as fork (the pre-check:
+      // an anchor the server no longer has must fail loudly here, before any
+      // copy exists) — but the copy records no lineage, so it lands as a
+      // plain root session the TUI or any other opencode client can continue.
+      const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
+      const exported = await client.fork(sessionId, cut);
+      return { ...mapSession(exported), origin: "root", parentSessionId: null };
     },
 
     async prompt(sessionId, text, model, attachments) {

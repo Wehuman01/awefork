@@ -604,6 +604,32 @@ describe("opencode adapter", () => {
     expect(lineage[forked.id]).toMatchObject({ parentId: "s1", atMessageId: "u1" });
   });
 
+  it("exportSession copies through the turn as a detached root — no lineage", async () => {
+    const state = baseState();
+    const { adapter, lineagePath } = await newAdapter(state);
+    const exported = await adapter.exportSession("s1", "u2");
+
+    // Same cut translation as fork: keep the u2 turn, drop after it.
+    expect(state.forkCalls).toEqual([{ sessionId: "s1", cutMessageId: "u3" }]);
+    expect(exported).toMatchObject({ origin: "root", parentSessionId: null });
+    const lineage = await readLineage(lineagePath);
+    expect(lineage[exported.id]).toBeUndefined();
+  });
+
+  it("exportSession at null copies the whole session at its tip", async () => {
+    const state = baseState();
+    const { adapter } = await newAdapter(state);
+    const exported = await adapter.exportSession("s1", null);
+    expect(state.forkCalls).toEqual([{ sessionId: "s1", cutMessageId: null }]);
+    expect(exported).toMatchObject({ origin: "root", parentSessionId: null });
+  });
+
+  it("rejects export at an unknown message with an actionable error", async () => {
+    const state = baseState();
+    const { adapter } = await newAdapter(state);
+    await expect(adapter.exportSession("s1", "nope")).rejects.toThrow(/not found in session s1/);
+  });
+
   it("rejects fork at an unknown message with an actionable error", async () => {
     const state = baseState();
     const { adapter } = await newAdapter(state);

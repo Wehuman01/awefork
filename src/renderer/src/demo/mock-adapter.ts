@@ -546,6 +546,34 @@ export function installMockAdapter(): void {
       if (!created) throw new Error(`demo fork ${id} missing after creation`);
       return created;
     },
+    // Standalone copy: the branch path materialized as its own turns, no
+    // lineage entry — the demo stand-in for the native detached copy.
+    exportSession: async (_backend, sessionId, atMessageId) => {
+      const source = defs.get(sessionId);
+      if (!source) throw new Error(`demo session ${sessionId} not found`);
+      const path = sessionTurns(defs, sessionId);
+      const cut = atMessageId == null ? path.length : path.findIndex((t) => t.id === atMessageId);
+      if (cut === -1) {
+        throw new Error(
+          `Message ${atMessageId} not found in session ${sessionId}. Refresh the session and try again.`,
+        );
+      }
+      promptSeq += 1;
+      const id = `demo-export-${promptSeq}`;
+      defs.set(id, {
+        id,
+        title: `${source.title}（导出）`,
+        origin: "root",
+        parent: null,
+        atMessageId: null,
+        turns: path.slice(0, cut + 1).map((t) => ({ ...t })),
+        minutesAgo: 0,
+        directory: source.directory ?? DIRECTORY,
+      });
+      const created = summaries().find((s) => s.id === id);
+      if (!created) throw new Error(`demo export ${id} missing after creation`);
+      return created;
+    },
     deleteSession: async (_backend, sessionId) => {
       defs.delete(sessionId);
       messages.delete(sessionId);
@@ -815,7 +843,12 @@ export function installMockAdapter(): void {
       ],
     }),
     selectBackend: async () => ({ ok: true }),
-    capabilities: async () => ({ deleteMessage: true, attachments: true, fileChanges: false }),
+    capabilities: async () => ({
+      deleteMessage: true,
+      attachments: true,
+      fileChanges: false,
+      exportBranch: true,
+    }),
     // The demo has no sidecar recorder; the pane never shows the card here.
     fileChanges: async () => null,
     fileChangeDiff: async () => null,

@@ -132,4 +132,56 @@ describe("buildBranchDigests", () => {
     // ghost parent is not on the canvas — the fork digests as a root
     expect(digests.find((d) => d.sessionId === "b")?.forkedFrom).toBeNull();
   });
+
+  it("numbers retries: siblings off one fork point repeating the same prompt", () => {
+    // a's turn failed twice; each retry grew a fork carrying the same prompt.
+    // b3 explores a different prompt off the same turn — never an attempt.
+    const sessions = [
+      session("a", { title: "主线" }),
+      session("b1", { origin: "fork", createdAt: 500, updatedAt: 800 }),
+      session("b2", { origin: "fork", createdAt: 600, updatedAt: 900 }),
+      session("b3", { origin: "fork", createdAt: 700, updatedAt: 950 }),
+    ];
+    const lineage: Record<string, ForkRecord> = {
+      b1: { parentId: "a", atMessageId: "a-u1", createdAt: 500 },
+      b2: { parentId: "a", atMessageId: "a-u1", createdAt: 600 },
+      b3: { parentId: "a", atMessageId: "a-u1", createdAt: 700 },
+    };
+    const prefix = [msg("a-u1", "user", "修一下登录"), msg("a-u1-r", "assistant", "好")];
+    const messages: Record<string, ChatMessage[]> = {
+      a: prefix,
+      b1: [...prefix, msg("b1-u", "user", "修一下登录"), msg("b1-r", "assistant", "再试一次")],
+      b2: [...prefix, msg("b2-u", "user", "修一下登录"), msg("b2-r", "assistant", "这次好了")],
+      b3: [...prefix, msg("b3-u", "user", "换个思路"), msg("b3-r", "assistant", "也行")],
+    };
+    const graph = buildTurnGraph({ sessions, lineage, messages });
+    const digests = buildBranchDigests(graph, sessions, lineage);
+    const byId = new Map(digests.map((d) => [d.sessionId, d]));
+
+    expect(byId.get("b1")?.attempt).toBe(1);
+    expect(byId.get("b2")?.attempt).toBe(2);
+    expect(byId.get("b3")?.attempt).toBeNull();
+    expect(byId.get("a")?.attempt).toBeNull();
+  });
+
+  it("a lone fork of its prompt stays unlabeled", () => {
+    const sessions = [session("a"), session("b", { origin: "fork", createdAt: 500 })];
+    const lineage: Record<string, ForkRecord> = {
+      b: { parentId: "a", atMessageId: "a-u1", createdAt: 500 },
+    };
+    const messages: Record<string, ChatMessage[]> = {
+      a: [msg("a-u1", "user", "问"), msg("a-u1-r", "assistant", "答")],
+      b: [
+        msg("a-u1", "user", "问"),
+        msg("a-u1-r", "assistant", "答"),
+        msg("b-u", "user", "问"),
+        msg("b-r", "assistant", "答"),
+      ],
+    };
+    const graph = buildTurnGraph({ sessions, lineage, messages });
+
+    expect(
+      buildBranchDigests(graph, sessions, lineage).find((d) => d.sessionId === "b")?.attempt,
+    ).toBeNull();
+  });
 });

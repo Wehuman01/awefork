@@ -397,6 +397,14 @@
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
+      <button
+        v-if="store.capabilities.exportBranch"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        :title="menuTurn ? '把这个分支截至当前回合复制成一份独立会话，可在任何 opencode 客户端继续' : '把这条分支复制成一份独立会话，可在任何 opencode 客户端继续'"
+        @click="exportFromMenu"
+      >📤 导出为独立会话</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginArchive">📦 归档会话</button>
       <button type="button" role="menuitem" class="ctx-menu-item danger" @click="beginDelete">
         🗑 删除会话…
@@ -685,6 +693,7 @@ import {
   createSession,
   deleteSession,
   deleteTag,
+  exportSessionAt,
   favoriteSessions,
   forkTagPrefOf,
   hueOf,
@@ -1200,6 +1209,19 @@ function openInTerminal(): void {
   if (!active) return;
   closeMenu();
   void openSessionTerminal(active.sessionId);
+}
+
+/**
+ * Copy the branch out as a standalone native session. A turn-card right
+ * click bounds the copy through that turn; a sidebar row exports the whole
+ * session at its tip.
+ */
+function exportFromMenu(): void {
+  const active = menu.value;
+  if (!active) return;
+  const atMessageId = menuTurn.value?.messageId ?? null;
+  closeMenu();
+  void exportSessionAt(active.sessionId, atMessageId);
 }
 
 /** Same soft delete as the canvas 🗑 chip; deleteSession owns the confirm. */

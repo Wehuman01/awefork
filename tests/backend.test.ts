@@ -18,6 +18,7 @@ describe("backendCapabilities", () => {
       deleteMessage: true,
       attachments: true,
       fileChanges: true,
+      exportBranch: true,
     });
   });
 
@@ -26,6 +27,7 @@ describe("backendCapabilities", () => {
       deleteMessage: false,
       attachments: false,
       fileChanges: false,
+      exportBranch: false,
     });
   });
 });
