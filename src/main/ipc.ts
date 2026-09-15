@@ -17,9 +17,11 @@ import { isLocalPath } from "../shared/local-path.js";
 import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
 import {
+  addTagsToSessions,
   deleteTag,
   pruneTags,
   readTags,
+  setForkTagPref,
   setSessionTags,
   setTagColor,
 } from "../shared/tags-store.js";
@@ -68,12 +70,12 @@ import { downloadAndInstallUpdate } from "./update-install.js";
  *   openSessionTerminal(backend, id) -> {ok, error?}  TUI in a system terminal
  * Overlay-store channels (per-backend files, no adapter spawn):
  *   pins / togglePin / marks / toggleMark / tags / setSessionTags / setTagColor /
- *   deleteTag / trash / trashAdd / trashRemove /
+ *   deleteTag / addTagsToSessions / setForkTagPref / trash / trashAdd / trashRemove /
  *   archive / archiveAdd / archiveRemove / dirs / dirsAdd / dirsRemove /
  *   composer / saveComposer — same
  *   shapes as before, backend-routed (composer holds the unsent draft + pane
- *   model picks; tags returns { sessions, colors }; dirs is the hand-added
- *   sidebar directories).
+ *   model picks; tags returns { sessions, colors, forkPref? }; dirs is the
+ *   hand-added sidebar directories).
  * Backend switcher:
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
@@ -348,6 +350,18 @@ export function registerIpc(registry: BackendRegistry): void {
     "awefork:deleteTag",
     (_event: IpcMainInvokeEvent, backend: BackendId, tag: string) =>
       deleteTag(registry.storePaths(storeBackend(backend)).tags, tag),
+  );
+
+  ipcMain.handle(
+    "awefork:addTagsToSessions",
+    (_event: IpcMainInvokeEvent, backend: BackendId, sessionIds: string[], tags: string[]) =>
+      addTagsToSessions(registry.storePaths(storeBackend(backend)).tags, sessionIds, tags),
+  );
+
+  ipcMain.handle(
+    "awefork:setForkTagPref",
+    (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string, pref: boolean | null) =>
+      setForkTagPref(registry.storePaths(storeBackend(backend)).tags, sessionId, pref),
   );
 
   ipcMain.handle("awefork:trash", async (_event: IpcMainInvokeEvent, backend: BackendId) =>

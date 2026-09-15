@@ -1560,6 +1560,96 @@ mark.hl {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+/* rule A ask: tags added to a session that already has a fork subtree */
+.tag-menu-subtree {
+  display: grid;
+  gap: 7px;
+  margin: 2px 6px 6px;
+  padding: 9px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.subtree-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.subtree-btns {
+  display: flex;
+  gap: 7px;
+}
+
+.subtree-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.subtree-btn:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.subtree-btn.apply {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+/* rule B preference: how forks of THIS session treat its tags */
+.tag-menu-pref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 6px 6px;
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--line);
+}
+
+.pref-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.pref-options {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.pref-options button {
+  padding: 3px 9px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.pref-options button:hover {
+  color: var(--ink);
+}
+
+.pref-options button.active {
+  background: var(--card);
+  box-shadow: 0 1px 3px rgba(74, 63, 58, 0.22);
+  color: var(--ink);
+}
+
 .sess-rename {
   flex: 1;
   min-width: 0;
@@ -3505,6 +3595,28 @@ code.md-code {
 .interaction-timeout {
   margin-top: 12px;
   text-align: right;
+}
+
+/* fork tag-inheritance ask — reuses the interaction dialog frame */
+.fork-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.fork-tag-remember {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.fork-tag-remember input {
+  accent-color: var(--primary);
 }
 
 /* Undo toast for a soft-deleted session: no whole-bar click handler, only

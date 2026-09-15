@@ -18,6 +18,8 @@ export type HistoryKind =
   | "tags"
   | "tagColor"
   | "tagDelete"
+  | "subtreeTags"
+  | "forkPref"
   | "archiveSession"
   | "archiveDirectory"
   | "restoreSession"

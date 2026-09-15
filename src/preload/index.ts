@@ -105,6 +105,17 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:setTagColor", backend, tag, hue),
   deleteTag: (backend: BackendId, tag: string): Promise<TagStore> =>
     ipcRenderer.invoke("awefork:deleteTag", backend, tag),
+  addTagsToSessions: (
+    backend: BackendId,
+    sessionIds: string[],
+    tags: string[],
+  ): Promise<TagStore> =>
+    ipcRenderer.invoke("awefork:addTagsToSessions", backend, sessionIds, tags),
+  setForkTagPref: (
+    backend: BackendId,
+    sessionId: string,
+    pref: boolean | null,
+  ): Promise<TagStore> => ipcRenderer.invoke("awefork:setForkTagPref", backend, sessionId, pref),
   trash: (backend: BackendId): Promise<TrashEntry[]> =>
     ipcRenderer.invoke("awefork:trash", backend),
   trashAdd: (backend: BackendId, sessionId: string, title: string): Promise<TrashEntry[]> =>

@@ -71,6 +71,8 @@ async function bootState(
     setSessionTags: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
     setTagColor: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
     deleteTag: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    addTagsToSessions: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
+    setForkTagPref: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
     trash: async () => options.trash ?? [],
     trashAdd: async () => [],
     trashRemove: async () => [],

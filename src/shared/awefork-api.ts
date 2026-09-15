@@ -37,6 +37,13 @@ export interface UpdateDownloadProgress {
 export interface TagStore {
   sessions: Record<string, string[]>;
   colors: Record<string, number>;
+  /**
+   * Parent session id → "inherit my tags when forked" preference. Absent
+   * entry (or whole map) = ask on every fork; true/false = always/never
+   * without asking. Only consulted for future forks — backfilling tags onto
+   * already-existing children is always an explicit per-edit ask.
+   */
+  forkPref?: Record<string, boolean>;
 }
 
 /** One session the renderer asks main to scan, with its updatedAt so cached
@@ -154,6 +161,17 @@ export interface AweforkApi {
   setTagColor(backend: BackendId, tag: string, hue: number | null): Promise<TagStore>;
   /** Remove a tag from every session; returns the whole store. */
   deleteTag(backend: BackendId, tag: string): Promise<TagStore>;
+  /**
+   * Union-add tags to several sessions in one serialized write (subtree
+   * application); each session keeps its own order and unique tags. Returns
+   * the whole store.
+   */
+  addTagsToSessions(backend: BackendId, sessionIds: string[], tags: string[]): Promise<TagStore>;
+  /**
+   * Set (null clears back to ask-every-time) one session's fork tag
+   * inheritance preference; returns the whole store.
+   */
+  setForkTagPref(backend: BackendId, sessionId: string, pref: boolean | null): Promise<TagStore>;
   trash(backend: BackendId): Promise<TrashEntry[]>;
   trashAdd(backend: BackendId, sessionId: string, title: string): Promise<TrashEntry[]>;
   trashRemove(backend: BackendId, sessionId: string): Promise<TrashEntry[]>;

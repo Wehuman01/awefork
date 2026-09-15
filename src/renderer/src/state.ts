@@ -111,6 +111,11 @@ interface AppState {
   /** User-chosen hue per tag name (tags.json colors); hash color otherwise. */
   tagColors: Record<string, number>;
   /**
+   * Fork tag-inheritance preference per parent session (tags.json forkPref):
+   * true/false = inherit silently / never; missing key = ask on every fork.
+   */
+  forkTagPrefs: Record<string, boolean>;
+  /**
    * The latest global tag delete, driving the tag undo toast; null = no toast.
    * `entryId` indexes the history entry so the toast's 撤销 can undo it.
    */
@@ -171,6 +176,12 @@ interface AppState {
   draft: DraftState | null;
   /** True while the draft's fork+prompt round-trip is in flight. */
   draftSending: boolean;
+  /**
+   * The open fork-inheritance ask (rule B): forking a tagged session with no
+   * stored preference. The modal resolves it through answerForkTagAsk;
+   * null = no ask pending.
+   */
+  forkTagAsk: { parentSessionId: string; parentTitle: string; tags: string[] } | null;
   /** Model the pane composer will use next, per session; null = agent default. */
   paneModels: Record<string, ModelChoice | null>;
   /** Bumped to ask the canvas to center on a session's latest node. */
@@ -224,6 +235,7 @@ const state = reactive<AppState>({
   marks: [],
   tags: {},
   tagColors: {},
+  forkTagPrefs: {},
   tagDeletedToast: null,
   archive: { sessions: [], directories: [] },
   knownDirs: [],
@@ -249,6 +261,7 @@ const state = reactive<AppState>({
   composerFocusRequest: null,
   draft: null,
   draftSending: false,
+  forkTagAsk: null,
   paneModels: {},
   focusRequest: null,
   fitRequest: null,
@@ -781,9 +794,11 @@ async function bootBackend(backend: BackendId): Promise<void> {
     const store = await window.awefork.tags(backend);
     state.tags = store.sessions;
     state.tagColors = store.colors;
+    state.forkTagPrefs = store.forkPref ?? {};
   } catch {
     state.tags = {};
     state.tagColors = {};
+    state.forkTagPrefs = {};
   }
   try {
     state.archive = await window.awefork.archive(backend);
@@ -1641,6 +1656,7 @@ export function tagColorPicked(tag: string): boolean {
 function setVisibleTagStore(store: TagStore): void {
   state.tags = store.sessions;
   state.tagColors = store.colors;
+  state.forkTagPrefs = store.forkPref ?? {};
 }
 
 function setCachedTagStore(backend: BackendId, store: TagStore): void {
@@ -1648,6 +1664,7 @@ function setCachedTagStore(backend: BackendId, store: TagStore): void {
   if (!snapshot) return;
   snapshot.tags = store.sessions;
   snapshot.tagColors = store.colors;
+  snapshot.forkTagPrefs = store.forkPref ?? {};
 }
 
 function applyTagStore(backend: BackendId, generation: number, store: TagStore): void {
@@ -1665,10 +1682,13 @@ function applyTagStore(backend: BackendId, generation: number, store: TagStore):
 }
 
 function removeLocalSessionTags(sessionId: string): void {
-  if (!(sessionId in state.tags)) return;
+  if (!(sessionId in state.tags) && !(sessionId in state.forkTagPrefs)) return;
   const { [sessionId]: goneTags, ...keptTags } = state.tags;
   void goneTags;
   state.tags = keptTags;
+  const { [sessionId]: gonePref, ...keptPrefs } = state.forkTagPrefs;
+  void gonePref;
+  state.forkTagPrefs = keptPrefs;
   const liveTags = new Set(Object.values(keptTags).flat());
   state.tagColors = Object.fromEntries(
     Object.entries(state.tagColors).filter(([tag]) => liveTags.has(tag)),
@@ -1757,6 +1777,182 @@ async function setTagColorOrThrow(
   return true;
 }
 
+// ── fork tag inheritance (分叉继承) & subtree application (子树应用) ────
+
+/** One session's fork tag-inheritance preference; null = ask on every fork. */
+export function forkTagPrefOf(sessionId: string): boolean | null {
+  return state.forkTagPrefs[sessionId] ?? null;
+}
+
+/** Pure preference write (throws on failure); undo/redo route through it. */
+async function setForkTagPrefOrThrow(
+  backend: BackendId,
+  sessionId: string,
+  pref: boolean | null,
+): Promise<boolean> {
+  const generation = workspaceGeneration;
+  const store = await window.awefork.setForkTagPref(backend, sessionId, pref);
+  applyTagStore(backend, generation, store);
+  return true;
+}
+
+const FORK_PREF_LABEL = new Map<boolean | null, string>([
+  [true, "始终继承"],
+  [false, "从不继承"],
+  [null, "每次询问"],
+]);
+
+/** Set (null = back to asking every fork) one session's inheritance preference. */
+export async function setForkTagPref(sessionId: string, pref: boolean | null): Promise<boolean> {
+  const backend = state.activeBackend;
+  const prev = forkTagPrefOf(sessionId);
+  if (prev === pref) return true;
+  try {
+    await setForkTagPrefOrThrow(backend, sessionId, pref);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return false;
+  }
+  track({
+    backend,
+    kind: "forkPref",
+    label: `「${titleOf(sessionId)}」分叉时继承标签：${FORK_PREF_LABEL.get(pref)}`,
+    undo: async () => {
+      await setForkTagPrefOrThrow(backend, sessionId, prev);
+      return true;
+    },
+    redo: async () => {
+      await setForkTagPrefOrThrow(backend, sessionId, pref);
+      return true;
+    },
+  });
+  return true;
+}
+
+/**
+ * Sessions strictly below `sessionId` as the user sees them (subagents, the
+ * delete grace window and the archive excluded) — the set a subtree tag
+ * application covers, and the count the ask shows.
+ */
+export function subtreeSessionIds(sessionId: string): Set<string> {
+  return descendantSessionIds(visibleSessions.value, state.lineage, sessionId);
+}
+
+/**
+ * Union-add tags to every session below `sessionId` (rule A): one serialized
+ * write on main, one undoable history entry. Sessions that already carry all
+ * the tags are left out, so undo restores exactly what this entry touched.
+ */
+export async function applyTagsToSubtree(sessionId: string, tags: string[]): Promise<void> {
+  const backend = state.activeBackend;
+  const add = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
+  const targets = [...subtreeSessionIds(sessionId)].filter((id) =>
+    add.some((tag) => !(state.tags[id] ?? []).includes(tag)),
+  );
+  if (add.length === 0 || targets.length === 0) return;
+  const before = Object.fromEntries(targets.map((id) => [id, [...(state.tags[id] ?? [])]]));
+  try {
+    const generation = workspaceGeneration;
+    const store = await window.awefork.addTagsToSessions(backend, targets, add);
+    applyTagStore(backend, generation, store);
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  track({
+    backend,
+    kind: "subtreeTags",
+    label: `标签「${add.join("、")}」应用到「${titleOf(sessionId)}」的 ${targets.length} 个子会话`,
+    undo: async () => {
+      // A child hard-deleted underneath this undo keeps its pruning — writing
+      // its old tags back would resurrect a phantom sessions entry.
+      const live = new Set(
+        backend === state.activeBackend
+          ? state.sessions.map((s) => s.id)
+          : (workspaceCache.get(backend)?.sessions ?? []).map((s) => s.id),
+      );
+      for (const id of targets) {
+        if (!live.has(id)) continue;
+        await saveSessionTagsOrThrow(backend, id, before[id] ?? []);
+      }
+      return true;
+    },
+    redo: async () => {
+      const generation = workspaceGeneration;
+      const store = await window.awefork.addTagsToSessions(backend, targets, add);
+      applyTagStore(backend, generation, store);
+      return true;
+    },
+  });
+}
+
+/** How a fork decided to treat the parent's tags; canceled = the fork itself
+ *  was called off (dialog dismissed) and nothing should happen. */
+export type ForkTagDecision = { canceled: true } | { canceled: false; inherit: boolean };
+
+let forkTagAskAnswer: ((choice: "inherit" | "skip" | "cancel") => void) | null = null;
+
+/**
+ * Resolve tag inheritance for forking `sessionId` (rule B): no tags = never
+ * inherit and never ask; a stored preference = honored silently; otherwise a
+ * modal ask with a remember-this-session checkbox. Clone and mid-turn fork
+ * both route through here BEFORE the fork fires.
+ */
+function askForkTags(sessionId: string): Promise<ForkTagDecision> {
+  const tags = tagsOf(sessionId);
+  if (tags.length === 0) return Promise.resolve({ canceled: false, inherit: false });
+  const pref = forkTagPrefOf(sessionId);
+  if (pref !== null) return Promise.resolve({ canceled: false, inherit: pref });
+  state.forkTagAsk = {
+    parentSessionId: sessionId,
+    parentTitle: titleOf(sessionId),
+    tags: [...tags],
+  };
+  return new Promise<ForkTagDecision>((resolve) => {
+    forkTagAskAnswer = (choice) => {
+      resolve(
+        choice === "cancel"
+          ? { canceled: true }
+          : { canceled: false, inherit: choice === "inherit" },
+      );
+    };
+  });
+}
+
+/** The modal's single exit: resolves the pending ask, optionally persisting
+ *  the remember-me preference as its own undoable entry. */
+export function answerForkTagAsk(choice: "inherit" | "skip" | "cancel", remember: boolean): void {
+  const ask = state.forkTagAsk;
+  const answer = forkTagAskAnswer;
+  if (!ask || !answer) return;
+  state.forkTagAsk = null;
+  forkTagAskAnswer = null;
+  if (remember && choice !== "cancel") {
+    void setForkTagPref(ask.parentSessionId, choice === "inherit");
+  }
+  answer(choice);
+}
+
+/**
+ * Copy the captured tag list onto a freshly forked session. Best effort by
+ * design: the fork already succeeded, so a sidecar hiccup only toasts — the
+ * run/prompt itself must go on.
+ */
+async function inheritTagsOnFork(
+  backend: BackendId,
+  forkedId: string,
+  tags: string[],
+): Promise<void> {
+  if (tags.length === 0) return;
+  try {
+    const generation = workspaceGeneration;
+    const store = await window.awefork.setSessionTags(backend, forkedId, tags);
+    applyTagStore(backend, generation, store);
+  } catch (error) {
+    state.actionError = `分叉已创建，但标签继承失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 /**
  * Remove a tag from every session (and its color). Undoable for the whole
  * run: undo re-attaches it to every session that had it and restores the hue.
@@ -1790,7 +1986,11 @@ export async function deleteTag(tag: string): Promise<void> {
 /** Pure strip + write (throws on failure); undo/redo re-use it. */
 async function deleteTagOrThrow(backend: BackendId, tag: string): Promise<void> {
   const generation = workspaceGeneration;
-  const previous: TagStore = { sessions: state.tags, colors: state.tagColors };
+  const previous: TagStore = {
+    sessions: state.tags,
+    colors: state.tagColors,
+    forkPref: state.forkTagPrefs,
+  };
   // Strip locally before the write lands: a checkbox toggle in the still-open
   // tag menu must not read the stale snapshot and write the tag back.
   state.tags = Object.fromEntries(
@@ -2441,6 +2641,13 @@ export async function cloneSelectedSession(): Promise<void> {
   const sessionId = state.selectedId;
   if (!sessionId || state.running[sessionId]) return;
   state.actionError = null;
+  // Rule B ask (or stored preference) BEFORE the fork fires; dismissing the
+  // dialog cancels the clone — nothing has happened yet.
+  const decision = await askForkTags(sessionId);
+  if (decision.canceled) return;
+  // Captured at decision time: undo→redo replays exactly this list, whatever
+  // the parent's tags look like by then.
+  const inheritTags = decision.inherit ? [...tagsOf(sessionId)] : [];
   let forked: SessionSummary;
   try {
     forked = await window.awefork.fork(backend, sessionId, null);
@@ -2448,6 +2655,7 @@ export async function cloneSelectedSession(): Promise<void> {
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
   }
+  await inheritTagsOnFork(backend, forked.id, inheritTags);
   const box = { id: forked.id };
   track({
     backend,
@@ -2460,6 +2668,7 @@ export async function cloneSelectedSession(): Promise<void> {
     redo: async () => {
       const f = await window.awefork.fork(backend, sessionId, null);
       box.id = f.id;
+      await inheritTagsOnFork(backend, f.id, inheritTags);
       await refreshSessions();
       if (backend === state.activeBackend) await selectSession(f.id);
       return true;
@@ -2849,7 +3058,16 @@ export async function sendDraft(): Promise<void> {
     const model = plainModel(draft.model);
     const sentAt = Date.now();
     if (draft.atMessageId) {
+      // Rule B ask first: a mid-turn fork must know whether to carry the
+      // parent's tags before it creates the branch. Dismissing the dialog
+      // cancels the send — the draft stays open for another try.
+      const decision = await askForkTags(draft.sessionId);
+      if (decision.canceled) return;
+      const inheritTags = decision.inherit ? [...tagsOf(draft.sessionId)] : [];
       const forked = await window.awefork.fork(backend, draft.sessionId, draft.atMessageId);
+      // Inherited tags land even if the user switched backends mid-flight:
+      // the fork is real, and it belongs to `backend`.
+      await inheritTagsOnFork(backend, forked.id, inheritTags);
       if (stale()) return;
       await refreshSessions();
       // No focus request: the canvas stays parked where the user was looking.
@@ -3152,6 +3370,7 @@ interface WorkspaceSnapshot {
   marks: string[];
   tags: Record<string, string[]>;
   tagColors: Record<string, number>;
+  forkTagPrefs: Record<string, boolean>;
   trash: string[];
   archive: ArchiveState;
   knownDirs: string[];
@@ -3175,6 +3394,7 @@ function parkWorkspace(backend: BackendId): void {
     marks: [...state.marks],
     tags: { ...state.tags },
     tagColors: { ...state.tagColors },
+    forkTagPrefs: { ...state.forkTagPrefs },
     trash: [...state.trash],
     archive: {
       sessions: [...state.archive.sessions],
@@ -3207,6 +3427,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.marks = snapshot.marks;
   state.tags = snapshot.tags;
   state.tagColors = snapshot.tagColors;
+  state.forkTagPrefs = snapshot.forkTagPrefs;
   state.trash = snapshot.trash;
   state.archive = snapshot.archive;
   state.knownDirs = snapshot.knownDirs;

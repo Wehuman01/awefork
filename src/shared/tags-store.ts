@@ -12,6 +12,10 @@ import { enqueueWrite } from "./write-queue.js";
  * A color never outlives its tag: hues whose tag has no session references
  * are pruned on read and on every write. Older files that were just a
  * sessionId → names map migrate on read.
+ *
+ * `forkPref` (optional) maps parent session id → "inherit tags on fork"
+ * (true/false); a missing key means ask on every fork. Writers that rebuild
+ * the store must carry it through — see keepForkPref.
  */
 
 export type TagMap = TagStore["sessions"];
@@ -58,6 +62,19 @@ function sanitizeColors(parsed: Record<string, unknown>): Record<string, number>
   return colors;
 }
 
+function sanitizeForkPref(parsed: Record<string, unknown>): Record<string, boolean> {
+  const pref: Record<string, boolean> = {};
+  for (const [id, value] of Object.entries(parsed)) {
+    if (isSafeKey(id) && typeof value === "boolean") pref[id] = value;
+  }
+  return pref;
+}
+
+/** Carry the fork preferences over when a writer rebuilds the store. */
+function keepForkPref(store: TagStore, forkPref: Record<string, boolean> | undefined): TagStore {
+  return forkPref && Object.keys(forkPref).length > 0 ? { ...store, forkPref } : store;
+}
+
 /** Keep only colors whose tag still has at least one session reference. */
 function pruneOrphanColors(
   sessions: TagMap,
@@ -94,7 +111,8 @@ export async function readTags(filePath: string): Promise<TagStore> {
       sessions,
       sanitizeColors((obj.colors ?? {}) as Record<string, unknown>),
     );
-    return { sessions, colors };
+    const forkPref = sanitizeForkPref((obj.forkPref ?? {}) as Record<string, unknown>);
+    return Object.keys(forkPref).length > 0 ? { sessions, colors, forkPref } : { sessions, colors };
   } catch {
     return EMPTY;
   }
@@ -122,8 +140,9 @@ export function setSessionTags(
     if (normalized.length > 0) next.sessions[sessionId] = normalized;
     else delete next.sessions[sessionId];
     next.colors = pruneOrphanColors(next.sessions, next.colors);
-    await writeTags(filePath, next);
-    return next;
+    const saved = keepForkPref(next, store.forkPref);
+    await writeTags(filePath, saved);
+    return saved;
   });
 }
 
@@ -140,16 +159,18 @@ export function setTagColor(filePath: string, tag: string, hue: number | null): 
       if (!(tag in store.colors)) return store;
       const next: TagStore = { sessions: store.sessions, colors: { ...store.colors } };
       delete next.colors[tag];
-      await writeTags(filePath, next);
-      return next;
+      const saved = keepForkPref(next, store.forkPref);
+      await writeTags(filePath, saved);
+      return saved;
     }
     if (!Number.isFinite(hue)) return store;
     const referenced = Object.values(store.sessions).some((tags) => tags.includes(tag));
     if (!referenced) return store;
     const next: TagStore = { sessions: store.sessions, colors: { ...store.colors } };
     next.colors[tag] = ((hue % 360) + 360) % 360;
-    await writeTags(filePath, next);
-    return next;
+    const saved = keepForkPref(next, store.forkPref);
+    await writeTags(filePath, saved);
+    return saved;
   });
 }
 
@@ -164,21 +185,79 @@ export function deleteTag(filePath: string, tag: string): Promise<TagStore> {
       if (kept.length > 0) sessions[id] = kept;
     }
     const colors = pruneOrphanColors(sessions, store.colors);
-    const next: TagStore = { sessions, colors };
-    await writeTags(filePath, next);
-    return next;
+    const saved = keepForkPref({ sessions, colors }, store.forkPref);
+    await writeTags(filePath, saved);
+    return saved;
   });
 }
 
-/** Drop a session's tags (hard delete path); returns the pruned store. */
+/**
+ * Union-add tags to several sessions in one serialized write (subtree
+ * application): each session keeps its own order and unique tags — nothing
+ * is ever removed, and tags it already has are not re-appended.
+ */
+export function addTagsToSessions(
+  filePath: string,
+  sessionIds: string[],
+  tags: string[],
+): Promise<TagStore> {
+  return enqueueWrite(filePath, async () => {
+    const store = await readTags(filePath);
+    const add = normalizeTags(tags);
+    const targets = [...new Set(sessionIds.filter((id) => isSafeKey(id)))];
+    if (add.length === 0 || targets.length === 0) return store;
+    const sessions: TagMap = { ...store.sessions };
+    for (const id of targets) {
+      const merged = [...(sessions[id] ?? [])];
+      for (const tag of add) {
+        if (!merged.includes(tag)) merged.push(tag);
+      }
+      if (merged.length > 0) sessions[id] = merged;
+    }
+    const saved = keepForkPref({ sessions, colors: store.colors }, store.forkPref);
+    await writeTags(filePath, saved);
+    return saved;
+  });
+}
+
+/**
+ * Set (or with null clear) one session's fork tag-inheritance preference;
+ * serialized per file. Clearing deletes the key, which reads as ask-every-time.
+ */
+export function setForkTagPref(
+  filePath: string,
+  sessionId: string,
+  pref: boolean | null,
+): Promise<TagStore> {
+  return enqueueWrite(filePath, async () => {
+    const store = await readTags(filePath);
+    if (!isSafeKey(sessionId)) return store;
+    const forkPref = { ...(store.forkPref ?? {}) };
+    if (pref === null) delete forkPref[sessionId];
+    else forkPref[sessionId] = pref;
+    const saved = keepForkPref({ sessions: store.sessions, colors: store.colors }, forkPref);
+    await writeTags(filePath, saved);
+    return saved;
+  });
+}
+
+/** Drop a session's tags AND fork preference (hard delete path); returns the pruned store. */
 export function pruneTags(filePath: string, sessionId: string): Promise<TagStore> {
   return enqueueWrite(filePath, async () => {
     const store = await readTags(filePath);
-    if (!isSafeKey(sessionId) || !(sessionId in store.sessions)) return store;
+    if (!isSafeKey(sessionId)) return store;
+    const hadTags = sessionId in store.sessions;
+    const hadPref = sessionId in (store.forkPref ?? {});
+    if (!hadTags && !hadPref) return store;
     const sessions = { ...store.sessions };
     delete sessions[sessionId];
-    const next: TagStore = { sessions, colors: pruneOrphanColors(sessions, store.colors) };
-    await writeTags(filePath, next);
-    return next;
+    const forkPref = { ...(store.forkPref ?? {}) };
+    delete forkPref[sessionId];
+    const saved = keepForkPref(
+      { sessions, colors: pruneOrphanColors(sessions, store.colors) },
+      forkPref,
+    );
+    await writeTags(filePath, saved);
+    return saved;
   });
 }

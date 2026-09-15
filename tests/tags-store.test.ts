@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  addTagsToSessions,
   deleteTag,
   pruneTags,
   readTags,
+  setForkTagPref,
   setSessionTags,
   setTagColor,
   writeTags,
@@ -203,6 +205,114 @@ describe("tags store", () => {
     expect(await readTags(path)).toEqual({
       sessions: { ses_1: ["执行"] },
       colors: { 执行: 20 },
+    });
+  });
+
+  it("setForkTagPref sets, then clears back to ask-every-time", async () => {
+    const path = await tempTagsPath();
+    await setSessionTags(path, "ses_1", ["执行"]);
+    await expect(setForkTagPref(path, "ses_1", true)).resolves.toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+      forkPref: { ses_1: true },
+    });
+    await expect(setForkTagPref(path, "ses_2", false)).resolves.toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+      forkPref: { ses_1: true, ses_2: false },
+    });
+    await expect(setForkTagPref(path, "ses_1", null)).resolves.toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+      forkPref: { ses_2: false },
+    });
+    await expect(setForkTagPref(path, "ses_2", null)).resolves.toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+    });
+    // Clearing the last key leaves no empty forkPref map behind.
+    expect(await readTags(path)).toEqual({ sessions: { ses_1: ["执行"] }, colors: {} });
+  });
+
+  it("every tag writer carries forkPref through instead of dropping it", async () => {
+    const path = await tempTagsPath();
+    await setSessionTags(path, "ses_1", ["执行", "咨询"]);
+    await setSessionTags(path, "ses_2", ["执行"]);
+    await setForkTagPref(path, "ses_1", true);
+    await expect(setSessionTags(path, "ses_1", ["执行"])).resolves.toEqual({
+      sessions: { ses_1: ["执行"], ses_2: ["执行"] },
+      colors: {},
+      forkPref: { ses_1: true },
+    });
+    await expect(setTagColor(path, "执行", 40)).resolves.toMatchObject({
+      forkPref: { ses_1: true },
+    });
+    await expect(deleteTag(path, "咨询")).resolves.toMatchObject({
+      forkPref: { ses_1: true },
+    });
+    await expect(addTagsToSessions(path, ["ses_2"], ["实验"])).resolves.toMatchObject({
+      forkPref: { ses_1: true },
+    });
+  });
+
+  it("addTagsToSessions union-adds without touching order or unique tags", async () => {
+    const path = await tempTagsPath();
+    await setSessionTags(path, "ses_parent", ["执行", "咨询"]);
+    await setSessionTags(path, "ses_child", ["实验", "执行"]);
+    await expect(
+      addTagsToSessions(path, ["ses_child", "ses_grand"], ["执行", "咨询"]),
+    ).resolves.toEqual({
+      sessions: {
+        ses_parent: ["执行", "咨询"],
+        ses_child: ["实验", "执行", "咨询"],
+        ses_grand: ["执行", "咨询"],
+      },
+      colors: {},
+    });
+    // Empty input is a no-op, and duplicates in the add list collapse once.
+    await expect(addTagsToSessions(path, ["ses_child"], [])).resolves.toMatchObject({
+      sessions: { ses_child: ["实验", "执行", "咨询"] },
+    });
+    await expect(addTagsToSessions(path, ["ses_child"], [" 实验 ", "实验"])).resolves.toMatchObject(
+      {
+        sessions: { ses_child: ["实验", "执行", "咨询"] },
+      },
+    );
+  });
+
+  it("pruneTags drops the session's fork preference alongside its tags", async () => {
+    const path = await tempTagsPath();
+    await setSessionTags(path, "ses_1", ["执行"]);
+    await setSessionTags(path, "ses_2", ["咨询"]);
+    await setForkTagPref(path, "ses_1", true);
+    await setForkTagPref(path, "ses_2", false);
+    await expect(pruneTags(path, "ses_1")).resolves.toEqual({
+      sessions: { ses_2: ["咨询"] },
+      colors: {},
+      forkPref: { ses_2: false },
+    });
+    // A session with a preference but no tags still loses the preference.
+    await setForkTagPref(path, "ses_3", true);
+    await expect(pruneTags(path, "ses_3")).resolves.toMatchObject({
+      forkPref: { ses_2: false },
+    });
+  });
+
+  it("readTags drops non-boolean fork preference values defensively", async () => {
+    const path = await tempTagsPath();
+    await writeFile(
+      path,
+      JSON.stringify({
+        sessions: { ses_1: ["执行"] },
+        colors: {},
+        forkPref: { ses_1: true, ses_2: "yes", ["__proto__"]: false, ses_3: 1 },
+      }),
+      "utf8",
+    );
+    expect(await readTags(path)).toEqual({
+      sessions: { ses_1: ["执行"] },
+      colors: {},
+      forkPref: { ses_1: true },
     });
   });
 });

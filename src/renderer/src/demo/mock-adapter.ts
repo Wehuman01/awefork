@@ -439,6 +439,9 @@ export function installMockAdapter(): void {
   const cloneTags = (): Record<string, string[]> =>
     Object.fromEntries(Object.entries(tagMap).map(([id, tags]) => [id, [...tags]]));
   let tagColors: Record<string, number> = {};
+  // Fork tag-inheritance preferences — the demo stand-in for tags.json's
+  // forkPref map (missing key = ask on every fork).
+  let forkPrefs: Record<string, boolean> = {};
   // A color never outlives its tag: hues with no session reference are
   // pruned on every mutation, mirroring shared/tags-store.ts.
   const pruneOrphanColors = (): void => {
@@ -448,7 +451,11 @@ export function installMockAdapter(): void {
     }
     tagColors = Object.fromEntries(Object.entries(tagColors).filter(([tag]) => live.has(tag)));
   };
-  const cloneStore = (): TagStore => ({ sessions: cloneTags(), colors: { ...tagColors } });
+  const cloneStore = (): TagStore => {
+    const store: TagStore = { sessions: cloneTags(), colors: { ...tagColors } };
+    if (Object.keys(forkPrefs).length > 0) store.forkPref = { ...forkPrefs };
+    return store;
+  };
   const handlers = new Set<(envelope: BackendEventEnvelope) => void>();
   const emit = (event: AgentEvent): void => {
     for (const handler of handlers) handler({ backend: "opencode", event });
@@ -548,6 +555,9 @@ export function installMockAdapter(): void {
       const { [sessionId]: _goneTags, ...keptTags } = tagMap;
       void _goneTags;
       tagMap = keptTags;
+      const { [sessionId]: _gonePref, ...keptPrefs } = forkPrefs;
+      void _gonePref;
+      forkPrefs = keptPrefs;
       pruneOrphanColors();
       return pins;
     },
@@ -736,6 +746,25 @@ export function installMockAdapter(): void {
           .filter(([, tags]) => tags.length > 0),
       );
       pruneOrphanColors();
+      return cloneStore();
+    },
+    addTagsToSessions: async (_backend, sessionIds, tags) => {
+      const add = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+      if (add.length > 0) {
+        for (const id of new Set(sessionIds)) {
+          const merged = [...(tagMap[id] ?? [])];
+          for (const tag of add) {
+            if (!merged.includes(tag)) merged.push(tag);
+          }
+          tagMap = { ...tagMap, [id]: merged };
+        }
+      }
+      return cloneStore();
+    },
+    setForkTagPref: async (_backend, sessionId, pref) => {
+      const { [sessionId]: _gone, ...kept } = forkPrefs;
+      void _gone;
+      forkPrefs = pref === null ? kept : { ...kept, [sessionId]: pref };
       return cloneStore();
     },
     trash: async () => trash,

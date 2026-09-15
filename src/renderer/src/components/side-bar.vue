@@ -592,6 +592,53 @@
           />
         </div>
       </form>
+      <div v-if="subtreeAsk" class="tag-menu-subtree" @mousedown.stop>
+        <span class="subtree-text"
+          >也把「{{ subtreeAsk.tags.join("、") }}」应用到 {{ subtreeAsk.count }} 个子会话？</span
+        >
+        <div class="subtree-btns">
+          <button
+            type="button"
+            class="subtree-btn apply"
+            title="把这些标签并集写入每个子孙会话（可撤销）"
+            @click="answerSubtreeApply"
+            >应用</button
+          >
+          <button
+            type="button"
+            class="subtree-btn"
+            title="这些标签只留在当前会话上"
+            @click="answerSubtreeSkip"
+            >仅本会话</button
+          >
+        </div>
+      </div>
+      <div v-if="draftTags.length > 0" class="tag-menu-pref" @mousedown.stop>
+        <span class="pref-label">分叉时继承标签</span>
+        <div class="pref-options" role="radiogroup" aria-label="分叉时继承标签">
+          <button
+            type="button"
+            :class="{ active: forkPref === null }"
+            title="每次分叉都询问是否继承"
+            @click="setPref(null)"
+            >每次问</button
+          >
+          <button
+            type="button"
+            :class="{ active: forkPref === true }"
+            title="分叉出的新会话自动带上本会话的全部标签"
+            @click="setPref(true)"
+            >始终</button
+          >
+          <button
+            type="button"
+            :class="{ active: forkPref === false }"
+            title="分叉出的新会话不带标签，也不再询问"
+            @click="setPref(false)"
+            >从不</button
+          >
+        </div>
+      </div>
     </div>
   </aside>
 </template>
@@ -614,6 +661,7 @@ import { panels, persistLayout } from "../layout";
 import {
   addDirectory,
   allTags,
+  applyTagsToSubtree,
   archiveDirectory,
   archivedDirectoryViews,
   archivedSessionViews,
@@ -622,6 +670,7 @@ import {
   deleteSession,
   deleteTag,
   favoriteSessions,
+  forkTagPrefOf,
   hueOf,
   jumpToMessage,
   openSessionTerminal,
@@ -633,9 +682,11 @@ import {
   restoreSession,
   selectSession,
   sessionGroups,
+  setForkTagPref,
   setSessionTags,
   setTagColor,
   store,
+  subtreeSessionIds,
   switchDirectory,
   tagBg,
   tagColor,
@@ -1170,6 +1221,7 @@ function openTagMenu(): void {
   colorEdit.value = null;
   hueDrag.value = null;
   delConfirm.value = null;
+  subtreeAsk.value = null;
   menu.value = null;
   placeAndFocusMenu();
 }
@@ -1214,6 +1266,8 @@ function closeTagMenu(): void {
   delConfirm.value = null;
   tagSearch.value = "";
   draftTags.value = [];
+  // An unanswered ask dies with the menu — those tags stay on this session only.
+  subtreeAsk.value = null;
 }
 
 /** Esc closes the menu, except while an IME is dismissing its candidate list. */
@@ -1240,12 +1294,15 @@ function setNewTagHue(event: Event): void {
 const delConfirm = ref<string | null>(null);
 
 /** Remove the tag from this session only — same write as unchecking. */
-function confirmDelLocal(tag: string): void {
+async function confirmDelLocal(tag: string): Promise<void> {
   const active = tagMenu.value;
   delConfirm.value = null;
   if (!active) return;
+  const prev = [...draftTags.value];
   draftTags.value = draftTags.value.filter((t) => t !== tag);
-  void setSessionTags(active.sessionId, draftTags.value);
+  if (await setSessionTags(active.sessionId, draftTags.value)) {
+    refreshSubtreeAsk(active.sessionId, prev, draftTags.value);
+  }
 }
 
 /**
@@ -1257,16 +1314,63 @@ function confirmDelAll(tag: string): void {
   colorEdit.value = null;
   // Gone from the draft too, or a queued checkbox write could resurrect it.
   draftTags.value = draftTags.value.filter((t) => t !== tag);
+  // A globally deleted tag must not ride a pending subtree apply back in.
+  if (subtreeAsk.value) {
+    const tags = subtreeAsk.value.tags.filter((t) => t !== tag);
+    subtreeAsk.value = tags.length > 0 ? { ...subtreeAsk.value, tags } : null;
+  }
   void deleteTag(tag);
 }
 
-function toggleDraftTag(tag: string): void {
+/**
+ * Rule A inline ask: tags this menu's saves ADDED to a session that has a
+ * fork subtree, not yet applied or declined. Each new add merges in, so
+ * checking three tags still answers one question; a later removal drops the
+ * tag back out — the ask never offers a tag the session no longer carries.
+ */
+const subtreeAsk = ref<{ tags: string[]; count: number } | null>(null);
+
+/** Fold one successful save into the pending ask: adds merge in, removals drop out. */
+function refreshSubtreeAsk(
+  sessionId: string,
+  prev: readonly string[],
+  next: readonly string[],
+): void {
+  const merged = (subtreeAsk.value?.tags ?? []).filter(
+    (tag) => !(prev.includes(tag) && !next.includes(tag)),
+  );
+  for (const tag of next) {
+    if (!prev.includes(tag) && !merged.includes(tag)) merged.push(tag);
+  }
+  if (merged.length === 0) {
+    subtreeAsk.value = null;
+    return;
+  }
+  const count = subtreeSessionIds(sessionId).size;
+  subtreeAsk.value = count > 0 ? { tags: merged, count } : null;
+}
+
+function answerSubtreeApply(): void {
+  const ask = subtreeAsk.value;
+  const active = tagMenu.value;
+  subtreeAsk.value = null;
+  if (ask && active) void applyTagsToSubtree(active.sessionId, ask.tags);
+}
+
+function answerSubtreeSkip(): void {
+  subtreeAsk.value = null;
+}
+
+async function toggleDraftTag(tag: string): Promise<void> {
   const active = tagMenu.value;
   if (!active) return;
+  const prev = [...draftTags.value];
   draftTags.value = draftTags.value.includes(tag)
     ? draftTags.value.filter((t) => t !== tag)
     : [...draftTags.value, tag];
-  void setSessionTags(active.sessionId, draftTags.value);
+  if (await setSessionTags(active.sessionId, draftTags.value)) {
+    refreshSubtreeAsk(active.sessionId, prev, draftTags.value);
+  }
 }
 
 async function addNewTag(): Promise<void> {
@@ -1275,12 +1379,24 @@ async function addNewTag(): Promise<void> {
   if (!active || !tag) return;
   let attached = draftTags.value.includes(tag);
   if (!draftTags.value.includes(tag)) {
+    const prev = [...draftTags.value];
     draftTags.value = [...draftTags.value, tag];
     attached = await setSessionTags(active.sessionId, draftTags.value);
+    if (attached) refreshSubtreeAsk(active.sessionId, prev, draftTags.value);
   }
   if (attached && newTagHue.value !== null) void setTagColor(tag, newTagHue.value);
   newTagText.value = "";
   newTagHue.value = null;
+}
+
+/** The menu session's fork-inheritance preference; null = ask every fork. */
+const forkPref = computed<boolean | null>(() =>
+  tagMenu.value ? forkTagPrefOf(tagMenu.value.sessionId) : null,
+);
+
+function setPref(pref: boolean | null): void {
+  const active = tagMenu.value;
+  if (active) void setForkTagPref(active.sessionId, pref);
 }
 
 /** Archive is fully reversible — no confirm, the archive section undoes it. */
