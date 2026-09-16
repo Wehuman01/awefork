@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.1
+
+The canvas stops showing empty placeholders and starts offering a way out of awefork: a brand-new session stays off the graph until its first turn, a branch can be copied into a standalone native session any opencode client can continue, and screenshots no longer pile past 20/40 MB. Directory paths resolve once per listing so symlinked macOS spellings stop splitting projects — and the post-v0.3.0 port, archive, and settings races are closed.
+
+### Highlights
+
+- **Export a branch as a standalone session** — right-click a session or turn and copy it out as a plain root session with no awefork lineage, so the backend's own tools (opencode TUI, another machine) can keep working on it. Codex stays capability-gated off.
+- **A clean canvas for empty roots** — a loaded session with no turns of its own draws nothing until the first prompt lands, instead of a stub card; fork stubs and loading placeholders still show.
+- **Image attachment caps** — single images over 20 MB and batches over 40 MB are skipped with a note, so a folder drop cannot stampede long-lived message rows with huge base64 blobs.
+- **One spelling per project** — session directories, archive keys, and hand-added sidebar directories canonicalize once per listing (macOS `/var` vs `/private/var`), so a project stays one group and archived paths stay archived.
+- **Retry-as-fork attempt labels** — forks off the same turn that repeat the same first prompt are numbered as attempts of one family; deliberate parallel branches stay unlabeled.
+- **Fresh sessions remember your last model** — a brand-new conversation with no turn of its own starts from the last model you hand-picked anywhere, not the agent default every time.
+- **Mid-run outages settle** — when the backend stays unreachable for ~30 s, running sessions settle as failed instead of spinning "运行中" for the full watchdog cap.
+- **Four races closed** — a cold opencode that has listen()ed but is not yet answering HTTP is adopted instead of spawning a duplicate on the next port; multi-port fallback kills the abandoned child instead of leaking it; pre-upgrade archive/dir symlink keys migrate on load so restore and remove work; `settings.json` patches serialize so a slow port write cannot drop a backend switch.
+
+### Install
+
+Installers are attached: `awefork-0.3.1-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.3.1-x64-setup.exe` (Windows x64 — SmartScreen may warn; choose More info → Run anyway).
+
 ## v0.3.0
 
 A session's important turns stop drowning in the scroll: star any conversation as a key turn and the mark follows it across the workbench — a rose ring on the card, a rose dot on the minimap, a jump panel that lists them all. Forks can now carry their parent's tags, a squatted port can no longer keep opencode from connecting, and the sidebar session menu learned pin/unpin.
