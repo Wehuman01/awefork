@@ -108,11 +108,11 @@ Lineage is stored by awefork because opencode's fork API copies messages without
 
 Per-backend facts live in data, not code: `src/shared/agents/opencode.json` declares the endpoints, SSE event names, field paths, fork cut translation, capability flags, and the tested version range. The adapter is a generic interpreter over that file, and the vocabulary is closed — the validator (`src/shared/agent-descriptor.ts`) rejects unknown keys at every level, so a typo in a descriptor fails loudly at startup instead of degrading silently at runtime.
 
-awefork is developed and tested against **opencode 1.18.x** (the range is the descriptor's `compat` section). When opencode shifts event shapes, the fix is a descriptor edit rather than an adapter rewrite. The install probe reads `opencode --version`; a version outside the tested range shows a ⚠ notice in the top bar instead of failing silently (runs that never settle, streams that stay empty). A port held by a server that does not behave like `opencode serve` is refused at startup instead of being adopted.
+awefork supports **opencode** (developed and tested against 1.18.x), **Codex** (spawned via app-server protocol), **pi** (`npm install -g @mariozechner/pi-coding-agent`; resume uses `pi --session <jsonl>`), and **ZCode** (install the ZCode desktop app; awefork locates its bundled `zcode.cjs` automatically, or set `AWEFORK_ZCODE_CLI` to point at it). pi and ZCode do not support session delete, export, or rename; ZCode reads its model directory from the v2 config. The install probe checks each CLI on PATH; a missing binary bounces back with a notice instead of failing silently.
 
 ## Multi-Agent Roadmap
 
-The core is the `AgentAdapter` protocol (`src/shared/types.ts`): listSessions / messages / fork / prompt / abort / subscribe. opencode and codex are implemented; each backend's drift-prone facts live in `src/shared/agents/*.json`. Planned next: pi (JSONL with `parentId`), Claude Code (JSONL with `parentUuid` + `--resume`).
+The core is the `AgentAdapter` protocol (`src/shared/types.ts`): listSessions / messages / fork / prompt / abort / subscribe. opencode, codex, pi, and ZCode are implemented (opencode's drift-prone facts live in `src/shared/agents/opencode.json`; the other backends stay literal in code for now). Planned next: Claude Code (JSONL with `parentUuid` + `--resume`).
 
 ## Support
 

@@ -11,10 +11,13 @@ import {
   type BackendId,
   type BackendInfo,
   backendCapabilities,
+  isBackendId,
   resolveStorePath,
 } from "../shared/backend.js";
 import { createOpencodeAdapter } from "../shared/opencode-adapter.js";
+import { createPiAdapter } from "../shared/pi-adapter.js";
 import type { AgentAdapter } from "../shared/types.js";
+import { createZcodeAdapter } from "../shared/zcode-adapter.js";
 import { createCodexMultiHomeAdapter } from "./codex-multihome.js";
 import { isCodexInstalled, stopCodexServer } from "./codex-server.js";
 import {
@@ -24,12 +27,19 @@ import {
   stopManagedServer,
   tryReuseOpencodeServer,
 } from "./opencode-server.js";
+import { isPiInstalled, piNodeSeams, stopPiChildren } from "./pi-server.js";
 import {
   readBackendSelection,
   readOpencodePort,
   writeBackendSelection,
   writeOpencodePort,
 } from "./settings-store.js";
+import {
+  ensureZcodeServer,
+  probeZcode,
+  readZcodeProviderConfig,
+  stopZcodeServer,
+} from "./zcode-server.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -210,13 +220,40 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
           })
         : // The codex facade manages one app-server per home (default +
           // aweswitch accounts) internally, including crash re-spawns.
-          Promise.resolve().then(() => {
-            const adapter = createCodexMultiHomeAdapter({
-              lineagePath: storePaths("codex").lineage,
-            });
-            subscribeAdapter("codex", adapter);
-            return adapter;
-          });
+          backend === "codex"
+          ? Promise.resolve().then(() => {
+              const adapter = createCodexMultiHomeAdapter({
+                lineagePath: storePaths("codex").lineage,
+              });
+              subscribeAdapter("codex", adapter);
+              return adapter;
+            })
+          : // One zcode app-server child; a crashed child respawns inside
+            // the handle and the adapter re-attaches its handlers.
+            backend === "zcode"
+            ? Promise.resolve().then(async () => {
+                const probe = await probeZcode();
+                const server = await ensureZcodeServer({ version: probe.version });
+                const adapter = createZcodeAdapter({
+                  client: server.client,
+                  onClientReplaced: server.onClientReplaced,
+                  lineagePath: storePaths("zcode").lineage,
+                  readProviderConfig: () => readZcodeProviderConfig(),
+                  homeDirectory: homedir(),
+                });
+                subscribeAdapter("zcode", adapter);
+                return adapter;
+              })
+            : // pi: browsing reads the session files directly; RPC children
+              // spawn only while a run is in flight.
+              Promise.resolve().then(async () => {
+                const adapter = createPiAdapter({
+                  lineagePath: storePaths("pi").lineage,
+                  ...(await piNodeSeams()),
+                });
+                subscribeAdapter("pi", adapter);
+                return adapter;
+              });
     // A failed spawn must not be cached as the permanent truth; drop it so
     // the next call retries (matches the lazy re-spawn contract).
     promise.catch(() => adapters.delete(backend));
@@ -230,10 +267,12 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     fileChangesDir: fileChangesRoot,
 
     async listBackends() {
-      const [selected, opencode, codexInstalled] = await Promise.all([
+      const [selected, opencode, codexInstalled, pi, zcode] = await Promise.all([
         readBackendSelection(settingsPath),
         probeOpencode(),
         isCodexInstalled(),
+        isPiInstalled(),
+        probeZcode(),
       ]);
       return {
         selected,
@@ -252,21 +291,45 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
             version: null,
             versionWarning: null,
           },
+          {
+            id: "pi",
+            label: BACKEND_LABELS.pi,
+            installed: pi,
+            version: null,
+            versionWarning: null,
+          },
+          {
+            id: "zcode",
+            label: BACKEND_LABELS.zcode,
+            installed: zcode.installed,
+            version: zcode.version,
+            versionWarning: null,
+          },
         ],
       };
     },
 
     async select(backend) {
-      if (backend !== "opencode" && backend !== "codex") {
+      if (!isBackendId(backend)) {
         return { ok: false, error: `未知后端：${String(backend)}` };
       }
       const installed =
-        backend === "codex" ? await isCodexInstalled() : (await probeOpencode()).installed;
+        backend === "codex"
+          ? await isCodexInstalled()
+          : backend === "zcode"
+            ? (await probeZcode()).installed
+            : backend === "pi"
+              ? await isPiInstalled()
+              : (await probeOpencode()).installed;
       if (!installed) {
         const hint =
           backend === "codex"
             ? "未在 PATH 上找到 codex CLI。安装：npm install -g @openai/codex"
-            : "未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。";
+            : backend === "zcode"
+              ? "未找到 zcode CLI。安装 ZCode 桌面端后重试，或用 AWEFORK_ZCODE_CLI 指向 zcode.cjs。"
+              : backend === "pi"
+                ? "未在 PATH 上找到 pi CLI。安装：npm install -g @mariozechner/pi-coding-agent"
+                : "未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。";
         return { ok: false, error: hint };
       }
       await writeBackendSelection(settingsPath, backend);
@@ -295,6 +358,8 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       adapters.clear();
       stopManagedServer();
       stopCodexServer();
+      stopZcodeServer();
+      stopPiChildren();
     },
   };
 }

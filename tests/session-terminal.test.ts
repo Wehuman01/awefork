@@ -63,6 +63,22 @@ const CODEX_FOREIGN: SessionTerminalRequest = {
   codexHome: "/Users/tester/.config/aweswitch/accounts/codex/cxo-peng",
 };
 
+const PI: SessionTerminalRequest = {
+  backend: "pi",
+  sessionId: "6f0e9b28-1111-2222-3333-444455556666",
+  directory: "/Users/tester/repo",
+  codexHome: null,
+  sessionFile: "/Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl",
+};
+
+const ZCODE: SessionTerminalRequest = {
+  backend: "zcode",
+  sessionId: "sess_abcdef1234567890",
+  directory: "/Users/tester/repo",
+  codexHome: null,
+  zcodeCli: "/Applications/ZCode.app/Contents/Resources/zcode.cjs",
+};
+
 describe("shellQuote", () => {
   it("wraps a plain path", () => {
     expect(shellQuote("/repo/path")).toBe("'/repo/path'");
@@ -104,6 +120,36 @@ describe("sessionScriptBody", () => {
     const body = sessionScriptBody({ ...CODEX_FOREIGN, codexProviderOverride: "x; rm -rf /" });
     expect(body).toContain("exec codex resume '6f0e9b28-1111-2222-3333-444455556666'\n");
   });
+
+  it("resumes pi via --session with the JSONL path shell-quoted", () => {
+    expect(sessionScriptBody(PI)).toBe(
+      [
+        "#!/bin/sh",
+        "cd '/Users/tester/repo' || exit 1",
+        "exec pi --session '/Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl'",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("resumes zcode via node --resume with the CLI path and session id", () => {
+    expect(sessionScriptBody(ZCODE)).toBe(
+      [
+        "#!/bin/sh",
+        "cd '/Users/tester/repo' || exit 1",
+        "exec node '/Applications/ZCode.app/Contents/Resources/zcode.cjs' --resume 'sess_abcdef1234567890'",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes single quotes in the pi session file path", () => {
+    const body = sessionScriptBody({
+      ...PI,
+      sessionFile: "/Users/tester/it's/session.jsonl",
+    });
+    expect(body).toContain("exec pi --session '/Users/tester/it'\\''s/session.jsonl'\n");
+  });
 });
 
 describe("sessionBatchBody", () => {
@@ -139,6 +185,32 @@ describe("sessionBatchBody", () => {
   it("forces the fallback provider after the session id", () => {
     expect(sessionBatchBody({ ...CODEX_FOREIGN, codexProviderOverride: "openai" })).toContain(
       "codex resume 6f0e9b28-1111-2222-3333-444455556666 -c model_provider=openai",
+    );
+  });
+
+  it("resumes pi via --session with the JSONL path unquoted in batch", () => {
+    expect(sessionBatchBody(PI)).toBe(
+      [
+        "@echo off",
+        "@chcp 65001 >nul",
+        'cd /d "/Users/tester/repo"',
+        "if errorlevel 1 exit /b 1",
+        "pi --session /Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl",
+        "",
+      ].join("\r\n"),
+    );
+  });
+
+  it("resumes zcode via node --resume with unquoted CLI path and session id", () => {
+    expect(sessionBatchBody(ZCODE)).toBe(
+      [
+        "@echo off",
+        "@chcp 65001 >nul",
+        'cd /d "/Users/tester/repo"',
+        "if errorlevel 1 exit /b 1",
+        "node /Applications/ZCode.app/Contents/Resources/zcode.cjs --resume sess_abcdef1234567890",
+        "",
+      ].join("\r\n"),
     );
   });
 });
@@ -281,6 +353,26 @@ describe("openSessionInTerminal (guards)", () => {
     const result = await openSessionInTerminal(OPENCODE, { ...deps, platform: "darwin" });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toContain("打开终端失败");
+  });
+
+  it("refuses pi sessions without a session file", async () => {
+    const { deps } = recordingDeps();
+    const result = await openSessionInTerminal(
+      { ...PI, sessionFile: null },
+      { ...deps, platform: "darwin" },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe("找不到该会话的记录文件，无法在终端打开");
+  });
+
+  it("refuses zcode sessions without a CLI path", async () => {
+    const { deps } = recordingDeps();
+    const result = await openSessionInTerminal(
+      { ...ZCODE, zcodeCli: null },
+      { ...deps, platform: "darwin" },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe("未找到 zcode CLI 路径，无法在终端打开");
   });
 });
 

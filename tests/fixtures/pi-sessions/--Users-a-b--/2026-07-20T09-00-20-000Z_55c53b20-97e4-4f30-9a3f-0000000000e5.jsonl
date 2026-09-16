@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"s4-late","timestamp":"2026-07-20T09:00:00.000Z","cwd":"/Users/a-b"}
+{"type":"message","id":"l-u","parentId":null,"timestamp":"2026-07-20T09:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"最近的会话"}],"timestamp":1753552801000}}
+{"type":"message","id":"l-a","parentId":"l-u","timestamp":"2026-07-20T09:00:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"处理完成"}],"stopReason":"stop","timestamp":1753552820000}}

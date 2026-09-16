@@ -80,6 +80,7 @@
           ></span>
         </div>
         <button
+          v-if="isTurnDelete(node) ? store.capabilities.deleteMessage : store.capabilities.deleteSession"
           type="button"
           class="del-chip"
           :title="isTurnDelete(node) ? '删除这个回合（更早的对话保留）' : '删除这个会话（整条分支故事）'"
@@ -561,6 +562,7 @@ function removeNode(node: TurnNode): void {
     if (ok) void deleteTurn(node);
     return;
   }
+  if (!store.capabilities.deleteSession) return;
   void deleteSession(node.sessionId);
 }
 

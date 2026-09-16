@@ -105,11 +105,11 @@ npm run dev
 
 ## 兼容性
 
-awefork 基于 **opencode 1.18.x** 开发与测试。它调用的是 opencode 的本地 HTTP API，而其 SSE 事件格式在不同版本间有过变动 —— 适配层已处理已知差异，但过老或过新的 opencode 可能出现静默降级（运行一直不结束、流式内容空白）。遇到这类情况，先用 `opencode --version` 对照上面的版本。端口若被一个行为不符合 `opencode serve` 的服务占用，启动时会直接拒绝，而不是误连。
+awefork 支持 **opencode**（基于 1.18.x 开发与测试）、**Codex**（通过 app-server 协议驱动）、**pi**（`npm install -g @mariozechner/pi-coding-agent`；通过 `pi --session <jsonl>` 恢复会话）和 **ZCode**（安装 ZCode 桌面端；awefork 自动定位其捆绑的 `zcode.cjs`，也可通过环境变量 `AWEFORK_ZCODE_CLI` 指定路径）。pi 和 ZCode 暂不支持删除会话、导出独立会话或重命名；ZCode 的模型目录读自其 v2 配置。各 CLI 的安装探针会检查 PATH；缺失的二进制会以提示返回，而不是静默失败。
 
 ## 多 Agent 路线
 
-核心是 `AgentAdapter` 协议（`src/shared/types.ts`）：listSessions / messages / fork / prompt / abort / subscribe。opencode 是第一个实现。后续计划：pi（带 `parentId` 的 JSONL）、Claude Code（带 `parentUuid` 的 JSONL + `--resume`）、Codex。
+核心是 `AgentAdapter` 协议（`src/shared/types.ts`）：listSessions / messages / fork / prompt / abort / subscribe。opencode、Codex、pi 和 ZCode 均已实现（opencode 的易变事实在 `src/shared/agents/opencode.json`，其余后端暂以代码内字面量维护）。后续计划：Claude Code（带 `parentUuid` 的 JSONL + `--resume`）。
 
 ## 赞助与支持
 

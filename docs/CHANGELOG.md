@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **pi and ZCode backends** — pi sessions resume through `pi --session <jsonl>` (install `@mariozechner/pi-coding-agent` globally); ZCode sessions resume through its bundled `zcode.cjs` (located automatically or via `AWEFORK_ZCODE_CLI`).
+- **deleteSession capability** — backends without a session-delete primitive hide the delete entry instead of surfacing a runtime error.
+- **backendCapabilities expansion** — the capability flags now cover pi and ZCode, so the renderer can gate affordances per backend.
+
 ## v0.3.1
 
 The canvas stops showing empty placeholders and starts offering a way out of awefork: a brand-new session stays off the graph until its first turn, a branch can be copied into a standalone native session any opencode client can continue, and screenshots no longer pile past 20/40 MB. Directory paths resolve once per listing so symlinked macOS spellings stop splitting projects — and the post-v0.3.0 port, archive, and settings races are closed.

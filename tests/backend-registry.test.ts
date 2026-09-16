@@ -32,12 +32,32 @@ const mocks = vi.hoisted(() => ({
   resolveSpawnEnv: vi.fn(),
   execFile: vi.fn(),
   discoverCodexHomes: vi.fn(),
+  probeZcode: vi.fn(),
+  ensureZcodeServer: vi.fn(),
+  stopZcodeServer: vi.fn(),
+  readZcodeProviderConfig: vi.fn(),
+  isPiInstalled: vi.fn(),
+  piNodeSeams: vi.fn(),
+  stopPiChildren: vi.fn(),
 }));
 
 vi.mock("../src/main/codex-server.js", () => ({
   ensureCodexServer: mocks.ensureCodexServer,
   isCodexInstalled: mocks.isCodexInstalled,
   stopCodexServer: mocks.stopCodexServer,
+}));
+
+vi.mock("../src/main/zcode-server.js", () => ({
+  probeZcode: mocks.probeZcode,
+  ensureZcodeServer: mocks.ensureZcodeServer,
+  stopZcodeServer: mocks.stopZcodeServer,
+  readZcodeProviderConfig: mocks.readZcodeProviderConfig,
+}));
+
+vi.mock("../src/main/pi-server.js", () => ({
+  isPiInstalled: mocks.isPiInstalled,
+  piNodeSeams: mocks.piNodeSeams,
+  stopPiChildren: mocks.stopPiChildren,
 }));
 
 // Keep home discovery synthetic: the real probe would pick up whatever
@@ -384,6 +404,8 @@ describe("switcher data and selection", () => {
   it("lists both backends with installed probes and the persisted selection", async () => {
     await writeBackendSelection(join(userDataDir, "settings.json"), "codex");
     mocks.isCodexInstalled.mockResolvedValue(false);
+    mocks.probeZcode.mockResolvedValue({ installed: false, version: null });
+    mocks.isPiInstalled.mockResolvedValue(false);
 
     await expect(registry.listBackends()).resolves.toEqual({
       selected: "codex",
@@ -396,6 +418,8 @@ describe("switcher data and selection", () => {
           versionWarning: null,
         },
         { id: "codex", label: "codex", installed: false, version: null, versionWarning: null },
+        { id: "pi", label: "pi", installed: false, version: null, versionWarning: null },
+        { id: "zcode", label: "zcode", installed: false, version: null, versionWarning: null },
       ],
     });
   });
@@ -436,6 +460,8 @@ describe("switcher data and selection", () => {
   it("select probes before persisting; a missing CLI keeps the old selection", async () => {
     const settingsPath = join(userDataDir, "settings.json");
     mocks.isCodexInstalled.mockResolvedValue(false);
+    mocks.probeZcode.mockResolvedValue({ installed: false, version: null });
+    mocks.isPiInstalled.mockResolvedValue(false);
 
     const failed = await registry.select("codex");
     expect(failed.ok).toBe(false);
@@ -511,12 +537,14 @@ describe("capabilities and store paths", () => {
   it("serves opencode capabilities from its agent descriptor", () => {
     expect(registry.capabilities("codex")).toEqual({
       deleteMessage: false,
+      deleteSession: true,
       attachments: false,
       fileChanges: false,
       exportBranch: false,
     });
     expect(registry.capabilities("opencode")).toEqual({
       deleteMessage: true,
+      deleteSession: true,
       attachments: true,
       fileChanges: true,
       exportBranch: true,
