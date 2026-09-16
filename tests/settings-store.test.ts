@@ -98,4 +98,13 @@ describe("opencodePort", () => {
     await writeFile(path, JSON.stringify({ opencodePort: "4096" }), "utf8");
     expect(await readOpencodePort(path)).toBeNull();
   });
+
+  it("does not drop keys when backend and port writes race", async () => {
+    const path = await tempSettingsPath();
+    await Promise.all([writeBackendSelection(path, "codex"), writeOpencodePort(path, 18765)]);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      backend: "codex",
+      opencodePort: 18765,
+    });
+  });
 });

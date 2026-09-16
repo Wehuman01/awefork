@@ -188,6 +188,28 @@ export async function resolveSpawnEnv(
 const PROBE_TIMEOUT_MS = 2_000;
 
 /**
+ * How long to wait on a held port before calling the holder foreign. A cold
+ * `opencode serve` can have listen()ed before HTTP answers; treating that
+ * window as "another process" made awefork spawn a duplicate on the next
+ * candidate port and pin it in settings.
+ */
+const HELD_PORT_WAIT_MS = 5_000;
+
+/**
+ * After our child exits (usually a lost port race), keep polling the winner
+ * for this long instead of diagnosing immediately — the other instance may
+ * still be warming its event stream.
+ */
+const PORT_RACE_GRACE_MS = 5_000;
+
+/** Tunables for tests; production uses the constants above. */
+export interface EnsureServerOptions {
+  heldPortWaitMs?: number;
+  portRaceGraceMs?: number;
+  readyDeadlineMs?: number;
+}
+
+/**
  * True when nothing is bound to 127.0.0.1:port. Binding is the only reliable
  * free-port probe on a user machine: another GUI tool can already hold the
  * port with a foreign HTTP server that answers every path (or 401s) — a
@@ -275,22 +297,35 @@ export function parseNetstatListeningPorts(stdout: string): number[] {
 export async function ensureOpencodeServer(
   port: number,
   spawnFn: typeof spawn = spawn,
+  options: EnsureServerOptions = {},
 ): Promise<EnsureServerResult> {
+  const heldPortWaitMs = options.heldPortWaitMs ?? HELD_PORT_WAIT_MS;
+  const portRaceGraceMs = options.portRaceGraceMs ?? PORT_RACE_GRACE_MS;
+  const readyDeadlineMs = options.readyDeadlineMs ?? 30_000;
   const baseUrl = `http://127.0.0.1:${port}`;
   const client = createOpencodeClient(baseUrl, { timeoutMs: PROBE_TIMEOUT_MS });
   if (await isFullyReady(client, baseUrl)) {
     return { spawned: false, baseUrl };
   }
-  // Held by a process that does not even answer /session with a sessions
-  // array (Xiaomi MiMo's 401 Basic Auth, another tool, a leftover proxy):
-  // never opencode, so do not spawn into EADDRINUSE. Callers walk the next
-  // port candidate. A port that answers /session is left to the spawn race —
-  // a cold opencode or a half-compatible foreign server still gets the
-  // post-loop diagnosis below.
-  if (!(await isPortFree(port)) && !(await isReachable(client))) {
-    throw new Error(
-      `${baseUrl} is already in use by another process (not an opencode server). Free port ${port}, or start opencode on another port.`,
-    );
+  // Held by another process. A cold opencode can sit between listen() and the
+  // first HTTP answer; poll before calling the holder foreign so we do not
+  // spawn a duplicate on the next port. A port that answers /session is left
+  // to the spawn race — a cold opencode or a half-compatible foreign server
+  // still gets the post-loop diagnosis below.
+  if (!(await isPortFree(port))) {
+    const waitUntil = Date.now() + heldPortWaitMs;
+    while (Date.now() < waitUntil) {
+      if (await isFullyReady(client, baseUrl)) {
+        return { spawned: false, baseUrl };
+      }
+      if (await isReachable(client)) break;
+      await sleep(250);
+    }
+    if (!(await isReachable(client))) {
+      throw new Error(
+        `${baseUrl} is already in use by another process (not an opencode server). Free port ${port}, or start opencode on another port.`,
+      );
+    }
   }
 
   const child = spawnFn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
@@ -311,13 +346,21 @@ export async function ensureOpencodeServer(
     spawnFailure.error = error;
   });
   registerCleanup(child);
+  // Every throw after spawn must free the child: a multi-port walk would
+  // otherwise overwrite serverChild and leak the previous process.
+  const fail = (message: string): never => {
+    killChild(child);
+    if (serverChild === child) serverChild = null;
+    throw new Error(message);
+  };
 
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + readyDeadlineMs;
+  let exitedAt: number | null = null;
   while (Date.now() < deadline) {
     await sleep(500);
     const spawnError = spawnFailure.error;
     if (spawnError) {
-      throw new Error(
+      return fail(
         `Could not start opencode serve: ${spawnError.message}. Is the "opencode" CLI on PATH? Install it, or start it manually with: opencode serve --port ${port}`,
       );
     }
@@ -326,22 +369,43 @@ export async function ensureOpencodeServer(
     if (await isFullyReady(client, baseUrl)) {
       return { spawned: true, baseUrl };
     }
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null) {
+      // Port race: the winner may still be warming its event stream. Keep
+      // polling a short grace window instead of diagnosing on the exit itself.
+      exitedAt ??= Date.now();
+      if (Date.now() - exitedAt >= portRaceGraceMs) break;
+    }
   }
-  // The loop only reaches here via deadline or child exit. One last probe
-  // covers the warm-up race — a winning opencode whose /event accepted right
-  // after the loop's final check — before diagnosing the failure.
+  // The loop only reaches here via deadline or grace-after-exit. One last
+  // probe covers the warm-up race before diagnosing the failure.
   if (await isFullyReady(client, baseUrl)) {
     return { spawned: true, baseUrl };
   }
   if (await isReachable(client)) {
-    throw new Error(
+    return fail(
       `${baseUrl} is held by a server that does not behave like opencode (REST answers but the event stream does not). Free up port ${port} or start opencode on another port.`,
     );
   }
-  throw new Error(
+  return fail(
     `opencode server did not become ready on ${baseUrl}. Is the "opencode" CLI on PATH? Start it manually with: opencode serve --port ${port}`,
   );
+}
+
+/** Best-effort kill of a child we are abandoning (timeout / diagnosis). */
+function killChild(child: ChildProcess): void {
+  if (child.exitCode !== null) return;
+  // Test doubles and an already-detached handle may not implement kill.
+  if (typeof child.kill !== "function") return;
+  // On win32 the child is cmd.exe (shell:true for .cmd shims) and the real
+  // server is its grandchild — a bare kill() would orphan it.
+  if (process.platform === "win32" && child.pid) {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  } else {
+    child.kill("SIGTERM");
+  }
 }
 
 async function isReachable(client: ReturnType<typeof createOpencodeClient>): Promise<boolean> {

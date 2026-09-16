@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import type { SessionSummary } from "./types.js";
+import type { ArchiveState, SessionSummary } from "./types.js";
 
 /**
  * Directory canonicalization for everything that groups or matches sessions
@@ -58,4 +58,57 @@ export async function canonicalDirectory(
   } catch {
     return dir;
   }
+}
+
+/**
+ * Fold archive directory keys onto their real paths and drop exact-path
+ * duplicates that the rewrite surfaces. `changed` tells the caller to persist
+ * once — later list/add/remove then match by exact string against the same
+ * spelling the session rows use.
+ */
+export async function canonicalizeArchiveDirectories(
+  archive: ArchiveState,
+  resolve: RealpathFn = realpath,
+): Promise<{ archive: ArchiveState; changed: boolean }> {
+  const map = await canonicalDirectories(
+    archive.directories.map((entry) => entry.path),
+    resolve,
+  );
+  let changed = false;
+  const byPath = new Map<string, (typeof archive.directories)[number]>();
+  // Keep the earliest archive timestamp when two spellings collapse.
+  for (const entry of [...archive.directories].sort((a, b) => a.archivedAt - b.archivedAt)) {
+    const canonical = map.get(entry.path) ?? entry.path;
+    if (canonical !== entry.path) changed = true;
+    if (byPath.has(canonical)) {
+      changed = true;
+      continue;
+    }
+    byPath.set(canonical, canonical === entry.path ? entry : { ...entry, path: canonical });
+  }
+  if (!changed) return { archive, changed: false };
+  return {
+    archive: { ...archive, directories: [...byPath.values()] },
+    changed: true,
+  };
+}
+
+/** Same rewrite for the hand-added directory list (dirs.json). */
+export async function canonicalizeDirectoryList(
+  dirs: string[],
+  resolve: RealpathFn = realpath,
+): Promise<{ dirs: string[]; changed: boolean }> {
+  const map = await canonicalDirectories(dirs, resolve);
+  let changed = false;
+  const unique: string[] = [];
+  for (const dir of dirs) {
+    const canonical = map.get(dir) ?? dir;
+    if (canonical !== dir) changed = true;
+    if (unique.includes(canonical)) {
+      changed = true;
+      continue;
+    }
+    unique.push(canonical);
+  }
+  return { dirs: unique, changed };
 }

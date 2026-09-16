@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalDirectories,
   canonicalDirectory,
+  canonicalizeArchiveDirectories,
+  canonicalizeDirectoryList,
   canonicalizeSessionDirectories,
   type RealpathFn,
 } from "../src/shared/canonical-paths";
@@ -69,5 +71,67 @@ describe("canonicalizeSessionDirectories", () => {
     ]);
     // The source rows are untouched — rewriting copies.
     expect(sessions[0]?.directory).toBe("/var/folders/aa/proj");
+  });
+});
+
+describe("canonicalizeArchiveDirectories", () => {
+  it("rewrites a pre-upgrade symlinked key so restore matches exactly", async () => {
+    const archive = {
+      sessions: [],
+      directories: [{ path: "/var/folders/aa/proj", archivedAt: 10 }],
+    };
+    const { archive: next, changed } = await canonicalizeArchiveDirectories(
+      archive,
+      resolvingSymlink,
+    );
+    expect(changed).toBe(true);
+    expect(next.directories).toEqual([{ path: "/private/var/folders/aa/proj", archivedAt: 10 }]);
+  });
+
+  it("collapses twin spellings into one entry, keeping the earliest timestamp", async () => {
+    const archive = {
+      sessions: [],
+      directories: [
+        { path: "/private/var/folders/aa/proj", archivedAt: 20 },
+        { path: "/var/folders/aa/proj", archivedAt: 5 },
+      ],
+    };
+    const { archive: next, changed } = await canonicalizeArchiveDirectories(
+      archive,
+      resolvingSymlink,
+    );
+    expect(changed).toBe(true);
+    expect(next.directories).toEqual([{ path: "/private/var/folders/aa/proj", archivedAt: 5 }]);
+  });
+
+  it("is a no-op when every key is already canonical", async () => {
+    const archive = {
+      sessions: [],
+      directories: [{ path: "/Users/peng/proj", archivedAt: 1 }],
+    };
+    const { archive: next, changed } = await canonicalizeArchiveDirectories(
+      archive,
+      resolvingSymlink,
+    );
+    expect(changed).toBe(false);
+    expect(next).toBe(archive);
+  });
+});
+
+describe("canonicalizeDirectoryList", () => {
+  it("rewrites and dedupes hand-added directory spellings", async () => {
+    const { dirs, changed } = await canonicalizeDirectoryList(
+      ["/var/folders/aa/proj", "/private/var/folders/aa/proj", "/Users/peng/other"],
+      resolvingSymlink,
+    );
+    expect(changed).toBe(true);
+    expect(dirs).toEqual(["/private/var/folders/aa/proj", "/Users/peng/other"]);
+  });
+
+  it("is a no-op on an already-canonical list", async () => {
+    const input = ["/Users/peng/proj"];
+    const { dirs, changed } = await canonicalizeDirectoryList(input, resolvingSymlink);
+    expect(changed).toBe(false);
+    expect(dirs).toEqual(input);
   });
 });

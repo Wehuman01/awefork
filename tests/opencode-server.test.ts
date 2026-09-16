@@ -291,7 +291,9 @@ describe("ensureOpencodeServer", () => {
 
   test("waits for the event stream, not just /session, before resolving", async () => {
     // Entry probe fails once; then REST answers while /event 503s two polls.
-    const { server, port } = await startGateServer({ sessionFailures: 1, eventFailures: 2 });
+    // eventFailures: 3 — the held-port wait's reuse probe burns one /event
+    // attempt before we spawn into the race.
+    const { server, port } = await startGateServer({ sessionFailures: 1, eventFailures: 3 });
     try {
       const result = ensureOpencodeServer(port, () => fakeRunningChild());
       // ~1 s of polls with REST up but SSE down — resolving here is the bug
@@ -372,6 +374,47 @@ describe("ensureOpencodeServer", () => {
       await closeServer(server);
     }
   });
+
+  test("adopts a held port once a cold opencode starts answering", async () => {
+    // listen() before HTTP is useful: the old one-shot probe called this
+    // foreign and spawned a duplicate on the next candidate port.
+    // First /session fails; the held-port wait's next probe is fully ready.
+    const { server, port } = await startGateServer({ sessionFailures: 1, eventFailures: 0 });
+    try {
+      const spawnFn: typeof spawn = (() => {
+        throw new Error("must not spawn — the cold holder should be adopted");
+      }) as typeof spawn;
+      await expect(ensureOpencodeServer(port, spawnFn)).resolves.toMatchObject({
+        spawned: false,
+        baseUrl: `http://127.0.0.1:${port}`,
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  test("kills the abandoned child before diagnosing a failed ensure", async () => {
+    // Multi-port walks overwrite the single serverChild slot; a throw that
+    // left the child alive leaked a process holding its port.
+    const { server, port } = await startGateServer({ sessionFailures: 0, eventFailures: Infinity });
+    const killed: string[] = [];
+    const child = fakeRunningChild();
+    (child as unknown as { kill: (signal: string) => boolean }).kill = (signal: string) => {
+      killed.push(signal);
+      child.exitCode = 0;
+      return true;
+    };
+    try {
+      // Short readiness deadline: the child stays alive (never ready) so the
+      // diagnosis path must kill it.
+      await expect(
+        ensureOpencodeServer(port, () => child, { readyDeadlineMs: 1_500 }),
+      ).rejects.toThrow(/does not behave like opencode/);
+      expect(killed).toEqual(["SIGTERM"]);
+    } finally {
+      await closeServer(server);
+    }
+  });
 });
 
 describe("listening-port discovery", () => {
@@ -427,7 +470,9 @@ describe("listening-port discovery", () => {
     }
   });
 
-  test("names a silent port holder quickly instead of idling at the API timeout", async () => {
+  test("names a silent port holder instead of spawning into it", async () => {
+    // Held-port wait (HELD_PORT_WAIT_MS) plus probe deadlines: a silent
+    // socket is foreign, but only after we give a cold opencode a chance.
     const silent = await startSilentServer();
     try {
       const spawnFn = (() => {
@@ -437,7 +482,8 @@ describe("listening-port discovery", () => {
       await expect(ensureOpencodeServer(silent.port, spawnFn)).rejects.toThrow(
         /already in use by another process/,
       );
-      expect(Date.now() - started).toBeLessThan(6_000);
+      // Held-port wait (~5 s) plus 2 s probe deadlines on a silent socket.
+      expect(Date.now() - started).toBeLessThan(15_000);
     } finally {
       await silent.close();
     }

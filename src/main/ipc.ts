@@ -1,10 +1,14 @@
 import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
-import { readArchive, setArchived } from "../shared/archive-store.js";
+import { readArchive, setArchived, writeArchive } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
-import { canonicalDirectory } from "../shared/canonical-paths.js";
+import {
+  canonicalDirectory,
+  canonicalizeArchiveDirectories,
+  canonicalizeDirectoryList,
+} from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
-import { addDir, readDirs, removeDir } from "../shared/dirs-store.js";
+import { addDir, readDirs, removeDir, writeDirs } from "../shared/dirs-store.js";
 import {
   clearSessionChanges,
   type FileChangeEntry,
@@ -30,6 +34,7 @@ import { addTrashEntry, readTrash, removeTrashEntry } from "../shared/trash-stor
 import type {
   AgentInteractionResponse,
   ArchiveKind,
+  ArchiveState,
   ModelChoice,
   PersistedComposer,
   PromptAttachment,
@@ -405,63 +410,84 @@ export function registerIpc(registry: BackendRegistry): void {
 
   // Archive keys on directory paths canonicalize on the way in and out, so a
   // hidden project stays hidden however its sessions report their directory.
-  ipcMain.handle("awefork:archive", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
-    const archive = await readArchive(registry.storePaths(storeBackend(backend)).archive);
-    return {
-      ...archive,
-      directories: await Promise.all(
-        archive.directories.map(async (entry) => ({
-          ...entry,
-          path: await canonicalDirectory(entry.path),
-        })),
-      ),
-    };
-  });
+  // Pre-upgrade sidecars may still hold a symlinked spelling — migrate the
+  // file once so later restore/remove match by exact string.
+  async function loadCanonicalArchive(backend: BackendId): Promise<ArchiveState> {
+    const path = registry.storePaths(storeBackend(backend)).archive;
+    const archive = await readArchive(path);
+    const { archive: canonical, changed } = await canonicalizeArchiveDirectories(archive);
+    if (changed) await writeArchive(path, canonical);
+    return canonical;
+  }
+
+  async function loadCanonicalDirs(backend: BackendId): Promise<string[]> {
+    const path = registry.storePaths(storeBackend(backend)).dirs;
+    const dirs = await readDirs(path);
+    const { dirs: canonical, changed } = await canonicalizeDirectoryList(dirs);
+    if (changed) await writeDirs(path, canonical);
+    return canonical;
+  }
+
+  ipcMain.handle("awefork:archive", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
+    loadCanonicalArchive(backend),
+  );
 
   ipcMain.handle(
     "awefork:archiveAdd",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) =>
-      setArchived(
+    async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) => {
+      // Migrate first so a re-archive of a pre-upgrade spelling folds onto
+      // one entry instead of stacking a second path that later lists as a twin.
+      await loadCanonicalArchive(backend);
+      return setArchived(
         registry.storePaths(storeBackend(backend)).archive,
         kind,
         kind === "directory" ? await canonicalDirectory(key) : key,
         true,
-      ),
+      );
+    },
   );
 
   ipcMain.handle(
     "awefork:archiveRemove",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) =>
-      setArchived(
+    async (_event: IpcMainInvokeEvent, backend: BackendId, kind: ArchiveKind, key: string) => {
+      await loadCanonicalArchive(backend);
+      return setArchived(
         registry.storePaths(storeBackend(backend)).archive,
         kind,
         kind === "directory" ? await canonicalDirectory(key) : key,
         false,
-      ),
+      );
+    },
   );
 
   // Directories the user registered by hand (＋ 新目录): they render as a
   // sidebar group even before the first conversation exists there. Stored and
   // served canonicalized, so a hand-added spelling matches the session rows'
   // directories however the shell reported them.
-  ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
-    const dirs = await readDirs(registry.storePaths(storeBackend(backend)).dirs);
-    return Promise.all(dirs.map((dir) => canonicalDirectory(dir)));
-  });
+  ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
+    loadCanonicalDirs(backend),
+  );
 
   ipcMain.handle(
     "awefork:dirsAdd",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
-      addDir(registry.storePaths(storeBackend(backend)).dirs, await canonicalDirectory(directory)),
+    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) => {
+      await loadCanonicalDirs(backend);
+      return addDir(
+        registry.storePaths(storeBackend(backend)).dirs,
+        await canonicalDirectory(directory),
+      );
+    },
   );
 
   ipcMain.handle(
     "awefork:dirsRemove",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) =>
-      removeDir(
+    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) => {
+      await loadCanonicalDirs(backend);
+      return removeDir(
         registry.storePaths(storeBackend(backend)).dirs,
         await canonicalDirectory(directory),
-      ),
+      );
+    },
   );
 
   // The unsent draft's crash-recovery sidecar, one file per backend — the
