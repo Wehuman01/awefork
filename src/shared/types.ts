@@ -105,6 +105,8 @@ export interface PersistedDraft {
   sessionId: string;
   /** User message to fork after; null = continue the session at its tip. */
   atMessageId: string | null;
+  /** Whether the forked branch carries the parent's history. Absent = inherit. */
+  contextMode?: ForkContextMode;
   text: string;
   model: ModelChoice | null;
   attachments: PersistedDraftAttachment[];
@@ -354,12 +356,27 @@ export type AgentInteractionResponse =
   | { decision: "answers"; answers: Record<string, string | string[]> };
 
 /**
+ * How much of the parent a fork carries: "inherit" (the default) copies
+ * history through the cut; "none" starts an empty session that lineage still
+ * links to the fork point — same tree position, zero carried context.
+ */
+export type ForkContextMode = "inherit" | "none";
+
+export interface ForkOptions {
+  context?: ForkContextMode;
+}
+
+/**
  * The protocol every agent backend implements.
  *
  * Fork semantics: `fork(sessionId, atMessageId)` branches off AFTER the turn
  * that starts with user message `atMessageId` — the new session contains that
  * full turn. `atMessageId === null` forks at the latest state. Adapters are
  * responsible for translating this to backend-specific cut points.
+ *
+ * `options.context === "none"` skips the history copy: the adapter creates a
+ * brand-new empty session in the parent's working directory and only the
+ * lineage sidecar records the fork.
  */
 export interface AgentAdapter {
   readonly kind: string;
@@ -378,7 +395,11 @@ export interface AgentAdapter {
    * the session should run in; null lets the backend pick (its server cwd).
    */
   createSession(directory?: string | null): Promise<SessionSummary>;
-  fork(sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
+  fork(
+    sessionId: string,
+    atMessageId: string | null,
+    options?: ForkOptions,
+  ): Promise<SessionSummary>;
   /**
    * Copy the branch through `atMessageId` into a standalone native session —
    * the same server-side copy primitive as fork, but detached: no lineage

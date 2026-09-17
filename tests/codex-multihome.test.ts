@@ -366,7 +366,8 @@ describe("codex multi-home facade", () => {
     await facade.listSessions();
     await facade.fork(threadId, null);
 
-    expect(homeAdapter(byHome, "default").fork).toHaveBeenCalledWith(threadId, null);
+    // Third arg is the (absent here) fork options the facade forwards.
+    expect(homeAdapter(byHome, "default").fork).toHaveBeenCalledWith(threadId, null, undefined);
     expect(existsSync(join(defaultHome, rel, `rollout-${threadId}.jsonl`))).toBe(true);
   });
 

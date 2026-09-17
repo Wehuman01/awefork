@@ -10,6 +10,7 @@ import type {
   ArchiveKind,
   ArchiveState,
   ChatMessage,
+  ForkOptions,
   ForkRecord,
   ModelChoice,
   ModelOption,
@@ -113,7 +114,12 @@ export interface AweforkApi {
     messageId: string,
   ): Promise<PromptAttachment[]>;
   createSession(backend: BackendId, directory?: string): Promise<SessionSummary>;
-  fork(backend: BackendId, sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
+  fork(
+    backend: BackendId,
+    sessionId: string,
+    atMessageId: string | null,
+    options?: ForkOptions,
+  ): Promise<SessionSummary>;
   /**
    * Copy the branch through `atMessageId` into a standalone native session
    * (no lineage, no canvas branch) that any opencode client can continue.

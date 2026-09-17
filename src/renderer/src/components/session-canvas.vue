@@ -181,6 +181,20 @@
       >
         <div class="draft-head">
           <span class="draft-tag">🌱 草稿 · {{ store.draft?.atMessageId == null ? "继续分支" : "新分支" }}</span>
+          <button
+            v-if="store.draft?.atMessageId != null"
+            type="button"
+            class="draft-ctx"
+            :class="{ on: store.draft?.contextMode === 'none' }"
+            :title="
+              store.draft?.contextMode === 'none'
+                ? '空上下文：新分支不带这条分支的任何历史，只在谱系上挂在分叉点'
+                : '当前会复制切点前的全部对话到新分支；点击切换为空上下文'
+            "
+            @click="
+              setDraftContextMode(store.draft?.contextMode === 'none' ? 'inherit' : 'none')
+            "
+          >{{ store.draft?.contextMode === "none" ? "✂ 空上下文" : "⛓ 带历史" }}</button>
           <button type="button" class="close" @click="dismissDraft">✕</button>
         </div>
         <div v-if="(store.draft?.attachments.length ?? 0) > 0" class="draft-atts">
@@ -337,6 +351,7 @@ import {
   selectTurn,
   sendDraft,
   setDraftAttachments,
+  setDraftContextMode,
   setDraftModel,
   setDraftText,
   setDraftVariant,

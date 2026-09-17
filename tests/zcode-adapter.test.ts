@@ -267,6 +267,34 @@ describe("zcode adapter", () => {
     });
   });
 
+  it("empty-context fork creates in the parent's workspace — no native fork", async () => {
+    const { client, calls } = fakeClient({
+      replies: {
+        "session/list": {
+          sessions: [
+            {
+              sessionId: "sess_x",
+              workspace: { workspaceKey: "/demo/shop-api", workspacePath: "/demo/shop-api" },
+            },
+          ],
+        },
+        "session/create": { session: { sessionId: "sess_empty" } },
+      },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    options.lineagePath = "/tmp/awefork-zcode-adapter-test/lineage3.json";
+    const summary = await createZcodeAdapter(options).fork("sess_x", "msg_u1", {
+      context: "none",
+    });
+    const createCall = calls.find((call) => call.method === "session/create");
+    expect(createCall?.params).toEqual({
+      workspace: { workspaceKey: "/demo/shop-api", workspacePath: "/demo/shop-api" },
+    });
+    expect(calls.some((call) => call.method === "session/fork")).toBe(false);
+    expect(summary).toMatchObject({ id: "sess_empty", origin: "fork", parentSessionId: "sess_x" });
+  });
+
   it("prompt sets the model, subscribes before send, and surfaces failures", async () => {
     const { client, calls } = fakeClient({
       replies: {

@@ -21,6 +21,7 @@ import type {
   ArchiveKind,
   ArchiveState,
   ChatMessage,
+  ForkOptions,
   ModelChoice,
   ModelOption,
   PersistedComposer,
@@ -64,7 +65,9 @@ const api: AweforkApi = {
     backend: BackendId,
     sessionId: string,
     atMessageId: string | null,
-  ): Promise<SessionSummary> => ipcRenderer.invoke("awefork:fork", backend, sessionId, atMessageId),
+    options?: ForkOptions,
+  ): Promise<SessionSummary> =>
+    ipcRenderer.invoke("awefork:fork", backend, sessionId, atMessageId, options),
   exportSession: (
     backend: BackendId,
     sessionId: string,

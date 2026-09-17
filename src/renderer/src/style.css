@@ -2215,6 +2215,29 @@ mark.hl {
   padding: 3px 12px;
 }
 
+/* empty-context fork toggle; .on = the branch carries no parent history */
+.draft-ctx {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.draft-ctx:hover {
+  color: var(--primary-deep);
+  border-color: var(--primary-deep);
+}
+
+.draft-ctx.on {
+  color: #b45309;
+  border-color: #b45309;
+  background: rgba(180, 83, 9, 0.08);
+}
+
 .draft-head .close {
   margin-left: auto;
   color: var(--ink-faint);

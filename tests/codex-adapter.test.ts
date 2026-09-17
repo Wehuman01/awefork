@@ -541,6 +541,32 @@ describe("createCodexAdapter fork()", () => {
     expect(callsOf("thread/fork")[0]?.params).toEqual({ threadId: "s1" });
   });
 
+  it("empty-context fork thread/starts in the parent's cwd — no fork, no writer taken", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/start": () => ({
+        thread: {
+          id: "empty-1",
+          cwd: "/demo/shop-api",
+          createdAt: 1726000099,
+          updatedAt: 1726000099,
+        },
+      }),
+    });
+    const lineagePath = await tempLineagePath();
+    const adapter = createCodexAdapter({ client, lineagePath, cliVersion: "0.154.0" });
+
+    const forked = await adapter.fork("s1", "u1", { context: "none" });
+    // A fresh thread in the parent's cwd; the copy primitive never ran and
+    // no writer was taken (read, not resume).
+    expect(callsOf("thread/start")[0]?.params).toEqual({ cwd: "/demo/shop-api" });
+    expect(callsOf("thread/fork")).toHaveLength(0);
+    expect(callsOf("thread/resume")).toHaveLength(0);
+    expect(forked).toMatchObject({ id: "empty-1", origin: "fork", parentSessionId: "s1" });
+    const saved = JSON.parse(await readFile(lineagePath, "utf8"));
+    expect(saved["empty-1"]).toMatchObject({ parentId: "s1", atMessageId: "u1" });
+  });
+
   it("falls back to fork + rollback when the CLI predates lastTurnId", async () => {
     const { client, callsOf } = fakeClient({
       "thread/turns/list": (params) =>

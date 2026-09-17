@@ -379,6 +379,19 @@ describe("createPiAdapter fork()", () => {
     const { adapter } = await makeHarness(["s5-fork"]);
     await expect(adapter.fork("s5-fork", "ghost")).rejects.toThrow(/找不到/);
   });
+
+  it("empty-context fork starts a fresh session — no branch copy, lineage kept", async () => {
+    const { adapter, runCalls, lineagePath } = await makeHarness(["s5-fork"]);
+
+    const forked = await adapter.fork("s5-fork", "m-q1", { context: "none" });
+    // The create script ran (newSession), never the branch copy.
+    expect(runCalls[0]).toContain("sm.newSession()");
+    expect(runCalls[0]).not.toContain("createBranchedSession");
+    expect(forked).toMatchObject({ origin: "fork", parentSessionId: "s5-fork" });
+    // The cut point is still recorded, so the canvas hangs the branch there.
+    const saved = JSON.parse(await readFile(lineagePath, "utf8"));
+    expect(saved["made-session-1"]).toMatchObject({ parentId: "s5-fork", atMessageId: "m-q1" });
+  });
 });
 
 // ── event / emitPiEvent normalization ────────────────────────────────────────

@@ -458,7 +458,25 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       return mapThread(thread);
     },
 
-    async fork(sessionId, atMessageId) {
+    async fork(sessionId, atMessageId, forkOptions) {
+      // Empty-context fork: thread/start in the parent's cwd. readThread (not
+      // resume) — an empty fork appends nothing, so it must not take the
+      // parent's writer lock just to read its directory.
+      if (forkOptions?.context === "none") {
+        const parent = await readThread(sessionId);
+        const response = await client.request<{ thread?: CodexThread }>("thread/start", {
+          cwd: parent?.cwd ?? null,
+        });
+        const thread = response?.thread;
+        if (!thread) throw new Error("codex thread/start returned no thread");
+        const summary = mapThread(thread);
+        await recordFork(lineagePath, summary.id, {
+          parentId: sessionId,
+          atMessageId,
+          createdAt: summary.createdAt,
+        });
+        return { ...summary, origin: "fork", parentSessionId: sessionId };
+      }
       let lastTurnId: string | null = null;
       if (atMessageId) {
         const turn = await turnOfItem(sessionId, atMessageId);

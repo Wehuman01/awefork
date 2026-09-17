@@ -57,6 +57,8 @@ interface SessionDef {
   directory?: string;
   /** Preset session tags (执行 / 实验设计 / 咨询 …) for the demo's tag shelf. */
   tags?: string[];
+  /** True on forks that carry none of the parent's turns (空上下文 fork). */
+  emptyContext?: boolean;
 }
 
 const DIRECTORY = "/demo/shop-api";
@@ -375,7 +377,8 @@ function sessionTurns(defs: Map<string, SessionDef>, id: string): TurnDef[] {
   if (!def) return [];
   // Always hand out a copy: the fork cut below splices the parent's list.
   const own = [...def.turns];
-  if (!def.parent) return own;
+  // An empty-context fork inherits no prefix — only lineage links it.
+  if (!def.parent || def.emptyContext) return own;
   const parentTurns = sessionTurns(defs, def.parent);
   if (def.atMessageId) {
     const cut = parentTurns.findIndex((t) => t.id === def.atMessageId);
@@ -528,7 +531,7 @@ export function installMockAdapter(): void {
       if (!created) throw new Error(`demo session ${id} missing after creation`);
       return created;
     },
-    fork: async (_backend, sessionId, atMessageId) => {
+    fork: async (_backend, sessionId, atMessageId, forkOptions) => {
       promptSeq += 1;
       const parent = defs.get(sessionId);
       const id = `demo-fork-${promptSeq}`;
@@ -540,6 +543,7 @@ export function installMockAdapter(): void {
         atMessageId,
         turns: [],
         minutesAgo: 0,
+        ...(forkOptions?.context === "none" ? { emptyContext: true } : {}),
       });
       lineage[id] = { parentId: sessionId, atMessageId, createdAt: Date.now() };
       const created = summaries().find((s) => s.id === id);

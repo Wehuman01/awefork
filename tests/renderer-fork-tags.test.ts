@@ -174,6 +174,7 @@ async function bootState(options: { tags?: TagStore } = {}) {
     tagStore: clone,
     answerForkTagAsk: state.answerForkTagAsk,
     sendMidTurnFork: () => state.sendDraft(),
+    setDraftContextMode: state.setDraftContextMode,
     applyTagsToSubtree: state.applyTagsToSubtree,
     setForkTagPref: state.setForkTagPref,
     undoSteps: history.undoSteps,
@@ -201,7 +202,7 @@ describe("fork tag inheritance (rule B)", () => {
     h.answerForkTagAsk("inherit", false);
     await pending;
 
-    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", "m1");
+    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", "m1", { context: "inherit" });
     expect(h.api.setSessionTags).toHaveBeenCalledWith("opencode", "fork-1", ["执行"]);
     // No remember-me: the preference stays ask-every-time.
     expect(h.api.setForkTagPref).not.toHaveBeenCalled();
@@ -310,5 +311,23 @@ describe("subtree tag application (rule A)", () => {
     await h.applyTagsToSubtree("grand", ["咨询"]);
 
     expect(h.api.addTagsToSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe("empty-context fork (草稿开关)", () => {
+  it("sends the draft's context mode with the fork call", async () => {
+    const h = await bootState();
+    h.setDraftContextMode("none");
+    await h.sendMidTurnFork();
+
+    // The branch starts a brand-new session instead of copying parent turns.
+    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", "m1", { context: "none" });
+  });
+
+  it("defaults to inherit when the toggle was never touched", async () => {
+    const h = await bootState();
+    await h.sendMidTurnFork();
+
+    expect(h.api.fork).toHaveBeenCalledWith("opencode", "root", "m1", { context: "inherit" });
   });
 });

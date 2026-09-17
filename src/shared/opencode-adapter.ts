@@ -238,7 +238,20 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       return mapSession(await client.createSession(directory ?? undefined));
     },
 
-    async fork(sessionId, atMessageId) {
+    async fork(sessionId, atMessageId, forkOptions) {
+      // Empty-context fork: a brand-new native session in the parent's
+      // directory. Nothing is copied, but lineage still records the cut so
+      // the canvas hangs the branch right where the fork card floated.
+      if (forkOptions?.context === "none") {
+        const parent = mapSession(await client.session(sessionId));
+        const created = mapSession(await client.createSession(parent.directory || undefined));
+        await recordFork(options.lineagePath, created.id, {
+          parentId: sessionId,
+          atMessageId,
+          createdAt: created.createdAt,
+        });
+        return { ...created, origin: "fork", parentSessionId: sessionId };
+      }
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
       const forked = await client.fork(sessionId, cut);
       await recordFork(options.lineagePath, forked.id, {

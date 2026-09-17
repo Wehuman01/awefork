@@ -33,6 +33,7 @@ import type {
   ArchiveKind,
   ArchiveState,
   ChatMessage,
+  ForkContextMode,
   ForkRecord,
   ModelChoice,
   ModelOption,
@@ -53,6 +54,8 @@ interface DraftState {
   sessionId: string;
   /** User message to fork after; null = continue the session as-is. */
   atMessageId: string | null;
+  /** Fork context: "none" = the new branch carries no parent history. */
+  contextMode: ForkContextMode;
   text: string;
   /** Model to run the prompt with; null = the agent's configured default. */
   model: ModelChoice | null;
@@ -2759,6 +2762,7 @@ export function openDraft(node: TurnNode): void {
     sessionId: node.sessionId,
     // Session tip: keep talking in place; a mid-story turn grows a fork.
     atMessageId: isSessionTip(node) ? null : node.messageId,
+    contextMode: "inherit",
     text: "",
     // Preselect the model that wrote the turn being forked from, when known;
     // a stub (no turns of its own) starts from the last model picked.
@@ -2784,6 +2788,7 @@ export function retryTurn(turn: Turn): void {
     nodeId,
     sessionId: turn.sessionId,
     atMessageId: last != null && last.messageId === turn.messageId ? null : turn.messageId,
+    contextMode: "inherit",
     text,
     model: turn.model,
     attachments: [],
@@ -2802,6 +2807,7 @@ export function retryNode(node: TurnNode): void {
     nodeId: node.id,
     sessionId: node.sessionId,
     atMessageId: isSessionTip(node) ? null : node.messageId,
+    contextMode: "inherit",
     text,
     model: node.model,
     attachments: [],
@@ -2849,6 +2855,14 @@ export function setDraftModel(model: ModelChoice | null): void {
 /** Swap the draft's reasoning-effort variant, keeping its model. */
 export function setDraftVariant(variant: string | null): void {
   if (state.draft?.model) state.draft.model = { ...state.draft.model, variant };
+}
+
+/**
+ * Toggle whether the drafted fork carries the parent's history. Only the
+ * fork path (atMessageId set) honors it; a tip draft continues in place.
+ */
+export function setDraftContextMode(mode: ForkContextMode): void {
+  if (state.draft) state.draft.contextMode = mode;
 }
 
 export function setDraftAttachments(attachments: readonly DraftAttachment[]): void {
@@ -2983,6 +2997,7 @@ function plainPersistedDraft(): PersistedDraft | null {
   return {
     sessionId: draft.sessionId,
     atMessageId: draft.atMessageId,
+    contextMode: draft.contextMode,
     text: draft.text,
     model: plainModel(draft.model),
     attachments: draft.attachments.map((a) => ({
@@ -3086,6 +3101,7 @@ async function restoreComposer(): Promise<void> {
             nodeId: anchor.nodeId,
             sessionId: draft.sessionId,
             atMessageId: anchor.atMessageId,
+            contextMode: draft.contextMode ?? "inherit",
             text: draft.text,
             model: draft.model,
             attachments: draft.attachments.map((a) => ({ ...a })),
@@ -3182,7 +3198,9 @@ export async function sendDraft(): Promise<void> {
       const decision = await askForkTags(draft.sessionId);
       if (decision.canceled) return;
       const inheritTags = decision.inherit ? [...tagsOf(draft.sessionId)] : [];
-      const forked = await window.awefork.fork(backend, draft.sessionId, draft.atMessageId);
+      const forked = await window.awefork.fork(backend, draft.sessionId, draft.atMessageId, {
+        context: draft.contextMode === "none" ? "none" : "inherit",
+      });
       // Inherited tags land even if the user switched backends mid-flight:
       // the fork is real, and it belongs to `backend`.
       await inheritTagsOnFork(backend, forked.id, inheritTags);

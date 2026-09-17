@@ -432,8 +432,31 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       };
     },
 
-    async fork(sessionId, atMessageId) {
+    async fork(sessionId, atMessageId, forkOptions) {
       const source = await requireSession(sessionId);
+      // Empty-context fork: a fresh empty file in the parent's cwd — no
+      // branch copy; lineage alone links it to the fork point.
+      if (forkOptions?.context === "none") {
+        const cwd = source.header?.cwd ?? "";
+        const out = await options.runNodeScript(createScript(PI_SDK_IMPORT, cwd));
+        const { sessionId: forkedId } = scriptResult(out);
+        await recordFork(lineagePath, forkedId, {
+          parentId: sessionId,
+          atMessageId,
+          createdAt: now(),
+        });
+        indexed = false;
+        const createdAt = now();
+        return {
+          id: forkedId,
+          title: "(未命名会话)",
+          directory: cwd,
+          parentSessionId: sessionId,
+          origin: "fork",
+          createdAt,
+          updatedAt: createdAt,
+        };
+      }
       const { entries } = await parseSession(source.file);
       const leafId = forkCutLeafId(activeBranch(entries), atMessageId ?? null);
       const out = await options.runNodeScript(forkScript(PI_SDK_IMPORT, source.file, leafId));

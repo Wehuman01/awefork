@@ -604,6 +604,21 @@ describe("opencode adapter", () => {
     expect(lineage[forked.id]).toMatchObject({ parentId: "s1", atMessageId: "u1" });
   });
 
+  it("empty-context fork creates a fresh session in the parent's directory, no copy", async () => {
+    const state = baseState();
+    const { adapter, lineagePath } = await newAdapter(state);
+    const forked = await adapter.fork("s1", "u2", { context: "none" });
+
+    // A plain create in the parent's directory — the native fork was never hit.
+    expect(state.forkCalls).toEqual([]);
+    expect(state.createCalls).toEqual(["/repo"]);
+    expect(forked).toMatchObject({ origin: "fork", parentSessionId: "s1" });
+    expect(await adapter.messages(forked.id)).toEqual([]);
+    // Lineage still points at the cut, so the canvas hangs the branch there.
+    const lineage = await readLineage(lineagePath);
+    expect(lineage[forked.id]).toMatchObject({ parentId: "s1", atMessageId: "u2" });
+  });
+
   it("exportSession copies through the turn as a detached root — no lineage", async () => {
     const state = baseState();
     const { adapter, lineagePath } = await newAdapter(state);

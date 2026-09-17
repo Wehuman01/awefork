@@ -35,6 +35,7 @@ import type {
   AgentInteractionResponse,
   ArchiveKind,
   ArchiveState,
+  ForkOptions,
   ModelChoice,
   PersistedComposer,
   PromptAttachment,
@@ -67,7 +68,8 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   models(backend)         -> ModelOption[]        models offered by the agent config
  *   messageAttachments(backend, session, message) -> PromptAttachment[] (retry prefill)
  *   createSession(backend, directory?) -> SessionSummary
- *   fork(backend, id, atMessageId | null) -> SessionSummary (turn-preserving)
+ *   fork(backend, id, atMessageId | null, {context}?) -> SessionSummary
+ *                           (turn-preserving; context "none" = empty fork)
  *   exportSession(backend, id, atMessageId | null) -> SessionSummary
  *                           standalone native copy, no lineage recorded
  *   deleteSession(backend, id) -> string[]          delete, pruned pins back
@@ -191,9 +193,10 @@ export function registerIpc(registry: BackendRegistry): void {
       backend: BackendId,
       sessionId: string,
       atMessageId: string | null,
+      options?: ForkOptions,
     ) => {
       const adapter = await withAdapter(storeBackend(backend));
-      return adapter.fork(sessionId, atMessageId);
+      return adapter.fork(sessionId, atMessageId, options);
     },
   );
 

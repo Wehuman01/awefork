@@ -170,6 +170,22 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     return page?.messages ?? [];
   };
 
+  /** session/create in one workspace; shared by createSession and empty forks. */
+  const createSessionIn = async (directory?: string | null): Promise<SessionSummary> => {
+    const client = await options.client();
+    const workspacePath = directory || options.homeDirectory || "";
+    if (!workspacePath) throw new Error("zcode 需要一个工作目录才能新建会话");
+    const created = await client.request<{ session?: ZcodeSessionRow } | ZcodeSessionRow>(
+      "session/create",
+      { workspace: { workspaceKey: workspacePath, workspacePath } },
+      30_000,
+    );
+    const row = (created as { session?: ZcodeSessionRow })?.session ?? (created as ZcodeSessionRow);
+    const summary = mapSessionRow(row ?? {});
+    if (!summary.id) throw new Error("zcode session/create 未返回会话 id");
+    return summary;
+  };
+
   const promptTextOf = (parts: ZcodeMessage["parts"]): string =>
     (parts ?? [])
       .filter((part) => part.type === "text" && typeof part.text === "string")
@@ -399,22 +415,25 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     },
 
     async createSession(directory) {
-      const client = await options.client();
-      const workspacePath = directory || options.homeDirectory || "";
-      if (!workspacePath) throw new Error("zcode 需要一个工作目录才能新建会话");
-      const created = await client.request<{ session?: ZcodeSessionRow } | ZcodeSessionRow>(
-        "session/create",
-        { workspace: { workspaceKey: workspacePath, workspacePath } },
-        30_000,
-      );
-      const row =
-        (created as { session?: ZcodeSessionRow })?.session ?? (created as ZcodeSessionRow);
-      const summary = mapSessionRow(row ?? {});
-      if (!summary.id) throw new Error("zcode session/create 未返回会话 id");
-      return summary;
+      return createSessionIn(directory);
     },
 
-    async fork(sessionId, atMessageId) {
+    async fork(sessionId, atMessageId, forkOptions) {
+      // 空上下文 fork: session/create in the parent's own workspace (found
+      // via session/list; the home directory is the fallback). No native
+      // fork call — lineage alone links the branch to the cut point.
+      if (forkOptions?.context === "none") {
+        const client = await options.client();
+        const page = await client.request<{ sessions?: ZcodeSessionRow[] }>("session/list", {});
+        const parentRow = (page?.sessions ?? []).find((row) => row.sessionId === sessionId);
+        const summary = await createSessionIn(parentRow?.workspace?.workspacePath ?? null);
+        await recordFork(options.lineagePath, summary.id, {
+          parentId: sessionId,
+          atMessageId,
+          createdAt: summary.createdAt,
+        });
+        return { ...summary, origin: "fork", parentSessionId: sessionId };
+      }
       const parentMessages = await fetchMessages(sessionId);
       const { cutId } = cutMessageIdOf(parentMessages, atMessageId);
       if (!cutId) throw new Error("未找到可用的分叉切点，刷新会话后重试");
