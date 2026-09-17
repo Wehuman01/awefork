@@ -28,6 +28,7 @@
         @click="jump(hit)"
       >
         <span class="ss-hit-head">
+          <span v-if="pinnedOf(hit)" class="ss-pin" title="已置顶">📌</span>
           <span class="ss-field" :class="hit.field">{{ fieldLabel(hit.field) }}</span>
           <span class="ss-hit-title">{{ titleOf(hit) }}</span>
         </span>
@@ -44,7 +45,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import type { TurnSearchHit } from "../../../shared/turn-search";
-import { searchQuery, selectTurn, storySearchHits, turnGraph } from "../state";
+import { searchQuery, selectTurn, store, storySearchHits, turnGraph } from "../state";
 
 const emit = defineEmits<{ jump: [node: TurnNode] }>();
 
@@ -55,6 +56,12 @@ const nodeById = computed(() => new Map(turnGraph.value.nodes.map((n) => [n.id, 
 
 function titleOf(hit: TurnSearchHit): string {
   return nodeById.value.get(hit.nodeId)?.title ?? "";
+}
+
+/** The hit's session pinned? Same source as the sidebar row badge. */
+function pinnedOf(hit: TurnSearchHit): boolean {
+  const node = nodeById.value.get(hit.nodeId);
+  return node !== undefined && store.pins.includes(node.sessionId);
 }
 
 function fieldLabel(field: TurnSearchHit["field"]): string {

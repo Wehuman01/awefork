@@ -21,6 +21,7 @@
             @click="run(item)"
           >
             <span class="palette-icon">{{ item.icon }}</span>
+            <span v-if="item.pinned" class="palette-pin" title="已置顶">📌</span>
             <span class="palette-label">{{ item.label }}</span>
             <span class="palette-hint">{{ item.hint }}</span>
           </button>
@@ -52,6 +53,8 @@ interface PaletteItem {
   label: string;
   hint: string;
   run: () => void;
+  /** Session items only: the sidebar's pin badge rides along. */
+  pinned?: boolean;
 }
 
 const query = ref("");
@@ -110,6 +113,7 @@ const items = computed<PaletteItem[]>(() => {
         icon: s.origin === "fork" ? "⎇" : "💬",
         label: s.title || "(untitled)",
         hint: shortDir(s.directory),
+        pinned: store.pins.includes(s.id),
         run: () => void jumpToSession(s),
       }),
     );
