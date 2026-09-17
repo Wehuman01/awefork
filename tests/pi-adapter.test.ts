@@ -341,6 +341,97 @@ describe("createPiAdapter prompt() and abort()", () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
     await expect(adapter.abort("s1-mixed")).rejects.toThrow("该会话当前没有正在运行的回合");
   });
+
+  it("concurrent prompts on one session share a single spawned child", async () => {
+    const { adapter, rpc } = await makeHarness(["s1-mixed"]);
+
+    await Promise.all([
+      adapter.prompt("s1-mixed", "first", null),
+      adapter.prompt("s1-mixed", "second", null),
+    ]);
+
+    // The spawn memo closes the race that used to orphan one child per pair.
+    expect(rpc.children).toHaveLength(1);
+    expect(rpc.children[0]?.calls.filter((c) => c.type === "prompt")).toHaveLength(2);
+  });
+});
+
+// ── summary cache invalidation ───────────────────────────────────────────────
+
+describe("createPiAdapter summary cache invalidation", () => {
+  /** Harness whose readSessionFile can be overridden per file mid-test. */
+  async function makeOverlayHarness(): Promise<{
+    adapter: ReturnType<typeof createPiAdapter>;
+    overlay: (text: string) => Promise<void>;
+  }> {
+    const rpc = fakeRpcPool();
+    const overlays = new Map<string, string>();
+    const seams: PiAdapterNodeSeams = {
+      async listSessionFiles() {
+        return [FIXTURES["s1-mixed"]];
+      },
+      async readSessionFile(path) {
+        return overlays.get(path) ?? readFile(path, "utf8");
+      },
+      async runNodeScript() {
+        return JSON.stringify({ sessionFile: "/tmp/fake/new.jsonl", sessionId: "made-session-1" });
+      },
+      spawnRpc: rpc.spawn,
+    };
+    const dir = await mkdtemp(join(tmpdir(), "awefork-pi-"));
+    dirs.push(dir);
+    return {
+      adapter: createPiAdapter({ ...seams, lineagePath: join(dir, "lineage.json") }),
+      overlay: async (text) => {
+        overlays.set(
+          FIXTURES["s1-mixed"],
+          `${await readFile(FIXTURES["s1-mixed"], "utf8")}\n${text}`,
+        );
+      },
+    };
+  }
+
+  it("re-reads summaries after a prompt moved the session file", async () => {
+    const { adapter, overlay } = await makeOverlayHarness();
+    expect((await adapter.listSessions()).find((s) => s.id === "s1-mixed")?.title).not.toBe(
+      "改后标题",
+    );
+
+    // The pooled RPC child appends entries out from under the cache mid-run.
+    await overlay(
+      JSON.stringify({
+        type: "session_info",
+        id: "c-renamed",
+        parentId: null,
+        timestamp: "2026-06-02T09:00:00.000Z",
+        name: "改后标题",
+      }),
+    );
+
+    await adapter.prompt("s1-mixed", "hi", null);
+    // The prompt's settle drops the pre-run cache; without it the sidebar
+    // would keep stale summaries until some create/fork invalidated them.
+    const after = await adapter.listSessions();
+    expect(after.find((s) => s.id === "s1-mixed")?.title).toBe("改后标题");
+  });
+
+  it("re-reads summaries after renameSession", async () => {
+    const { adapter, overlay } = await makeOverlayHarness();
+
+    await overlay(
+      JSON.stringify({
+        type: "session_info",
+        id: "c-renamed",
+        parentId: null,
+        timestamp: "2026-06-02T09:00:00.000Z",
+        name: "SDK 改的名",
+      }),
+    );
+
+    await adapter.renameSession("s1-mixed", "SDK 改的名");
+    const after = await adapter.listSessions();
+    expect(after.find((s) => s.id === "s1-mixed")?.title).toBe("SDK 改的名");
+  });
 });
 
 // ── fork() ───────────────────────────────────────────────────────────────────

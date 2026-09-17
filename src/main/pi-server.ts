@@ -257,7 +257,7 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
           pending.delete(id);
           clearTimeout(entry.timeout);
           if (frame.success === false) {
-            const detail = typeof frame.error === "string" ? frame.error : "si RPC 请求失败";
+            const detail = typeof frame.error === "string" ? frame.error : "pi RPC 请求失败";
             entry.reject(new Error(detail));
           } else {
             entry.resolve(frame.data ?? null);

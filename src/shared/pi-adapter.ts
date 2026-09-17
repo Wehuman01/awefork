@@ -136,6 +136,8 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   let emitEvent: ((event: AgentEvent) => void) | null = null;
   /** sessionId → its pooled live RPC child. */
   const sessions = new Map<string, PiRpcProcess>();
+  /** sessionId → an RPC spawn still in flight, so racing prompts share one child. */
+  const spawning = new Map<string, Promise<PiRpcProcess>>();
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
   const str = (value: unknown): string | undefined =>
@@ -356,11 +358,28 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
    * would CREATE a fresh empty session file on startup, so letting it fall
    * back to "recent session under cwd" would leak one junk file per prompt.
    */
-  const ensureRpc = async (sessionId: string, file: string, cwd: string): Promise<PiRpcProcess> => {
-    const proc = await options.spawnRpc(["--session", file], cwd);
-    proc.onExit(() => sessions.delete(sessionId));
-    proc.setEventHandler((event) => emitPiEvent(sessionId, event, emit));
-    return proc;
+  const ensureRpc = (sessionId: string, file: string, cwd: string): Promise<PiRpcProcess> => {
+    // Concurrent prompts for one session must land on one child: two racing
+    // spawns would orphan the loser, and its exit handler would later drop
+    // the winner's pool slot.
+    const inFlight = spawning.get(sessionId);
+    if (inFlight) return inFlight;
+    const spawnOnce = options.spawnRpc(["--session", file], cwd).then((proc) => {
+      proc.onExit(() => sessions.delete(sessionId));
+      proc.setEventHandler((event) => {
+        emitPiEvent(sessionId, event, emit);
+        // A finished agent turn appended entries (updatedAt moved); the
+        // summary cache must not keep serving the pre-run branch.
+        if ((event as { type?: unknown } | null)?.type === "agent_end") indexed = false;
+      });
+      spawning.delete(sessionId);
+      return proc;
+    });
+    spawning.set(sessionId, spawnOnce);
+    spawnOnce.catch(() => {
+      if (spawning.get(sessionId) === spawnOnce) spawning.delete(sessionId);
+    });
+    return spawnOnce;
   };
 
   return {
@@ -500,6 +519,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     async renameSession(sessionId, title) {
       const found = await requireSession(sessionId);
       await options.runNodeScript(renameScript(PI_SDK_IMPORT, found.file, title));
+      indexed = false;
     },
 
     async prompt(sessionId, text, model) {
@@ -527,6 +547,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         const detail = error instanceof Error ? error.message : String(error);
         emit({ type: "server.error", sessionId, message: `pi prompt failed: ${detail}` });
         throw error instanceof Error ? error : new Error(detail);
+      } finally {
+        // The accepted prompt (and any entries a failed run still appended)
+        // moved the file; without this the sidebar keeps pre-run summaries
+        // until some create/fork happens to invalidate the cache.
+        indexed = false;
       }
     },
 
@@ -556,6 +581,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       emitEvent = null;
       for (const proc of sessions.values()) proc.kill();
       sessions.clear();
+      spawning.clear();
     },
   };
 }
