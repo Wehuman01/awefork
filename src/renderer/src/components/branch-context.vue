@@ -139,6 +139,14 @@
           </div>
         </template>
       </div>
+      <CompareComposer
+        :targets="compareTargets"
+        :models="store.models"
+        :allow-attachments="store.capabilities.attachments"
+        :send="sendCompare"
+        :abort="abortCompare"
+        @set-model="setPaneModel"
+      />
     </template>
 
     <!-- ── normal pane ───────────────────────────────────────────────── -->
@@ -283,10 +291,12 @@ import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../sha
 import { formatDuration, formatTokens } from "../format";
 import {
   abortRun,
+  abortRunFor,
   activeChain,
   cancelComparePick,
   comparePlan,
   compareWithParent,
+  composerModelFor,
   exitCompare,
   exportBranchMarkdown,
   isTurnMarked,
@@ -297,6 +307,7 @@ import {
   selectedSession,
   selectSession,
   selectTurn,
+  sendComparePrompt,
   sendPanePrompt,
   setPaneModel,
   stepTurn,
@@ -309,6 +320,7 @@ import {
 } from "../state";
 import ChatInput from "./chat-input.vue";
 import CmpCell, { type DisplayCell } from "./cmp-cell.vue";
+import CompareComposer from "./compare-composer.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import MessageList from "./message-list.vue";
 
@@ -354,6 +366,31 @@ const compare = computed(() => {
 });
 
 const sides = ["left", "right"] as const;
+
+const compareTargets = computed(() => {
+  const current = compare.value;
+  if (!current) return [];
+  return [current.pair.leftId, current.pair.rightId].map((id, index) => ({
+    id,
+    side: sideOf(index),
+    title: sideTitle(id),
+    model: composerModelFor(id),
+    running: Boolean(store.running[id]),
+  }));
+});
+
+async function sendCompare(
+  ids: readonly string[],
+  text: string,
+  models: Readonly<Record<string, ModelChoice | null>>,
+  attachments: PromptAttachment[],
+) {
+  return sendComparePrompt(ids, text, models, attachments);
+}
+
+async function abortCompare(sessionId: string): Promise<string | null> {
+  return abortRunFor(sessionId);
+}
 
 function sideOf(index: number): (typeof sides)[number] {
   return index === 0 ? "left" : "right";

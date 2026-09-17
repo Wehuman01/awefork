@@ -25,6 +25,16 @@ const OPENCODE: SessionSummary = {
   updatedAt: 1_726_000_000_000,
 };
 
+const SECOND: SessionSummary = {
+  id: "s2",
+  title: "另一条会话",
+  directory: "/demo/shop-api",
+  parentSessionId: null,
+  origin: "root",
+  createdAt: 1_726_000_000_000,
+  updatedAt: 1_726_000_000_000,
+};
+
 const CODEX: SessionSummary = {
   id: "c1",
   title: "codex 会话",
@@ -62,7 +72,11 @@ function turnNode() {
 }
 
 async function bootState(
-  options: { composer?: PersistedComposer | null; messages?: Record<string, ChatMessage[]> } = {},
+  options: {
+    composer?: PersistedComposer | null;
+    messages?: Record<string, ChatMessage[]>;
+    includeSecond?: boolean;
+  } = {},
 ) {
   vi.resetModules();
   const saves: Array<{ backend: BackendId; value: PersistedComposer | null }> = [];
@@ -72,7 +86,7 @@ async function bootState(
     sessions: vi.fn(async (backend: BackendId) =>
       backend === "codex"
         ? { sessions: [CODEX], lineage: {} }
-        : { sessions: [OPENCODE], lineage: {} },
+        : { sessions: options.includeSecond ? [OPENCODE, SECOND] : [OPENCODE], lineage: {} },
     ),
     messages: vi.fn(
       async (_backend: BackendId, sessionId: string) => options.messages?.[sessionId] ?? [],
@@ -232,6 +246,86 @@ describe("composer persistence × backend switch", () => {
  * the selected branch's own last-used model+variant, and only a hand-picked
  * model (or a deliberate 默认模型) overrides it.
  */
+describe("explicit prompt targets", () => {
+  it("sends to an explicit session without changing the current selection", async () => {
+    const h = await bootState({ includeSecond: true });
+    await h.mod.selectSession("s1");
+
+    await h.mod.sendPromptTo("s2", "给另一条会话");
+
+    expect(h.store.selectedId).toBe("s1");
+    expect(h.api.prompt).toHaveBeenCalledWith("opencode", "s2", "给另一条会话", null, []);
+    expect(h.store.messagesBySession.s2?.at(-1)?.text).toBe("给另一条会话");
+    expect(h.store.running.s2).toBe(true);
+  });
+
+  it("sends one compare draft to both sessions with independent models", async () => {
+    const h = await bootState({ includeSecond: true });
+    await h.mod.selectSession("s1");
+    await h.mod.enterCompare("s1", "s2");
+
+    const results = await h.mod.sendComparePrompt(["s1", "s2"], "同一个问题", {
+      s1: { providerId: "oc", modelId: "glm-5.3", variant: "high" },
+      s2: { providerId: "oc", modelId: "glm-5.3-flash", variant: null },
+    });
+
+    expect(results).toEqual([
+      { sessionId: "s1", error: null },
+      { sessionId: "s2", error: null },
+    ]);
+    expect(h.store.selectedId).toBe("s1");
+    expect(h.api.prompt).toHaveBeenCalledWith(
+      "opencode",
+      "s1",
+      "同一个问题",
+      {
+        providerId: "oc",
+        modelId: "glm-5.3",
+        variant: "high",
+      },
+      [],
+    );
+    expect(h.api.prompt).toHaveBeenCalledWith(
+      "opencode",
+      "s2",
+      "同一个问题",
+      {
+        providerId: "oc",
+        modelId: "glm-5.3-flash",
+        variant: null,
+      },
+      [],
+    );
+    expect(h.store.running.s1).toBe(true);
+    expect(h.store.running.s2).toBe(true);
+  });
+
+  it("keeps a successful compare target running when the other target fails", async () => {
+    const h = await bootState({ includeSecond: true });
+    await h.mod.enterCompare("s1", "s2");
+    h.api.prompt.mockImplementation(async (_backend, sessionId) => {
+      if (sessionId === "s2") throw new Error("右侧失败");
+    });
+
+    const results = await h.mod.sendComparePrompt(["s1", "s2"], "同一个问题", {});
+
+    expect(results).toEqual([
+      { sessionId: "s1", error: null },
+      { sessionId: "s2", error: "右侧失败" },
+    ]);
+    expect(h.store.running.s1).toBe(true);
+    expect(h.store.running.s2).toBeFalsy();
+  });
+
+  it("aborts only the requested explicit session", async () => {
+    const h = await bootState();
+    h.api.abort = vi.fn(async () => {});
+
+    expect(await h.mod.abortRunFor("s2")).toBeNull();
+    expect(h.api.abort).toHaveBeenCalledWith("opencode", "s2");
+  });
+});
+
 describe("pane composer follows the selected session", () => {
   /** One ChatMessage with only the fields the tests care about. */
   function row(

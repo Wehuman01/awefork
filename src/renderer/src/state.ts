@@ -526,11 +526,15 @@ export const paneTurn = computed<{ turn: Turn; index: number; total: number } | 
  * the last model the user picked anywhere, so it doesn't restart from the
  * agent default every time.
  */
+export function composerModelFor(sessionId: string): ModelChoice | null {
+  if (sessionId in state.paneModels) return state.paneModels[sessionId] ?? null;
+  const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
+  return turns[turns.length - 1]?.model ?? state.lastModel;
+}
+
 export const paneComposerModel = computed<ModelChoice | null>(() => {
   const id = state.selectedId;
-  if (!id) return null;
-  if (id in state.paneModels) return state.paneModels[id] ?? null;
-  return paneTurn.value?.turn.model ?? state.lastModel;
+  return id ? composerModelFor(id) : null;
 });
 
 /**
@@ -3405,33 +3409,24 @@ function appendLocalMessage(
  * always continues the branch at its end; the pane follows the newest turn
  * so the reply streams into view.
  */
-export async function sendPanePrompt(
-  text: string,
-  attachments: PromptAttachment[] = [],
-): Promise<void> {
-  if (!state.selectedId || !text.trim()) return;
-  // Read before unlocking the pane: the model the composer shows is the one
-  // that goes out, even when the pane was locked on an earlier turn.
-  const model = paneComposerModel.value;
-  state.selectedTurnId = null;
-  await sendPrompt(text, model, attachments);
+export interface PromptSendResult {
+  sessionId: string;
+  error: string | null;
 }
 
-export async function sendPrompt(
+/**
+ * Send to one explicit session. Compare mode uses this instead of selectedId so
+ * two independent runs can start without navigation changing their target.
+ */
+export async function sendPromptTo(
+  sessionId: string,
   text: string,
   model: ModelChoice | null = null,
   attachments: PromptAttachment[] = [],
-): Promise<void> {
+): Promise<PromptSendResult> {
   const backend = state.activeBackend;
-  const sessionId = state.selectedId;
   const generation = workspaceGeneration;
-  if (!sessionId || !text.trim()) return;
-  state.actionError = null;
-  // The target session is captured before the prompt request goes out — a
-  // backend switch is the one mid-flight change that aborts: the target left
-  // the screen, and firing the run anyway would start something the user
-  // cannot see.
-  if (generation !== workspaceGeneration) return;
+  if (!text.trim() || generation !== workspaceGeneration) return { sessionId, error: null };
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
   appendLocalMessage(sessionId, text, model, attachments);
@@ -3440,10 +3435,52 @@ export async function sendPrompt(
     // Irreversible: the run is out, so seal the journal with a lock entry.
     trackEvent({ backend, kind: "sendPrompt", label: `发送消息「${truncate(text)}」` });
     watchCompletion(backend, sessionId, sentAt);
+    return { sessionId, error: null };
   } catch (error) {
     setRunning(backend, sessionId, false);
-    state.actionError = error instanceof Error ? error.message : String(error);
+    return { sessionId, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** Send one shared compare draft to the requested current comparison sides. */
+export async function sendComparePrompt(
+  sessionIds: readonly string[],
+  text: string,
+  models: Readonly<Record<string, ModelChoice | null>>,
+  attachments: PromptAttachment[] = [],
+): Promise<PromptSendResult[]> {
+  const pair = state.compare;
+  if (!pair || !text.trim()) return [];
+  const allowed = new Set([pair.leftId, pair.rightId]);
+  const targets = [...new Set(sessionIds)].filter((id) => allowed.has(id));
+  if (targets.length === 0) return [];
+  return Promise.all(targets.map((id) => sendPromptTo(id, text, models[id] ?? null, attachments)));
+}
+
+export async function sendPanePrompt(
+  text: string,
+  attachments: PromptAttachment[] = [],
+): Promise<void> {
+  if (!state.selectedId || !text.trim()) return;
+  // Read before unlocking the pane: the model the composer shows is the one
+  // that goes out, even when the pane was locked on an earlier turn.
+  const sessionId = state.selectedId;
+  const model = paneComposerModel.value;
+  state.selectedTurnId = null;
+  const result = await sendPromptTo(sessionId, text, model, attachments);
+  state.actionError = result.error;
+}
+
+export async function sendPrompt(
+  text: string,
+  model: ModelChoice | null = null,
+  attachments: PromptAttachment[] = [],
+): Promise<void> {
+  const sessionId = state.selectedId;
+  if (!sessionId || !text.trim()) return;
+  state.actionError = null;
+  const result = await sendPromptTo(sessionId, text, model, attachments);
+  state.actionError = result.error;
 }
 
 /** Remember the model the pane composer should use for this session's next run. */
@@ -3466,18 +3503,22 @@ export function requestCanvasFit(): void {
   state.fitRequest = Date.now();
 }
 
-export async function abortRun(): Promise<void> {
+export async function abortRunFor(sessionId: string): Promise<string | null> {
   const backend = state.activeBackend;
-  const sessionId = state.selectedId;
-  if (!sessionId) return;
   try {
     await window.awefork.abort(backend, sessionId);
   } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
+    return error instanceof Error ? error.message : String(error);
   }
   // Irreversible (the run is gone); a lock entry seals the journal.
   trackEvent({ backend, kind: "abortRun", label: `停止运行「${titleOf(sessionId)}」` });
+  return null;
+}
+
+export async function abortRun(): Promise<void> {
+  const sessionId = state.selectedId;
+  if (!sessionId) return;
+  state.actionError = await abortRunFor(sessionId);
 }
 
 export function dismissActionError(): void {

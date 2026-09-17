@@ -3144,6 +3144,159 @@ mark.hl {
   background: var(--primary-soft);
 }
 
+/* The compare composer stays outside the scrolling comparison body so a long
+   timeline never hides the shared draft and target controls. */
+.cmp-composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  padding: 10px 14px 12px;
+  background: var(--panel);
+}
+
+.cmp-composer.dragging {
+  background: var(--primary-soft);
+}
+
+.cmp-composer-head,
+.cmp-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cmp-composer-head {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+
+.cmp-composer-head .attach {
+  margin-left: auto;
+}
+
+.cmp-targets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.cmp-target {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+}
+
+.cmp-target.left {
+  border-left: 3px solid var(--lavender);
+}
+
+.cmp-target.right {
+  border-left: 3px solid var(--mint);
+}
+
+.cmp-target-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+
+.cmp-target-toggle input {
+  margin: 0;
+}
+
+.cmp-target-toggle span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cmp-target-models {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.cmp-target-models .mp {
+  flex: 1;
+  min-width: 0;
+}
+
+.cmp-target-models .vp {
+  flex: 0 0 auto;
+}
+
+.cmp-target-running,
+.cmp-target-error {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.cmp-target-running {
+  color: #4e8f45;
+}
+
+.cmp-target-stop {
+  margin-top: 5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #fdeceb;
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cmp-target-error {
+  color: var(--danger);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cmp-composer textarea {
+  width: 100%;
+  min-height: 50px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.cmp-composer textarea:focus {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.cmp-composer-foot {
+  margin-top: 7px;
+}
+
+.cmp-composer-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+
+.cmp-composer .send {
+  flex: 0 0 auto;
+}
+
 .ctx-empty {
   flex: 1;
   display: grid;
