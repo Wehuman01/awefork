@@ -36,7 +36,7 @@ export interface ChatMessage {
   /** Concatenated reasoning parts, kept separate from the final reply text. */
   thinking: string;
   /** Distinct tool names invoked in this message, in first-seen order. */
-  toolNames: string[];
+  toolNames: readonly string[];
   /** Model that produced this message (e.g. "glm/glm-5.3-flash"); user messages carry the model the run was configured with, null when the backend reports none. */
   modelId: string | null;
   /** Provider that served the model (e.g. "oc-awerouter"); null alongside modelId. */
@@ -44,7 +44,7 @@ export interface ChatMessage {
   /** Reasoning-effort variant the run used (e.g. "high"); null when none was reported. */
   variant: string | null;
   /** Names of files attached to this message, in send order. */
-  attachmentNames: string[];
+  attachmentNames: readonly string[];
   createdAt: number;
   /** When the backend finished the message; null while unreported or still running. */
   completedAt: number | null;

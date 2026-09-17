@@ -246,7 +246,7 @@
                   '--recent-alpha': recentAlphaFor(row.session.id),
                 }"
                 :title="row.session.title || '(untitled)'"
-                @click="selectSession(row.session.id, { focus: true })"
+                @click="onRowClick(row.session.id)"
                 @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
               >
                 <span class="dot"></span>
@@ -396,13 +396,13 @@
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
       <button
-        v-if="menuOnCanvas"
+        v-if="menuInDirectory"
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        title="回到画布点另一条分支，与它并排对比"
+        title="点画布上的一张卡片，或在侧栏点一个会话，与它并排对比"
         @click="compareFromMenu"
-      >⇄ 与另一分支对比…</button>
+      >⇄ 与另一会话对比…</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
       <button
@@ -705,10 +705,12 @@ import {
   archivedSessionViews,
   archiveSession,
   beginComparePick,
-  canvasSessions,
+  cancelComparePick,
   createSession,
   deleteSession,
   deleteTag,
+  directorySessions,
+  enterCompare,
   exportSessionAt,
   favoriteSessions,
   forkTagPrefOf,
@@ -1111,16 +1113,34 @@ const menuTurn = computed(() => {
 
 const menuMarked = computed(() => (menuTurn.value ? isTurnMarked(menuTurn.value.id) : false));
 
-/** Comparisons pair up canvas branches, so the entry only shows for those. */
-const menuOnCanvas = computed(() => {
+/** Comparisons pair sessions of one directory, so the entry only shows for those. */
+const menuInDirectory = computed(() => {
   const id = menu.value?.sessionId;
-  return id != null && canvasSessions.value.some((s) => s.id === id);
+  return id != null && directorySessions.value.some((s) => s.id === id);
 });
 
 function compareFromMenu(): void {
   const id = menu.value?.sessionId;
   closeMenu();
   if (id) beginComparePick(id);
+}
+
+/**
+ * Pick mode reroutes a row click: a different session completes the ⇄ pair
+ * (any story in the directory — the canvas can only offer the current one),
+ * the armed session's own row cancels. Other rows select as usual.
+ */
+function onRowClick(sessionId: string): void {
+  const from = store.comparePickFrom;
+  if (from == null || !directorySessions.value.some((s) => s.id === sessionId)) {
+    void selectSession(sessionId, { focus: true });
+    return;
+  }
+  if (sessionId === from) {
+    cancelComparePick();
+    return;
+  }
+  void enterCompare(from, sessionId);
 }
 
 function toggleMarkFromMenu(): void {

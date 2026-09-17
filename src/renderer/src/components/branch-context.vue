@@ -1,10 +1,10 @@
 <template>
   <aside class="context" :class="{ comparing: compare }">
-    <!-- ── ⇄ dual-pane branch comparison ─────────────────────────────── -->
+    <!-- ── ⇄ dual-pane comparison: aligned at a fork, or free side-by-side ── -->
     <template v-if="compare">
       <div class="cmp-head">
-        <span class="cmp-head-title">⇄ 分支对比</span>
-        <div class="cmp-pager">
+        <span class="cmp-head-title">{{ compare.plan ? "⇄ 分支对比" : "⇄ 自由并排" }}</span>
+        <div v-if="compare.plan" class="cmp-pager">
           <button
             type="button"
             class="nav-btn"
@@ -31,106 +31,113 @@
         >✕</button>
       </div>
 
-      <div class="cmp-body">
+      <div class="cmp-body" :class="{ free: !compare.plan }">
         <div class="cmp-cols">
           <div class="cmp-colcard left">
+            <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">当前</span>
             <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">{{
               sideTitle(compare.pair.leftId)
             }}</span>
-            <span class="cmp-colmeta">{{ sideMeta(compare.pair.leftId) }}</span>
+            <span class="cmp-colmeta">{{ colMeta(0) }}</span>
           </div>
           <div class="cmp-colcard right">
             <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">当前</span>
             <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">{{
               sideTitle(compare.pair.rightId)
             }}</span>
-            <span class="cmp-colmeta">{{ sideMeta(compare.pair.rightId) }}</span>
+            <span class="cmp-colmeta">{{ colMeta(1) }}</span>
           </div>
         </div>
 
-        <button
-          v-if="compare.plan.common.length > 0"
-          type="button"
-          class="cmp-prefix"
-          @click="prefixOpen = !prefixOpen"
-        >{{ prefixOpen ? "▾" : "▸" }} 共同前缀 · {{ compare.plan.common.length }} 个回合</button>
-        <div v-if="prefixOpen" class="cmp-prefix-list">
-          <div v-for="node in compare.plan.common" :key="node.id" class="cmp-prefix-row">
-            <span class="cmp-prefix-title" :title="node.title">{{ node.title }}</span>
-          </div>
-        </div>
-
-        <div class="cmp-forkline">
-          <span class="cmp-fork-glyph">⑂</span>
-          <span class="cmp-fork-text">此后分叉 · 『{{ compare.plan.anchor.title }}』</span>
-          <span
-            v-if="samePrompt"
-            class="cmp-same"
-            title="两条分支分叉后的第一个提示词相同 — 看起来是同一步的重试"
-          >同题</span>
-        </div>
-
-        <div v-if="pairRows.length === 0" class="cmp-empty">
-          分叉点之后两条分支都还没有自己的回合。
-        </div>
-        <div v-else class="cmp-pairs">
-          <div
-            v-for="(row, i) in pairRows"
-            :key="i"
-            :ref="(el) => setPairEl(i, el)"
-            class="pair"
-          >
-            <div
-              v-for="side in sides"
-              :key="side"
-              class="cell"
-              :class="[side, { blank: !row[side], open: row[side] && openCells.has(row[side].id) }]"
-              @click="row[side] && toggleCell(row[side])"
-            >
-              <template v-if="row[side]">
-                <div class="cell-top">
-                  <span class="cell-idx">{{ badgeOf(row[side]) }}</span>
-                  <span class="cell-title" :title="row[side].title">{{ row[side].title }}</span>
-                </div>
-                <div class="cell-chips">
-                  <span
-                    v-if="row[side].sessionId !== compare.pair[side === 'left' ? 'leftId' : 'rightId']"
-                    class="cell-up"
-                    title="上游分支的回合 — 通往这条分支的路上经过的岔路"
-                  >⎇ 上游</span>
-                  <span
-                    v-if="row[side].modelIds.length > 0"
-                    class="cell-chip model"
-                    :title="row[side].modelIds.join('\n')"
-                  >{{ row[side].modelIds[0] }}<template v-if="row[side].modelIds.length > 1">
-                    +{{ row[side].modelIds.length - 1 }}</template></span>
-                  <span
-                    v-if="row[side].durationMs !== null"
-                    class="cell-chip"
-                  >⏱ {{ formatDuration(row[side].durationMs) }}</span>
-                  <span
-                    v-if="row[side].outputTokens > 0"
-                    class="cell-chip"
-                  >{{ formatTokens(row[side].outputTokens) }}</span>
-                  <span
-                    v-if="row[side].toolNames.length > 0"
-                    class="cell-chip"
-                  >🔧 {{ row[side].toolNames.length }}</span>
-                  <span
-                    v-if="row[side].error"
-                    class="cell-chip err"
-                    :title="row[side].error"
-                  >⚠ 失败</span>
-                </div>
-                <p
-                  class="cell-preview"
-                  :class="{ errored: !row[side].preview && row[side].error }"
-                >{{ previewOf(row[side]) }}</p>
-              </template>
-              <p v-else class="cell-blank">{{ side === "left" ? "左栏已到尾" : "右栏已到尾" }}</p>
+        <!-- 同源: aligned pairs from the shared fork anchor -->
+        <template v-if="compare.plan">
+          <button
+            v-if="compare.plan.common.length > 0"
+            type="button"
+            class="cmp-prefix"
+            @click="prefixOpen = !prefixOpen"
+          >{{ prefixOpen ? "▾" : "▸" }} 共同前缀 · {{ compare.plan.common.length }} 个回合</button>
+          <div v-if="prefixOpen" class="cmp-prefix-list">
+            <div v-for="node in compare.plan.common" :key="node.id" class="cmp-prefix-row">
+              <span class="cmp-prefix-title" :title="node.title">{{ node.title }}</span>
             </div>
           </div>
-        </div>
+
+          <div class="cmp-forkline">
+            <span class="cmp-fork-glyph">⑂</span>
+            <span class="cmp-fork-text">此后分叉 · 『{{ compare.plan.anchor.title }}』</span>
+            <span
+              v-if="samePrompt"
+              class="cmp-same"
+              title="两条分支分叉后的第一个提示词相同 — 看起来是同一步的重试"
+            >同题</span>
+          </div>
+
+          <div v-if="pairRows.length === 0" class="cmp-empty">
+            分叉点之后两条分支都还没有自己的回合。
+          </div>
+          <div v-else class="cmp-pairs">
+            <div
+              v-for="(row, i) in pairRows"
+              :key="i"
+              :ref="(el) => setPairEl(i, el)"
+              class="pair"
+            >
+              <CmpCell
+                v-for="side in sides"
+                :key="side"
+                :cell="row[side]"
+                :side="side"
+                :open="openCells.has(row[side] ? row[side].id : '')"
+                @toggle="row[side] && toggleCell(row[side].id)"
+              />
+            </div>
+          </div>
+        </template>
+
+        <!-- 不同源: two independent timelines, no pairing -->
+        <template v-else>
+          <div class="cmp-forkline">
+            <span class="cmp-fork-glyph">⇄</span>
+            <span class="cmp-fork-text">两个会话不同源 · 各自按时间线并排</span>
+            <span
+              v-if="freeSamePrompt"
+              class="cmp-same"
+              title="两个会话的第一个提示词相同 — 可能是同一件事的两种做法"
+            >同题</span>
+          </div>
+          <div class="cmp-free">
+            <div
+              v-for="(col, ci) in freeColumns"
+              :key="col.id"
+              :ref="(el) => setColEl(ci, el)"
+              class="cmp-fcol"
+              :class="sides[ci]"
+            >
+              <div class="cmp-fcol-head">
+                <button
+                  type="button"
+                  :title="`选中「${col.title}」并退出对比`"
+                  @click="selectColumn(col.id)"
+                >选中</button>
+                <button
+                  type="button"
+                  title="跳到这个会话的最新回合"
+                  @click="scrollLatest(ci)"
+                >⤓ 最新</button>
+              </div>
+              <div v-if="col.cells.length === 0" class="cmp-empty">这个会话还没有回合。</div>
+              <CmpCell
+                v-for="cell in col.cells"
+                :key="cell.id"
+                :cell="cell"
+                :side="sideOf(ci)"
+                :open="openCells.has(cell.id)"
+                @toggle="toggleCell(cell.id)"
+              />
+            </div>
+          </div>
+        </template>
       </div>
     </template>
 
@@ -271,6 +278,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
+import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
 import {
@@ -287,6 +295,7 @@ import {
   paneTurn,
   retryTurn,
   selectedSession,
+  selectSession,
   selectTurn,
   sendPanePrompt,
   setPaneModel,
@@ -299,6 +308,7 @@ import {
   turnGraph,
 } from "../state";
 import ChatInput from "./chat-input.vue";
+import CmpCell, { type DisplayCell } from "./cmp-cell.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import MessageList from "./message-list.vue";
 
@@ -333,22 +343,43 @@ watch(
 
 // ── ⇄ branch comparison ─────────────────────────────────────────────
 
-/** The open comparison with its alignment plan, or null = normal pane. */
+/**
+ * The open comparison. `plan` is null when the two sessions never meet —
+ * 不同源 renders as two free side-by-side timelines instead of aligned pairs.
+ */
 const compare = computed(() => {
   const pair = store.compare;
   if (!pair) return null;
-  const plan = comparePlan.value;
-  return plan ? { pair, plan } : null;
+  return { pair, plan: comparePlan.value };
 });
 
 const sides = ["left", "right"] as const;
 
+function sideOf(index: number): (typeof sides)[number] {
+  return index === 0 ? "left" : "right";
+}
+
 const pairRows = computed(() => {
-  const plan = compare.value?.plan;
-  if (!plan) return [];
-  const rows: { left: TurnNode | null; right: TurnNode | null }[] = [];
+  const current = compare.value;
+  if (!current?.plan) return [];
+  const plan = current.plan;
+  const cell = (node: TurnNode, side: (typeof sides)[number]): DisplayCell => ({
+    id: node.id,
+    title: node.title,
+    preview: node.preview,
+    toolNames: node.toolNames,
+    modelIds: node.modelIds,
+    durationMs: node.durationMs,
+    outputTokens: node.outputTokens,
+    error: node.error,
+    badge: badgeOf(node),
+    flag: node.sessionId !== current.pair[side === "left" ? "leftId" : "rightId"] ? "up" : null,
+  });
+  const rows: { left: DisplayCell | null; right: DisplayCell | null }[] = [];
   for (let i = 0; i < Math.max(plan.left.length, plan.right.length); i += 1) {
-    rows.push({ left: plan.left[i] ?? null, right: plan.right[i] ?? null });
+    const l = plan.left[i];
+    const r = plan.right[i];
+    rows.push({ left: l ? cell(l, "left") : null, right: r ? cell(r, "right") : null });
   }
   return rows;
 });
@@ -359,6 +390,72 @@ const samePrompt = computed(() => {
   const [l, r] = [plan.left[0], plan.right[0]];
   return l != null && r != null && l.title !== "" && l.title === r.title;
 });
+
+/** Leading turns copied from the 母本 — none for roots and empty-context forks. */
+function inheritedTurns(sessionId: string, turns: Turn[]): number {
+  const record = store.lineage[sessionId];
+  if (!record || record.context === "none" || record.atMessageId == null) return 0;
+  const index = turns.findIndex((t) => t.messageId === record.atMessageId);
+  return index < 0 ? 0 : index + 1;
+}
+
+interface FreeColumn {
+  id: string;
+  title: string;
+  meta: string;
+  cells: DisplayCell[];
+}
+
+/**
+ * The free side-by-side columns (不同源): each session's whole timeline from
+ * its own messages — no canvas graph needed, so the pair may cross stories.
+ */
+const freeColumns = computed<FreeColumn[] | null>(() => {
+  const current = compare.value;
+  if (!current || current.plan) return null;
+  return [current.pair.leftId, current.pair.rightId].map((id) => {
+    const turns = buildTurns(id, store.messagesBySession[id] ?? []);
+    const inherited = inheritedTurns(id, turns);
+    const cells: DisplayCell[] = turns.map((turn, i) => ({
+      id: `${id}:${turn.messageId}`,
+      title: turn.title,
+      preview: turn.preview,
+      toolNames: turn.toolNames,
+      modelIds: turn.modelIds,
+      durationMs: turn.durationMs,
+      outputTokens: turn.outputTokens,
+      error: turn.error,
+      badge: i < inherited ? null : i - inherited + 1,
+      flag: i < inherited ? "inherited" : null,
+    }));
+    const tokens = turns.reduce((sum, t) => sum + t.outputTokens, 0);
+    const errors = turns.filter((t) => t.error !== null).length;
+    const bits = [
+      inherited > 0 ? `${turns.length} 个回合 · 含 ${inherited} 继承` : `${turns.length} 个回合`,
+    ];
+    if (tokens > 0) bits.push(formatTokens(tokens));
+    if (errors > 0) bits.push(`⚠ ${errors}`);
+    return { id, title: sideTitle(id), meta: bits.join(" · "), cells };
+  });
+});
+
+const freeSamePrompt = computed(() => {
+  const cols = freeColumns.value;
+  if (!cols || cols.length < 2) return false;
+  const l = cols[0]?.cells[0];
+  const r = cols[1]?.cells[0];
+  return l != null && r != null && l.title !== "" && l.title === r.title;
+});
+
+/** Column summary — own graph turns when aligned, whole timeline when free. */
+function colMeta(index: 0 | 1): string {
+  const current = compare.value;
+  if (!current) return "";
+  if (current.plan) {
+    return sideMeta(index === 0 ? current.pair.leftId : current.pair.rightId);
+  }
+  return freeColumns.value?.[index]?.meta ?? "";
+}
 
 function sessionOf(id: string): SessionSummary | null {
   return store.sessions.find((s) => s.id === id) ?? null;
@@ -390,23 +487,12 @@ function badgeOf(node: TurnNode): number {
   return count;
 }
 
-function previewOf(node: TurnNode): string {
-  return (
-    node.preview ||
-    (node.error
-      ? `⚠ ${node.error}`
-      : node.toolNames.length > 0
-        ? "(工具调用，无文本回复)"
-        : "(无文本回复)")
-  );
-}
-
 const openCells = ref(new Set<string>());
 
-function toggleCell(node: TurnNode): void {
+function toggleCell(id: string): void {
   const next = new Set(openCells.value);
-  if (next.has(node.id)) next.delete(node.id);
-  else next.add(node.id);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
   openCells.value = next;
 }
 
@@ -427,6 +513,23 @@ function stepPager(delta: number): void {
   pairEls.get(pagerPos.value)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+const colEls = new Map<number, Element>();
+
+function setColEl(index: number, el: unknown): void {
+  if (el) colEls.set(index, el as Element);
+  else colEls.delete(index);
+}
+
+function scrollLatest(index: number): void {
+  const el = colEls.get(index);
+  if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+}
+
+/** Jump into one of the compared sessions — a fresh selection tears the lens down. */
+function selectColumn(sessionId: string): void {
+  void selectSession(sessionId);
+}
+
 // A new pair (or compare closing) starts the lens from scratch; watching the
 // state pair rather than the plan keeps graph re-layouts from resetting it.
 watch(
@@ -436,6 +539,7 @@ watch(
     prefixOpen.value = false;
     openCells.value = new Set();
     pairEls.clear();
+    colEls.clear();
   },
 );
 
@@ -504,8 +608,9 @@ function onSetModel(model: ModelChoice | null): void {
 }
 
 // ←/→ walk turns without leaving the pane — but never while typing somewhere.
-// During a comparison they page the pair rows instead, and Esc leaves the
-// comparison (or cancels a pending pick).
+// During an aligned comparison they page the pair rows; free side-by-side has
+// no pairing, so they do nothing there. Esc leaves the comparison (or cancels
+// a pending pick).
 function onKeydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   const typing =
@@ -528,7 +633,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (typing) return;
   if (store.compare) {
     event.preventDefault();
-    stepPager(event.key === "ArrowLeft" ? -1 : 1);
+    if (compare.value?.plan) stepPager(event.key === "ArrowLeft" ? -1 : 1);
     return;
   }
   if (!pane.value) return;

@@ -57,7 +57,7 @@ export function turnMessageRange(
  * assistant messages append to the current turn's reply. Assistant messages
  * before the first user message belong to no turn and are dropped.
  */
-export function buildTurns(sessionId: string, messages: ChatMessage[]): Turn[] {
+export function buildTurns(sessionId: string, messages: readonly ChatMessage[]): Turn[] {
   const turns: Turn[] = [];
   let current: Turn | null = null;
 

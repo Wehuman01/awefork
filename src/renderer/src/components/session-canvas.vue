@@ -286,7 +286,7 @@
     </div>
 
     <div v-if="pickArmed" class="pick-banner">
-      <span>⇄ 点一张卡片，与「{{ pickFromTitle }}」对比</span>
+      <span>⇄ 点一张卡片，或在侧栏点一个会话，与「{{ pickFromTitle }}」对比</span>
       <button type="button" title="取消（Esc）" @click="cancelComparePick()">✕</button>
     </div>
     <div class="canvas-tools">

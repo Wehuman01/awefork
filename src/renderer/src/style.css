@@ -3078,6 +3078,72 @@ mark.hl {
   -webkit-line-clamp: unset;
 }
 
+/* free side-by-side (不同源): each column is its own scroll container — the
+   timelines don't correspond, so there is nothing to keep in lockstep */
+.cmp-body.free {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cmp-free {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cmp-fcol {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.cmp-fcol.left {
+  border-top: 3px solid var(--lavender);
+}
+
+.cmp-fcol.right {
+  border-top: 3px solid var(--mint);
+}
+
+.cmp-fcol-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: -8px -8px 2px;
+  padding: 6px 8px;
+  background: var(--card);
+  border-bottom: 1px dashed var(--line);
+}
+
+.cmp-fcol-head button {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+
+.cmp-fcol-head button:hover {
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+}
+
 .ctx-empty {
   flex: 1;
   display: grid;

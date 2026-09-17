@@ -391,7 +391,7 @@ const enrichedSessions = computed<SessionSummary[]>(() =>
   enrichSessions(visibleSessions.value, state.lineage),
 );
 
-const directorySessions = computed<SessionSummary[]>(() =>
+export const directorySessions = computed<SessionSummary[]>(() =>
   enrichedSessions.value.filter((s) => s.directory === state.selectedDirectory),
 );
 
@@ -1176,15 +1176,17 @@ function restoreContextAfterCompare(): void {
 }
 
 /**
- * Open the dual-pane comparison of two branches of the current story: the
- * left column is the reference (usually the 母本), the right one the branch
- * being inspected. Both sessions must render on the canvas — comparisons are
- * a same-story lens, not a cross-project tool.
+ * Open the dual-pane comparison of two sessions of the current directory:
+ * the left column is the reference (usually the 母本), the right one the
+ * branch being inspected. When the pane can align them at a shared fork
+ * anchor it does; sessions from different stories fall back to free
+ * side-by-side. Comparisons are a same-directory lens, not a cross-project
+ * tool — both sessions must exist in the directory.
  */
 export async function enterCompare(leftId: string, rightId: string): Promise<void> {
   if (leftId === rightId) return;
-  const onCanvas = new Set(canvasSessions.value.map((s) => s.id));
-  if (!onCanvas.has(leftId) || !onCanvas.has(rightId)) return;
+  const inDirectory = new Set(directorySessions.value.map((s) => s.id));
+  if (!inDirectory.has(leftId) || !inDirectory.has(rightId)) return;
   state.comparePickFrom = null;
   state.compare = { leftId, rightId };
   widenContextForCompare();
