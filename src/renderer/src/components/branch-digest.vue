@@ -24,6 +24,13 @@
             digest.forkedFrom ? "⎇" : "●"
           }}</span>
           <span class="digest-title" :title="digest.title">{{ digest.title }}</span>
+          <span
+            v-if="canCompare(digest)"
+            class="digest-cmp"
+            role="button"
+            :title="`与「${selectedTitle}」并排对比`"
+            @click.stop="compareWith(digest)"
+          >⇄</span>
         </span>
         <span v-if="digest.forkedFrom" class="digest-fork">
           从「{{ digest.forkedFrom.sessionTitle }}」的『{{ digest.forkedFrom.turnTitle }}』分出
@@ -46,7 +53,7 @@ import { computed, ref } from "vue";
 import { type BranchDigest, buildBranchDigests } from "../../../shared/branch-digest";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { formatTokens } from "../format";
-import { canvasSessions, selectTurn, store, turnGraph } from "../state";
+import { canvasSessions, enterCompare, selectTurn, store, turnGraph } from "../state";
 
 const emit = defineEmits<{ jump: [node: TurnNode] }>();
 
@@ -55,6 +62,23 @@ const open = ref(false);
 const digests = computed(() =>
   buildBranchDigests(turnGraph.value, canvasSessions.value, store.lineage),
 );
+
+/** ⇄ compares the row's branch with the one currently selected. */
+const selectedTitle = computed(
+  () => store.sessions.find((s) => s.id === store.selectedId)?.title ?? "",
+);
+
+function canCompare(digest: BranchDigest): boolean {
+  return (
+    store.selectedId != null &&
+    digest.sessionId !== store.selectedId &&
+    canvasSessions.value.some((s) => s.id === store.selectedId)
+  );
+}
+
+function compareWith(digest: BranchDigest): void {
+  if (store.selectedId) void enterCompare(store.selectedId, digest.sessionId);
+}
 
 function jump(digest: BranchDigest): void {
   if (!digest.jumpNodeId) return;

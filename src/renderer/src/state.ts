@@ -7,6 +7,7 @@ import {
   type BackendInfo,
   backendCapabilities,
 } from "../../shared/backend";
+import { buildComparePlan, type ComparePlan } from "../../shared/branch-compare";
 import { type BranchMarkdownTurn, buildBranchMarkdown } from "../../shared/branch-markdown";
 import {
   buildTurnGraph,
@@ -46,6 +47,7 @@ import type {
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
+import { panels } from "./layout";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -181,6 +183,18 @@ interface AppState {
   /** True while the draft's fork+prompt round-trip is in flight. */
   draftSending: boolean;
   /**
+   * Open branch comparison (⇄ 分支对比): the two session ids shown side by
+   * side in the right pane. null = normal pane. Any fresh selection tears it
+   * down — compare is a lens, not a selection.
+   */
+  compare: { leftId: string; rightId: string } | null;
+  /**
+   * One-sided compare pick: the session waiting for the user to click its
+   * partner card on the canvas (from the right-click menu / digest / palette).
+   * Esc or a fresh selection cancels.
+   */
+  comparePickFrom: string | null;
+  /**
    * The open fork-inheritance ask (rule B): forking a tagged session with no
    * stored preference. The modal resolves it through answerForkTagAsk;
    * null = no ask pending.
@@ -279,6 +293,8 @@ const state = reactive<AppState>({
   composerFocusRequest: null,
   draft: null,
   draftSending: false,
+  compare: null,
+  comparePickFrom: null,
   forkTagAsk: null,
   paneModels: {},
   lastModel: null,
@@ -1028,6 +1044,8 @@ export async function selectSession(
   if (!sessionId) return;
   const session = visibleSessions.value.find((item) => item.id === sessionId);
   if (!session) return;
+  // A fresh selection is also the compare lens's off switch.
+  exitCompare();
   state.selectedDirectory = session.directory;
   state.selectedId = session.id;
   state.selectedTurnId = null;
@@ -1054,6 +1072,8 @@ export async function selectTurn(
   node: TurnNode,
   options: { focusCanvas?: boolean } = {},
 ): Promise<void> {
+  // Clicking any card during a comparison (or a pick) returns to normal use.
+  exitCompare();
   if (node.sessionId !== state.selectedId) {
     await selectSession(node.sessionId);
   }
@@ -1119,6 +1139,93 @@ export function stepTurn(delta: number): void {
   const target = selectedTurns.value[pane.index + delta];
   if (!target) return;
   state.selectedTurnId = `${target.sessionId}:${target.messageId}`;
+}
+
+// ── branch compare (⇄ 分支对比) ────────────────────────────────────────
+
+/**
+ * The open comparison rendered as an alignment plan, or null when compare is
+ * closed — or when the pair no longer builds (a compared session was deleted
+ * or the canvas moved to another story; the pane then just looks normal).
+ */
+export const comparePlan = computed<ComparePlan | null>(() =>
+  state.compare
+    ? buildComparePlan(turnGraph.value, state.compare.leftId, state.compare.rightId)
+    : null,
+);
+
+/** Compare-width the context panel borrows while a comparison is open. */
+const COMPARE_CONTEXT_WIDTH = 680;
+/** Width to hand back on exit; null = the panel was wide enough already. */
+let contextWidthBeforeCompare: number | null = null;
+
+function widenContextForCompare(): void {
+  const panel = panels.context;
+  if (panel.collapsed || panel.width >= COMPARE_CONTEXT_WIDTH) return;
+  if (contextWidthBeforeCompare === null) contextWidthBeforeCompare = panel.width;
+  panel.width = COMPARE_CONTEXT_WIDTH;
+}
+
+function restoreContextAfterCompare(): void {
+  if (contextWidthBeforeCompare === null) return;
+  // A drag during compare deliberately set another width — keep that one.
+  if (panels.context.width === COMPARE_CONTEXT_WIDTH) {
+    panels.context.width = contextWidthBeforeCompare;
+  }
+  contextWidthBeforeCompare = null;
+}
+
+/**
+ * Open the dual-pane comparison of two branches of the current story: the
+ * left column is the reference (usually the 母本), the right one the branch
+ * being inspected. Both sessions must render on the canvas — comparisons are
+ * a same-story lens, not a cross-project tool.
+ */
+export async function enterCompare(leftId: string, rightId: string): Promise<void> {
+  if (leftId === rightId) return;
+  const onCanvas = new Set(canvasSessions.value.map((s) => s.id));
+  if (!onCanvas.has(leftId) || !onCanvas.has(rightId)) return;
+  state.comparePickFrom = null;
+  state.compare = { leftId, rightId };
+  widenContextForCompare();
+  // Both columns read turn content from messages the canvas batch may not
+  // have pulled yet; the graph cards render regardless, this just fills gaps.
+  await Promise.allSettled([loadSessionMessages(leftId), loadSessionMessages(rightId)]);
+}
+
+export function exitCompare(): void {
+  state.compare = null;
+  state.comparePickFrom = null;
+  restoreContextAfterCompare();
+}
+
+/** Compare a branch with the 母本 it forked from — the ⇄ button's move. */
+export function compareWithParent(sessionId: string): void {
+  const parent = state.lineage[sessionId]?.parentId;
+  if (!parent) return;
+  void enterCompare(parent, sessionId);
+}
+
+/**
+ * Arm pick mode: the next canvas card from a DIFFERENT session completes the
+ * comparison with `sessionId`. A card of the same session (or Esc) cancels.
+ */
+export function beginComparePick(sessionId: string): void {
+  if (state.compare) exitCompare();
+  state.comparePickFrom = sessionId;
+}
+
+export function cancelComparePick(): void {
+  state.comparePickFrom = null;
+}
+
+/** Drop compare state that references a session about to vanish from view. */
+function clearCompareOf(sessionId: string): void {
+  if (state.compare?.leftId === sessionId || state.compare?.rightId === sessionId) {
+    state.compare = null;
+    restoreContextAfterCompare();
+  }
+  if (state.comparePickFrom === sessionId) state.comparePickFrom = null;
 }
 
 /** Load messages for every session currently on the canvas that lacks them. */
@@ -2140,6 +2247,7 @@ async function softDeleteSession(backend: BackendId, sessionId: string): Promise
     landing = landingAfterHide(sessionId);
     state.trash = [...state.trash, sessionId];
     if (state.draft?.sessionId === sessionId) state.draft = null;
+    clearCompareOf(sessionId);
   }
   const session = findSessionAnywhere(backend, sessionId);
   try {
@@ -2284,6 +2392,7 @@ async function archiveSessionFlow(backend: BackendId, sessionId: string): Promis
 
   await archiveAddOrThrow(backend, "session", sessionId);
   if (state.draft?.sessionId === sessionId) state.draft = null;
+  clearCompareOf(sessionId);
   if (state.selectedId === sessionId) {
     state.selectedId = null;
     state.selectedTurnId = null;
@@ -2325,6 +2434,8 @@ async function archiveDirectoryFlow(backend: BackendId, directory: string): Prom
 
   await archiveAddOrThrow(backend, "directory", directory);
   if (draftedHere) state.draft = null;
+  // A directory archive can hide either compared branch — drop the lens.
+  exitCompare();
   if (!selectedHere) return true;
   state.selectedId = null;
   state.selectedTurnId = null;
@@ -2516,6 +2627,7 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
     // Main prunes the tags sidecar with the delete; mirror it locally so the
     // filter shelf and right-click menu don't offer a dead session's labels.
     removeLocalSessionTags(sessionId);
+    clearCompareOf(sessionId);
     // Same for key-turn marks: drop every key of this session from the live map.
     applyMarks(
       backend,

@@ -1792,6 +1792,69 @@ mark.hl {
   fill-opacity: 0.55;
 }
 
+/* ⇄ branch compare edges: the two compared paths take their column colors,
+   the anchor's fork-out edges split lavender/mint, everything else fades.
+   Shared-trunk edges keep the plain style. */
+
+.edge.cmp-el {
+  stroke: var(--lavender);
+}
+
+.edge.cmp-er {
+  stroke: var(--mint);
+}
+
+.edge.cmp-edim {
+  stroke-opacity: 0.18;
+}
+
+.edge-dot.cmp-el {
+  fill: var(--lavender);
+}
+
+.edge-dot.cmp-er {
+  fill: var(--mint);
+}
+
+/* pick mode banner: a card click completes the comparison pair */
+.pick-banner {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--primary-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-card);
+  padding: 7px 9px 7px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.pick-banner button {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pick-banner button:hover {
+  color: var(--primary-deep);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
 /* turn cards */
 
 .turn {
@@ -1831,6 +1894,42 @@ mark.hl {
 
 .turn.dimmed {
   opacity: 0.35;
+}
+
+/* ⇄ compare card roles: lavender rings the left branch, mint the right, the
+   fork anchor gets the dashed frame; uninvolved cards fade harder than the
+   active-path dim. Shared-trunk cards keep their normal look. */
+.turn.cmp-l {
+  border-color: var(--lavender);
+  box-shadow:
+    0 0 0 1px var(--lavender),
+    var(--shadow-card);
+}
+
+.turn.cmp-r {
+  border-color: var(--mint);
+  box-shadow:
+    0 0 0 1px var(--mint),
+    var(--shadow-card);
+}
+
+.turn.cmp-anchor {
+  border-color: var(--primary);
+  border-style: dashed;
+  box-shadow:
+    0 0 0 1.5px var(--primary-soft),
+    var(--shadow-card);
+}
+
+.turn.cmp-dim {
+  opacity: 0.18;
+}
+
+/* pick mode: every card is a candidate partner */
+.turn.pickable:hover {
+  box-shadow:
+    0 0 0 2px var(--primary-border),
+    var(--shadow-lift);
 }
 
 .turn:hover {
@@ -2657,6 +2756,326 @@ mark.hl {
 .nav-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* ⇄ 对比母本 entry in the pane header */
+.nav-cmp {
+  height: 26px;
+  border-radius: 9px;
+  border: 1px solid var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.nav-cmp:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* ── ⇄ compare pane: dual-column branch comparison ──────────────────── */
+
+.cmp-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cmp-head-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cmp-pager-pos {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  min-width: 38px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+
+.cmp-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cmp-colcard {
+  border-radius: 12px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cmp-colcard.left {
+  background: var(--lavender-soft);
+  border: 1px solid var(--lavender);
+}
+
+.cmp-colcard.right {
+  background: var(--mint-soft);
+  border: 1px solid var(--mint);
+}
+
+.cmp-colname {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-colmeta {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.cmp-now {
+  align-self: flex-start;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #4e8f45;
+  background: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.cmp-prefix {
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px dashed var(--ink-faint);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+
+.cmp-prefix:hover {
+  color: var(--primary-deep);
+  border-color: var(--primary-border);
+}
+
+.cmp-prefix-list {
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel);
+}
+
+.cmp-prefix-row {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.cmp-prefix-row .cmp-prefix-title {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-forkline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--primary-deep);
+}
+
+.cmp-fork-glyph {
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+.cmp-fork-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-same {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.cmp-empty {
+  margin-top: 30px;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* pairs live in ONE scroll container, row i = left[i] ⇄ right[i], so the
+   columns never drift apart and no sync-scroll machinery exists */
+.cmp-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  scroll-margin-top: 8px;
+}
+
+.cell {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  padding: 9px 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.cell.left {
+  border-left: 3px solid var(--lavender);
+}
+
+.cell.right {
+  border-left: 3px solid var(--mint);
+}
+
+.cell.blank {
+  border-style: dashed;
+  background: transparent;
+  cursor: default;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 54px;
+}
+
+.cell-top {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.cell-idx {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.cell-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cell-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cell-chip,
+.cell-up {
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.cell-chip.model {
+  background: var(--lavender-soft);
+  color: #6a58c9;
+}
+
+.cell-chip.err {
+  background: rgba(224, 93, 75, 0.12);
+  color: var(--danger);
+}
+
+.cell-up {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.cell-preview {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cell-preview.errored {
+  color: var(--danger);
+}
+
+/* click a cell to read the whole turn: clamps come off */
+.cell.open .cell-preview,
+.cell.open .cell-title {
+  display: block;
+  -webkit-line-clamp: unset;
 }
 
 .ctx-empty {
@@ -4162,6 +4581,26 @@ code.md-code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ⇄ chip: compare this branch with the selected one */
+.digest-cmp {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 999px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.digest-cmp:hover {
+  color: var(--primary-deep);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
 }
 
 .digest-fork {

@@ -17,6 +17,9 @@
               active: onActivePath(edge),
               dim: hasActivePath && !onActivePath(edge),
               desc: isSubtreeEdge(edge),
+              'cmp-el': cmpEdgeRole(edge) === 'l',
+              'cmp-er': cmpEdgeRole(edge) === 'r',
+              'cmp-edim': cmpEdgeRole(edge) === 'dim',
             }"
           />
           <circle
@@ -28,6 +31,8 @@
               active: onActivePath(edge),
               dim: hasActivePath && !onActivePath(edge),
               desc: isSubtreeEdge(edge),
+              'cmp-el': cmpEdgeRole(edge) === 'l',
+              'cmp-er': cmpEdgeRole(edge) === 'r',
             }"
           />
         </g>
@@ -45,10 +50,14 @@
           running: isNodeRunning(node),
           recent: isNodeRecent(node),
           stub: node.kind === 'stub',
-          dimmed: isDimmed(node),
+          dimmed: cmpRole(node) ? cmpRole(node) === 'dim' : isDimmed(node),
           descendant: isSubtreeNode(node),
           hit: searchHitIds.has(node.id),
           marked: isTurnMarked(node.id),
+          'cmp-l': cmpRole(node) === 'l',
+          'cmp-r': cmpRole(node) === 'r',
+          'cmp-anchor': cmpRole(node) === 'anchor',
+          pickable: pickArmed,
         }"
         :style="{
           left: `${node.x}px`,
@@ -275,6 +284,11 @@
     <div class="canvas-status">
       {{ graph.nodes.length }} 个节点 · {{ sequenceCount }} 段对话 · {{ forkCount }} 条分支
     </div>
+
+    <div v-if="pickArmed" class="pick-banner">
+      <span>⇄ 点一张卡片，与「{{ pickFromTitle }}」对比</span>
+      <button type="button" title="取消（Esc）" @click="cancelComparePick()">✕</button>
+    </div>
     <div class="canvas-tools">
       <div class="zoom-ctl">
         <button type="button" @click="zoomBy(0.85)">−</button>
@@ -335,11 +349,14 @@ import { type DraftAttachment, readAttachments } from "../attachments";
 import { formatDuration, formatTokens } from "../format";
 import {
   activeChain,
+  cancelComparePick,
   cardHeights,
   childTurnIds,
+  comparePlan,
   deleteSession,
   deleteTurn,
   dismissDraft,
+  enterCompare,
   forkedFromSelection,
   isSessionTip,
   isTurnDelete,
@@ -551,8 +568,66 @@ const draftEdge = computed(() => {
 });
 
 function selectNode(node: TurnNode): void {
+  // Armed pick mode: the next card from another session completes the pair.
+  const from = store.comparePickFrom;
+  if (from != null) {
+    if (node.sessionId === from) {
+      cancelComparePick();
+      return;
+    }
+    void enterCompare(from, node.sessionId);
+    return;
+  }
   void selectTurn(node);
 }
+
+// ── ⇄ compare highlighting ──────────────────────────────────────────
+// While a comparison is open the canvas becomes its map: lavender rings the
+// left branch's cards, mint the right's, the fork anchor gets the dashed
+// orange frame, and cards outside the two paths fade. The shared trunk keeps
+// its normal look — both columns collapsed it into the prefix band.
+
+type CmpRole = "l" | "r" | "anchor" | "dim" | null;
+
+const compareSets = computed(() => {
+  const plan = comparePlan.value;
+  if (!plan) return null;
+  return {
+    anchor: plan.anchor.id,
+    left: new Set(plan.left.map((n) => n.id)),
+    right: new Set(plan.right.map((n) => n.id)),
+    common: new Set(plan.common.map((n) => n.id)),
+  };
+});
+
+function cmpRole(node: TurnNode): CmpRole {
+  const sets = compareSets.value;
+  if (!sets) return null;
+  if (node.id === sets.anchor) return "anchor";
+  if (sets.left.has(node.id)) return "l";
+  if (sets.right.has(node.id)) return "r";
+  if (sets.common.has(node.id)) return null;
+  return "dim";
+}
+
+/** Edge tint during compare: the anchor's two fork-out edges split l/r. */
+function cmpEdgeRole(edge: { from: string; to: string }): CmpRole {
+  const sets = compareSets.value;
+  if (!sets) return null;
+  if (edge.from === sets.anchor) {
+    if (sets.left.has(edge.to)) return "l";
+    if (sets.right.has(edge.to)) return "r";
+  }
+  if (sets.left.has(edge.from) && sets.left.has(edge.to)) return "l";
+  if (sets.right.has(edge.from) && sets.right.has(edge.to)) return "r";
+  return sets.common.has(edge.from) && sets.common.has(edge.to) ? null : "dim";
+}
+
+const pickArmed = computed(() => store.comparePickFrom != null);
+
+const pickFromTitle = computed(
+  () => store.sessions.find((s) => s.id === store.comparePickFrom)?.title ?? "",
+);
 
 function submitDraft(): void {
   void sendDraft();

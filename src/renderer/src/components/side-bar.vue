@@ -395,6 +395,14 @@
       </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
+      <button
+        v-if="menuOnCanvas"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        title="回到画布点另一条分支，与它并排对比"
+        @click="compareFromMenu"
+      >⇄ 与另一分支对比…</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
       <button
@@ -696,6 +704,8 @@ import {
   archivedDirectoryViews,
   archivedSessionViews,
   archiveSession,
+  beginComparePick,
+  canvasSessions,
   createSession,
   deleteSession,
   deleteTag,
@@ -1100,6 +1110,18 @@ const menuTurn = computed(() => {
 });
 
 const menuMarked = computed(() => (menuTurn.value ? isTurnMarked(menuTurn.value.id) : false));
+
+/** Comparisons pair up canvas branches, so the entry only shows for those. */
+const menuOnCanvas = computed(() => {
+  const id = menu.value?.sessionId;
+  return id != null && canvasSessions.value.some((s) => s.id === id);
+});
+
+function compareFromMenu(): void {
+  const id = menu.value?.sessionId;
+  closeMenu();
+  if (id) beginComparePick(id);
+}
 
 function toggleMarkFromMenu(): void {
   const node = menuTurn.value;

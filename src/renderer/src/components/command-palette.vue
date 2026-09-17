@@ -48,7 +48,9 @@ import type { SessionSummary } from "../../../shared/types";
 import { shortPath as shortDir } from "../format";
 import { paletteOpen, panels, togglePalette, togglePanel } from "../layout";
 import {
+  compareWithParent,
   createSession,
+  exitCompare,
   refreshSessions,
   requestCanvasFit,
   selectSession,
@@ -117,6 +119,23 @@ const items = computed<PaletteItem[]>(() => {
       hint: "",
       run: () => togglePanel("context"),
     },
+    ...(store.selectedId && store.lineage[store.selectedId]?.parentId
+      ? [
+          {
+            key: "act:cmp-parent",
+            icon: "⇄",
+            label: "与母本分支对比",
+            hint: "对比",
+            run: () => {
+              const id = store.selectedId;
+              if (id) compareWithParent(id);
+            },
+          },
+        ]
+      : []),
+    ...(store.compare
+      ? [{ key: "act:cmp-exit", icon: "✕", label: "退出分支对比", hint: "", run: exitCompare }]
+      : []),
   ].filter((action) => match(action.label) || match(action.hint));
 
   const sessions = visibleSessions.value
