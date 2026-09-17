@@ -54,7 +54,10 @@ watch(
 );
 
 // Esc cancels the fork/send that triggered the ask; nothing has fired yet.
+// An Esc that only dismisses the IME candidate window is not a cancel
+// (keyCode 229 covers engines that skip isComposing — same guard everywhere).
 function onKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Escape" && store.forkTagAsk) {
     event.preventDefault();
     cancel();
