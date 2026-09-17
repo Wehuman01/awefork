@@ -7,6 +7,7 @@ import {
   type BackendInfo,
   backendCapabilities,
 } from "../../shared/backend";
+import { type BranchMarkdownTurn, buildBranchMarkdown } from "../../shared/branch-markdown";
 import {
   buildTurnGraph,
   chainToTip,
@@ -2891,6 +2892,70 @@ export async function exportSessionAt(
   } catch (error) {
     state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
   }
+}
+
+/**
+ * Export the active branch (root → tip of the selected story) as a Markdown
+ * file: one section per turn with the card-footer metadata plus full prompt
+ * and reply text. Reads only what the renderer already has, fetching rows
+ * for chain sessions that were never opened; the backend is not involved.
+ */
+export async function exportBranchMarkdown(): Promise<boolean> {
+  const chain = activeChain.value.filter((n) => n.kind === "turn" && n.messageId !== null);
+  if (chain.length === 0) return false;
+  const bySession = new Map<string, ChatMessage[]>();
+  for (const id of new Set(chain.map((n) => n.sessionId))) {
+    const cached = state.messagesBySession[id];
+    bySession.set(id, cached ?? (await loadSessionMessages(id, false)) ?? []);
+  }
+  const turns = chain.map((node) => markdownTurnOf(node, bySession.get(node.sessionId) ?? []));
+  const title = selectedSession.value?.title ?? "awefork 分支";
+  const markdown = buildBranchMarkdown({
+    title,
+    exportedAt: Date.now(),
+    turns,
+  });
+  state.actionError = null;
+  try {
+    const result = await window.awefork.saveTextFile(`${safeFileName(title)}.md`, markdown);
+    return result.ok;
+  } catch (error) {
+    state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
+    return false;
+  }
+}
+
+/** One turn's markdown payload from the in-memory rows behind a canvas node. */
+function markdownTurnOf(node: TurnNode, messages: ChatMessage[]): BranchMarkdownTurn {
+  const range = node.messageId === null ? null : turnMessageRange(messages, node.messageId);
+  const rows = range ? messages.slice(range.start, range.end) : [];
+  const user = rows.find((m) => m.role === "user");
+  const replies = rows.filter((m) => m.role === "assistant");
+  const lastReply = replies[replies.length - 1];
+  return {
+    title: node.title,
+    prompt: user?.text ?? "",
+    reply: replies
+      .map((m) => m.text)
+      .filter((text) => text.trim().length > 0)
+      .join("\n\n"),
+    toolNames: node.toolNames,
+    model: node.model?.modelId ?? lastReply?.modelId ?? null,
+    variant: node.model?.variant ?? lastReply?.variant ?? null,
+    durationMs: node.durationMs,
+    outputTokens: node.outputTokens,
+    error: node.error,
+  };
+}
+
+/** Filesystem-safe base name for a session title, keeping CJK intact. */
+function safeFileName(title: string): string {
+  return (
+    title
+      .replace(/[/\\:*?"<>|]/g, "_")
+      .trim()
+      .slice(0, 80) || "awefork-branch"
+  );
 }
 
 // ── composer persistence ──────────────────────────────────────────────

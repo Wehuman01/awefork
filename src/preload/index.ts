@@ -160,6 +160,11 @@ const api: AweforkApi = {
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
+  saveTextFile: (
+    defaultName: string,
+    content: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke("awefork:saveTextFile", defaultName, content),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("awefork:openExternal", url),
   convertDocument: (filename: string, bytes: Uint8Array): Promise<string> =>
     ipcRenderer.invoke("awefork:convertDocument", filename, bytes),

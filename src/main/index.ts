@@ -3,10 +3,12 @@ import { join } from "node:path";
 import { app, BrowserWindow, nativeImage } from "electron";
 import { createBackendRegistry } from "./backend-registry.js";
 import { registerIpc } from "./ipc.js";
+import { registerSaveFileIpc } from "./save-file.js";
 import { readBackendSelection } from "./settings-store.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
 registerIpc(registry);
+registerSaveFileIpc();
 
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no

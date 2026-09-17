@@ -217,6 +217,14 @@ export interface AweforkApi {
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for ＋ 新目录; null when the user canceled. */
   pickDirectory(): Promise<string | null>;
+  /**
+   * Write text to a user-chosen path through a native save dialog. {ok:false}
+   * when the dialog is canceled; {ok:false,error} when the write fails.
+   */
+  saveTextFile(
+    defaultName: string,
+    content: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }>;
   openExternal(url: string): Promise<void>;
   convertDocument(filename: string, bytes: Uint8Array): Promise<string>;
   checkUpdates(respectSkip: boolean): Promise<CheckUpdatesResult>;

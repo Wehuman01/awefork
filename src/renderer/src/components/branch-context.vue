@@ -32,6 +32,13 @@
           title="重跑这个回合（预填原文，可先换模型/档位）"
           @click="retry"
         >↻</button>
+        <button
+          v-if="pane"
+          type="button"
+          class="nav-btn"
+          title="导出这条分支为 Markdown（含模型/耗时/token）"
+          @click="exportMd"
+        >⤓</button>
         <template v-if="pane">
           <button
             type="button"
@@ -125,6 +132,7 @@ import { formatDuration, formatTokens } from "../format";
 import {
   abortRun,
   activeChain,
+  exportBranchMarkdown,
   isTurnMarked,
   paneComposerModel,
   paneMessages,
@@ -213,6 +221,10 @@ function abort(): void {
 function retry(): void {
   const current = pane.value;
   if (current) retryTurn(current.turn);
+}
+
+function exportMd(): void {
+  void exportBranchMarkdown();
 }
 
 const paneModel = paneComposerModel;

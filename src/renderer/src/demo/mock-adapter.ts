@@ -742,6 +742,17 @@ export function installMockAdapter(): void {
       pickedCount += 1;
       return `/demo/picked-${pickedCount}`;
     },
+    // Demo runs in a real browser: a plain anchor download stands in for the
+    // native save dialog, and the file lands in the browser's download dir.
+    saveTextFile: async (defaultName, content) => {
+      const url = URL.createObjectURL(new Blob([content], { type: "text/markdown" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = defaultName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      return { ok: true };
+    },
     tags: async () => cloneStore(),
     setSessionTags: async (_backend, sessionId, tags) => {
       const next = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
