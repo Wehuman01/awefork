@@ -131,6 +131,8 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   let emitEvent: ((event: AgentEvent) => void) | null = null;
   /** Events stream only to a subscribed session; ensured before every send. */
   const subscribedSessions = new Set<string>();
+  /** Guard so a second subscribe() cannot stack reconnect callbacks. */
+  let reattachRegistered = false;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
 
@@ -538,14 +540,19 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     async subscribe(handler) {
       emitEvent = handler;
       attachHandlers(await options.client());
-      options.onClientReplaced((fresh) => {
-        // The replaced process holds no subscriptions (it restarted), so the
-        // set is stale — clear it so the next prompt re-subscribes on the
-        // fresh process and session/event frames resume streaming.
-        subscribedSessions.clear();
-        attachHandlers(fresh);
-        emit({ type: "server.reconnected" });
-      });
+      // A re-subscribe must not stack a second reconnect callback: each would
+      // re-fire server.reconnected for one respawn.
+      if (!reattachRegistered) {
+        reattachRegistered = true;
+        options.onClientReplaced((fresh) => {
+          // The replaced process holds no subscriptions (it restarted), so the
+          // set is stale — clear it so the next prompt re-subscribes on the
+          // fresh process and session/event frames resume streaming.
+          subscribedSessions.clear();
+          attachHandlers(fresh);
+          emit({ type: "server.reconnected" });
+        });
+      }
       return () => {
         emitEvent = null;
       };

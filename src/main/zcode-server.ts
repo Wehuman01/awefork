@@ -131,8 +131,15 @@ export interface EnsureZcodeServerOptions {
 let slot: ServerSlot | null = null;
 let handle: ZcodeServerHandle | null = null;
 let replacedCallbacks: Array<(client: ZcodeJsonRpc) => void> = [];
-/** In-flight respawn so concurrent `client()` calls share a single spawn. */
-let respawning: Promise<ServerSlot> | null = null;
+
+/** Grace window a freshly spawned child gets before it is trusted. */
+const SPAWN_GRACE_MS = 300;
+
+/** A slot nobody owns anymore must not keep a live child. */
+function discardSlot(dead: ServerSlot): void {
+  dead.alive = false;
+  if (dead.child.exitCode === null) killChild(dead.child);
+}
 
 /**
  * Spawn `zcode app-server` and drive it over stdio. There is no handshake —
@@ -188,7 +195,7 @@ export async function ensureZcodeServer(
   slot = await spawnChild();
   // A wrong CLI path or a bad flag exits immediately; surface that instead
   // of letting the first request time out against a dead pipe.
-  await new Promise<void>((resolve) => setTimeout(resolve, 300));
+  await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
   if (!slot.alive) {
     throw new Error(
       "zcode app-server 启动即退出。请确认 ZCode 桌面端已正确安装（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。",
@@ -200,8 +207,13 @@ export async function ensureZcodeServer(
   // this process no longer drives, so start the array clean instead of
   // wiping it in stop() (where a still-live adapter would lose its callback).
   replacedCallbacks = [];
+  let stopped = false;
+  // Per-handle in-flight respawn so concurrent client() calls share one
+  // spawn without ever adopting another handle's child.
+  let respawning: Promise<ServerSlot> | null = null;
   const currentHandle: ZcodeServerHandle = {
     async client() {
+      if (stopped) throw new Error("zcode app-server 已停止");
       if (!slot || !slot.alive) {
         if (!respawning) {
           respawning = spawnChild().finally(() => {
@@ -209,10 +221,34 @@ export async function ensureZcodeServer(
           });
         }
         const fresh = await respawning;
-        if (!slot || !slot.alive) {
-          slot = fresh;
-          for (const cb of replacedCallbacks) cb(fresh.client);
+        // stop() during the spawn must not install (and leak) the new child.
+        if (stopped) {
+          discardSlot(fresh);
+          throw new Error("zcode app-server 已停止");
         }
+        // Another caller installed a live slot while this spawn ran; drop ours.
+        if (slot && slot.alive) {
+          discardSlot(fresh);
+          return slot.client;
+        }
+        // Same grace as the initial spawn: a crash-looping CLI surfaces as
+        // an error here, not as a dead client handed to the next request.
+        await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
+        if (stopped) {
+          discardSlot(fresh);
+          throw new Error("zcode app-server 已停止");
+        }
+        if (!fresh.alive) {
+          throw new Error(
+            "zcode app-server 重启后立即退出；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。",
+          );
+        }
+        if (slot && slot.alive) {
+          discardSlot(fresh);
+          return slot.client;
+        }
+        slot = fresh;
+        for (const cb of replacedCallbacks) cb(fresh.client);
       }
       return slot.client;
     },
@@ -221,6 +257,7 @@ export async function ensureZcodeServer(
     },
     version: options.version ?? null,
     stop() {
+      stopped = true;
       const current = slot;
       slot = null;
       handle = null;

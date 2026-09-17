@@ -133,13 +133,77 @@ describe("zcode-server", () => {
       spawnedChild?.kill("SIGTERM");
       await vi.advanceTimersByTimeAsync(50);
 
-      const [clientA, clientB] = await Promise.all([handle.client(), handle.client()]);
+      // The respawn re-checks the fresh child after the same 300 ms grace the
+      // initial spawn gets; keep the fake clock moving while the callers wait.
+      const pending = Promise.all([handle.client(), handle.client()]);
+      await vi.advanceTimersByTimeAsync(350);
+      const [clientA, clientB] = await pending;
 
       // initial spawn + one shared respawn
       expect(mocks.spawn).toHaveBeenCalledTimes(2);
       expect(clientA).toBe(clientB);
       expect(replacedClients.length).toBe(1);
       expect(replacedClients[0]).toBe(clientB);
+    });
+
+    it("stop() during an in-flight respawn discards the fresh child", async () => {
+      vi.useFakeTimers();
+
+      const children: ChildProcess[] = [];
+      mocks.spawn.mockImplementation(() => {
+        const child = createFakeChild();
+        children.push(child);
+        return child;
+      });
+
+      const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
+      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      await vi.advanceTimersByTimeAsync(350);
+      const handle = await ensurePromise;
+
+      children[0]?.kill("SIGTERM");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // client() runs synchronously up to its first await, so the respawn is
+      // in flight by the time stop() tears the handle down. The rejection
+      // assertion must be attached before the clock advances, or the promise
+      // rejects unhandled.
+      const pending = expect(handle.client()).rejects.toThrow("已停止");
+      handle.stop();
+      await vi.advanceTimersByTimeAsync(50);
+      await pending;
+      // The respawned child must not have been installed — a follow-up client()
+      // on a fresh handle (not the stopped one) would spawn again, not adopt it.
+      expect(mocks.spawn).toHaveBeenCalledTimes(2);
+      await expect(handle.client()).rejects.toThrow("已停止");
+    });
+
+    it("a respawn that dies inside the grace window rejects instead of returning a dead client", async () => {
+      vi.useFakeTimers();
+
+      const children: ChildProcess[] = [];
+      mocks.spawn.mockImplementation(() => {
+        const child = createFakeChild();
+        children.push(child);
+        return child;
+      });
+
+      const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
+      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      await vi.advanceTimersByTimeAsync(350);
+      const handle = await ensurePromise;
+
+      children[0]?.kill("SIGTERM");
+      await vi.advanceTimersByTimeAsync(50);
+
+      const pending = expect(handle.client()).rejects.toThrow("重启后立即退出");
+      // Let the respawn spawn, then kill the fresh child inside its grace.
+      await vi.advanceTimersByTimeAsync(1);
+      children[1]?.kill("SIGTERM");
+      await vi.advanceTimersByTimeAsync(350);
+      await pending;
+
+      expect(mocks.spawn).toHaveBeenCalledTimes(2);
     });
 
     it("stop() is idempotent", async () => {
