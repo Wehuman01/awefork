@@ -2,7 +2,14 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EMPTY_ARCHIVE, readArchive, setArchived, writeArchive } from "../src/shared/archive-store";
+import {
+  canonicalizeStoredArchive,
+  EMPTY_ARCHIVE,
+  readArchive,
+  setArchived,
+  writeArchive,
+} from "../src/shared/archive-store";
+import { canonicalizeArchiveDirectories } from "../src/shared/canonical-paths";
 
 async function tempArchivePath(): Promise<string> {
   return join(await mkdtemp(join(tmpdir(), "awefork-archive-")), "archive.json");
@@ -91,6 +98,32 @@ describe("archive store", () => {
         { id: "ses_2", archivedAt: 2 },
       ],
       directories: [{ path: "/repo", archivedAt: 3 }],
+    });
+  });
+
+  it("queues the spelling migration with archive writes so neither is lost", async () => {
+    const path = await tempArchivePath();
+    await writeArchive(path, {
+      sessions: [],
+      directories: [{ path: "/legacy/x", archivedAt: 1 }],
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The migration parks mid-task; setArchived must wait behind it. Read
+    // outside the queue, the migration's whole-file write would land after
+    // setArchived's and silently drop ses_1.
+    const migration = canonicalizeStoredArchive(path, async (archive) => {
+      await gate;
+      return canonicalizeArchiveDirectories(archive, async () => "/real/x");
+    });
+    const added = setArchived(path, "session", "ses_1", true, 2);
+    release();
+    await Promise.all([migration, added]);
+    expect(await readArchive(path)).toEqual({
+      sessions: [{ id: "ses_1", archivedAt: 2 }],
+      directories: [{ path: "/real/x", archivedAt: 1 }],
     });
   });
 

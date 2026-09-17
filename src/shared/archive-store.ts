@@ -108,3 +108,21 @@ async function applySetArchived(
   await writeArchive(filePath, next);
   return next;
 }
+
+/**
+ * Fold a stored archive through `canonicalize` (pre-upgrade symlinked
+ * spellings) as one queued read-modify-write. Sharing setArchived's queue is
+ * the whole point: a migration that read outside the queue and wrote the whole
+ * file back could silently drop an archive change that landed between its
+ * read and write.
+ */
+export function canonicalizeStoredArchive(
+  filePath: string,
+  canonicalize: (archive: ArchiveState) => Promise<{ archive: ArchiveState; changed: boolean }>,
+): Promise<ArchiveState> {
+  return enqueueWrite(filePath, async () => {
+    const { archive, changed } = await canonicalize(await readArchive(filePath));
+    if (changed) await writeArchive(filePath, archive);
+    return archive;
+  });
+}

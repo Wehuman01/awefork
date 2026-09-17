@@ -50,3 +50,19 @@ export function removeDir(filePath: string, directory: string): Promise<string[]
     return next;
   });
 }
+
+/**
+ * Spelling migration as one queued read-modify-write, same discipline as
+ * addDir/removeDir: a rewrite that read outside the queue and wrote the whole
+ * list back could blind-overwrite a registration that landed in between.
+ */
+export function canonicalizeStoredDirs(
+  filePath: string,
+  canonicalize: (dirs: string[]) => Promise<{ dirs: string[]; changed: boolean }>,
+): Promise<string[]> {
+  return enqueueWrite(filePath, async () => {
+    const { dirs, changed } = await canonicalize(await readDirs(filePath));
+    if (changed) await writeDirs(filePath, dirs);
+    return dirs;
+  });
+}

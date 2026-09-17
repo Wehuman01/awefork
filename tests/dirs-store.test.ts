@@ -2,7 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { addDir, readDirs, removeDir, writeDirs } from "../src/shared/dirs-store";
+import { canonicalizeDirectoryList } from "../src/shared/canonical-paths";
+import {
+  addDir,
+  canonicalizeStoredDirs,
+  readDirs,
+  removeDir,
+  writeDirs,
+} from "../src/shared/dirs-store";
 
 async function tempDirsPath(): Promise<string> {
   return join(await mkdtemp(join(tmpdir(), "awefork-dirs-")), "dirs.json");
@@ -46,6 +53,25 @@ describe("dirs store", () => {
     // see the empty file and the second write drops the first directory.
     await Promise.all([addDir(path, "/proj/one"), addDir(path, "/proj/two")]);
     expect(await readDirs(path)).toEqual(["/proj/one", "/proj/two"]);
+  });
+
+  it("queues the spelling migration with directory writes so neither is lost", async () => {
+    const path = await tempDirsPath();
+    await writeDirs(path, ["/legacy/x"]);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The migration parks mid-task; addDir must wait behind it. Read outside
+    // the queue, the migration's whole-list write would land after addDir's
+    // and silently drop the registration.
+    const migration = canonicalizeStoredDirs(path, (dirs) =>
+      canonicalizeDirectoryList(dirs, async () => "/real/x"),
+    );
+    const added = addDir(path, "/added");
+    release();
+    await Promise.all([migration, added]);
+    expect(await readDirs(path)).toEqual(["/real/x", "/added"]);
   });
 });
 

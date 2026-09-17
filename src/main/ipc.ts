@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
-import { readArchive, setArchived, writeArchive } from "../shared/archive-store.js";
+import { canonicalizeStoredArchive, setArchived } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 import {
   canonicalDirectory,
@@ -8,7 +8,7 @@ import {
 } from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
-import { addDir, readDirs, removeDir, writeDirs } from "../shared/dirs-store.js";
+import { addDir, canonicalizeStoredDirs, removeDir } from "../shared/dirs-store.js";
 import {
   clearSessionChanges,
   type FileChangeEntry,
@@ -411,21 +411,22 @@ export function registerIpc(registry: BackendRegistry): void {
   // Archive keys on directory paths canonicalize on the way in and out, so a
   // hidden project stays hidden however its sessions report their directory.
   // Pre-upgrade sidecars may still hold a symlinked spelling — migrate the
-  // file once so later restore/remove match by exact string.
+  // file once so later restore/remove match by exact string. The migration is
+  // itself a queued read-modify-write (see canonicalizeStoredArchive): a read
+  // outside the queue with a whole-file write could drop a concurrent
+  // setArchived/change landing in between.
   async function loadCanonicalArchive(backend: BackendId): Promise<ArchiveState> {
-    const path = registry.storePaths(storeBackend(backend)).archive;
-    const archive = await readArchive(path);
-    const { archive: canonical, changed } = await canonicalizeArchiveDirectories(archive);
-    if (changed) await writeArchive(path, canonical);
-    return canonical;
+    return canonicalizeStoredArchive(
+      registry.storePaths(storeBackend(backend)).archive,
+      canonicalizeArchiveDirectories,
+    );
   }
 
   async function loadCanonicalDirs(backend: BackendId): Promise<string[]> {
-    const path = registry.storePaths(storeBackend(backend)).dirs;
-    const dirs = await readDirs(path);
-    const { dirs: canonical, changed } = await canonicalizeDirectoryList(dirs);
-    if (changed) await writeDirs(path, canonical);
-    return canonical;
+    return canonicalizeStoredDirs(
+      registry.storePaths(storeBackend(backend)).dirs,
+      canonicalizeDirectoryList,
+    );
   }
 
   ipcMain.handle("awefork:archive", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
