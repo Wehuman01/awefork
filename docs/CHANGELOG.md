@@ -5,6 +5,10 @@
 - **pi and ZCode backends** — pi sessions resume through `pi --session <jsonl>` (install `@mariozechner/pi-coding-agent` globally); ZCode sessions resume through its bundled `zcode.cjs` (located automatically or via `AWEFORK_ZCODE_CLI`).
 - **deleteSession capability** — backends without a session-delete primitive hide the delete entry instead of surfacing a runtime error.
 - **backendCapabilities expansion** — the capability flags now cover pi and ZCode, so the renderer can gate affordances per backend.
+- **ZCode machine messages stay machine messages** — harness-injected notes such as todo reminders carry a model-only marker in the ZCode store and are no longer rendered as user input.
+- **ZCode forks keep the anchor turn's tail** — an injected message landing mid-turn no longer pulls the fork cut point early, so a branch copied at an earlier turn keeps everything the anchor turn actually produced.
+- **ZCode runs settle after a crash** — when the app-server dies and respawns, event subscriptions are restored, so a running session can reach a final state instead of spinning "运行中" forever.
+- **ZCode crash spawns one replacement, not many** — concurrent requests racing a crashed app-server no longer leak duplicate child processes.
 
 ## v0.3.1
 

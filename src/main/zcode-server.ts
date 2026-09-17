@@ -22,8 +22,8 @@ export interface ZcodeProbe {
 /**
  * How to launch the zcode CLI. ZCode ships as a desktop app whose CLI is a
  * bundled .cjs script (not on PATH), so a plain `spawn("zcode")` is not
- * enough — resolution order: explicit env override, a PATH `zcode`, then the
- * known app-bundle locations.
+ * enough — resolution order: explicit env override, the known app-bundle
+ * locations, then a PATH `zcode` (future CLI distribution).
  */
 export interface ZcodeCli {
   /** argv leading to `zcode <args...>` — a direct executable or node + script. */
@@ -131,6 +131,8 @@ export interface EnsureZcodeServerOptions {
 let slot: ServerSlot | null = null;
 let handle: ZcodeServerHandle | null = null;
 let replacedCallbacks: Array<(client: ZcodeJsonRpc) => void> = [];
+/** In-flight respawn so concurrent `client()` calls share a single spawn. */
+let respawning: Promise<ServerSlot> | null = null;
 
 /**
  * Spawn `zcode app-server` and drive it over stdio. There is no handshake —
@@ -193,12 +195,24 @@ export async function ensureZcodeServer(
     );
   }
 
+  // A fresh handle pairs with a fresh adapter that re-registers on
+  // ClientReplaced; registrations from the previous handle belong to adapters
+  // this process no longer drives, so start the array clean instead of
+  // wiping it in stop() (where a still-live adapter would lose its callback).
+  replacedCallbacks = [];
   const currentHandle: ZcodeServerHandle = {
     async client() {
       if (!slot || !slot.alive) {
-        const fresh = await spawnChild();
-        slot = fresh;
-        for (const cb of replacedCallbacks) cb(fresh.client);
+        if (!respawning) {
+          respawning = spawnChild().finally(() => {
+            respawning = null;
+          });
+        }
+        const fresh = await respawning;
+        if (!slot || !slot.alive) {
+          slot = fresh;
+          for (const cb of replacedCallbacks) cb(fresh.client);
+        }
       }
       return slot.client;
     },
@@ -207,7 +221,6 @@ export async function ensureZcodeServer(
     },
     version: options.version ?? null,
     stop() {
-      replacedCallbacks = [];
       const current = slot;
       slot = null;
       handle = null;

@@ -79,13 +79,32 @@ interface ZcodeMessage {
     tokens?: { output?: number | null } | null;
     finish?: string | null;
     error?: { message?: string; data?: { message?: string } } | null;
+    /** Runtime-injected rows carry metadata with a visibility flag. */
+    metadata?: { source?: string; visibility?: string } | null;
   } | null;
   parts?: Array<{
     type?: string;
     text?: string;
     tool?: string;
     filename?: string;
+    /** Runtime-injected parts are flagged synthetic / model-only. */
+    synthetic?: boolean;
+    metadata?: { visibility?: string } | null;
   }> | null;
+}
+
+/**
+ * A row the harness injected (todo reminders, background-task notices, …)
+ * rather than a real user turn. The app server stores these as role:"user"
+ * and stamps them model-only either on info.metadata or on a synthetic part.
+ * Filter on the visibility flag, never on source strings — real user rows may
+ * carry no metadata at all, so only a negative check is safe.
+ */
+function isModelOnly(message: ZcodeMessage): boolean {
+  if (message.info?.metadata?.visibility === "model-only") return true;
+  return (message.parts ?? []).some(
+    (part) => part.synthetic === true || part.metadata?.visibility === "model-only",
+  );
 }
 
 /** The slice of the provider registry listModels reads. */
@@ -161,12 +180,14 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   function mapMessage(message: ZcodeMessage): ChatMessage[] {
     const info = message.info ?? {};
     const parts = message.parts ?? [];
+    const rows: ChatMessage[] = [];
+    // Harness-injected rows are not real user input; render nothing for them.
+    if (isModelOnly(message)) return rows;
     const id = info.id ?? info.messageId ?? "";
     const createdAt = info.time?.created ?? now();
     const modelId = info.model?.modelID ?? info.modelID ?? null;
     const providerId = info.model?.providerID ?? info.providerID ?? null;
     const variant = info.model?.variant ?? info.variant ?? null;
-    const rows: ChatMessage[] = [];
 
     if (info.role === "user") {
       rows.push({
@@ -245,6 +266,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     atMessageId: string | null,
   ): { cutId: string } => {
     const rows = messages
+      .filter((message) => !isModelOnly(message))
       .map((message) => message.info ?? {})
       .filter((info) => info.role === "user" || info.role === "assistant")
       .map((info) => ({ role: info.role ?? "", id: info.id ?? info.messageId ?? "" }));
@@ -258,6 +280,8 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     }
     // Keep the anchor turn whole: walk to the last assistant row before the
     // next user message. A turn with no reply yet cuts at the user row.
+    // Harness-injected rows (role:"user") are filtered above so they cannot
+    // truncate the walk mid-turn.
     let cutIndex = anchorIndex;
     for (let i = anchorIndex + 1; i < rows.length; i += 1) {
       if (rows[i]?.role === "user") break;
@@ -495,6 +519,10 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       emitEvent = handler;
       attachHandlers(await options.client());
       options.onClientReplaced((fresh) => {
+        // The replaced process holds no subscriptions (it restarted), so the
+        // set is stale — clear it so the next prompt re-subscribes on the
+        // fresh process and session/event frames resume streaming.
+        subscribedSessions.clear();
         attachHandlers(fresh);
         emit({ type: "server.reconnected" });
       });

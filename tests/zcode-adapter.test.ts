@@ -421,4 +421,131 @@ describe("zcode adapter", () => {
     await expect(adapter.exportSession("sess_x", null)).rejects.toThrow("zcode");
     await expect(adapter.respondInteraction("req", { decision: "deny" })).rejects.toThrow();
   });
+
+  it("drops model-only harness rows but keeps real and legacy user rows", async () => {
+    const modelOnly = {
+      info: {
+        id: "msg_hl",
+        role: "user",
+        metadata: { source: "todo_reminder", visibility: "model-only" },
+      },
+      parts: [
+        {
+          type: "text",
+          text: "The TodoWrite tool hasn't been used recently…",
+          synthetic: true,
+          metadata: { runtimeMessage: { source: "todo_reminder" }, visibility: "model-only" },
+        },
+      ],
+    };
+    const realUser = {
+      info: {
+        id: "msg_real",
+        role: "user",
+        time: { created: 200 },
+        semantics: { origin: "real_user", uiVisibility: "visible" },
+      },
+      parts: [{ type: "text", text: "这是我打的字" }],
+    };
+    const legacyUser = {
+      // Older real-user rows carry neither metadata nor semantics — only a
+      // negative check keeps them.
+      info: { id: "msg_legacy", role: "user", time: { created: 300 } },
+      parts: [{ type: "text", text: "旧版本真实输入" }],
+    };
+    const { client } = fakeClient({
+      requests: [
+        {
+          method: "session/messages",
+          result: { messages: [modelOnly, realUser, legacyUser] },
+        },
+      ],
+      replies: { "session/resume": {} },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const rows = await createZcodeAdapter(options).messages("sess_x");
+    expect(rows.map((row) => row.id)).toEqual(["msg_real", "msg_legacy"]);
+    expect(rows[0].text).toBe("这是我打的字");
+    expect(rows[1].text).toBe("旧版本真实输入");
+  });
+
+  it("fork ignores synthetic user rows when walking to the turn cut", async () => {
+    // A model-only row dropped mid-turn must not stop the turn walk early.
+    const syntheticUser = {
+      info: {
+        id: "msg_syn",
+        role: "user",
+        metadata: { source: "background_task", visibility: "model-only" },
+      },
+      parts: [
+        {
+          type: "text",
+          text: "后台任务完成",
+          synthetic: true,
+          metadata: { visibility: "model-only" },
+        },
+      ],
+    };
+    const reply3 = {
+      info: { id: "msg_a3", role: "assistant", time: { created: 5000, completed: 5500 } },
+      parts: [{ type: "text", text: "第三条" }],
+    };
+    const reply4 = {
+      info: { id: "msg_a4", role: "assistant", time: { created: 6000, completed: 6500 } },
+      parts: [{ type: "text", text: "第四条" }],
+    };
+    const { client, calls } = fakeClient({
+      requests: [
+        {
+          method: "session/messages",
+          result: {
+            messages: [
+              USER_MESSAGE, // msg_u1 (real user, anchor)
+              ASSISTANT_MESSAGE, // msg_a1
+              syntheticUser, // mid-turn, must be ignored by the walk
+              reply3, // msg_a3
+              reply4, // msg_a4 — last of the anchor turn
+            ],
+          },
+        },
+      ],
+      replies: {
+        "session/resume": {},
+        "session/fork": { forkedSessionId: "sess_forked" },
+      },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    options.lineagePath = "/tmp/awefork-zcode-adapter-test/lineage3.json";
+    await createZcodeAdapter(options).fork("sess_x", "msg_u1");
+    const forkCall = calls.find((call) => call.method === "session/fork");
+    expect(forkCall?.params).toEqual({
+      sessionId: "sess_x",
+      target: { kind: "message", messageId: "msg_a4" },
+    });
+  });
+
+  it("re-subscribes a session after the client respawns", async () => {
+    const first = fakeClient({
+      replies: { "session/subscribe": { eventSeq: 0 }, "session/send": { accepted: true } },
+    });
+    const { options, addClient, replaceClient } = fakeOptions();
+    addClient(first.client);
+    const adapter = createZcodeAdapter(options);
+    await adapter.subscribe(() => {});
+    await adapter.prompt("sess_x", "第一轮", {} as never);
+
+    // Simulate the app-server restarting: a fresh process with no
+    // subscriptions. The adapter must forget the old subscription and
+    // re-subscribe when prompting again.
+    const second = fakeClient({
+      replies: { "session/subscribe": { eventSeq: 0 }, "session/send": { accepted: true } },
+    });
+    replaceClient(second.client);
+    await adapter.prompt("sess_x", "重生后再发一条", {});
+    const subscribeCalls = second.calls.filter((call) => call.method === "session/subscribe");
+    expect(subscribeCalls).toHaveLength(1);
+    expect(subscribeCalls[0].params).toEqual({ sessionId: "sess_x" });
+  });
 });
