@@ -431,6 +431,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           parentId: sessionId,
           atMessageId,
           createdAt: summary.createdAt,
+          context: "none",
         });
         return { ...summary, origin: "fork", parentSessionId: sessionId };
       }

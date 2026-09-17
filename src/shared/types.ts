@@ -136,6 +136,12 @@ export interface ForkRecord {
   /** User message id the branch starts after; null = forked at latest turn. */
   atMessageId: string | null;
   createdAt: number;
+  /**
+   * Set on empty-context forks: the branch carries no copied history, so the
+   * canvas must never treat its own turns as an inherited prefix (the
+   * re-keyed-ids fallback would otherwise swallow them).
+   */
+  context?: ForkContextMode;
 }
 
 /** Lineage store content. Key = forked session id. */

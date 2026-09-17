@@ -444,6 +444,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
           parentId: sessionId,
           atMessageId,
           createdAt: now(),
+          context: "none",
         });
         indexed = false;
         const createdAt = now();

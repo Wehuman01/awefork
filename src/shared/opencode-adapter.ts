@@ -249,6 +249,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           parentId: sessionId,
           atMessageId,
           createdAt: created.createdAt,
+          context: "none",
         });
         return { ...created, origin: "fork", parentSessionId: sessionId };
       }

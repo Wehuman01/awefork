@@ -545,7 +545,12 @@ export function installMockAdapter(): void {
         minutesAgo: 0,
         ...(forkOptions?.context === "none" ? { emptyContext: true } : {}),
       });
-      lineage[id] = { parentId: sessionId, atMessageId, createdAt: Date.now() };
+      lineage[id] = {
+        parentId: sessionId,
+        atMessageId,
+        createdAt: Date.now(),
+        ...(forkOptions?.context === "none" ? { context: "none" as const } : {}),
+      };
       const created = summaries().find((s) => s.id === id);
       if (!created) throw new Error(`demo fork ${id} missing after creation`);
       return created;

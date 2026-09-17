@@ -345,6 +345,9 @@ function sharedPrefixCount(
 
   const atMessageId = options.lineage[sessionId]?.atMessageId;
   if (!atMessageId) return 0;
+  // An empty-context fork carries no copied rows at all — every turn it has
+  // is its own, no matter how the counts line up against the fork position.
+  if (options.lineage[sessionId]?.context === "none") return 0;
   const index = parentTurns.findIndex((t) => t.messageId === atMessageId);
   if (index === -1) return 0;
   return Math.min(index + 1, childTurns.length);

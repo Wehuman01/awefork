@@ -57,8 +57,12 @@ function chain(...pairs: [string, string][]): ChatMessage[] {
   ]);
 }
 
-function fork(parentId: string, atMessageId: string | null, at = 500): ForkRecord {
-  return { parentId, atMessageId, createdAt: at };
+function fork(
+  parentId: string,
+  atMessageId: string | null,
+  extra: Partial<ForkRecord> = {},
+): ForkRecord {
+  return { parentId, atMessageId, createdAt: 500, ...extra };
 }
 
 function nodeIds(graph: { nodes: TurnNode[] }, sessionId: string): string[] {
@@ -125,6 +129,23 @@ describe("buildTurnGraph", () => {
     // fork at a-u1 keeps turn 1 → only b's 3rd turn is new
     expect(nodeIds(graph, "b")).toEqual(["b:b-u3"]);
     expect(graph.edges).toContainEqual({ from: "a:a-u1", to: "b:b-u3", kind: "fork" });
+  });
+
+  it("renders an empty-context fork's own turns instead of swallowing them as prefix", () => {
+    const graph = buildTurnGraph({
+      sessions: [session("a"), session("b", { origin: "fork", createdAt: 500 })],
+      lineage: { b: fork("a", "a-u1", { context: "none" }) },
+      messages: {
+        a: chain(["a-u1", "a-r1"], ["a-u2", "a-r2"]),
+        // the fork copied nothing; its only turn is its own prompt
+        b: chain(["b-u1", "b-r1"]),
+      },
+    });
+
+    // The re-keyed-ids fallback used to count b's own turn as an inherited
+    // prefix (a context:none fork has no inherited rows at all).
+    expect(nodeIds(graph, "b")).toEqual(["b:b-u1"]);
+    expect(graph.edges).toContainEqual({ from: "a:a-u1", to: "b:b-u1", kind: "fork" });
   });
 
   it("renders an empty branch as a stub node connected to its fork point", () => {
