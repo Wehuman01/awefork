@@ -188,29 +188,45 @@ describe("sessionBatchBody", () => {
     );
   });
 
-  it("resumes pi via --session with the JSONL path unquoted in batch", () => {
+  it("resumes pi via --session with the JSONL path quoted in batch", () => {
     expect(sessionBatchBody(PI)).toBe(
       [
         "@echo off",
         "@chcp 65001 >nul",
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
-        "pi --session /Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl",
+        'pi --session "/Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl"',
         "",
       ].join("\r\n"),
     );
   });
 
-  it("resumes zcode via node --resume with unquoted CLI path and session id", () => {
+  it("resumes zcode via node --resume with the CLI path quoted and the session id bare", () => {
     expect(sessionBatchBody(ZCODE)).toBe(
       [
         "@echo off",
         "@chcp 65001 >nul",
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
-        "node /Applications/ZCode.app/Contents/Resources/zcode.cjs --resume sess_abcdef1234567890",
+        'node "/Applications/ZCode.app/Contents/Resources/zcode.cjs" --resume sess_abcdef1234567890',
         "",
       ].join("\r\n"),
+    );
+  });
+
+  it("quotes pi and zcode paths that contain spaces in batch", () => {
+    // A home directory with a space must not split the resume command.
+    const spacedPi = sessionBatchBody({
+      ...PI,
+      sessionFile: "/Users/Some Body/pi/sessions/6f0e9b28.jsonl",
+    });
+    expect(spacedPi).toContain('pi --session "/Users/Some Body/pi/sessions/6f0e9b28.jsonl"');
+    const spacedZcode = sessionBatchBody({
+      ...ZCODE,
+      zcodeCli: "/Applications/ZCode App.app/Contents/Resources/zcode.cjs",
+    });
+    expect(spacedZcode).toContain(
+      'node "/Applications/ZCode App.app/Contents/Resources/zcode.cjs" --resume sess_abcdef1234567890',
     );
   });
 });

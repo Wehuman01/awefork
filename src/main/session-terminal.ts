@@ -130,9 +130,9 @@ export function sessionBatchBody(request: SessionTerminalRequest): string {
     request.backend === "codex"
       ? `codex resume ${request.sessionId}${providerOverrideArg(request)}`
       : request.backend === "pi"
-        ? `pi --session ${request.sessionFile ?? ""}`
+        ? `pi --session ${batchQuote(request.sessionFile ?? "")}`
         : request.backend === "zcode"
-          ? `node ${request.zcodeCli ?? ""} --resume ${request.sessionId}`
+          ? `node ${batchQuote(request.zcodeCli ?? "")} --resume ${request.sessionId}`
           : `opencode -s ${request.sessionId}`,
   );
   return `${lines.join("\r\n")}\r\n`;
