@@ -908,6 +908,21 @@ export async function init(): Promise<void> {
 }
 
 /**
+ * Re-probe the switcher's backend rows (installed flags, versions). Called
+ * when the dropdown opens: a CLI installed or removed while the app runs
+ * would otherwise stay frozen at boot state until a restart. The active
+ * backend is not touched — only the probes refresh.
+ */
+export async function refreshBackendList(): Promise<void> {
+  try {
+    const { backends } = await window.awefork.backends();
+    state.backendList = backends;
+  } catch {
+    // Best-effort probe; the last known list stays.
+  }
+}
+
+/**
  * A cold-started agent can answer its API before its session scan finishes,
  * so the first fetch may see an empty list or a transient timeout. Retry
  * with backoff until sessions appear or the attempts run out; a genuinely

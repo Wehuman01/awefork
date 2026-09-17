@@ -92,7 +92,14 @@ import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { togglePalette } from "../layout";
-import { checkForUpdates, directories, store, switchBackend, switchDirectory } from "../state";
+import {
+  checkForUpdates,
+  directories,
+  refreshBackendList,
+  store,
+  switchBackend,
+  switchDirectory,
+} from "../state";
 import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
@@ -124,6 +131,9 @@ function toggleVersionMenu(): void {
 
 function toggleBackendMenu(): void {
   backendOpen.value = !backendOpen.value;
+  // A CLI installed or removed since boot shows up here instead of after a
+  // restart; the probe runs while the menu is already open.
+  if (backendOpen.value) void refreshBackendList();
 }
 
 async function pickBackend(backend: BackendId): Promise<void> {
