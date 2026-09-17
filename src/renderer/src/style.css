@@ -146,52 +146,94 @@ textarea {
   padding-top: 3px;
 }
 
-/* backend switcher: segmented pill next to the brand, one button per agent
-   backend; the active segment doubles as the connection-status label */
+/* backend switcher: dropdown pill next to the brand — four agents outgrew a
+   segmented control; the pill carries the active agent (plus its compat
+   warning), the menu carries installed state and switching */
 
-.backend-switch {
+.backend-wrap {
+  position: relative;
+}
+
+.backend-pill {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 7px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 2px;
+  padding: 3px 13px;
+  font-size: 12px;
+  color: var(--ink-soft);
 }
 
-.backend-btn {
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--ink-faint);
-}
-
-.backend-btn:hover:not(:disabled) {
+.backend-pill b {
   color: var(--ink);
-  background: var(--primary-soft);
+  font-weight: 800;
 }
 
-.backend-btn.active {
-  background: var(--primary-soft);
-  color: var(--primary-deep);
+.backend-pill .chev {
+  color: var(--ink-faint);
+  font-size: 11px;
 }
 
-.backend-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* compat-range notice: sits inside the switch pill after the active backend;
-   the badge is the signal, the hover title carries the full explanation */
+/* compat-range notice: sits on the pill after the active agent's name (or on
+   its menu row); the badge is the signal, the hover title carries the full
+   explanation */
 .backend-warn {
-  padding: 0 6px 0 4px;
   font-size: 12px;
   line-height: 1;
   color: #b45309;
   cursor: help;
   user-select: none;
+}
+
+.backend-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 190px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lift);
+  padding: 6px;
+  z-index: 50;
+}
+
+.backend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.backend-item:hover:not(:disabled),
+.backend-item.active {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.backend-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.backend-check {
+  width: 14px;
+  flex: none;
+}
+
+.backend-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .project-wrap {

@@ -5,31 +5,43 @@
       <span class="brand-name">awefork</span>
       <span class="brand-sub">分支工作台</span>
     </div>
-    <div v-if="backendList.length > 1" class="backend-switch" role="group" aria-label="Agent 后端">
+    <div v-if="backendList.length > 1" class="backend-wrap">
       <button
-        v-for="entry in backendList"
-        :key="entry.id"
         type="button"
-        class="backend-btn"
-        :class="{ active: entry.id === activeBackend }"
-        :disabled="!entry.installed"
-        :title="
-          entry.installed ? `切换到 ${entry.label}` : `未在 PATH 上找到 ${entry.label} CLI`
-        "
-        @click="pickBackend(entry.id)"
+        class="backend-pill"
+        :aria-expanded="backendOpen"
+        aria-haspopup="menu"
+        aria-label="Agent 后端"
+        :title="`切换 Agent 后端（当前 ${activeLabel}）`"
+        @click.stop="toggleBackendMenu"
       >
-        {{ entry.label }}
+        <span aria-hidden="true">🤖</span>
+        <b>{{ activeLabel }}</b>
+        <!-- The install probe's compat check: a CLI version outside the tested
+             range still runs, but never silently — the full text sits in the
+             title so one hover explains a misbehaving run. -->
+        <span v-if="activeVersionWarning" class="backend-warn" :title="activeVersionWarning" role="status">⚠</span>
+        <span class="chev">{{ backendOpen ? "⌃" : "⌄" }}</span>
       </button>
-      <!-- The install probe's compat check: a CLI version outside the tested
-           range still runs, but never silently — the full text sits in the
-           title so one hover explains a misbehaving run. -->
-      <span
-        v-if="activeVersionWarning"
-        class="backend-warn"
-        :title="activeVersionWarning"
-        role="status"
-        >⚠</span
-      >
+      <div v-if="backendOpen" class="backend-menu" role="menu" aria-label="Agent 后端">
+        <button
+          v-for="entry in backendList"
+          :key="entry.id"
+          type="button"
+          role="menuitem"
+          class="backend-item"
+          :class="{ active: entry.id === activeBackend }"
+          :disabled="!entry.installed"
+          :title="
+            entry.installed ? `切换到 ${entry.label}` : `未在 PATH 上找到 ${entry.label} CLI`
+          "
+          @click="pickBackend(entry.id)"
+        >
+          <span class="backend-check" aria-hidden="true">{{ entry.id === activeBackend ? "✓" : "" }}</span>
+          <span class="backend-name">{{ entry.label }}</span>
+          <span v-if="entry.versionWarning" class="backend-warn" :title="entry.versionWarning">⚠</span>
+        </button>
+      </div>
     </div>
     <div v-if="directories.length > 0" class="project-wrap">
       <button type="button" class="project-pill" @click.stop="toggleOpen">
@@ -85,6 +97,7 @@ import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);
+const backendOpen = ref(false);
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);
@@ -109,7 +122,12 @@ function toggleVersionMenu(): void {
   versionOpen.value = !versionOpen.value;
 }
 
+function toggleBackendMenu(): void {
+  backendOpen.value = !backendOpen.value;
+}
+
 async function pickBackend(backend: BackendId): Promise<void> {
+  backendOpen.value = false;
   await switchBackend(backend);
 }
 
@@ -126,6 +144,7 @@ async function runManualCheck(): Promise<void> {
 function closeOnOutsideClick(): void {
   open.value = false;
   versionOpen.value = false;
+  backendOpen.value = false;
 }
 
 onMounted(() => document.addEventListener("click", closeOnOutsideClick));
