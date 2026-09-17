@@ -856,6 +856,7 @@ export function installMockAdapter(): void {
     selectBackend: async () => ({ ok: true }),
     capabilities: async () => ({
       deleteMessage: true,
+      deleteSession: true,
       attachments: true,
       fileChanges: false,
       exportBranch: true,

@@ -47,9 +47,11 @@ import {
 } from "./codex-homes.js";
 import { convertDocumentToText } from "./document-convert.js";
 import { createMessageSearcher, type MessageSearcher } from "./message-search.js";
+import { findPiSessionFile } from "./pi-server.js";
 import { openSessionInTerminal } from "./session-terminal.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
 import { downloadAndInstallUpdate } from "./update-install.js";
+import { resolveZcodeCli } from "./zcode-server.js";
 
 /**
  * IPC surface (all invoke-channels, prefixed awefork:). Every method that
@@ -326,12 +328,26 @@ export function registerIpc(registry: BackendRegistry): void {
         codexProviderOverride =
           home !== null ? codexRolloutProviderFallback(home.path, sessionId) : null;
       }
+      // pi resumes by session FILE (no resume-by-id flag); zcode by id but
+      // through its bundled CLI, which is not on PATH.
+      let sessionFile: string | null = null;
+      let zcodeCli: string | null = null;
+      if (id === "pi") {
+        sessionFile = await findPiSessionFile(sessionId);
+      } else if (id === "zcode") {
+        const cli = await resolveZcodeCli();
+        // The bundle install runs `node <script>`; a PATH install has no
+        // script to hand the terminal script.
+        zcodeCli = cli?.args[0] ?? null;
+      }
       return openSessionInTerminal({
         backend: id,
         sessionId,
         directory: session.directory,
         codexHome,
         codexProviderOverride,
+        sessionFile,
+        zcodeCli,
       });
     },
   );

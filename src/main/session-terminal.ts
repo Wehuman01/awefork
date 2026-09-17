@@ -36,6 +36,17 @@ export interface SessionTerminalRequest {
    * when the recorded provider is still resolvable.
    */
   codexProviderOverride?: string | null;
+  /**
+   * Absolute path to the pi session JSONL file. Only used when `backend` is
+   * `"pi"`, because pi has no resume-by-id flag — it resumes by file path.
+   */
+  sessionFile?: string | null;
+  /**
+   * Absolute path to the zcode CLI bundle (`zcode.cjs`). Only used when
+   * `backend` is `"zcode"`, because the binary is not on PATH; the user's
+   * terminal does have `node`, so we invoke it directly.
+   */
+  zcodeCli?: string | null;
 }
 
 export type SessionTerminalResult = { ok: true } | { ok: false; error: string };
@@ -91,7 +102,11 @@ export function sessionScriptBody(request: SessionTerminalRequest): string {
   lines.push(
     request.backend === "codex"
       ? `exec codex resume ${shellQuote(request.sessionId)}${providerOverrideArg(request)}`
-      : `exec opencode -s ${shellQuote(request.sessionId)}`,
+      : request.backend === "pi"
+        ? `exec pi --session ${shellQuote(request.sessionFile ?? "")}`
+        : request.backend === "zcode"
+          ? `exec node ${shellQuote(request.zcodeCli ?? "")} --resume ${shellQuote(request.sessionId)}`
+          : `exec opencode -s ${shellQuote(request.sessionId)}`,
   );
   return `${lines.join("\n")}\n`;
 }
@@ -114,7 +129,11 @@ export function sessionBatchBody(request: SessionTerminalRequest): string {
   lines.push(
     request.backend === "codex"
       ? `codex resume ${request.sessionId}${providerOverrideArg(request)}`
-      : `opencode -s ${request.sessionId}`,
+      : request.backend === "pi"
+        ? `pi --session ${request.sessionFile ?? ""}`
+        : request.backend === "zcode"
+          ? `node ${request.zcodeCli ?? ""} --resume ${request.sessionId}`
+          : `opencode -s ${request.sessionId}`,
   );
   return `${lines.join("\r\n")}\r\n`;
 }
@@ -149,6 +168,15 @@ export async function openSessionInTerminal(
   }
   if (!request.directory) {
     return { ok: false, error: "会话没有工作目录，无法在终端中打开" };
+  }
+  if (request.backend === "pi" && !request.sessionFile) {
+    // pi has no resume-by-id flag; it needs the absolute path to the JSONL.
+    return { ok: false, error: "找不到该会话的记录文件，无法在终端打开" };
+  }
+  if (request.backend === "zcode" && !request.zcodeCli) {
+    // zcode is not on PATH; the terminal only has `node`, so we need the
+    // bundled zcode.cjs path to invoke it.
+    return { ok: false, error: "未找到 zcode CLI 路径，无法在终端打开" };
   }
   const platform = deps.platform ?? process.platform;
   const exec = deps.exec ?? execFileAsync;

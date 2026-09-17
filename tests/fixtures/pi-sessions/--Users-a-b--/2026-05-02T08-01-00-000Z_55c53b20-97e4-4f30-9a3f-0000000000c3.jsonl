@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"s2-branch","timestamp":"2026-05-02T08:00:00.000Z","cwd":"/Users/a-b"}
+{"type":"message","id":"b-u0","parentId":null,"timestamp":"2026-05-02T08:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"开局问题"}],"timestamp":1751328001000}}
+{"type":"message","id":"b-a0","parentId":"b-u0","timestamp":"2026-05-02T08:00:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"第一条回答"}],"stopReason":"stop","timestamp":1751328010000}}
+{"type":"message","id":"b-u1","parentId":"b-a0","timestamp":"2026-05-02T08:00:11.000Z","message":{"role":"user","content":[{"type":"text","text":"分支怎么选？"}],"timestamp":1751328011000}}
+{"type":"message","id":"b-alpha","parentId":"b-u1","timestamp":"2026-05-02T08:00:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"甲支路：方案一"}],"stopReason":"stop","timestamp":1751328020000}}
+{"type":"message","id":"b-beta","parentId":"b-u1","timestamp":"2026-05-02T08:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"乙支路：方案二"}],"stopReason":"stop","timestamp":1751328060000}}

@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"s3-orphan","timestamp":"2026-04-03T07:00:00.000Z","cwd":"/Users/a-b"}
+{"type":"message","id":"o-keep","parentId":"o-keep","timestamp":"2026-04-03T07:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"不再被引用的历史"}],"timestamp":1751331605000}}
+{"type":"message","id":"o-gone","parentId":"o-keep","timestamp":"2026-04-03T07:00:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"答案"}],"stopReason":"stop","timestamp":1751331610000}}
+{"type":"message","id":"o-orphan","parentId":"missing-id","timestamp":"2026-04-03T07:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"孤立消息"}],"timestamp":1751331660000}}

@@ -1,0 +1,10 @@
+{"type":"session","version":3,"id":"s1-mixed","timestamp":"2026-06-01T09:00:00.000Z","cwd":"/Users/a-b"}
+{"type":"model_change","id":"c-m0","parentId":null,"timestamp":"2026-06-01T09:00:01.000Z","provider":"anthropic","modelId":"claude-sonnet"}
+{"type":"thinking_level_change","id":"c-t0","parentId":"c-m0","timestamp":"2026-06-01T09:00:02.000Z","thinkingLevel":"medium"}
+{"type":"message","id":"c-u1","parentId":"c-t0","timestamp":"2026-06-01T09:00:03.000Z","message":{"role":"user","content":[{"type":"text","text":"帮我读登录代码"}],"timestamp":1751302803000}}
+{"type":"message","id":"c-a1","parentId":"c-u1","timestamp":"2026-06-01T09:00:10.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先看入口路由"},{"type":"text","text":"登录在 src/auth.ts"}],"provider":"anthropic","model":"claude-sonnet","usage":{"input":12,"output":30,"cacheRead":0,"cacheWrite":0,"totalTokens":42,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1750002810000}}
+{"type":"model_change","id":"c-m2","parentId":"c-a1","timestamp":"2026-06-01T09:00:12.000Z","provider":"openai","modelId":"gpt-5"}
+{"type":"thinking_level_change","id":"c-t2","parentId":"c-m2","timestamp":"2026-06-01T09:00:13.000Z","thinkingLevel":"high"}
+{"type":"message","id":"c-u2","parentId":"c-t2","timestamp":"2026-06-01T09:00:14.000Z","message":{"role":"user","content":[{"type":"text","text":"顺手加个限流"}],"timestamp":1750002814000}}
+{"type":"message","id":"c-a2","parentId":"c-u2","timestamp":"2026-06-01T09:00:30.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tc1","name":"shell","arguments":{"command":"rg rateLimit"}},{"type":"text","text":"限流已加"}],"provider":"openai","model":"gpt-5","usage":{"input":20,"output":55,"cacheRead":0,"cacheWrite":0,"totalTokens":75,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":1750002830000}}
+{"type":"session_info","id":"c-info","parentId":"c-a2","timestamp":"2026-06-01T09:00:31.000Z","name":"限流改造"}

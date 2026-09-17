@@ -16,6 +16,7 @@ describe("backendCapabilities", () => {
   it("gives opencode the full surface", () => {
     expect(backendCapabilities("opencode")).toEqual({
       deleteMessage: true,
+      deleteSession: true,
       attachments: true,
       fileChanges: true,
       exportBranch: true,
@@ -25,6 +26,7 @@ describe("backendCapabilities", () => {
   it("gates codex to no message delete and no attachments", () => {
     expect(backendCapabilities("codex")).toEqual({
       deleteMessage: false,
+      deleteSession: true,
       attachments: false,
       fileChanges: false,
       exportBranch: false,

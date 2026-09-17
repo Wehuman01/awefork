@@ -406,7 +406,13 @@
         @click="exportFromMenu"
       >📤 导出为独立会话</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginArchive">📦 归档会话</button>
-      <button type="button" role="menuitem" class="ctx-menu-item danger" @click="beginDelete">
+      <button
+        v-if="store.capabilities.deleteSession"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item danger"
+        @click="beginDelete"
+      >
         🗑 删除会话…
       </button>
     </div>
