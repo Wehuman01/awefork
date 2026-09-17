@@ -3406,6 +3406,30 @@ code.md-code {
   opacity: 0.85;
 }
 
+/* session tag chips, same colors the sidebar row shows */
+.palette-tags {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  max-width: 40%;
+  overflow: hidden;
+}
+
+.palette-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 0 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.palette-tag-more {
+  color: var(--ink-faint);
+  background: transparent;
+}
+
 .palette-label {
   flex: 1;
   min-width: 0;
@@ -3983,6 +4007,29 @@ code.md-code {
   flex: 0 0 auto;
   font-size: 10px;
   opacity: 0.85;
+}
+
+/* session tag chips, same colors the sidebar row shows */
+.ss-tags {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.ss-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 0 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.ss-tag-more {
+  color: var(--ink-faint);
+  background: transparent;
 }
 
 .ss-field {

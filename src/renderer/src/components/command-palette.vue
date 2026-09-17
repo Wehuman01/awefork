@@ -23,6 +23,16 @@
             <span class="palette-icon">{{ item.icon }}</span>
             <span v-if="item.pinned" class="palette-pin" title="已置顶">📌</span>
             <span class="palette-label">{{ item.label }}</span>
+            <span v-if="(item.tags?.length ?? 0) > 0" class="palette-tags">
+              <span
+                v-for="tag in item.tags?.slice(0, 2)"
+                :key="tag"
+                class="palette-tag"
+                :style="{ color: tagColor(tag), background: tagBg(tag) }"
+              >{{ tag }}</span>
+              <span v-if="(item.tags?.length ?? 0) > 2" class="palette-tag palette-tag-more"
+                >+{{ (item.tags?.length ?? 0) - 2 }}</span>
+            </span>
             <span class="palette-hint">{{ item.hint }}</span>
           </button>
           <p v-if="items.length === 0" class="palette-empty">没有匹配项</p>
@@ -44,6 +54,9 @@ import {
   selectSession,
   store,
   switchDirectory,
+  tagBg,
+  tagColor,
+  tagsOf,
   visibleSessions,
 } from "../state";
 
@@ -55,6 +68,8 @@ interface PaletteItem {
   run: () => void;
   /** Session items only: the sidebar's pin badge rides along. */
   pinned?: boolean;
+  /** Session items only: the sidebar's tag chips ride along. */
+  tags?: string[];
 }
 
 const query = ref("");
@@ -114,6 +129,7 @@ const items = computed<PaletteItem[]>(() => {
         label: s.title || "(untitled)",
         hint: shortDir(s.directory),
         pinned: store.pins.includes(s.id),
+        tags: tagsOf(s.id),
         run: () => void jumpToSession(s),
       }),
     );

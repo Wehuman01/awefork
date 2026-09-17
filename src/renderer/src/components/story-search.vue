@@ -31,6 +31,16 @@
           <span v-if="pinnedOf(hit)" class="ss-pin" title="已置顶">📌</span>
           <span class="ss-field" :class="hit.field">{{ fieldLabel(hit.field) }}</span>
           <span class="ss-hit-title">{{ titleOf(hit) }}</span>
+          <span v-if="hitTags(hit).length > 0" class="ss-tags">
+            <span
+              v-for="tag in hitTags(hit).slice(0, 2)"
+              :key="tag"
+              class="ss-tag"
+              :style="{ color: tagColor(tag), background: tagBg(tag) }"
+            >{{ tag }}</span>
+            <span v-if="hitTags(hit).length > 2" class="ss-tag ss-tag-more"
+              >+{{ hitTags(hit).length - 2 }}</span>
+          </span>
         </span>
         <span class="ss-snippet">{{ hit.snippet.slice(0, hit.matchStart) }}<mark>{{ hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength) }}</mark>{{ hit.snippet.slice(hit.matchStart + hit.matchLength) }}</span>
       </button>
@@ -45,7 +55,16 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import type { TurnSearchHit } from "../../../shared/turn-search";
-import { searchQuery, selectTurn, store, storySearchHits, turnGraph } from "../state";
+import {
+  searchQuery,
+  selectTurn,
+  store,
+  storySearchHits,
+  tagBg,
+  tagColor,
+  tagsOf,
+  turnGraph,
+} from "../state";
 
 const emit = defineEmits<{ jump: [node: TurnNode] }>();
 
@@ -62,6 +81,12 @@ function titleOf(hit: TurnSearchHit): string {
 function pinnedOf(hit: TurnSearchHit): boolean {
   const node = nodeById.value.get(hit.nodeId);
   return node !== undefined && store.pins.includes(node.sessionId);
+}
+
+/** The hit session's tags — same chips the sidebar row shows. */
+function hitTags(hit: TurnSearchHit): string[] {
+  const node = nodeById.value.get(hit.nodeId);
+  return node ? tagsOf(node.sessionId) : [];
 }
 
 function fieldLabel(field: TurnSearchHit["field"]): string {

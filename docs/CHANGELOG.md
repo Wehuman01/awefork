@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Empty-context forks** — a mid-story fork draft gains a toggle: "空上下文" starts the branch as a brand-new session in the same directory (only the lineage sidecar remembers where it branched), while "带历史" keeps the usual copy-up-to-that-turn. The choice rides the fork call through every backend and survives composer reloads.
+- **Tag chips in search surfaces** — story search hits and command-palette entries show the session's tags (up to two plus an overflow count) in their own colors, so a tagged branch is recognizable before you commit to it.
 - **pi and ZCode backends** — pi sessions resume through `pi --session <jsonl>` (install `@mariozechner/pi-coding-agent` globally); ZCode sessions resume through its bundled `zcode.cjs` (located automatically or via `AWEFORK_ZCODE_CLI`).
 - **deleteSession capability** — backends without a session-delete primitive hide the delete entry instead of surfacing a runtime error.
 - **backendCapabilities expansion** — the capability flags now cover pi and ZCode, so the renderer can gate affordances per backend.
