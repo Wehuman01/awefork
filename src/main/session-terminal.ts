@@ -88,9 +88,14 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+/** Escape literal percent signs and double quotes for a cmd.exe batch file. */
+function batchEscape(value: string): string {
+  return value.replaceAll("%", "%%").replaceAll('"', '""');
+}
+
 /** cmd.exe double-quote; "" is cmd's in-quote escape. */
 function batchQuote(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
+  return `"${batchEscape(value)}"`;
 }
 
 /** The POSIX script a macOS/Linux terminal runs: cd, optional CODEX_HOME, TUI. */
@@ -115,6 +120,7 @@ export function sessionScriptBody(request: SessionTerminalRequest): string {
 export function sessionBatchBody(request: SessionTerminalRequest): string {
   const lines = [
     "@echo off",
+    "setlocal DisableDelayedExpansion",
     // cmd decodes batch files with the ANSI codepage (GBK on Chinese
     // Windows); the file is written UTF-8, so the console must switch before
     // the first line that can carry a non-ASCII path, or cd targets mojibake.
@@ -124,7 +130,7 @@ export function sessionBatchBody(request: SessionTerminalRequest): string {
     "if errorlevel 1 exit /b 1",
   ];
   if (request.backend === "codex" && request.codexHome !== null) {
-    lines.push(`set "CODEX_HOME=${request.codexHome}"`);
+    lines.push(`set "CODEX_HOME=${batchEscape(request.codexHome)}"`);
   }
   lines.push(
     request.backend === "codex"

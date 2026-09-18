@@ -34,9 +34,12 @@ export interface ZcodeCli {
 }
 
 /** Candidate .cjs bundle paths, most common first. darwin-only for now. */
-function bundleCandidates(plat: NodeJS.Platform): string[] {
+function bundleCandidates(home: string, plat: NodeJS.Platform): string[] {
   if (plat !== "darwin") return [];
-  return ["/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"];
+  return [
+    "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+    join(home, "Applications", "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs"),
+  ];
 }
 
 /**
@@ -51,7 +54,7 @@ export async function resolveZcodeCli(
 ): Promise<ZcodeCli | null> {
   const override = env.AWEFORK_ZCODE_CLI;
   if (override && existsSync(override)) return nodeCommand(override);
-  const bundled = bundleCandidates(plat).find((path) => existsSync(path));
+  const bundled = bundleCandidates(home, plat).find((path) => existsSync(path));
   if (bundled) return nodeCommand(bundled);
   // A PATH install (future CLI distribution): let the loader find it.
   try {
@@ -187,7 +190,7 @@ export async function ensureZcodeServer(
   const slotOf = (child: ChildProcess): ServerSlot | null => (slot?.child === child ? slot : null);
 
   const markDead = (dead: ServerSlot | null): void => {
-    if (!dead || !dead.alive) return;
+    if (!dead?.alive) return;
     dead.alive = false;
     if (slot === dead) slot = null;
   };
@@ -214,7 +217,7 @@ export async function ensureZcodeServer(
   const currentHandle: ZcodeServerHandle = {
     async client() {
       if (stopped) throw new Error("zcode app-server 已停止");
-      if (!slot || !slot.alive) {
+      if (!slot?.alive) {
         if (!respawning) {
           respawning = spawnChild().finally(() => {
             respawning = null;
@@ -227,7 +230,7 @@ export async function ensureZcodeServer(
           throw new Error("zcode app-server 已停止");
         }
         // Another caller installed a live slot while this spawn ran; drop ours.
-        if (slot && slot.alive) {
+        if (slot?.alive) {
           discardSlot(fresh);
           return slot.client;
         }
@@ -243,7 +246,7 @@ export async function ensureZcodeServer(
             "zcode app-server 重启后立即退出；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。",
           );
         }
-        if (slot && slot.alive) {
+        if (slot?.alive) {
           discardSlot(fresh);
           return slot.client;
         }

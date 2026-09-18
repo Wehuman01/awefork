@@ -105,7 +105,7 @@ npm run dev
 
 ## 兼容性
 
-awefork 支持 **opencode**（基于 1.18.x 开发与测试）、**Codex**（通过 app-server 协议驱动）、**pi**（`npm install -g @mariozechner/pi-coding-agent`；通过 `pi --session <jsonl>` 恢复会话）和 **ZCode**（安装 ZCode 桌面端；awefork 自动定位其捆绑的 `zcode.cjs`，也可通过环境变量 `AWEFORK_ZCODE_CLI` 指定路径）。pi 和 ZCode 暂不支持删除会话、导出独立会话或重命名；ZCode 的模型目录读自其 v2 配置。各 CLI 的安装探针会检查 PATH；缺失的二进制会以提示返回，而不是静默失败。
+awefork 支持 **opencode**（基于 1.18.x 开发与测试）、**Codex**（通过 app-server 协议驱动）、**pi**（`npm install -g @mariozechner/pi-coding-agent`；通过 `pi --session <jsonl>` 恢复会话）和 **ZCode**。macOS 会自动从 `/Applications` 或 `~/Applications` 定位 ZCode 捆绑的 `zcode.cjs`；Windows 需设置 `AWEFORK_ZCODE_CLI`，除非 `zcode` 已在 PATH 中。pi 和 ZCode 暂不支持删除会话、导出独立会话或重命名；ZCode 的模型目录读自其 v2 配置。各 CLI 的安装探针会检查 PATH；缺失的二进制会以提示返回，而不是静默失败。
 
 ## 多 Agent 路线
 

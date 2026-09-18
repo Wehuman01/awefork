@@ -13,6 +13,7 @@ import {
 import { resolveSpawnEnv } from "./opencode-server.js";
 
 const execFileAsync = promisify(execFile);
+const PI_PACKAGE_NAME = "@mariozechner/pi-coding-agent";
 
 /**
  * Real process wiring for the pi adapter (main scope only). Everything an
@@ -46,9 +47,8 @@ export async function isPiInstalled(
 }
 
 /**
- * The package root on whose PATH `pi` lives, following the bin symlink.
- * `pi`'s bin points at dist/cli.js, so the root is two directory hops up from
- * the resolved bin — dist/cli.js → dist → package root.
+ * The package root on whose PATH `pi` lives. On POSIX the bin is a symlink to
+ * dist/cli.js; npm's Windows bin is a .cmd shim beside node_modules.
  */
 export async function resolvePiPackageRoot(
   env: NodeJS.ProcessEnv = process.env,
@@ -59,14 +59,17 @@ export async function resolvePiPackageRoot(
   const separator = platform === "win32" ? ";" : ":";
   for (const dir of pathEntry.split(separator)) {
     if (!dir) continue;
-    const binName = platform === "win32" ? "pi.cmd" : "pi";
-    let real: string;
-    try {
-      real = await realpath(join(dir, binName));
-    } catch {
+    const bin = join(dir, platform === "win32" ? "pi.cmd" : "pi");
+    if (platform === "win32") {
+      if (!existsSync(bin)) continue;
+      const root = join(dir, "node_modules", PI_PACKAGE_NAME);
+      if (existsSync(root)) return root;
       continue;
     }
-    return dirname(dirname(real));
+    try {
+      const real = await realpath(bin);
+      return dirname(dirname(real));
+    } catch {}
   }
   return null;
 }
@@ -169,9 +172,7 @@ export function stopPiChildren(): void {
 async function runNodeScript(code: string): Promise<string> {
   const root = await resolvePiPackageRoot();
   if (!root) {
-    throw new Error(
-      "找不到 pi 运行时：请先安装 @mariozechner/pi-coding-agent 并确保 `pi` 在 PATH 上",
-    );
+    throw new Error(`找不到 pi 运行时：请先安装 ${PI_PACKAGE_NAME} 并确保 \`pi\` 在 PATH 上`);
   }
   const script = code.split(PI_SDK_IMPORT).join(root);
   const spawnEnv = await resolveSpawnEnv(process.env, homedir(), undefined, process.platform);

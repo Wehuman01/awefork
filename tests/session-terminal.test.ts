@@ -76,7 +76,7 @@ const ZCODE: SessionTerminalRequest = {
   sessionId: "sess_abcdef1234567890",
   directory: "/Users/tester/repo",
   codexHome: null,
-  zcodeCli: "/Applications/ZCode.app/Contents/Resources/zcode.cjs",
+  zcodeCli: "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
 };
 
 describe("shellQuote", () => {
@@ -137,7 +137,7 @@ describe("sessionScriptBody", () => {
       [
         "#!/bin/sh",
         "cd '/Users/tester/repo' || exit 1",
-        "exec node '/Applications/ZCode.app/Contents/Resources/zcode.cjs' --resume 'sess_abcdef1234567890'",
+        "exec node '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs' --resume 'sess_abcdef1234567890'",
         "",
       ].join("\n"),
     );
@@ -157,6 +157,7 @@ describe("sessionBatchBody", () => {
     expect(sessionBatchBody(OPENCODE)).toBe(
       [
         "@echo off",
+        "setlocal DisableDelayedExpansion",
         "@chcp 65001 >nul",
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
@@ -192,6 +193,7 @@ describe("sessionBatchBody", () => {
     expect(sessionBatchBody(PI)).toBe(
       [
         "@echo off",
+        "setlocal DisableDelayedExpansion",
         "@chcp 65001 >nul",
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
@@ -205,10 +207,11 @@ describe("sessionBatchBody", () => {
     expect(sessionBatchBody(ZCODE)).toBe(
       [
         "@echo off",
+        "setlocal DisableDelayedExpansion",
         "@chcp 65001 >nul",
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
-        'node "/Applications/ZCode.app/Contents/Resources/zcode.cjs" --resume sess_abcdef1234567890',
+        'node "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs" --resume sess_abcdef1234567890',
         "",
       ].join("\r\n"),
     );
@@ -223,10 +226,27 @@ describe("sessionBatchBody", () => {
     expect(spacedPi).toContain('pi --session "/Users/Some Body/pi/sessions/6f0e9b28.jsonl"');
     const spacedZcode = sessionBatchBody({
       ...ZCODE,
-      zcodeCli: "/Applications/ZCode App.app/Contents/Resources/zcode.cjs",
+      zcodeCli: "/Applications/ZCode App.app/Contents/Resources/glm/zcode.cjs",
     });
     expect(spacedZcode).toContain(
-      'node "/Applications/ZCode App.app/Contents/Resources/zcode.cjs" --resume sess_abcdef1234567890',
+      'node "/Applications/ZCode App.app/Contents/Resources/glm/zcode.cjs" --resume sess_abcdef1234567890',
+    );
+  });
+
+  it("escapes percent signs in batch paths and CODEX_HOME", () => {
+    const body = sessionBatchBody({
+      ...CODEX_FOREIGN,
+      directory: "C:\\Users\\100%done%\\repo",
+      codexHome: "C:\\Users\\100%done%\\codex",
+    });
+
+    expect(body).toContain('cd /d "C:\\Users\\100%%done%%\\repo"');
+    expect(body).toContain('set "CODEX_HOME=C:\\Users\\100%%done%%\\codex"');
+  });
+
+  it("disables delayed expansion before writing user-controlled batch paths", () => {
+    expect(sessionBatchBody({ ...OPENCODE, directory: "C:\\Users\\hello!\\repo" })).toContain(
+      "setlocal DisableDelayedExpansion",
     );
   });
 });

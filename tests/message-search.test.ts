@@ -125,7 +125,8 @@ describe("message searcher", () => {
     expect(result.hits).toHaveLength(1);
     // The snippet must surface the original-case "Neon", and the highlight
     // span must land on those four characters, not somewhere else.
-    const hit = result.hits[0]!;
+    const hit = result.hits[0];
+    if (!hit) throw new Error("expected one search hit");
     expect(hit.snippet).toContain("Neon");
     expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength)).toBe("Neon");
   });

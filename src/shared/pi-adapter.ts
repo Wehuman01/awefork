@@ -333,7 +333,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
   const requireSession = async (sessionId: string): Promise<ParsedSession> => {
     const found = (await refreshIndex()).get(sessionId);
-    if (!found || !found.header?.id) throw new Error(`pi 会话 ${sessionId} 不存在`);
+    if (!found?.header?.id) throw new Error(`pi 会话 ${sessionId} 不存在`);
     return found;
   };
 

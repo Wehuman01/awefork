@@ -219,6 +219,27 @@ describe("zcode-server", () => {
   });
 
   describe("resolveZcodeCli", () => {
+    it("finds a per-user macOS app bundle before falling back to PATH", async () => {
+      const home = "/Users/tester";
+      const bundledCli = "/Users/tester/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs";
+      mocks.existsSync.mockImplementation((path: string) => path === bundledCli);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        process.env,
+        home,
+        "darwin",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result).toEqual({
+        command: process.execPath,
+        args: [bundledCli],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+      });
+      expect(mocks.execFile).not.toHaveBeenCalled();
+    });
+
     it("prefers env override over bundle and PATH", async () => {
       const fakeCliPath = "/tmp/fake-zcode.cjs";
       mocks.existsSync.mockImplementation((path: string) => {
