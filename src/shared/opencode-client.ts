@@ -7,6 +7,12 @@
  * code fix.
  */
 import {
+  Agent,
+  type RequestInit as UndiciRequestInit,
+  type Response as UndiciResponse,
+  fetch as undiciFetch,
+} from "undici";
+import {
   type AgentEndpoints,
   type OpenCodeDescriptor,
   opencodeDescriptor,
@@ -94,6 +100,16 @@ export class OpencodeApiError extends Error {
 /** Per-request deadline; 0 disables it (only the prompt endpoint needs that). */
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * undici's transport defaults (300s headers/body) contradict a request with
+ * no app deadline: a prompt's response headers arrive only when the whole
+ * run finishes, so a run past five minutes used to die client-side with a
+ * bare "fetch failed" while the server kept executing it. Deadline-less
+ * requests ride this agent instead; timed requests keep the defaults, which
+ * sit far above any app deadline they already enforce themselves.
+ */
+const noDeadlineAgent = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+
 /** Known reasoning-effort keys, weakest to strongest; anything else sorts after. */
 const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -103,6 +119,20 @@ function orderVariants(keys: string[]): string[] {
     return index === -1 ? EFFORT_ORDER.length : index;
   };
   return [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/**
+ * undici wraps every transport failure in a bare TypeError("fetch failed");
+ * the cause underneath names it (ECONNREFUSED, UND_ERR_HEADERS_TIMEOUT, …).
+ */
+function fetchFailureCode(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof Error) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (typeof code === "string") return code;
+    return cause.name;
+  }
+  return "";
 }
 
 export interface OpencodeClient {
@@ -167,15 +197,20 @@ export function createOpencodeClient(
 
   async function request<T>(
     path: string,
-    init?: RequestInit,
+    init?: UndiciRequestInit,
     timeoutMs: number = config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
-    let response: Response;
+    let response: UndiciResponse;
     // Without a deadline, a half-dead server (port open, never responding)
     // hangs the IPC call — and with it the UI — forever.
     const timer = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
     try {
-      response = await fetch(url(path), { ...init, signal: timer ?? init?.signal });
+      response = await undiciFetch(url(path), {
+        ...init,
+        signal: timer ?? init?.signal,
+        // No app deadline means no transport deadline either (see agent).
+        ...(timeoutMs > 0 ? {} : { dispatcher: noDeadlineAgent }),
+      });
     } catch (error) {
       if (timer?.aborted) {
         throw new OpencodeApiError(
@@ -183,10 +218,19 @@ export function createOpencodeClient(
           `opencode API ${path} timed out after ${timeoutMs}ms — the server is not responding. Restart it with: ${serveHint}`,
         );
       }
+      const causeCode = fetchFailureCode(error);
+      if (causeCode === "UND_ERR_HEADERS_TIMEOUT" || causeCode === "UND_ERR_BODY_TIMEOUT") {
+        // The server was reached and kept the request — undici gave up on
+        // it. Telling the user to restart the server here would be a lie.
+        throw new OpencodeApiError(
+          0,
+          `opencode API ${path} was in flight longer than undici's transport timeout (${causeCode}) — the server may still be processing it; check the session before retrying.`,
+        );
+      }
       const reason = error instanceof Error ? error.message : String(error);
       throw new OpencodeApiError(
         0,
-        `Cannot reach opencode server at ${baseUrl} (${reason}). Start it with: ${serveHint}`,
+        `Cannot reach opencode server at ${baseUrl} (${reason}${causeCode ? `: ${causeCode}` : ""}). Start it with: ${serveHint}`,
       );
     }
     if (!response.ok) {
