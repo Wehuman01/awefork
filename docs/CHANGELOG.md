@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.2 - 2026-09-18
+
+- **Cross-platform backend compatibility** — Windows global npm installs now locate pi's SDK for session creation, forking, and renaming; terminal resume scripts preserve literal `%` and `!` in paths; and macOS discovers ZCode installed in `~/Applications` as well as `/Applications`.
+- **Write to compared conversations together (⇄ 同题投递)** — both aligned branch comparison and free side-by-side now share one composer beneath the two timelines. A shared draft can target the left side, right side, or both (both selected by default), with independent model/effort picks and stop controls for each running session. Sends use explicit session targets, so comparison never redirects the selected pane; one side can fail without rolling back the other. Image attachments block the send with a named notice when any selected model cannot accept them.
+- **Compare any two conversations (⇄ 自由并排)** — a comparison no longer needs a shared fork. When the two sessions never meet (different stories, two roots attacking one task), the pane falls back to free side-by-side: two independent scrolling timelines of each session's own turns — 选中 jumps in, ⤓ 最新 jumps to the latest turn, copied 母本 prefix turns carry a 继承 chip. Pairs may span every story in the directory: pick mode now completes on a sidebar row as well as a canvas card, and the session menu entry is 与另一会话对比…. One shared cell renderer serves both modes; the aligned 分支对比 view is unchanged.
+- **Branch comparison (⇄)** — the right pane gains a dual-column compare mode. 对比母本 puts a branch side by side with the one it forked from: the shared prefix collapses into an expandable band, the fork point is named on the divider, and every turn after it pairs up row by row — click a cell to read the whole turn, ‹ › pages the pairs, Esc leaves. Two more entries: right-click any canvas card for 与另一会话对比…, and a ⇄ chip on every 分支摘要 row. While comparing, the canvas tints the two paths lavender/mint, frames the fork point in dashed orange, and fades everything else; the context panel borrows a wider 680px and hands it back on exit.
+- **Empty-context forks keep their turns on the canvas** — a 空上下文 fork that grew its own prompts used to have them swallowed by the shared-prefix fallback (they read as "inherited"); fork records now carry the context mode so the canvas renders every turn the branch actually owns.
+- **Empty-context forks** — a mid-story fork draft gains a toggle: "空上下文" starts the branch as a brand-new session in the same directory (only the lineage sidecar remembers where it branched), while "带历史" keeps the usual copy-up-to-that-turn. The choice rides the fork call through every backend and survives composer reloads.
+- **Tag chips in search surfaces** — story search hits and command-palette entries show the session's tags (up to two plus an overflow count) in their own colors, so a tagged branch is recognizable before you commit to it.
+- **pi and ZCode backends** — pi sessions resume through `pi --session <jsonl>` (install `@mariozechner/pi-coding-agent` globally); ZCode sessions resume through its bundled `zcode.cjs` (located automatically or via `AWEFORK_ZCODE_CLI`).
+- **deleteSession capability** — backends without a session-delete primitive hide the delete entry instead of surfacing a runtime error.
+- **backendCapabilities expansion** — the capability flags now cover pi and ZCode, so the renderer can gate affordances per backend.
+- **ZCode machine messages stay machine messages** — harness-injected notes such as todo reminders carry a model-only marker in the ZCode store and are no longer rendered as user input.
+- **ZCode forks keep the anchor turn's tail** — an injected message landing mid-turn no longer pulls the fork cut point early, so a branch copied at an earlier turn keeps everything the anchor turn actually produced.
+- **ZCode runs settle after a crash** — when the app-server dies and respawns, event subscriptions are restored, so a running session can reach a final state instead of spinning "运行中" forever.
+- **ZCode crash spawns one replacement, not many** — concurrent requests racing a crashed app-server no longer leak duplicate child processes.
+
 ## Unreleased
 
 - **Cross-platform backend compatibility** — Windows global npm installs now locate pi's SDK for session creation, forking, and renaming; terminal resume scripts preserve literal `%` and `!` in paths; and macOS discovers ZCode installed in `~/Applications` as well as `/Applications`.
