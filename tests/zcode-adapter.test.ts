@@ -316,7 +316,11 @@ describe("zcode adapter", () => {
     expect(order).toEqual(["session/setModel", "session/subscribe", "session/send"]);
     expect(calls[0].params).toMatchObject({
       sessionId: "sess_x",
-      model: { providerId: "zc-aweshare", modelId: "hub/deepseek-v4-pro", variant: "high" },
+      model: {
+        providerId: "zc-aweshare",
+        modelId: "hub/deepseek-v4-pro",
+        options: { reasoningLevel: "high" },
+      },
     });
 
     const boom = fakeClient({
@@ -357,6 +361,29 @@ describe("zcode adapter", () => {
       { type: "session.updated", sessionId: "sess_x" },
       { type: "server.error", sessionId: "sess_x", message: "额度不足" },
       { type: "session.idle", sessionId: "sess_x" },
+    ]);
+  });
+
+  it("normalizes the 0.16.5 dotted camelCase event names", async () => {
+    const { client, emit } = fakeClient({});
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const events: AgentEvent[] = [];
+    await createZcodeAdapter(options).subscribe((event) => events.push(event));
+    const push = (type: string) => emit("session/event", { sessionId: "sess_x", type, payload: {} });
+    push("turn.started");
+    push("session.updated");
+    push("session.titleUpdated");
+    push("turn.completed");
+    push("turn.failed");
+    expect(events.map((event) => event.type)).toEqual([
+      "message.started",
+      "session.updated",
+      "session.updated",
+      "session.idle",
+      "session.updated",
+      "server.error",
+      "session.idle",
     ]);
   });
 
@@ -574,6 +601,9 @@ describe("zcode adapter", () => {
     await adapter.prompt("sess_x", "重生后再发一条", {});
     const subscribeCalls = second.calls.filter((call) => call.method === "session/subscribe");
     expect(subscribeCalls).toHaveLength(1);
-    expect(subscribeCalls[0].params).toEqual({ sessionId: "sess_x" });
+    expect(subscribeCalls[0].params).toEqual({
+      sessionId: "sess_x",
+      deliveryKind: "desktop-continuous",
+    });
   });
 });

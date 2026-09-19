@@ -62,6 +62,10 @@ const SAFE_REPLIES: Record<string, unknown> = {
     askUserQuestionAutoResolutionEnabled: true,
     modelContextBudgetStrategy: "preflight-v1",
   },
+  // 0.16.5 asks for auth headers of its official MCP plugins before a prompt;
+  // an empty header map is accepted and the plugin proceeds unauthenticated
+  // (verified live — the request retries per prompt otherwise).
+  "interaction/requestOfficialMcpAuthHeaders": { headers: {} },
 };
 
 const KNOWN_REQUESTS = new Set(Object.keys(SAFE_REPLIES));

@@ -315,7 +315,13 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     const client = await options.client();
     // Without this the server never pushes session/event frames for the
     // session, and a finished run would leave the renderer running forever.
-    await client.request("session/subscribe", { sessionId }, 15_000);
+    // deliveryKind is required (0.16.5 schema); "desktop-continuous" is the
+    // live-push mode the ZCode desktop client itself uses.
+    await client.request(
+      "session/subscribe",
+      { sessionId, deliveryKind: "desktop-continuous" },
+      15_000,
+    );
     subscribedSessions.add(sessionId);
   };
 
@@ -330,6 +336,10 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : null;
       if (!sessionId) return;
       switch (frame.type) {
+        // Live vocabulary on 0.16.5 is dotted camelCase (turn.started,
+        // session.titleUpdated, …); the legacy snake_case spellings stay for
+        // older builds the adapter was originally verified against.
+        case "turn.started":
         case "turn_started":
           emit({
             type: "message.started",
@@ -337,10 +347,12 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
             messageId: frame.payload?.turnId ?? "",
           });
           break;
+        case "turn.completed":
         case "turn_complete":
           emit({ type: "session.idle", sessionId });
           emit({ type: "session.updated", sessionId });
           break;
+        case "turn.failed":
         case "turn_error":
           emit({
             type: "server.error",
@@ -349,10 +361,15 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           });
           emit({ type: "session.idle", sessionId });
           break;
-        // Title changes and fork/create/resume bookkeeping: re-read.
+        // Generic state pushes (parts persisted, projections revised) stream
+        // several per turn — same contract as opencode's message.updated.
+        case "session.updated":
+        // Title changes and create/resume/mode bookkeeping: re-read.
+        case "session.titleUpdated":
         case "session_title_updated":
-        case "session_forked":
         case "session_created":
+        case "session_forked":
+        case "session.mode.updated":
         case "session_mode_changed":
           emit({ type: "session.updated", sessionId });
           break;
@@ -496,7 +513,9 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
               model: {
                 providerId: model.providerId,
                 modelId: model.modelId,
-                ...(model.variant ? { variant: model.variant } : {}),
+                // The schema (verified against 0.16.5) takes the reasoning
+                // level under options; a bare `variant` key is rejected.
+                ...(model.variant ? { options: { reasoningLevel: model.variant } } : {}),
               },
             },
             15_000,
