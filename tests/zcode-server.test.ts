@@ -280,9 +280,29 @@ describe("zcode-server", () => {
       expect(result).toEqual({
         command: process.execPath,
         args: ["/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"],
-        env: { ELECTRON_RUN_AS_NODE: "1" },
+        env: {
+          ELECTRON_RUN_AS_NODE: "1",
+          // The provider catalog sits one level up from the script in the
+          // real bundle; the mock existsSync marks every ZCode.app path as
+          // present, so the first candidate (dir/provider/) wins.
+          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE:
+            "/Applications/ZCode.app/Contents/Resources/glm/provider/zcode-builtin.json",
+        },
       });
       expect(mocks.execFile).not.toHaveBeenCalled();
+    });
+
+    it("passes the bundle's real provider catalog when the CLI's own guesses miss", async () => {
+      const bundleScript = "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs";
+      const realCatalog = "/Applications/ZCode.app/Contents/Resources/config/provider/zcode-builtin.json";
+      // The CLI's own candidates (dir/provider/, five levels up) miss; only
+      // the one-level-up layout of the real bundle exists.
+      mocks.existsSync.mockImplementation((path: string) => path === bundleScript || path === realCatalog);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(process.env, homedir(), "darwin");
+
+      expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(realCatalog);
     });
 
     it("uses PATH fallback on linux when bundle is absent", async () => {

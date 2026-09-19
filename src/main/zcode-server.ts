@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveSpawnEnv } from "./opencode-server.js";
 import {
@@ -74,12 +74,32 @@ export async function resolveZcodeCli(
  * GUI-spawned PATH may lack a plain `node` — so run it with Electron itself
  * in node mode, which always exists and always matches the bundled CLI's
  * runtime.
+ *
+ * The CLI also resolves its built-in provider catalog from its own entry
+ * script path (dir/provider/, then five levels up to config/provider/).
+ * Neither matches this bundle's layout (the catalog sits one level up, in
+ * Resources/config/provider/), and once the runtime catalog cache in
+ * ~/.zcode expires the CLI needs the file — a miss makes it exit 1 with
+ * "无法定位 CLI ZCode Built-in Provider Config". The CLI accepts the path
+ * via ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (what the desktop app passes), so
+ * hand it over whenever the file can be located next to the script.
  */
+function builtinProviderEnv(scriptPath: string): Record<string, string> {
+  const dir = dirname(scriptPath);
+  const candidates = [
+    join(dir, "provider", "zcode-builtin.json"),
+    resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
+    resolve(dir, "../config/provider/zcode-builtin.json"),
+  ];
+  const found = candidates.find((path) => existsSync(path));
+  return found ? { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: found } : {};
+}
+
 function nodeCommand(scriptPath: string): ZcodeCli {
   return {
     command: process.execPath,
     args: [scriptPath],
-    env: { ELECTRON_RUN_AS_NODE: "1" },
+    env: { ELECTRON_RUN_AS_NODE: "1", ...builtinProviderEnv(scriptPath) },
   };
 }
 
