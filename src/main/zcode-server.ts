@@ -166,7 +166,7 @@ export async function ensureZcodeServer(
   const spawnChild = async (): Promise<ServerSlot> => {
     const spawnEnv = await resolveSpawnEnv(process.env, homedir(), undefined, process.platform);
     const child = spawnFn(cli.command, [...cli.args, "app-server"], {
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
       cwd: homedir(),
       env: { ...spawnEnv, ...cli.env },
       // Own process group on POSIX so shutdown kills the whole tree (the
@@ -176,16 +176,39 @@ export async function ensureZcodeServer(
       ...(process.platform === "win32" ? { shell: true, windowsHide: true } : {}),
     });
     child.stdin?.on?.("error", () => {});
+    // The child's own diagnostics are the only clue when it dies mid-request
+    // (a crashed app-server otherwise surfaces as a bare "connection lost"),
+    // so keep a tail of stderr and log it with the exit code on every exit.
+    let stderrTail = "";
+    child.stderr?.on?.("data", (chunk: Buffer | string) => {
+      stderrTail = (stderrTail + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(
+        -2048,
+      );
+    });
+    child.stderr?.on?.("error", () => {});
     const client = createZcodeJsonRpc(child.stdin, child.stdout, {
       onNotification: () => {},
       onDisconnect: () => markDead(slotOf(child)),
       onRequest: options.onRequest,
     });
     const created: ServerSlot = { child, client, alive: true };
-    child.on("error", () => markDead(created));
-    child.on("exit", () => markDead(created));
+    child.on("error", (error) => {
+      console.error(`zcode app-server spawn error: ${error.message}`);
+      markDead(created);
+    });
+    child.on("exit", (code, signal) => {
+      const detail = stderrTail.trim();
+      lastExitDetail = detail ? `（${detail}）` : `（code=${code} signal=${signal}，stderr 无输出）`;
+      console.error(
+        `zcode app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
+      );
+      markDead(created);
+    });
     return created;
   };
+
+  /** stderr tail from the most recent child exit, for the throw sites below. */
+  let lastExitDetail = "";
 
   const slotOf = (child: ChildProcess): ServerSlot | null => (slot?.child === child ? slot : null);
 
@@ -201,7 +224,7 @@ export async function ensureZcodeServer(
   await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
   if (!slot.alive) {
     throw new Error(
-      "zcode app-server 启动即退出。请确认 ZCode 桌面端已正确安装（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。",
+      `zcode app-server 启动即退出${lastExitDetail}。请确认 ZCode 桌面端已正确安装（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
     );
   }
 
@@ -243,7 +266,7 @@ export async function ensureZcodeServer(
         }
         if (!fresh.alive) {
           throw new Error(
-            "zcode app-server 重启后立即退出；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。",
+            `zcode app-server 重启后立即退出${lastExitDetail}；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
           );
         }
         if (slot?.alive) {
