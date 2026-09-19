@@ -329,7 +329,7 @@ export async function ensureOpencodeServer(
   }
 
   const child = spawnFn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
     detached: false,
     cwd: homedir(),
     env: await resolveSpawnEnv(),
@@ -344,6 +344,21 @@ export async function ensureOpencodeServer(
   const spawnFailure = { error: null as Error | null };
   child.on("error", (error) => {
     spawnFailure.error = error;
+  });
+  // A serve that never becomes ready is otherwise undiagnosable — keep a tail
+  // of the child's own stderr for the failure message and the exit log.
+  let stderrTail = "";
+  child.stderr?.on?.("data", (chunk: Buffer | string) => {
+    stderrTail = (stderrTail + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(
+      -2048,
+    );
+  });
+  child.stderr?.on?.("error", () => {});
+  child.on("exit", (code, signal) => {
+    const detail = stderrTail.trim();
+    console.error(
+      `opencode serve exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
+    );
   });
   registerCleanup(child);
   // Every throw after spawn must free the child: a multi-port walk would
@@ -386,8 +401,11 @@ export async function ensureOpencodeServer(
       `${baseUrl} is held by a server that does not behave like opencode (REST answers but the event stream does not). Free up port ${port} or start opencode on another port.`,
     );
   }
+  const detail = stderrTail.trim();
   return fail(
-    `opencode server did not become ready on ${baseUrl}. Is the "opencode" CLI on PATH? Start it manually with: opencode serve --port ${port}`,
+    `opencode server did not become ready on ${baseUrl}${
+      detail ? `：${detail}` : ""
+    }. Is the "opencode" CLI on PATH? Start it manually with: opencode serve --port ${port}`,
   );
 }
 

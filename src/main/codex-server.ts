@@ -80,7 +80,7 @@ export async function ensureCodexServer(
 
   const spawnEnv = await resolveSpawnEnv(process.env, homedir(), undefined, process.platform);
   const child = spawnFn("codex", ["app-server"], {
-    stdio: ["pipe", "pipe", "ignore"],
+    stdio: ["pipe", "pipe", "pipe"],
     cwd: homedir(),
     env: home ? { ...spawnEnv, CODEX_HOME: home } : spawnEnv,
     // Own process group on POSIX (see doc comment); the npm .cmd shim needs
@@ -95,6 +95,16 @@ export async function ensureCodexServer(
     result: { client: null as unknown as CodexJsonRpc, version: null, authMessage: null },
   };
   let exitNotified = false;
+  // The child's own diagnostics are the only clue when it dies mid-request
+  // (a crashed app-server otherwise surfaces as a bare "connection lost"),
+  // so keep a tail of stderr and log it with the exit code on every exit.
+  let stderrTail = "";
+  child.stderr?.on?.("data", (chunk: Buffer | string) => {
+    stderrTail = (stderrTail + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(
+      -2048,
+    );
+  });
+  child.stderr?.on?.("error", () => {});
   const markDead = () => {
     if (!slot.alive) return;
     slot.alive = false;
@@ -110,7 +120,13 @@ export async function ensureCodexServer(
     spawnFailure.error = error;
     markDead();
   });
-  child.on("exit", markDead);
+  child.on("exit", (code, signal) => {
+    const detail = stderrTail.trim();
+    console.error(
+      `codex app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
+    );
+    markDead();
+  });
   // A request racing the child's death surfaces on stdin as an 'error' event
   // (EPIPE / ERR_STREAM_DESTROYED); with no listener that is an uncaught
   // exception. The jsonrpc layer learns of the death via stdout and settles
@@ -132,8 +148,11 @@ export async function ensureCodexServer(
     }
     if (child.exitCode !== null || !slot.alive) {
       client.dispose();
+      const detail = stderrTail.trim();
       throw new Error(
-        'codex app-server exited during startup. Is the "codex" CLI on PATH and healthy?',
+        `codex app-server exited during startup${
+          detail ? `：${detail}` : ""
+        }. Is the "codex" CLI on PATH and healthy?`,
       );
     }
     try {
