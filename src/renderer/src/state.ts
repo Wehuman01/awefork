@@ -47,7 +47,7 @@ import type {
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
-import { panels } from "./layout";
+import { panels, persistLayout } from "./layout";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -1180,7 +1180,14 @@ let contextWidthBeforeCompare: number | null = null;
 
 function widenContextForCompare(): void {
   const panel = panels.context;
-  if (panel.collapsed || panel.width >= COMPARE_CONTEXT_WIDTH) return;
+  if (panel.collapsed) {
+    // The comparison lives inside the context panel — reveal it even when
+    // the user had the panel folded away.
+    panel.collapsed = false;
+    panel.width = panel.saved;
+    persistLayout();
+  }
+  if (panel.width >= COMPARE_CONTEXT_WIDTH) return;
   if (contextWidthBeforeCompare === null) contextWidthBeforeCompare = panel.width;
   panel.width = COMPARE_CONTEXT_WIDTH;
 }

@@ -42,14 +42,34 @@
         title="拖拽调宽 · 双击折叠/展开"
         @mousedown="startDrag('sidebar', $event)"
         @dblclick="togglePanel('sidebar')"
-      ></div>
+      >
+        <button
+          type="button"
+          class="edge-toggle left-edge"
+          :title="panels.sidebar.collapsed ? '展开侧栏' : '折叠侧栏'"
+          :aria-label="panels.sidebar.collapsed ? '展开侧栏' : '折叠侧栏'"
+          @mousedown.stop
+          @click.stop="togglePanel('sidebar')"
+          @dblclick.stop
+        >{{ panels.sidebar.collapsed ? "›" : "‹" }}</button>
+      </div>
       <SessionCanvas />
       <div
         class="col-handle"
         title="拖拽调宽 · 双击折叠/展开"
         @mousedown="startDrag('context', $event)"
         @dblclick="togglePanel('context')"
-      ></div>
+      >
+        <button
+          type="button"
+          class="edge-toggle right-edge"
+          :title="panels.context.collapsed ? '展开右栏' : '折叠右栏'"
+          :aria-label="panels.context.collapsed ? '展开右栏' : '折叠右栏'"
+          @mousedown.stop
+          @click.stop="togglePanel('context')"
+          @dblclick.stop
+        >{{ panels.context.collapsed ? "‹" : "›" }}</button>
+      </div>
       <BranchContext :style="panelStyle('context')" />
     </div>
     <CommandPalette />

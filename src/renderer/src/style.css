@@ -106,6 +106,42 @@ textarea {
   background: var(--primary-soft);
 }
 
+/* one-click fold buttons riding the drag handles: each straddles the panel/
+   canvas seam and leans into the canvas, so a collapsed panel still leaves a
+   visible reopen button pinned at the window edge */
+
+.edge-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow-card);
+}
+
+.edge-toggle.left-edge {
+  right: -13px;
+}
+
+.edge-toggle.right-edge {
+  left: -13px;
+}
+
+.edge-toggle:hover {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
 /* ── top bar ───────────────────────────────────────────────────────── */
 
 .topbar {
