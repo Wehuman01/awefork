@@ -2620,16 +2620,17 @@ mark.hl {
   border-color: #c9b8f0;
 }
 
-/* fork-subtree nodes read above the plain dots, below hits and a live run */
-.mm-node.desc {
-  background: #e3d9fa;
-  border-color: #c9b8f0;
-}
-
 /* freshness dot: green while it fades, below hits and a live run */
 .mm-node.recent {
   background: rgba(var(--mint-rgb), var(--recent-alpha, 0));
   border-color: rgba(var(--mint-rgb), var(--recent-alpha, 0));
+}
+
+/* branch-entry dots sit above the freshness green — a branch forked minutes
+   ago must still read purple, not fade out — and below hits and a live run */
+.mm-node.desc {
+  background: #e3d9fa;
+  border-color: #c9b8f0;
 }
 
 /* search hits, above the active path but below a live run */
@@ -3107,9 +3108,23 @@ mark.hl {
   color: var(--danger);
 }
 
+/* reply bodies render through the pane's markdown (MarkdownView), same
+   typography as a normal reply; collapsed cells keep the 3-line clamp */
+.cell-md {
+  margin-top: 6px;
+}
+
+.cell-md.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* click a cell to read the whole turn: clamps come off */
 .cell.open .cell-preview,
-.cell.open .cell-title {
+.cell.open .cell-title,
+.cell.open .cell-md {
   display: block;
   -webkit-line-clamp: unset;
 }

@@ -2,7 +2,7 @@
   <div
     class="cell"
     :class="[side, { blank: !cell, open: cell && open }]"
-    @click="cell && emit('toggle')"
+    @click="onCellClick"
   >
     <template v-if="cell">
       <div class="cell-top">
@@ -24,7 +24,17 @@
         <span v-if="cell.toolNames.length > 0" class="cell-chip">🔧 {{ cell.toolNames.length }}</span>
         <span v-if="cell.error" class="cell-chip err" :title="cell.error">⚠ 失败</span>
       </div>
-      <p class="cell-preview" :class="{ errored: !cell.preview && cell.error }">{{ previewOf(cell) }}</p>
+      <p
+        v-if="!cell.preview"
+        class="cell-preview"
+        :class="{ errored: Boolean(cell.error) }"
+      >{{ previewOf(cell) }}</p>
+      <MarkdownView
+        v-else
+        :source="cell.preview"
+        class="cell-md"
+        :class="{ clamped: !open }"
+      />
     </template>
     <p v-else class="cell-blank">{{ side === "left" ? "左栏已到尾" : "右栏已到尾" }}</p>
   </div>
@@ -56,6 +66,7 @@ export interface DisplayCell {
 <script setup lang="ts">
 import { computed } from "vue";
 import { formatDuration, formatTokens } from "../format";
+import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
   cell: DisplayCell | null;
@@ -71,14 +82,20 @@ const flagTitle = computed(() =>
     : "上游分支的回合 — 通往这条分支的路上经过的岔路",
 );
 
+/**
+ * Click folds a cell open/closed — but markdown bodies now carry links and
+ * code-block copy buttons that must stay clickable, and a drag that selects
+ * reply text must not fold the cell shut on mouseup.
+ */
+function onCellClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("a, button")) return;
+  if (window.getSelection()?.toString()) return;
+  if (props.cell) emit("toggle");
+}
+
 function previewOf(cell: DisplayCell): string {
-  return (
-    cell.preview ||
-    (cell.error
-      ? `⚠ ${cell.error}`
-      : cell.toolNames.length > 0
-        ? "(工具调用，无文本回复)"
-        : "(无文本回复)")
-  );
+  if (cell.error) return `⚠ ${cell.error}`;
+  return cell.toolNames.length > 0 ? "(工具调用，无文本回复)" : "(无文本回复)";
 }
 </script>

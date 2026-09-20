@@ -324,7 +324,7 @@
           :class="{
             stub: n.kind === 'stub',
             on: activePathIds.has(n.id),
-            desc: childTurnIds.has(n.id),
+            desc: isMapSubtree(n),
             running: isNodeRunning(n),
             recent: isNodeRecent(n),
             hit: searchHitIds.has(n.id),
@@ -984,12 +984,21 @@ const mmNodes = computed(() =>
   [...graph.value.nodes].sort((a, b) => mmNodeRank(a) - mmNodeRank(b)),
 );
 
+/** The map tints exactly the cards' descendant set — the selected turn's
+ *  direct children, i.e. the entry card of each branch forked from the
+ *  selection — so a branch the layout parked far away stays findable. Deeper
+ *  branch cards keep the plain dot. Off-path so the lit line reads orange
+ *  throughout, not purple. */
+function isMapSubtree(node: TurnNode): boolean {
+  return !activePathIds.value.has(node.id) && childTurnIds.value.has(node.id);
+}
+
 function mmNodeRank(node: TurnNode): number {
   if (isNodeRunning(node)) return 6;
   if (isTurnMarked(node.id)) return 5;
   if (activePathIds.value.has(node.id)) return 4;
   if (searchHitIds.value.has(node.id)) return 3;
-  if (childTurnIds.value.has(node.id)) return 2;
+  if (isMapSubtree(node)) return 2;
   return node.kind === "stub" ? 1 : 0;
 }
 
