@@ -119,7 +119,10 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure(
+        { cli: { command: "node", args: ["/fake/zcode.cjs"] } },
+        mocks.spawn as typeof spawn,
+      );
 
       // Advance past the 300 ms startup observation window BEFORE awaiting
       // the pending ensure() so its internal setTimeout can resolve.
@@ -157,7 +160,10 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure(
+        { cli: { command: "node", args: ["/fake/zcode.cjs"] } },
+        mocks.spawn as typeof spawn,
+      );
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
 
@@ -189,7 +195,10 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure(
+        { cli: { command: "node", args: ["/fake/zcode.cjs"] } },
+        mocks.spawn as typeof spawn,
+      );
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
 
@@ -208,7 +217,10 @@ describe("zcode-server", () => {
 
     it("stop() is idempotent", async () => {
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure(
+        { cli: { command: "node", args: ["/fake/zcode.cjs"] } },
+        mocks.spawn as typeof spawn,
+      );
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
       expect(() => {
@@ -282,10 +294,13 @@ describe("zcode-server", () => {
 
     it("passes the bundle's real provider catalog when the CLI's own guesses miss", async () => {
       const bundleScript = "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs";
-      const realCatalog = "/Applications/ZCode.app/Contents/Resources/config/provider/zcode-builtin.json";
+      const realCatalog =
+        "/Applications/ZCode.app/Contents/Resources/config/provider/zcode-builtin.json";
       // The CLI's own candidates (dir/provider/, five levels up) miss; only
       // the one-level-up layout of the real bundle exists.
-      mocks.existsSync.mockImplementation((path: string) => path === bundleScript || path === realCatalog);
+      mocks.existsSync.mockImplementation(
+        (path: string) => path === bundleScript || path === realCatalog,
+      );
 
       const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
       const result = await resolveZcodeCli(process.env, homedir(), "darwin");

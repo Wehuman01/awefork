@@ -103,10 +103,7 @@ function builtinProviderEnv(scriptPath: string): Record<string, string> {
  * bouncing beside awefork's own. A real node never touches AppKit.
  * GUI-launched PATHs may lack node, so Electron-as-node stays the fallback.
  */
-async function scriptRunner(
-  scriptPath: string,
-  execFn: typeof execFileAsync
-): Promise<ZcodeCli> {
+async function scriptRunner(scriptPath: string, execFn: typeof execFileAsync): Promise<ZcodeCli> {
   const providerEnv = builtinProviderEnv(scriptPath);
   try {
     await execFn("node", ["--version"], { timeout: 5000 });
@@ -218,9 +215,9 @@ export async function ensureZcodeServer(
     // so keep a tail of stderr and log it with the exit code on every exit.
     let stderrTail = "";
     child.stderr?.on?.("data", (chunk: Buffer | string) => {
-      stderrTail = (stderrTail + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(
-        -2048,
-      );
+      stderrTail = (
+        stderrTail + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))
+      ).slice(-2048);
     });
     child.stderr?.on?.("error", () => {});
     const client = createZcodeJsonRpc(child.stdin, child.stdout, {
@@ -235,7 +232,9 @@ export async function ensureZcodeServer(
     });
     child.on("exit", (code, signal) => {
       const detail = stderrTail.trim();
-      lastExitDetail = detail ? `（${detail}）` : `（code=${code} signal=${signal}，stderr 无输出）`;
+      lastExitDetail = detail
+        ? `（${detail}）`
+        : `（code=${code} signal=${signal}，stderr 无输出）`;
       console.error(
         `zcode app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
       );
