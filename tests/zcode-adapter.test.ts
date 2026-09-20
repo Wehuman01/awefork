@@ -370,7 +370,8 @@ describe("zcode adapter", () => {
     options.client = async () => client;
     const events: AgentEvent[] = [];
     await createZcodeAdapter(options).subscribe((event) => events.push(event));
-    const push = (type: string) => emit("session/event", { sessionId: "sess_x", type, payload: {} });
+    const push = (type: string) =>
+      emit("session/event", { sessionId: "sess_x", type, payload: {} });
     push("turn.started");
     push("session.updated");
     push("session.titleUpdated");
@@ -398,6 +399,147 @@ describe("zcode adapter", () => {
     second.emit("session/event", { sessionId: "sess_x", type: "turn_complete", payload: {} });
     expect(events.some((event) => event.type === "server.reconnected")).toBe(true);
     expect(events.some((event) => event.type === "session.idle")).toBe(true);
+  });
+
+  it("merges the resume projection's model into canonical rows lacking one", async () => {
+    // Live 0.16.5: session/messages serves parts but NO modelID/providerID —
+    // only the resume projection carries model (with the reasoning effort
+    // under options.reasoningLevel). The adapter merges it back by id.
+    const bare = {
+      info: {
+        id: "msg_a9",
+        role: "assistant",
+        time: { created: 100, completed: 200 },
+        tokens: { output: 5 },
+      },
+      parts: [{ type: "text", text: "回复" }],
+    };
+    const { client } = fakeClient({
+      requests: [{ method: "session/messages", result: { messages: [bare] } }],
+      replies: {
+        "session/resume": {
+          messages: [
+            {
+              info: {
+                messageId: "msg_a9",
+                role: "assistant",
+                model: {
+                  providerId: "account:bigmodel-coding-plan",
+                  modelId: "GLM-5.3",
+                  options: { reasoningLevel: "max" },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const rows = await createZcodeAdapter(options).messages("sess_x");
+    expect(rows[0]).toMatchObject({
+      id: "msg_a9",
+      modelId: "GLM-5.3",
+      providerId: "account:bigmodel-coding-plan",
+      variant: "max",
+    });
+  });
+
+  it("maps model.streaming snapshots into live part events", async () => {
+    const { client, emit } = fakeClient({});
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const events: AgentEvent[] = [];
+    await createZcodeAdapter(options).subscribe((event) => events.push(event));
+    const push = (payload: unknown) =>
+      emit("session/event", { sessionId: "sess_x", type: "model.streaming", payload });
+    push({ assistantMessageId: "msg_s1", delta: "The", kind: "reasoning_delta", done: false });
+    push({
+      assistantMessageId: "msg_s1",
+      delta: "The user asks 2+2.",
+      kind: "reasoning_delta",
+      done: true,
+    });
+    push({ assistantMessageId: "msg_s1", delta: "4", kind: "text_delta", done: false });
+    const parts = events.filter((event) => event.type === "message.part");
+    expect(parts[0]).toMatchObject({
+      sessionId: "sess_x",
+      messageId: "msg_s1",
+      partId: "msg_s1:thinking",
+      kind: "thinking",
+      text: "The",
+      endedAt: null,
+    });
+    // The delta field is cumulative — each frame is the part's whole text.
+    expect(parts[1]).toMatchObject({ kind: "thinking", text: "The user asks 2+2." });
+    expect(parts[1].type === "message.part" && parts[1].endedAt).toBe(1_750_000_000_000);
+    expect(parts[2]).toMatchObject({ partId: "msg_s1:text", kind: "text", text: "4" });
+    expect(events.some((event) => event.type === "message.started")).toBe(true);
+  });
+
+  it("fork waits for a running parent session, then retries", async () => {
+    const { client, calls } = fakeClient({
+      requests: [
+        { method: "session/messages", result: { messages: [USER_MESSAGE, ASSISTANT_MESSAGE] } },
+        { method: "session/fork", result: new Error("Cannot fork while a prompt is running") },
+        { method: "session/list", result: { sessions: [{ sessionId: "sess_x", status: "idle" }] } },
+        { method: "session/fork", result: { forkedSessionId: "sess_after_wait" } },
+      ],
+      replies: { "session/resume": {} },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    options.lineagePath = "/tmp/awefork-zcode-adapter-test/lineage-wait.json";
+    const summary = await createZcodeAdapter(options).fork("sess_x", null);
+    expect(summary.id).toBe("sess_after_wait");
+    expect(calls.filter((call) => call.method === "session/fork")).toHaveLength(2);
+  });
+
+  it("listModels prefers the server catalog from session/resume", async () => {
+    const { client } = fakeClient({
+      replies: {
+        "session/list": {
+          sessions: [{ sessionId: "sess_latest", updatedAt: 100, sessionKind: "interactive" }],
+        },
+        "session/resume": {
+          settings: {
+            model: {
+              available: [
+                {
+                  ref: { providerId: "zc-aweshare", modelId: "hub/deepseek-v4-pro" },
+                  label: "hub/deepseek-v4-pro",
+                  providerLabel: "zc-aweshare",
+                  reasoning: {
+                    levels: [
+                      { value: "disabled" },
+                      { value: "low" },
+                      { value: "high" },
+                      { value: "max" },
+                    ],
+                  },
+                  properties: { inputFormat: { supportsImage: true } },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+    const { options } = fakeOptions({
+      // The config fallback must not be consulted when the catalog answered.
+      readProviderConfig: async () => {
+        throw new Error("config should not be read");
+      },
+    });
+    options.client = async () => client;
+    const models = await createZcodeAdapter(options).listModels();
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({
+      providerId: "zc-aweshare",
+      modelId: "hub/deepseek-v4-pro",
+      variants: ["disabled", "low", "high", "max"],
+      attachment: true,
+    });
   });
 
   it("reads models from the v2 provider config", async () => {

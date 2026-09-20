@@ -58,6 +58,7 @@ interface ZcodeSessionRow {
   parentSessionId?: string | null;
   sessionKind?: string | null;
   directory?: string | null;
+  status?: string | null;
   workspace?: { workspaceKey?: string | null; workspacePath?: string | null } | null;
   createdAt?: number;
   updatedAt?: number;
@@ -74,7 +75,17 @@ interface ZcodeMessage {
     modelID?: string | null;
     providerID?: string | null;
     variant?: string | null;
-    model?: { modelID?: string | null; providerID?: string | null; variant?: string | null } | null;
+    /** The resume projection spells the run's reasoning effort this way. */
+    options?: { reasoningLevel?: string } | null;
+    model?: {
+      modelID?: string | null;
+      /** The resume projection spells the fields lower-case. */
+      modelId?: string | null;
+      providerID?: string | null;
+      providerId?: string | null;
+      variant?: string | null;
+      options?: { reasoningLevel?: string } | null;
+    } | null;
     time?: { created?: number; completed?: number | null } | null;
     tokens?: { output?: number | null } | null;
     finish?: string | null;
@@ -107,7 +118,7 @@ function isModelOnly(message: ZcodeMessage): boolean {
   );
 }
 
-/** The slice of the provider registry listModels reads. */
+/** The slice of the provider registry listModels falls back to. */
 interface ZcodeProviderModel {
   name?: string;
   reasoning?: { variants?: string[] } | null;
@@ -124,7 +135,20 @@ interface ZcodeProviderConfig {
   provider?: Record<string, ZcodeProviderEntry | null> | null;
 }
 
+/** One entry of session/resume's settings.model.available catalog. */
+interface ZcodeCatalogModel {
+  ref?: { providerId?: string; modelId?: string } | null;
+  label?: string | null;
+  providerLabel?: string | null;
+  reasoning?: { levels?: Array<{ value?: string }> | null } | null;
+  properties?: { inputFormat?: { supportsImage?: boolean } | null } | null;
+}
+
 const SESSION_EVENT_METHOD = "session/event";
+
+/** How long fork() waits for a running parent session to settle. */
+const FORK_BUSY_WAIT_MS = 10 * 60 * 1000;
+const FORK_BUSY_POLL_MS = 1000;
 
 export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   const now = options.now ?? Date.now;
@@ -161,15 +185,31 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     // it returns zero rows (verified live). It appends a session_resumed
     // event — the price of going through the native API instead of the
     // sqlite store. Its rows are a compact projection (messageId, model{},
-    // no parts), so the canonical rows come from session/messages, which
-    // serves the opencode-shaped `{info, parts}` only after the attach.
-    await client.request("session/resume", { sessionId }, 45_000);
+    // no parts), and — on 0.16.5 — they are the ONLY rows that carry the
+    // model: session/messages serves parts but no modelID/providerID. The
+    // canonical rows therefore come from session/messages with the model
+    // merged back in from the projection by message id.
+    const resumed = await client.request<{ messages?: ZcodeMessage[] } | null>(
+      "session/resume",
+      { sessionId },
+      45_000,
+    );
+    const modelsById = new Map<string, ZcodeMessage["info"]>();
+    for (const row of resumed?.messages ?? []) {
+      const id = row.info?.messageId ?? row.info?.id ?? "";
+      if (id && row.info?.model) modelsById.set(id, row.info);
+    }
     const page = await client.request<{ messages?: ZcodeMessage[] }>(
       "session/messages",
       { sessionId },
       30_000,
     );
-    return page?.messages ?? [];
+    return (page?.messages ?? []).map((message) => {
+      const id = message.info?.id ?? message.info?.messageId ?? "";
+      const modelInfo = id ? modelsById.get(id) : undefined;
+      if (modelInfo && !message.info?.model && message.info) message.info.model = modelInfo.model;
+      return message;
+    });
   };
 
   /** session/create in one workspace; shared by createSession and empty forks. */
@@ -203,9 +243,10 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     if (isModelOnly(message)) return rows;
     const id = info.id ?? info.messageId ?? "";
     const createdAt = info.time?.created ?? now();
-    const modelId = info.model?.modelID ?? info.modelID ?? null;
-    const providerId = info.model?.providerID ?? info.providerID ?? null;
-    const variant = info.model?.variant ?? info.variant ?? null;
+    const modelId = info.model?.modelID ?? info.model?.modelId ?? info.modelID ?? null;
+    const providerId = info.model?.providerID ?? info.model?.providerId ?? info.providerID ?? null;
+    const variant =
+      info.model?.variant ?? info.model?.options?.reasoningLevel ?? info.variant ?? null;
 
     if (info.role === "user") {
       rows.push({
@@ -325,13 +366,78 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     subscribedSessions.add(sessionId);
   };
 
+  /**
+   * Poll session/list until the session reports idle (or drops off the list).
+   * True when settled; false when the deadline passed while still busy. A row
+   * with no status at all (older builds) counts as settled — the retry fork
+   * then surfaces the server's own refusal instead of a wait timeout.
+   */
+  const waitForSessionIdle = async (sessionId: string, timeoutMs: number): Promise<boolean> => {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      const client = await options.client();
+      const page = await client
+        .request<{ sessions?: ZcodeSessionRow[] }>("session/list", {}, 30_000)
+        .catch(() => null);
+      const row = (page?.sessions ?? []).find((item) => item.sessionId === sessionId);
+      if (
+        !row ||
+        row.sessionKind === "subagent_child" ||
+        row.status === null ||
+        row.status === undefined ||
+        row.status === "idle"
+      ) {
+        return true;
+      }
+      if (now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, FORK_BUSY_POLL_MS));
+    }
+  };
+
+  /**
+   * The live model catalog, read by resuming the most recent session — the
+   * only request that serves it. Empty when no session exists yet or the
+   * server does not answer; listModels then falls back to the config file.
+   */
+  const serverModelCatalog = async (): Promise<ModelOption[]> => {
+    const client = await options.client();
+    const page = await client.request<{ sessions?: ZcodeSessionRow[] }>("session/list", {}, 30_000);
+    const latest = (page?.sessions ?? [])
+      .filter((row) => row.sessionId && row.sessionKind !== "subagent_child")
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+    if (!latest?.sessionId) return [];
+    const resumed = await client.request<{
+      settings?: { model?: { available?: ZcodeCatalogModel[] | null } | null } | null;
+    } | null>("session/resume", { sessionId: latest.sessionId }, 45_000);
+    return (resumed?.settings?.model?.available ?? [])
+      .filter((entry) => entry.ref?.providerId && entry.ref?.modelId)
+      .map((entry) => ({
+        providerId: entry.ref?.providerId ?? "",
+        providerName: entry.providerLabel ?? entry.ref?.providerId ?? "",
+        modelId: entry.ref?.modelId ?? "",
+        modelName: entry.label ?? entry.ref?.modelId ?? "",
+        variants: (entry.reasoning?.levels ?? [])
+          .map((level) => level.value)
+          .filter((value): value is string => typeof value === "string" && value !== ""),
+        attachment: entry.properties?.inputFormat?.supportsImage ?? false,
+      }));
+  };
+
   const attachHandlers = (client: ZcodeClient): void => {
     client.setNotificationHandler((method, params) => {
       if (method !== SESSION_EVENT_METHOD) return;
       const frame = (params ?? {}) as {
         sessionId?: string;
         type?: string;
-        payload?: { turnId?: string; message?: string; error?: { message?: string } };
+        payload?: {
+          turnId?: string;
+          message?: string;
+          error?: { message?: string };
+          assistantMessageId?: string;
+          delta?: string;
+          done?: boolean;
+          kind?: string;
+        };
       };
       const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : null;
       if (!sessionId) return;
@@ -347,6 +453,27 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
             messageId: frame.payload?.turnId ?? "",
           });
           break;
+        // Text/reasoning snapshots of the running turn. The `delta` field is
+        // cumulative (each frame repeats the part's whole text so far —
+        // verified live), which is exactly the renderer's message.part
+        // contract; one part id per (message, kind).
+        case "model.streaming": {
+          const messageId = frame.payload?.assistantMessageId ?? "";
+          const kind = frame.payload?.kind === "reasoning_delta" ? "thinking" : "text";
+          if (!messageId) break;
+          emit({ type: "message.started", sessionId, messageId });
+          emit({
+            type: "message.part",
+            sessionId,
+            messageId,
+            partId: `${messageId}:${kind}`,
+            kind,
+            text: frame.payload?.delta ?? "",
+            startedAt: null,
+            endedAt: frame.payload?.done ? now() : null,
+          });
+          break;
+        }
         case "turn.completed":
         case "turn_complete":
           emit({ type: "session.idle", sessionId });
@@ -407,6 +534,13 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     },
 
     async listModels() {
+      // The server's own catalog is authoritative: it carries the per-model
+      // reasoning levels session/setModel actually accepts (the v2 config
+      // file's variant list drifts — e.g. "none"/"medium" are rejected live).
+      // It is only served inside session/resume's settings, so attach the
+      // most recent session to fill it; fall back to the config file.
+      const catalog = await serverModelCatalog().catch(() => []);
+      if (catalog.length > 0) return catalog;
       const raw = options.readProviderConfig ? await options.readProviderConfig() : null;
       if (!raw) return [] as ModelOption[];
       let config: ZcodeProviderConfig;
@@ -458,10 +592,26 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       const { cutId } = cutMessageIdOf(parentMessages, atMessageId);
       if (!cutId) throw new Error("未找到可用的分叉切点，刷新会话后重试");
       const client = await options.client();
-      const forked = await client.request<{
-        forkedSessionId?: string;
-        parentSessionId?: string | null;
-      }>("session/fork", { sessionId, target: { kind: "message", messageId: cutId } }, 60_000);
+      // opencode forks a running session instantly; zcode refuses with
+      // "Cannot fork while a prompt is running". The cut point is already
+      // persisted, so nothing depends on the in-flight turn — waiting for the
+      // parent to settle and retrying gives the same UX (send to a branch
+      // while the parent runs; the branch starts once the parent finishes).
+      const forkOnce = () =>
+        client.request<{
+          forkedSessionId?: string;
+          parentSessionId?: string | null;
+        }>("session/fork", { sessionId, target: { kind: "message", messageId: cutId } }, 60_000);
+      let forked: { forkedSessionId?: string; parentSessionId?: string | null };
+      try {
+        forked = await forkOnce();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!/prompt is running|fork while/i.test(detail)) throw error;
+        const settled = await waitForSessionIdle(sessionId, FORK_BUSY_WAIT_MS);
+        if (!settled) throw new Error("会话仍在运行，暂时无法分叉；请稍后重试");
+        forked = await forkOnce();
+      }
       const forkedId = forked?.forkedSessionId;
       if (!forkedId) throw new Error("zcode session/fork 未返回新会话 id");
       const summary: SessionSummary = {
