@@ -119,7 +119,7 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
 
       // Advance past the 300 ms startup observation window BEFORE awaiting
       // the pending ensure() so its internal setTimeout can resolve.
@@ -157,7 +157,7 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
 
@@ -189,7 +189,7 @@ describe("zcode-server", () => {
       });
 
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
 
@@ -208,7 +208,7 @@ describe("zcode-server", () => {
 
     it("stop() is idempotent", async () => {
       const { ensureZcodeServer: ensure } = await import("../src/main/zcode-server.js");
-      const ensurePromise = ensure({}, mocks.spawn as typeof spawn);
+      const ensurePromise = ensure({ cli: { command: "node", args: ["/fake/zcode.cjs"] } }, mocks.spawn as typeof spawn);
       await vi.advanceTimersByTimeAsync(350);
       const handle = await ensurePromise;
       expect(() => {
@@ -219,7 +219,7 @@ describe("zcode-server", () => {
   });
 
   describe("resolveZcodeCli", () => {
-    it("finds a per-user macOS app bundle before falling back to PATH", async () => {
+    it("runs the .cjs with a plain node — no second Electron Dock icon on macOS", async () => {
       const home = "/Users/tester";
       const bundledCli = "/Users/tester/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs";
       mocks.existsSync.mockImplementation((path: string) => path === bundledCli);
@@ -232,21 +232,14 @@ describe("zcode-server", () => {
         mocks.execFile as typeof execFile,
       );
 
-      expect(result).toEqual({
-        command: process.execPath,
-        args: [bundledCli],
-        env: { ELECTRON_RUN_AS_NODE: "1" },
-      });
-      expect(mocks.execFile).not.toHaveBeenCalled();
+      // A plain node never registers with LaunchServices; the dev app's
+      // process.execPath (Electron) would bounce a second Dock icon.
+      expect(result).toEqual({ command: "node", args: [bundledCli], env: {} });
     });
 
     it("prefers env override over bundle and PATH", async () => {
       const fakeCliPath = "/tmp/fake-zcode.cjs";
-      mocks.existsSync.mockImplementation((path: string) => {
-        if (path === fakeCliPath) return true;
-        if (typeof path === "string" && path.includes("ZCode.app")) return false;
-        return false;
-      });
+      mocks.existsSync.mockImplementation((path: string) => path === fakeCliPath);
 
       const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
       const result = await resolveZcodeCli(
@@ -256,25 +249,21 @@ describe("zcode-server", () => {
         mocks.execFile as typeof execFile,
       );
 
-      expect(result).toEqual({
-        command: process.execPath,
-        args: [fakeCliPath],
-        env: { ELECTRON_RUN_AS_NODE: "1" },
-      });
-      expect(mocks.execFile).not.toHaveBeenCalled();
+      expect(result).toEqual({ command: "node", args: [fakeCliPath], env: {} });
     });
 
-    it("falls back to bundle on darwin when no env override", async () => {
+    it("falls back to Electron-as-node when no usable node is on PATH", async () => {
       mocks.existsSync.mockImplementation((path: string) => {
         return typeof path === "string" && path.includes("ZCode.app");
       });
+      const noNode = vi.fn().mockRejectedValue(new Error("node not found"));
 
       const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
       const result = await resolveZcodeCli(
         process.env,
         homedir(),
         "darwin",
-        mocks.execFile as typeof execFile,
+        noNode as unknown as typeof execFile,
       );
 
       expect(result).toEqual({
@@ -289,7 +278,6 @@ describe("zcode-server", () => {
             "/Applications/ZCode.app/Contents/Resources/glm/provider/zcode-builtin.json",
         },
       });
-      expect(mocks.execFile).not.toHaveBeenCalled();
     });
 
     it("passes the bundle's real provider catalog when the CLI's own guesses miss", async () => {

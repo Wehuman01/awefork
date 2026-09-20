@@ -53,9 +53,9 @@ export async function resolveZcodeCli(
   execFn: typeof execFileAsync = execFileAsync,
 ): Promise<ZcodeCli | null> {
   const override = env.AWEFORK_ZCODE_CLI;
-  if (override && existsSync(override)) return nodeCommand(override);
+  if (override && existsSync(override)) return scriptRunner(override, execFn);
   const bundled = bundleCandidates(home, plat).find((path) => existsSync(path));
-  if (bundled) return nodeCommand(bundled);
+  if (bundled) return scriptRunner(bundled, execFn);
   // A PATH install (future CLI distribution): let the loader find it.
   try {
     await execFn("zcode", ["--version"], {
@@ -95,12 +95,29 @@ function builtinProviderEnv(scriptPath: string): Record<string, string> {
   return found ? { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: found } : {};
 }
 
-function nodeCommand(scriptPath: string): ZcodeCli {
-  return {
-    command: process.execPath,
-    args: [scriptPath],
-    env: { ELECTRON_RUN_AS_NODE: "1", ...builtinProviderEnv(scriptPath) },
-  };
+/**
+ * How to run a .cjs CLI script. A plain `node` is preferred: on macOS the
+ * dev app's process.execPath is the Electron binary, and even with
+ * ELECTRON_RUN_AS_NODE=1 a child of Electron.app registers with
+ * LaunchServices as a second Electron application — a second Dock icon
+ * bouncing beside awefork's own. A real node never touches AppKit.
+ * GUI-launched PATHs may lack node, so Electron-as-node stays the fallback.
+ */
+async function scriptRunner(
+  scriptPath: string,
+  execFn: typeof execFileAsync
+): Promise<ZcodeCli> {
+  const providerEnv = builtinProviderEnv(scriptPath);
+  try {
+    await execFn("node", ["--version"], { timeout: 5000 });
+    return { command: "node", args: [scriptPath], env: providerEnv };
+  } catch {
+    return {
+      command: process.execPath,
+      args: [scriptPath],
+      env: { ELECTRON_RUN_AS_NODE: "1", ...providerEnv },
+    };
+  }
 }
 
 export async function probeZcode(
