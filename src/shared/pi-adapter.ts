@@ -508,6 +508,12 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       throw new Error("pi 不支持导出为去关联的原生会话");
     },
 
+    // pi has no compaction primitive; the renderer hides the affordance
+    // (capabilities.compress === false) and this throws if ever reached.
+    async compress() {
+      throw new Error("pi 不支持会话压缩");
+    },
+
     async deleteSession() {
       throw new Error("pi 没有原生的整会话删除原语，请手动删除会话文件");
     },

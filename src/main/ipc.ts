@@ -76,6 +76,8 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   deleteMessage(backend, session, message) -> void (native DELETE)
  *   prompt(backend, id, text, model, attachments?) -> void
  *   abort(backend, id)      -> void                 abort the running turn
+ *   compressSession(backend, id, model) -> void     fold history into a
+ *                           summary (capability-gated, fire-and-forget)
  *   respondInteraction(backend, requestId, response) -> void  reply to a pending
  *                                                approval/interaction request
  *   renameSession(backend, id, title) -> void
@@ -261,6 +263,27 @@ export function registerIpc(registry: BackendRegistry): void {
     async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string) => {
       const adapter = await withAdapter(storeBackend(backend));
       await adapter.abort(sessionId);
+    },
+  );
+
+  // Session compaction through the backend's own summarize primitive.
+  // Capability-gated like exportSession; fire-and-forget like prompt — the
+  // adapter returns once the request is out, the summary streams in on the
+  // event feed, and session.compressed announces completion.
+  ipcMain.handle(
+    "awefork:compressSession",
+    async (
+      _event: IpcMainInvokeEvent,
+      backend: BackendId,
+      sessionId: string,
+      model: ModelChoice,
+    ) => {
+      const id = storeBackend(backend);
+      const adapter = await withAdapter(id);
+      if (!registry.capabilities(id).compress) {
+        throw new Error("这个后端不支持会话压缩");
+      }
+      await adapter.compress(sessionId, model);
     },
   );
 

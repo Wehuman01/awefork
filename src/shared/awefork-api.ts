@@ -139,6 +139,13 @@ export interface AweforkApi {
     model: ModelChoice | null,
     attachments?: PromptAttachment[],
   ): Promise<void>;
+  /**
+   * Fold the session's history into a summary (session compaction). History
+   * stays intact on the backend — later prompts just carry summary + recent
+   * turns. Fire-and-forget like prompt: completion arrives as a
+   * session.compressed event.
+   */
+  compressSession(backend: BackendId, sessionId: string, model: ModelChoice): Promise<void>;
   abort(backend: BackendId, sessionId: string): Promise<void>;
   /**
    * Reply to a pending interaction (approval/tool-user-input) the backend is

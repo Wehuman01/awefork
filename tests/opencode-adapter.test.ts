@@ -77,6 +77,10 @@ interface FakeState {
   /** directory query param per POST /session; null = the client sent none. */
   createCalls: (string | null)[];
   promptCalls: { sessionId: string; body: Record<string, unknown> }[];
+  /** POST /session/:id/summarize recordings; the compress path. */
+  summarizeCalls: { sessionId: string; body: Record<string, unknown> }[];
+  /** Fail every summarize with a 500 — the compress failure path. */
+  summarizeFails?: boolean;
   deleteCalls: string[];
   deleteMessageCalls: { sessionId: string; messageId: string }[];
   providers: FakeProvider[];
@@ -282,6 +286,19 @@ function startFakeServer(state: FakeState): Promise<{
         return;
       }
 
+      const summarizeMatch = url.pathname.match(/^\/session\/([^/]+)\/summarize$/);
+      if (method === "POST" && summarizeMatch) {
+        state.summarizeCalls.push({ sessionId: summarizeMatch[1] ?? "", body: payload });
+        if (state.summarizeFails) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ data: { message: "summarize blew up" } }));
+          return;
+        }
+        // The real endpoint resolves only when the whole compaction finished.
+        res.end(JSON.stringify(true));
+        return;
+      }
+
       res.writeHead(404);
       res.end("{}");
     }
@@ -339,6 +356,7 @@ function baseState(): FakeState {
     forkCalls: [],
     createCalls: [],
     promptCalls: [],
+    summarizeCalls: [],
     deleteCalls: [],
     deleteMessageCalls: [],
     providers: [
@@ -692,6 +710,65 @@ describe("opencode adapter", () => {
       model: { providerID: "oc-fake", modelID: "glm-5.3-flash" },
       variant: "high",
     });
+  });
+
+  it("compress posts the summarize endpoint with the required model fields", async () => {
+    const state = baseState();
+    const { adapter } = await newAdapter(state);
+    await adapter.compress("s1", { providerId: "oc-fake", modelId: "glm-5.3-flash" });
+    // the request is detached like prompt; give the fake server a beat
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(state.summarizeCalls).toEqual([
+      {
+        sessionId: "s1",
+        body: { providerID: "oc-fake", modelID: "glm-5.3-flash", auto: false },
+      },
+    ]);
+  });
+
+  it("compress announces session.compressed when the summarize resolves", async () => {
+    const state = baseState();
+    // No SSE frames: only the request path speaks in this test.
+    state.eventFrames = [];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await adapter.compress("s1", { providerId: "oc-fake", modelId: "glm-5.3-flash" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    expect(events).toContainEqual({ type: "session.compressed", sessionId: "s1" });
+  });
+
+  it("compress surfaces a rejected summarize as server.error naming the session", async () => {
+    const state = baseState();
+    state.eventFrames = [];
+    state.summarizeFails = true;
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await adapter.compress("s1", { providerId: "oc-fake", modelId: "glm-5.3-flash" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    const failure = events.find(
+      (e): e is Extract<AgentEvent, { type: "server.error" }> => e.type === "server.error",
+    );
+    expect(failure?.sessionId).toBe("s1");
+    expect(failure?.message).toContain("Compress failed");
+  });
+
+  it("maps a compaction marker row — the summarize boundary turn", async () => {
+    const state = baseState();
+    state.messages.s1 = [
+      msg("u1", "user", "old question"),
+      {
+        info: { id: "cmp1", sessionID: "s1", role: "user", time: { created: 50 } },
+        parts: [{ type: "compaction" }],
+      },
+      msg("sum1", "assistant", "the summary"),
+    ];
+    const { adapter } = await newAdapter(state);
+    const messages = await adapter.messages("s1");
+    expect(messages.map((m) => m.compaction ?? false)).toEqual([false, true, false]);
   });
 
   it("subscribe emits normalized events from the SSE stream", async () => {

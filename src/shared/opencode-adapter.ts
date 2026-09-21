@@ -135,6 +135,10 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // both candidates so the model stays visible even when a run dies
       // before its assistant row reports back.
       const { fields, parts } = descriptor.messages;
+      // A compaction marker part carries no text; its presence flags the row
+      // summarize inserted — everything before it was folded into the summary
+      // that follows.
+      const marker = parts.compaction;
       return {
         id: firstString(m, fields.id) ?? "",
         role: (firstString(m, fields.role) ?? "assistant") as ChatMessage["role"],
@@ -161,6 +165,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         finish: firstString(m, fields.finish),
         outputTokens: firstNumber(m, fields.outputTokens),
         error: firstString(m, fields.error),
+        ...(marker && m.parts.some((p) => p.type === marker.type) ? { compaction: true } : {}),
       };
     });
 
@@ -287,6 +292,26 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           message: `Prompt failed for ${sessionId}: ${detail}`,
         });
       });
+    },
+
+    async compress(sessionId, model) {
+      // Detached like prompt: /summarize resolves only when the whole
+      // compaction finishes, while the summary itself streams in through the
+      // event stream (status busy → message deltas → idle). Completion has a
+      // dedicated event so the renderer can toast + refresh even if the idle
+      // frame raced; request-level failures have no event, so they surface
+      // here as server.error with the session id.
+      client.summarize(sessionId, model).then(
+        () => emitEvent?.({ type: "session.compressed", sessionId }),
+        (error) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          emitEvent?.({
+            type: "server.error",
+            sessionId,
+            message: `Compress failed for ${sessionId}: ${detail}`,
+          });
+        },
+      );
     },
 
     async deleteSession(sessionId) {

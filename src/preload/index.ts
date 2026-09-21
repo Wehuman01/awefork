@@ -86,6 +86,8 @@ const api: AweforkApi = {
     attachments?: PromptAttachment[],
   ): Promise<void> =>
     ipcRenderer.invoke("awefork:prompt", backend, sessionId, text, model, attachments),
+  compressSession: (backend: BackendId, sessionId: string, model: ModelChoice): Promise<void> =>
+    ipcRenderer.invoke("awefork:compressSession", backend, sessionId, model),
   abort: (backend: BackendId, sessionId: string): Promise<void> =>
     ipcRenderer.invoke("awefork:abort", backend, sessionId),
   respondInteraction: (

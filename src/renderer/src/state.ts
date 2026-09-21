@@ -200,6 +200,15 @@ interface AppState {
    * null = no ask pending.
    */
   forkTagAsk: { parentSessionId: string; parentTitle: string; tags: string[] } | null;
+  /**
+   * The open session-compression ask: which model should write the summary.
+   * The compress modal resolves it through answerCompressAsk; null = none
+   * pending. `model` is the preselected default (last turn's model →
+   * lastModel → catalog head).
+   */
+  compressAsk: { sessionId: string; title: string; model: ModelChoice | null } | null;
+  /** Latest compaction completion notice; drives the 🗜 toast, auto-clears. */
+  compressedToast: string | null;
   /** Model the pane composer will use next, per session; null = agent default. */
   paneModels: Record<string, ModelChoice | null>;
   /**
@@ -257,6 +266,7 @@ const state = reactive<AppState>({
     deleteSession: true,
     attachments: true,
     fileChanges: true,
+    compress: true,
     exportBranch: true,
   },
   sessions: [],
@@ -296,6 +306,8 @@ const state = reactive<AppState>({
   compare: null,
   comparePickFrom: null,
   forkTagAsk: null,
+  compressAsk: null,
+  compressedToast: null,
   paneModels: {},
   lastModel: null,
   focusRequest: null,
@@ -1619,6 +1631,21 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // (codex only ends a turn after its server requests resolve or time out).
       dropSessionInteractions(backend, event.sessionId);
       void finishRun(backend, event.sessionId);
+      break;
+    }
+    case "session.compressed": {
+      // The summarize round-trip finished: the marker row + summary are on the
+      // server. Reload even if the idle frame raced, then toast the outcome —
+      // background backends only refresh (their views aren't on screen).
+      if (backend === state.activeBackend) {
+        void loadSessionMessages(event.sessionId);
+        void refreshSessions();
+        const text = `🗜 已压缩「${titleOf(event.sessionId)}」— 历史仍完整保留，后续对话只携带摘要与最近几轮`;
+        state.compressedToast = text;
+        setTimeout(() => {
+          if (state.compressedToast === text) state.compressedToast = null;
+        }, TOAST_MS);
+      }
       break;
     }
     case "server.reconnected": {
@@ -3051,6 +3078,73 @@ export async function exportSessionAt(
     });
   } catch (error) {
     state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+// ── session compression (backend summarize) ──────────────────────────
+
+let compressAskAnswer: ((model: ModelChoice | null) => void) | null = null;
+
+/**
+ * Open the compress confirmation: a model pick (summary writer) plus what
+ * compaction does. Resolves with the chosen model, null when canceled; the
+ * modal's single exit is answerCompressAsk.
+ */
+function askCompressModel(sessionId: string, preset: ModelChoice): Promise<ModelChoice | null> {
+  state.compressAsk = { sessionId, title: titleOf(sessionId), model: preset };
+  return new Promise((resolve) => {
+    compressAskAnswer = resolve;
+  });
+}
+
+/** The compress modal's single exit: hand the pick back (null = canceled). */
+export function answerCompressAsk(model: ModelChoice | null): void {
+  const answer = compressAskAnswer;
+  state.compressAsk = null;
+  compressAskAnswer = null;
+  answer?.(model);
+}
+
+/**
+ * Fold a session's history into a summary through the backend's compaction
+ * primitive (capability-gated; codex/pi/zcode offer none). Non-destructive:
+ * the marker row + summary land as a new turn, history stays readable, and
+ * later prompts carry summary + recent turns instead of the whole log.
+ * Fire-and-forget like prompt — the summary streams in on the event feed and
+ * session.compressed announces completion.
+ */
+export async function compressSession(sessionId: string): Promise<void> {
+  const backend = state.activeBackend;
+  if (!state.capabilities.compress) return;
+  if (state.running[sessionId]) {
+    state.actionError = "会话正在运行，等它结束后再压缩";
+    return;
+  }
+  // summarize takes no default: providerID/modelID are required, so the pick
+  // must be concrete. Load the catalog if no draft opened one yet.
+  await ensureModels();
+  const catalogFirst = state.models[0];
+  if (!catalogFirst) {
+    state.actionError = "暂时拿不到模型列表，无法压缩";
+    return;
+  }
+  const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
+  const preset = turns[turns.length - 1]?.model ??
+    state.lastModel ?? {
+      providerId: catalogFirst.providerId,
+      modelId: catalogFirst.modelId,
+    };
+  const model = await askCompressModel(sessionId, preset);
+  if (!model) return;
+  if (state.running[sessionId]) {
+    state.actionError = "会话正在运行，等它结束后再压缩";
+    return;
+  }
+  state.actionError = null;
+  try {
+    await window.awefork.compressSession(backend, sessionId, plainModel(model) ?? preset);
+  } catch (error) {
+    state.actionError = `压缩失败：${error instanceof Error ? error.message : String(error)}`;
   }
 }
 

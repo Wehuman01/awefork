@@ -28,7 +28,13 @@ describe("bundled opencode descriptor", () => {
   it("parses and answers the facts the runtime reads", () => {
     const descriptor = opencodeDescriptor();
     expect(descriptor.kind).toBe("opencode");
-    expect(descriptor.capabilities).toEqual({ deleteMessage: true, attachments: true });
+    expect(descriptor.capabilities).toEqual({
+      deleteMessage: true,
+      attachments: true,
+      compress: true,
+    });
+    expect(descriptor.endpoints.sessionSummarize).toBe("/session/{id}/summarize");
+    expect(descriptor.messages.parts.compaction).toEqual({ type: "compaction" });
     expect(descriptor.fileChanges).toEqual({
       tools: ["edit", "write"],
       stateKeyPath: "state.key",
@@ -140,6 +146,27 @@ describe("vocabulary enforcement", () => {
       }),
     );
     expect(descriptor.fileChanges).toBeUndefined();
+  });
+
+  it("accepts a descriptor without the optional compaction part", () => {
+    const descriptor = parseOpenCodeDescriptor(
+      drifted((root) => {
+        ((root.messages as Record<string, unknown>).parts as Record<string, unknown>).compaction =
+          undefined;
+      }),
+    );
+    expect(descriptor.messages.parts.compaction).toBeUndefined();
+  });
+
+  it("rejects an unknown key inside the compaction part", () => {
+    expect(() =>
+      parseOpenCodeDescriptor(
+        drifted((root) => {
+          const parts = (root.messages as Record<string, unknown>).parts as Record<string, unknown>;
+          (parts.compaction as Record<string, unknown>).field = "text";
+        }),
+      ),
+    ).toThrow(/messages\.parts\.compaction: unknown key\(s\) field/);
   });
 
   it("rejects an unknown fork cut strategy", () => {

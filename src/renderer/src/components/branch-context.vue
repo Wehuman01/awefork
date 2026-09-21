@@ -197,6 +197,14 @@
             title="导出这条分支为 Markdown（含模型/耗时/token）"
             @click="exportMd"
           >⤓</button>
+          <button
+            v-if="store.capabilities.compress && pane"
+            type="button"
+            class="nav-btn"
+            title="压缩会话：把历史折叠成摘要（历史仍保留，之后的对话只携带摘要与最近几轮）"
+            :disabled="isRunning"
+            @click="compress"
+          >🗜</button>
           <template v-if="pane">
             <button
               type="button"
@@ -297,6 +305,7 @@ import {
   comparePlan,
   compareWithParent,
   composerModelFor,
+  compressSession,
   exitCompare,
   exportBranchMarkdown,
   isTurnMarked,
@@ -636,6 +645,11 @@ function retry(): void {
 
 function exportMd(): void {
   void exportBranchMarkdown();
+}
+
+function compress(): void {
+  const id = store.selectedId;
+  if (id) void compressSession(id);
 }
 
 const paneModel = paneComposerModel;

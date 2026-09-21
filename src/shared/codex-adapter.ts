@@ -526,6 +526,12 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       throw new Error("codex does not support exporting a detached session");
     },
 
+    // codex has no compaction primitive; the renderer hides the affordance
+    // (capabilities.compress === false) and this throws if ever reached.
+    async compress() {
+      throw new Error("codex does not support session compaction");
+    },
+
     async deleteSession(sessionId) {
       await client.request("thread/delete", { threadId: sessionId });
       await removeFork(lineagePath, sessionId);

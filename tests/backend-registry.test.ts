@@ -540,6 +540,7 @@ describe("capabilities and store paths", () => {
       deleteSession: true,
       attachments: false,
       fileChanges: false,
+      compress: false,
       exportBranch: false,
     });
     expect(registry.capabilities("opencode")).toEqual({
@@ -547,6 +548,7 @@ describe("capabilities and store paths", () => {
       deleteSession: true,
       attachments: true,
       fileChanges: true,
+      compress: true,
       exportBranch: true,
     });
   });

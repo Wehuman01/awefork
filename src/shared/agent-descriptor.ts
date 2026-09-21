@@ -22,6 +22,8 @@ export interface AgentCompat {
 export interface AgentCapabilities {
   readonly deleteMessage: boolean;
   readonly attachments: boolean;
+  /** Session compaction through the backend's summarize primitive. */
+  readonly compress: boolean;
 }
 
 /** REST paths; `{id}` / `{messageId}` are interpolated by the client. */
@@ -32,6 +34,8 @@ export interface AgentEndpoints {
   readonly sessionMessage: string;
   readonly sessionFork: string;
   readonly sessionAbort: string;
+  /** POST — folds the session into a summary; long-running, resolves at the end. */
+  readonly sessionSummarize: string;
   readonly projects: string;
   readonly providers: string;
   readonly events: string;
@@ -81,11 +85,22 @@ export interface AgentFilePart {
   readonly mimeField: string;
 }
 
+/**
+ * A compaction marker part: opencode's summarize inserts a user row whose
+ * only part is `type:"compaction"`. It carries no text — its presence flags
+ * the row as the "history above was folded into a summary" boundary.
+ */
+export interface AgentCompactionPart {
+  readonly type: string;
+}
+
 export interface AgentMessageParts {
   readonly text: AgentTextPart;
   readonly thinking: AgentTextPart;
   readonly tool: AgentToolPart;
   readonly file: AgentFilePart;
+  /** Optional: a backend version without compaction rows simply omits it. */
+  readonly compaction?: AgentCompactionPart;
 }
 
 export interface AgentErrorEvent {
@@ -288,10 +303,11 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   };
 
   const capabilities = section(root, "capabilities", "agent descriptor");
-  onlyKeys(capabilities, ["deleteMessage", "attachments"], "capabilities");
+  onlyKeys(capabilities, ["deleteMessage", "attachments", "compress"], "capabilities");
   const parsedCapabilities = {
     deleteMessage: booleanAt(capabilities.deleteMessage, "capabilities.deleteMessage"),
     attachments: booleanAt(capabilities.attachments, "capabilities.attachments"),
+    compress: booleanAt(capabilities.compress, "capabilities.compress"),
   };
 
   const fork = section(root, "fork", "agent descriptor");
@@ -327,6 +343,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     "sessionMessage",
     "sessionFork",
     "sessionAbort",
+    "sessionSummarize",
     "projects",
     "providers",
     "events",
@@ -362,7 +379,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   );
 
   const parts = objectAt(messages.parts, "messages.parts");
-  onlyKeys(parts, ["text", "thinking", "tool", "file"], "messages.parts");
+  onlyKeys(parts, ["text", "thinking", "tool", "file", "compaction"], "messages.parts");
   const tool = section(parts, "tool", "messages.parts");
   onlyKeys(tool, ["type", "nameField", "fallbackName"], "messages.parts.tool");
   const file = section(parts, "file", "messages.parts");
@@ -371,6 +388,15 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     ["type", "nameField", "fallbackName", "urlField", "mimeField"],
     "messages.parts.file",
   );
+  // Optional marker part: a descriptor without it maps no compaction rows.
+  let compactionPart: AgentCompactionPart | undefined;
+  if (parts.compaction !== undefined) {
+    const compaction = objectAt(parts.compaction, "messages.parts.compaction");
+    onlyKeys(compaction, ["type"], "messages.parts.compaction");
+    compactionPart = {
+      type: stringAt(compaction.type, "messages.parts.compaction.type"),
+    };
+  }
 
   const events = section(root, "events", "agent descriptor");
   onlyKeys(
@@ -423,6 +449,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       parts: {
         text: parseTextPart(parts.text, "messages.parts.text"),
         thinking: parseTextPart(parts.thinking, "messages.parts.thinking"),
+        ...(compactionPart ? { compaction: compactionPart } : {}),
         tool: {
           type: stringAt(tool.type, "messages.parts.tool.type"),
           nameField: stringAt(tool.nameField, "messages.parts.tool.nameField"),

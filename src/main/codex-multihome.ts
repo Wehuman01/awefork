@@ -322,6 +322,12 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       await (await adapterFor(sessionId)).prompt(sessionId, text, model, attachments);
     },
 
+    // Compaction is capability-gated off for codex; the underlying adapter's
+    // rejection is the honest answer.
+    async compress(sessionId, model) {
+      await (await adapterFor(sessionId)).compress(sessionId, model);
+    },
+
     async abort(sessionId) {
       await (await adapterFor(sessionId)).abort(sessionId);
     },

@@ -406,6 +406,14 @@
       <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
       <button
+        v-if="store.capabilities.compress"
+        type="button"
+        role="menuitem"
+        class="ctx-menu-item"
+        title="把历史折叠成一份摘要：历史仍保留，之后的对话只携带摘要与最近几轮"
+        @click="compressFromMenu"
+      >🗜 压缩会话…</button>
+      <button
         v-if="store.capabilities.exportBranch"
         type="button"
         role="menuitem"
@@ -706,6 +714,7 @@ import {
   archiveSession,
   beginComparePick,
   cancelComparePick,
+  compressSession,
   createSession,
   deleteSession,
   deleteTag,
@@ -1270,6 +1279,13 @@ function exportFromMenu(): void {
   const atMessageId = menuTurn.value?.messageId ?? null;
   closeMenu();
   void exportSessionAt(active.sessionId, atMessageId);
+}
+
+function compressFromMenu(): void {
+  const active = menu.value;
+  if (!active) return;
+  closeMenu();
+  void compressSession(active.sessionId);
 }
 
 /** Same soft delete as the canvas 🗑 chip; deleteSession owns the confirm. */

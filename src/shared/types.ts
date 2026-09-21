@@ -58,6 +58,12 @@ export interface ChatMessage {
   outputTokens: number | null;
   /** Why the run failed (provider/API error reported by the backend); null when it didn't. */
   error: string | null;
+  /**
+   * True on the marker user row a session compaction inserted: everything
+   * before it was folded into the summary that follows it. History stays
+   * intact — later prompts just carry summary + recent turns.
+   */
+  compaction?: boolean;
 }
 
 /** A model the agent backend offers, flattened from its provider config. */
@@ -253,6 +259,12 @@ export type AgentEvent =
     }
   | { type: "session.idle"; sessionId: string }
   /**
+   * A manually-triggered session compaction finished: the backend folded the
+   * session's history into a summary (a compaction marker row + summary
+   * reply) and the renderer should refresh that session's messages.
+   */
+  | { type: "session.compressed"; sessionId: string }
+  /**
    * The agent is waiting on the user: an approval, a requested input, or an
    * MCP server elicitation arrived from the backend mid-run. The renderer
    * answers through `AgentAdapter.respondInteraction` with the request's
@@ -435,6 +447,14 @@ export interface AgentAdapter {
    * allow. Backends without server-originated interactions reject.
    */
   respondInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
+  /**
+   * Fold the session's history into a summary (session compaction). Same
+   * contract as prompt: fire-and-forget — the call returns once the request
+   * is out; the summary streams in through `subscribe` (message deltas) and
+   * `session.compressed` announces completion. Backends without a compaction
+   * primitive reject.
+   */
+  compress(sessionId: string, model: ModelChoice): Promise<void>;
   abort(sessionId: string): Promise<void>;
   /** Subscribe to the normalized event feed. Returns an unsubscribe function. */
   subscribe(handler: (event: AgentEvent) => void): Promise<() => void>;
