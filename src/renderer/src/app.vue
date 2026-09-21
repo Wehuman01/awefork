@@ -76,6 +76,7 @@
     <InteractionDialog />
     <ForkTagDialog />
     <HistoryPanel />
+    <SubagentDrawer />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -120,6 +121,7 @@ import HistoryPanel from "./components/history-panel.vue";
 import InteractionDialog from "./components/interaction-dialog.vue";
 import SessionCanvas from "./components/session-canvas.vue";
 import SideBar from "./components/side-bar.vue";
+import SubagentDrawer from "./components/subagent-drawer.vue";
 import TopBar from "./components/top-bar.vue";
 import {
   history as historyStore,

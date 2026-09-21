@@ -1,4 +1,5 @@
 import {
+  type AgentTaskToolFact,
   firstNumber,
   firstString,
   type OpenCodeDescriptor,
@@ -21,6 +22,7 @@ import type {
   ChatMessage,
   PromptAttachment,
   SessionSummary,
+  SubagentCall,
 } from "./types.js";
 
 export interface OpenCodeAdapterOptions {
@@ -135,6 +137,8 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // both candidates so the model stays visible even when a run dies
       // before its assistant row reports back.
       const { fields, parts } = descriptor.messages;
+      const taskFact = parts.tool.task;
+      const toolCalls = taskFact ? taskCallsOf(m.parts, parts.tool, taskFact) : [];
       return {
         id: firstString(m, fields.id) ?? "",
         role: (firstString(m, fields.role) ?? "assistant") as ChatMessage["role"],
@@ -150,6 +154,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               .map((p) => firstString(p, [parts.tool.nameField]) ?? parts.tool.fallbackName),
           ),
         ],
+        ...(toolCalls.length > 0 ? { taskCalls: toolCalls } : {}),
         modelId: firstString(m, fields.modelId),
         providerId: firstString(m, fields.providerId),
         variant: firstString(m, fields.variant),
@@ -388,6 +393,82 @@ function partField(part: OcPart, field: string): unknown {
   return (part as unknown as Record<string, unknown>)[field];
 }
 
+/**
+ * The wrapper opencode seals task results in:
+ * `<task id="ses_…" state="…">\n<task_result>\n…\n</task_result>\n</task>`.
+ * The id inside the opening tag is the child session — the fallback linkage
+ * for builds whose state.metadata arrives late or not at all.
+ */
+const TASK_HEAD = /^<task\b[^>]*>\s*<task_result>\s*/;
+const TASK_TAIL = /\s*<\/task_result>\s*<\/task>\s*$/;
+const TASK_HEAD_ID = /^<task\b[^>]*\bid="([^"]+)"/;
+
+/** Task-tool parts of one message, in call order; empty when none are. */
+function taskCallsOf(
+  parts: OcPart[],
+  toolPart: OpenCodeDescriptor["messages"]["parts"]["tool"],
+  fact: AgentTaskToolFact,
+): SubagentCall[] {
+  const calls: SubagentCall[] = [];
+  for (const part of parts) {
+    if (part.type !== toolPart.type) continue;
+    const partId = readPath(part, "id");
+    if (typeof partId !== "string") continue;
+    const tool = firstString(part, [toolPart.nameField]) ?? toolPart.fallbackName;
+    const call = subagentCallOf(part, partId, tool, fact);
+    if (call) calls.push(call);
+  }
+  return calls;
+}
+
+/**
+ * Map one tool part to a SubagentCall when it is a Task delegation the
+ * descriptor names; null otherwise. Every field is descriptor-driven; the
+ * only behavior here is the wrapper strip and the status union guard.
+ */
+function subagentCallOf(
+  part: unknown,
+  partId: string,
+  tool: string,
+  fact: AgentTaskToolFact,
+): SubagentCall | null {
+  if (tool !== fact.name) return null;
+  const rawStatus = readPath(part, fact.statusPath);
+  const status: SubagentCall["status"] =
+    rawStatus === "pending" ||
+    rawStatus === "running" ||
+    rawStatus === "completed" ||
+    rawStatus === "error"
+      ? rawStatus
+      : // An unrecognized status is still an in-flight delegation; a settled
+        // row would have said completed/error, which the union above caught.
+        "running";
+  let result: string | null = null;
+  let childSessionId = firstString(part, fact.childSessionIdPaths);
+  const rawResult = readPath(part, fact.resultPath);
+  if (typeof rawResult === "string" && rawResult !== "") {
+    childSessionId ??= rawResult.match(TASK_HEAD_ID)?.[1] ?? null;
+    result = rawResult.replace(TASK_HEAD, "").replace(TASK_TAIL, "").trim();
+  }
+  if (status === "error") {
+    // Error rows carry no output; state.error is the card's body.
+    result = firstString(part, [fact.errorPath]) ?? result;
+  }
+  return {
+    partId,
+    tool,
+    agent: firstString(part, [fact.agentPath]),
+    title: firstString(part, [fact.titlePath]),
+    prompt: firstString(part, [fact.promptPath]),
+    status,
+    result,
+    childSessionId,
+    modelId: firstString(part, fact.modelIdPaths),
+    startedAt: firstNumber(part, [fact.startedAtPath]),
+    endedAt: firstNumber(part, [fact.endedAtPath]),
+  };
+}
+
 /** A part as it rides inside an SSE frame — the REST part shape plus timing. */
 interface EventPart {
   id?: unknown;
@@ -463,12 +544,21 @@ function emitToAgentEvent(
     // older opencode builds put the text delta in this same frame.
     const kind = typeof part?.type === "string" ? events.partSnapshot.kinds[part.type] : undefined;
     if (partId && kind) partKinds.set(partId, kind);
-    // Tool parts carry no text stream, but they are where file changes live:
-    // hand the raw part to the recorder before anything else falls through.
-    if (onToolPart && partId && !kind) {
+    // Tool parts carry no text stream, but they are where file changes and
+    // Task delegations live: hand the raw part to the recorder, and forward
+    // a SubagentCall card whenever the descriptor maps this tool to one.
+    if (partId && !kind) {
       const id = sessionId();
       const messageId = firstString(props, events.messageIdPaths);
-      if (id && messageId) onToolPart(id, messageId, part);
+      if (id && messageId) {
+        if (onToolPart) onToolPart(id, messageId, part);
+        const toolPart = descriptor.messages.parts.tool;
+        if (toolPart.task) {
+          const tool = firstString(part, [toolPart.nameField]) ?? toolPart.fallbackName;
+          const call = subagentCallOf(part, partId, tool, toolPart.task);
+          if (call) emit({ type: "message.toolCall", sessionId: id, messageId, partId, call });
+        }
+      }
     }
 
     const id = sessionId();

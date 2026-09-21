@@ -46,7 +46,24 @@
     "parts": {
       "text": { "type": "text", "field": "text", "join": "\n" },
       "thinking": { "type": "reasoning", "field": "text", "join": "\n\n" },
-      "tool": { "type": "tool", "nameField": "tool", "fallbackName": "tool" },
+      "tool": {
+        "type": "tool",
+        "nameField": "tool",
+        "fallbackName": "tool",
+        "task": {
+          "name": "task",
+          "agentPath": "state.input.subagent_type",
+          "titlePath": "state.input.description",
+          "promptPath": "state.input.prompt",
+          "statusPath": "state.status",
+          "resultPath": "state.output",
+          "errorPath": "state.error",
+          "childSessionIdPaths": ["state.metadata.sessionId"],
+          "modelIdPaths": ["state.metadata.model.modelID"],
+          "startedAtPath": "state.time.start",
+          "endedAtPath": "state.time.end"
+        }
+      },
       "file": {
         "type": "file",
         "nameField": "filename",

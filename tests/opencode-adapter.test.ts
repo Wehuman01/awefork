@@ -39,6 +39,10 @@ interface FakeMessage {
     type: string;
     text?: string;
     tool?: string;
+    /** Tool parts: the part id task cards key on. */
+    id?: string;
+    /** Tool parts: the state block (status/input/output/metadata/time). */
+    state?: Record<string, unknown>;
     filename?: string;
     mime?: string;
     url?: string;
@@ -491,6 +495,201 @@ describe("opencode adapter", () => {
     const messages = await adapter.messages("s1");
     expect(messages[0]?.attachmentNames).toEqual(["shot.png", "附件"]);
     expect(messages[1]?.attachmentNames).toEqual([]);
+  });
+
+  it("maps task tool parts to structured subagent cards", async () => {
+    const state = baseState();
+    // Shapes verified against a real opencode 1.18.31 storage: input carries
+    // the dispatch, output wraps the report in <task …><task_result>, and
+    // metadata names the child session for the drill-in.
+    state.messages.s1?.[1]?.parts.push(
+      {
+        type: "tool",
+        tool: "task",
+        id: "prt-task-1",
+        state: {
+          status: "completed",
+          input: {
+            description: "Fix Stage 02 blockers",
+            subagent_type: "glm-5.3-flash",
+            prompt: "Work in the worktree. Implement Tasks 1-3 only.",
+          },
+          output:
+            '<task id="ses_child_1" state="completed">\n<task_result>\nAll Tasks 1–3 implemented.\n</task_result>\n</task>',
+          metadata: {
+            parentSessionId: "s1",
+            sessionId: "ses_child_1",
+            model: { providerID: "oc-fake", modelID: "glm/glm-5.3-flash" },
+            truncated: false,
+          },
+          time: { start: 1000, end: 61000 },
+        },
+      },
+      // metadata absent → the child id falls back to the wrapper's opening tag
+      {
+        type: "tool",
+        tool: "task",
+        id: "prt-task-2",
+        state: {
+          status: "error",
+          input: { description: "Search for references", subagent_type: "explore" },
+          error: "Task cancelled",
+          time: { start: 2000, end: 9000 },
+        },
+      },
+      // a non-task tool stays a name, never a card
+      { type: "tool", tool: "grep", id: "prt-grep" },
+    );
+    const { adapter } = await newAdapter(state);
+    const messages = await adapter.messages("s1");
+    expect(messages[1]?.toolNames).toEqual(["task", "grep"]);
+    expect(messages[1]?.taskCalls).toEqual([
+      {
+        partId: "prt-task-1",
+        tool: "task",
+        agent: "glm-5.3-flash",
+        title: "Fix Stage 02 blockers",
+        prompt: "Work in the worktree. Implement Tasks 1-3 only.",
+        status: "completed",
+        result: "All Tasks 1–3 implemented.",
+        childSessionId: "ses_child_1",
+        modelId: "glm/glm-5.3-flash",
+        startedAt: 1000,
+        endedAt: 61000,
+      },
+      {
+        partId: "prt-task-2",
+        tool: "task",
+        agent: "explore",
+        title: "Search for references",
+        prompt: null,
+        status: "error",
+        result: "Task cancelled",
+        childSessionId: null,
+        modelId: null,
+        startedAt: 2000,
+        endedAt: 9000,
+      },
+    ]);
+    // rows without delegations carry no field at all, not an empty list
+    expect(messages[3]?.taskCalls).toBeUndefined();
+  });
+
+  it("forwards task tool part snapshots as message.toolCall cards", async () => {
+    const state = baseState();
+    state.eventFrames = [
+      // delegation starts: no output yet, card shows as running
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "m1",
+          part: {
+            id: "p-task",
+            type: "tool",
+            sessionID: "s1",
+            messageID: "m1",
+            tool: "task",
+            state: {
+              status: "running",
+              input: { description: "Fix blockers", subagent_type: "review", prompt: "Go look." },
+              time: { start: 1000 },
+            },
+          },
+        },
+      },
+      // delegation lands: full report, child session named in metadata
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "m1",
+          part: {
+            id: "p-task",
+            type: "tool",
+            sessionID: "s1",
+            messageID: "m1",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { description: "Fix blockers", subagent_type: "review", prompt: "Go look." },
+              output:
+                '<task id="ses_kid" state="completed">\n<task_result>\nDone.\n</task_result>\n</task>',
+              metadata: { parentSessionId: "s1", sessionId: "ses_kid" },
+              time: { start: 1000, end: 9000 },
+            },
+          },
+        },
+      },
+      // plain tools stay off the card stream
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "m1",
+          part: { id: "p-grep", type: "tool", sessionID: "s1", messageID: "m1", tool: "grep" },
+        },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    const cards = events.filter((e) => e.type === "message.toolCall");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({
+      type: "message.toolCall",
+      sessionId: "s1",
+      messageId: "m1",
+      partId: "p-task",
+      call: { status: "running", agent: "review", title: "Fix blockers", result: null },
+    });
+    expect(cards[1]).toMatchObject({
+      type: "message.toolCall",
+      partId: "p-task",
+      call: {
+        status: "completed",
+        result: "Done.",
+        childSessionId: "ses_kid",
+        startedAt: 1000,
+        endedAt: 9000,
+      },
+    });
+  });
+
+  it("message.toolCall alone never marks a session running (fork replay)", async () => {
+    const state = baseState();
+    // Fork creation replays every copied message's tool parts; a replayed
+    // task snapshot must not look like a run waking up.
+    state.eventFrames = [
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "m1",
+          part: {
+            id: "p-task",
+            type: "tool",
+            sessionID: "s1",
+            messageID: "m1",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { subagent_type: "build" },
+              time: { start: 1, end: 2 },
+            },
+          },
+        },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    expect(events.some((e) => e.type === "message.toolCall")).toBe(true);
+    expect(events.some((e) => e.type === "message.started")).toBe(false);
   });
 
   it("messageAttachments hands a message's file parts back as sendable attachments", async () => {

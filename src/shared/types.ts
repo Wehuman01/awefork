@@ -28,6 +28,35 @@ export interface SessionSummary {
   updatedAt: number;
 }
 
+/**
+ * One Task-tool subagent delegation, structured for the pane's task cards.
+ * Populated by backends that report tool-part state (opencode); absent means
+ * the backend only exposes the bare tool name, which stays a chip.
+ */
+export interface SubagentCall {
+  /** Tool part id; unique within the message. */
+  partId: string;
+  /** Tool name the backend reports for the delegation (e.g. "task"). */
+  tool: string;
+  /** Subagent type the parent dispatched (state.input.subagent_type). */
+  agent: string | null;
+  /** Short human description (state.input.description). */
+  title: string | null;
+  /** Full dispatched prompt (state.input.prompt). */
+  prompt: string | null;
+  /** Lifecycle of the delegation as the backend reports it. */
+  status: "pending" | "running" | "completed" | "error";
+  /** Result body with the `<task …>` wrapper stripped, or the error text. */
+  result: string | null;
+  /** Child session id — the drill-in target (state.metadata.sessionId). */
+  childSessionId: string | null;
+  /** Model that served the subagent (state.metadata.model.modelID). */
+  modelId: string | null;
+  /** Delegation times in ms; nulls while the backend reports none. */
+  startedAt: number | null;
+  endedAt: number | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -37,6 +66,12 @@ export interface ChatMessage {
   thinking: string;
   /** Distinct tool names invoked in this message, in first-seen order. */
   toolNames: readonly string[];
+  /**
+   * Task-tool delegations this message made, in call order. Rendered as
+   * subagent cards; the "task" entry stays in toolNames too, so backends
+   * without structured state keep the chip-only view.
+   */
+  taskCalls?: readonly SubagentCall[];
   /** Model that produced this message (e.g. "glm/glm-5.3-flash"); user messages carry the model the run was configured with, null when the backend reports none. */
   modelId: string | null;
   /** Provider that served the model (e.g. "oc-awerouter"); null alongside modelId. */
@@ -252,6 +287,19 @@ export type AgentEvent =
       endedAt: number | null;
     }
   | { type: "session.idle"; sessionId: string }
+  | {
+      /**
+       * Snapshot of a Task-tool part (opencode's message.part.updated for a
+       * tool the adapter maps to a SubagentCall). Tool parts carry no text
+       * stream — each frame carries the whole delegation state, so the
+       * renderer replaces the card by partId instead of appending deltas.
+       */
+      type: "message.toolCall";
+      sessionId: string;
+      messageId: string;
+      partId: string;
+      call: SubagentCall;
+    }
   /**
    * The agent is waiting on the user: an approval, a requested input, or an
    * MCP server elicitation arrived from the backend mid-run. The renderer

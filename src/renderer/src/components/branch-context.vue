@@ -225,8 +225,10 @@
         :messages="paneMessages"
         :running="isRunning"
         :stream-parts="store.streamParts"
+        :tool-calls="store.liveToolCalls"
         :error="null"
         @retry="retry"
+        @open-subagent="openSubagentSession"
       >
         <template v-if="contextTurns.length > 0 || omittedCount > 0" #context>
           <div class="chain">
@@ -300,6 +302,7 @@ import {
   exitCompare,
   exportBranchMarkdown,
   isTurnMarked,
+  openSubagentSession,
   paneComposerModel,
   paneMessages,
   paneTurn,

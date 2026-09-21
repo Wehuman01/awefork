@@ -3568,6 +3568,236 @@ mark.hl {
   color: var(--primary-deep);
 }
 
+/* ── task-tool delegation cards ────────────────────────────────────── */
+
+.task-call {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 7px 10px;
+  margin-bottom: 7px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.task-call.running {
+  border-color: var(--butter);
+  background: #fffdf7;
+}
+
+.task-call.error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+.task-call.open {
+  box-shadow: var(--shadow-card);
+}
+
+.task-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-call-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ink-faint);
+}
+
+.task-call-dot.running,
+.task-call-dot.pending {
+  background: var(--butter);
+  animation: task-call-pulse 1.2s ease-in-out infinite;
+}
+
+.task-call-dot.completed {
+  background: var(--mint);
+}
+
+.task-call-dot.error {
+  background: var(--danger);
+}
+
+@keyframes task-call-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+.task-call-agent {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2.5px 9px;
+  border-radius: 999px;
+  background: var(--lavender-soft);
+  color: #7a66d6;
+  flex-shrink: 0;
+}
+
+.task-call-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-call-meta {
+  font-size: 11px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-call-open {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+
+.task-call-open:hover {
+  filter: brightness(0.96);
+}
+
+.task-call-body {
+  border-top: 1px dashed var(--line);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.task-call-k {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ink-faint);
+  letter-spacing: 0.05em;
+  margin: 0 0 3px;
+}
+
+.task-call-k:not(:first-child) {
+  margin-top: 8px;
+}
+
+.task-call-prompt {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.task-call-result {
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.task-call-result.danger {
+  color: var(--danger);
+}
+
+/* ── subagent session drawer ───────────────────────────────────────── */
+
+.subagent-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(74, 63, 58, 0.18);
+  z-index: 60;
+}
+
+.subagent-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 92vw);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  animation: subagent-drawer-in 0.22s ease;
+}
+
+@keyframes subagent-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+.subagent-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+
+.subagent-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.subagent-drawer-title strong {
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-drawer-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.subagent-drawer-close:hover {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.subagent-drawer-meta {
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding: 0 14px 10px;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+}
+
+.subagent-drawer-loading {
+  padding: 14px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.subagent-drawer .message-list {
+  padding: 12px 14px;
+}
+
 .stream {
   color: var(--ink-soft);
 }

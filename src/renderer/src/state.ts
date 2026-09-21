@@ -43,6 +43,7 @@ import type {
   PromptAttachment,
   SessionFileChanges,
   SessionSummary,
+  SubagentCall,
 } from "../../shared/types";
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { shortPath } from "./format";
@@ -167,6 +168,14 @@ interface AppState {
   recent: Record<string, number>;
   /** Live stream of the selected session only, as the run's ordered parts. */
   streamParts: LivePart[];
+  /** Live Task-tool delegation cards of the selected session, in call order. */
+  liveToolCalls: LiveToolCall[];
+  /**
+   * The read-only subagent drawer: the delegation card the user clicked and
+   * the child session it named. null = closed. The pane selection stays
+   * untouched — closing the drawer returns to exactly what was on screen.
+   */
+  subagentView: { call: SubagentCall; sessionId: string } | null;
   /** Card-sized tail of every running session's stream, keyed by session id. */
   streams: Record<string, string>;
   /**
@@ -282,6 +291,8 @@ const state = reactive<AppState>({
   running: {},
   recent: {},
   streamParts: [],
+  liveToolCalls: [],
+  subagentView: null,
   streams: {},
   backgroundRuns: {
     opencode: { running: {}, streams: {}, recent: {} },
@@ -550,7 +561,10 @@ export const paneMessages = computed<ChatMessage[]>(() => {
   // otherwise duplicate the streaming step above the live blocks.
   const streaming =
     sessionId && state.running[sessionId]
-      ? new Set(state.streamParts.map((p) => p.messageId))
+      ? new Set([
+          ...state.streamParts.map((p) => p.messageId),
+          ...state.liveToolCalls.map((c) => c.messageId),
+        ])
       : new Set<string>();
   const messages = (state.messagesBySession[sessionId ?? ""] ?? []).filter(
     (m) =>
@@ -558,6 +572,7 @@ export const paneMessages = computed<ChatMessage[]>(() => {
       (m.role === "user" ||
         m.text.trim().length > 0 ||
         m.thinking.trim().length > 0 ||
+        (m.taskCalls?.length ?? 0) > 0 ||
         m.error !== null),
   );
   const turn = paneTurn.value?.turn;
@@ -585,6 +600,16 @@ export interface LivePart {
 }
 
 /**
+ * One live Task-tool delegation card. The event envelope carries the message
+ * id; the call itself is the shared SubagentCall the settled row will also
+ * hold, so the card renders identically mid-run and after the reload lands.
+ */
+export interface LiveToolCall {
+  messageId: string;
+  call: SubagentCall;
+}
+
+/**
  * Per-backend namespace for the live part buffers: both backends can stream
  * at once, and the composite key keeps an off-screen run's parts from ever
  * colliding with (or publishing into) the on-screen session.
@@ -594,6 +619,8 @@ function streamKey(backend: BackendId, sessionId: string): string {
 }
 
 const streamBuffers = new Map<string, LivePart[]>();
+/** Live Task-tool cards per stream key — same lifecycle as streamBuffers. */
+const toolCallBuffers = new Map<string, LiveToolCall[]>();
 /** True once the assistant row for these parts has landed complete in state. */
 function rowCompleted(sessionId: string, messageId: string): boolean {
   return (state.messagesBySession[sessionId] ?? []).some(
@@ -666,6 +693,42 @@ function publishParts(backend: BackendId, sessionId: string, parts: LivePart[]):
   setStreamTail(backend, sessionId, tail ? tail.text.slice(-400) : null);
 }
 
+/** Store a session's live task cards and mirror them into the visible pane. */
+function publishToolCalls(backend: BackendId, sessionId: string, calls: LiveToolCall[]): void {
+  const key = streamKey(backend, sessionId);
+  if (calls.length === 0) toolCallBuffers.delete(key);
+  else toolCallBuffers.set(key, calls);
+  if (backend === state.activeBackend && state.selectedId === sessionId) {
+    state.liveToolCalls = [...calls];
+  }
+}
+
+/**
+ * Fold one task-tool snapshot frame into the session's live card list. Like
+ * text-part snapshots — and unlike deltas — it never starts a run: fork
+ * creation replays tool parts for every copied message, and a replayed
+ * snapshot must not wake a session the busy frame never mentioned.
+ */
+function applyToolCall(
+  backend: BackendId,
+  sessionId: string,
+  frame: { messageId: string; partId: string; call: SubagentCall },
+): void {
+  const key = streamKey(backend, sessionId);
+  if (!isRunning(backend, sessionId) && !toolCallBuffers.has(key)) return;
+  // A completed row renders from state; late frames for it must not
+  // resurrect a card the reload already took over.
+  if (rowCompleted(sessionId, frame.messageId)) return;
+  const calls = toolCallBuffers.get(key) ?? [];
+  const index = calls.findIndex((c) => c.call.partId === frame.partId);
+  const next: LiveToolCall = { messageId: frame.messageId, call: frame.call };
+  publishToolCalls(
+    backend,
+    sessionId,
+    index >= 0 ? calls.map((c, i) => (i === index ? next : c)) : [...calls, next],
+  );
+}
+
 /**
  * Fold one delta or full-snapshot frame into the session's live part list.
  * Deltas append to (or create) the part; snapshots REPLACE its content — the
@@ -721,20 +784,30 @@ function applyPartFrame(
 /**
  * Drop live parts whose assistant row has landed complete: from here on the
  * row itself renders that step, and the live timeline keeps only the steps
- * still in flight.
+ * still in flight. Task cards ride the same rule — the settled row's
+ * taskCalls take over the moment the row exists in state.
  */
 function pruneSettledParts(backend: BackendId, sessionId: string, messages: ChatMessage[]): void {
-  const parts = streamBuffers.get(streamKey(backend, sessionId));
-  if (!parts || parts.length === 0) return;
   const done = new Set(
     messages.filter((m) => m.role === "assistant" && m.completedAt !== null).map((m) => m.id),
   );
-  if (!parts.some((p) => done.has(p.messageId))) return;
-  publishParts(
-    backend,
-    sessionId,
-    parts.filter((p) => !done.has(p.messageId)),
-  );
+  const key = streamKey(backend, sessionId);
+  const parts = streamBuffers.get(key);
+  if (parts && parts.length > 0 && parts.some((p) => done.has(p.messageId))) {
+    publishParts(
+      backend,
+      sessionId,
+      parts.filter((p) => !done.has(p.messageId)),
+    );
+  }
+  const calls = toolCallBuffers.get(key);
+  if (calls && calls.length > 0 && calls.some((c) => done.has(c.messageId))) {
+    publishToolCalls(
+      backend,
+      sessionId,
+      calls.filter((c) => !done.has(c.messageId)),
+    );
+  }
 }
 
 /** Sessions whose messages have been requested (or are already cached). */
@@ -1069,6 +1142,7 @@ export async function selectSession(
   state.selectedId = session.id;
   state.selectedTurnId = null;
   state.streamParts = [...(streamBuffers.get(streamKey(state.activeBackend, sessionId)) ?? [])];
+  state.liveToolCalls = [...(toolCallBuffers.get(streamKey(state.activeBackend, sessionId)) ?? [])];
   state.messagesError = null;
   if (options.focus) {
     state.focusRequest = { sessionId, nonce: Date.now() };
@@ -1411,6 +1485,7 @@ function clearRecent(backend: BackendId, sessionId: string): void {
 function settleRun(backend: BackendId, sessionId: string, failed = false): void {
   stopWatch(backend, sessionId);
   streamBuffers.delete(streamKey(backend, sessionId));
+  toolCallBuffers.delete(streamKey(backend, sessionId));
   setStreamTail(backend, sessionId, null);
   setRunning(backend, sessionId, false);
   // A failed run carries no tint — mint reads as success, and its card already
@@ -1429,6 +1504,7 @@ function settleRun(backend: BackendId, sessionId: string, failed = false): void 
   }
   if (backend === state.activeBackend && state.selectedId === sessionId) {
     state.streamParts = [];
+    state.liveToolCalls = [];
   }
 }
 
@@ -1460,6 +1536,16 @@ async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
   const lastRun = assistants[assistants.length - 1];
   settleRun(backend, sessionId, Boolean(lastRun?.error));
   if (backend === state.activeBackend) void refreshSessions();
+}
+
+/** Open the read-only subagent drawer on a delegation card's child session. */
+export function openSubagentSession(call: SubagentCall): void {
+  if (!call.childSessionId) return;
+  state.subagentView = { call, sessionId: call.childSessionId };
+}
+
+export function closeSubagentSession(): void {
+  state.subagentView = null;
 }
 
 function interactionKey(backend: BackendId, requestId: string): string {
@@ -1611,6 +1697,10 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
           endedAt: event.endedAt,
         });
       }
+      break;
+    }
+    case "message.toolCall": {
+      applyToolCall(backend, event.sessionId, event);
       break;
     }
     case "session.idle": {
@@ -3661,6 +3751,7 @@ function parkRuntime(backend: BackendId): void {
   state.streams = {};
   state.recent = {};
   state.streamParts = [];
+  state.liveToolCalls = [];
   stopRecentTicker();
 }
 
@@ -3774,6 +3865,9 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   const selected = state.selectedId;
   state.streamParts = selected
     ? [...(streamBuffers.get(streamKey(state.activeBackend, selected)) ?? [])]
+    : [];
+  state.liveToolCalls = selected
+    ? [...(toolCallBuffers.get(streamKey(state.activeBackend, selected)) ?? [])]
     : [];
 }
 

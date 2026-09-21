@@ -42,12 +42,23 @@ interface TurnDef {
   variant?: string;
   /** A file the prompt carried, shown as an attachment chip. */
   attachment?: string;
+  /** One Task-tool delegation the turn made — the pane's subagent card. */
+  taskCall?: {
+    partId: string;
+    agent: string;
+    title: string;
+    prompt: string;
+    result: string;
+    /** Child session def id; absent = no drill-in target. */
+    childSessionId?: string;
+    modelId?: string;
+  };
 }
 
 interface SessionDef {
   id: string;
   title: string;
-  origin: "root" | "fork";
+  origin: "root" | "fork" | "subagent";
   parent: string | null;
   /** Fork keeps the parent's turns through this one (awefork semantics). */
   atMessageId: string | null;
@@ -128,6 +139,17 @@ const SESSION_DEFS: SessionDef[] = [
         tokens: 2600,
         minutesAgo: 840,
         model: "glm-5.3",
+        taskCall: {
+          partId: "r6-task-1",
+          agent: "explore",
+          title: "定位限流器内存增长",
+          prompt:
+            "在压测 profile 里内存增长集中在 rate limit 相关路径。扫一遍限流器的实现和调用点，找出哪里只增不减，只读不改，回报嫌疑点。",
+          result:
+            "泄漏点：rate limiter 用 map[IP]记录计数，键永不过期。压测 500 并发 10 分钟积累 42 万条键。建议改带 TTL 的 LRU。",
+          childSessionId: "s-root-sub1",
+          modelId: "glm-5.3-flash",
+        },
       },
       {
         id: "r7",
@@ -251,6 +273,28 @@ const SESSION_DEFS: SessionDef[] = [
     tags: ["执行"],
     turns: [],
   },
+  // The r6 delegation's child session — the drill-in target. Hidden from the
+  // sidebar/canvas like every subagent; reachable only through the task card.
+  {
+    id: "s-root-sub1",
+    title: "定位限流器内存增长",
+    origin: "subagent",
+    parent: "s-root",
+    atMessageId: null,
+    minutesAgo: 845,
+    turns: [
+      {
+        id: "b1",
+        prompt:
+          "在压测 profile 里内存增长集中在 rate limit 相关路径。扫一遍限流器的实现和调用点，找出哪里只增不减，只读不改，回报嫌疑点。",
+        reply:
+          "泄漏点：rate limiter 用 map[IP] 记录计数，键永不过期。压测 500 并发 10 分钟积累约 42 万条键，内存线性增长。\n\n调用点两处：网关 middleware 和 auth 内嵌副本，各自持有一份 map，泄漏翻倍。\n\n建议：改带 TTL 的 LRU，两处共用一个实例。",
+        tools: ["read", "grep"],
+        tokens: 1900,
+        minutesAgo: 845,
+      },
+    ],
+  },
   {
     id: "w-root",
     title: "官网首页改版",
@@ -358,6 +402,25 @@ function turnMessages(turn: TurnDef): ChatMessage[] {
       text: turn.reply,
       thinking: "",
       toolNames: turn.tools ?? [],
+      ...(turn.taskCall
+        ? {
+            taskCalls: [
+              {
+                partId: turn.taskCall.partId,
+                tool: "task",
+                agent: turn.taskCall.agent,
+                title: turn.taskCall.title,
+                prompt: turn.taskCall.prompt,
+                status: "completed" as const,
+                result: turn.taskCall.result,
+                childSessionId: turn.taskCall.childSessionId ?? null,
+                modelId: turn.taskCall.modelId ?? null,
+                startedAt: createdAt + 2000,
+                endedAt: createdAt + 2000 + Math.round(durationMs * 0.6),
+              },
+            ],
+          }
+        : {}),
       modelId: model,
       providerId: "oc-awerouter",
       variant: turn.variant ?? null,
@@ -377,8 +440,9 @@ function sessionTurns(defs: Map<string, SessionDef>, id: string): TurnDef[] {
   if (!def) return [];
   // Always hand out a copy: the fork cut below splices the parent's list.
   const own = [...def.turns];
-  // An empty-context fork inherits no prefix — only lineage links it.
-  if (!def.parent || def.emptyContext) return own;
+  // An empty-context fork inherits no prefix — and neither does a subagent
+  // child: opencode starts it fresh with just the dispatched prompt.
+  if (!def.parent || def.emptyContext || def.origin === "subagent") return own;
   const parentTurns = sessionTurns(defs, def.parent);
   if (def.atMessageId) {
     const cut = parentTurns.findIndex((t) => t.id === def.atMessageId);
@@ -391,7 +455,10 @@ export function installMockAdapter(): void {
   const defs = new Map(SESSION_DEFS.map((d) => [d.id, { ...d, turns: [...d.turns] }]));
   const lineage: Record<string, ForkRecord> = {};
   for (const def of defs.values()) {
-    if (def.parent) {
+    // Subagent children are linked by the session row itself (parentID); only
+    // awefork's own forks record lineage — enrichSessions would otherwise
+    // relabel the subagent origin as "fork".
+    if (def.parent && def.origin !== "subagent") {
       lineage[def.id] = {
         parentId: def.parent,
         atMessageId: def.atMessageId,
@@ -624,12 +691,35 @@ export function installMockAdapter(): void {
       };
       const reply = `演示模式：这是一条模拟回复（真实环境里会走你的 opencode 后端）。你问的是「${text.slice(0, 40)}」——切到真的 npm run dev 就能拿到流式真回复。`;
       const thinking = "**组织回答**\n我先梳理用户的问题，再组织一段清晰、可执行的回答。";
+      const thinkingChunks = thinking.match(/.{1,14}/g) ?? [];
+      const textStartDelay = 600 + thinkingChunks.length * 300;
+      // One live Task-tool delegation: the card appears running after the
+      // thinking block, settles before the reply streams — the same shape a
+      // real opencode run pushes through message.part.updated.
+      const taskPartId = `p${promptSeq}-r-task`;
+      const taskCallBase = {
+        partId: taskPartId,
+        tool: "task",
+        agent: "explore",
+        title: "检索相关上下文",
+        prompt: text,
+        childSessionId: null,
+        modelId: "glm-5.3-flash",
+      };
+      const settledTaskCall = {
+        ...taskCallBase,
+        status: "completed" as const,
+        result: `围绕「${text.slice(0, 24)}…」扫了相关实现和调用点，结论已并入回复。`,
+        startedAt: Date.now() + textStartDelay,
+        endedAt: Date.now() + textStartDelay + 1800,
+      };
       const assistant: ChatMessage = {
-        id: `p${promptSeq}-r`,
+        id: `${promptSeq}-r`,
         role: "assistant",
         text: reply,
         thinking,
         toolNames: [],
+        taskCalls: [settledTaskCall],
         modelId: model?.modelId ?? "glm-5.3-flash",
         providerId: model?.providerId ?? "oc-awerouter",
         variant: model?.variant ?? null,
@@ -645,9 +735,7 @@ export function installMockAdapter(): void {
       const runStart = Date.now();
       const thinkingPartId = `${assistant.id}-th`;
       const textPartId = `${assistant.id}-tx`;
-      const thinkingChunks = thinking.match(/.{1,14}/g) ?? [];
       const chunks = reply.match(/.{1,18}/g) ?? [];
-      const textStartDelay = 600 + thinkingChunks.length * 300;
       thinkingChunks.forEach((chunk, i) => {
         pending.push(
           setTimeout(
@@ -680,6 +768,36 @@ export function installMockAdapter(): void {
             endedAt: runStart + textStartDelay,
           });
         }, textStartDelay),
+      );
+      // the delegation card: running right after thinking, settled before
+      // the reply's first delta lands
+      pending.push(
+        setTimeout(() => {
+          emit({
+            type: "message.toolCall",
+            sessionId,
+            messageId: assistant.id,
+            partId: taskPartId,
+            call: {
+              ...taskCallBase,
+              status: "running",
+              result: null,
+              startedAt: runStart + textStartDelay,
+              endedAt: null,
+            },
+          });
+        }, textStartDelay + 100),
+      );
+      pending.push(
+        setTimeout(() => {
+          emit({
+            type: "message.toolCall",
+            sessionId,
+            messageId: assistant.id,
+            partId: taskPartId,
+            call: settledTaskCall,
+          });
+        }, textStartDelay + 1900),
       );
       chunks.forEach((chunk, i) => {
         pending.push(

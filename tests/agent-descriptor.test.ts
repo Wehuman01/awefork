@@ -37,6 +37,19 @@ describe("bundled opencode descriptor", () => {
     });
     expect(descriptor.compat).toEqual({ min: "1.18.0", max: "1.19.0" });
     expect(descriptor.events.partSnapshot.kinds).toEqual({ text: "text", reasoning: "thinking" });
+    expect(descriptor.messages.parts.tool.task).toEqual({
+      name: "task",
+      agentPath: "state.input.subagent_type",
+      titlePath: "state.input.description",
+      promptPath: "state.input.prompt",
+      statusPath: "state.status",
+      resultPath: "state.output",
+      errorPath: "state.error",
+      childSessionIdPaths: ["state.metadata.sessionId"],
+      modelIdPaths: ["state.metadata.model.modelID"],
+      startedAtPath: "state.time.start",
+      endedAtPath: "state.time.end",
+    });
   });
 
   it("accepts a legitimate variation — the drift scenario this exists for", () => {
@@ -121,6 +134,30 @@ describe("vocabulary enforcement", () => {
         }),
       ),
     ).toThrowError(/fileChanges: unknown key\(s\) edits/);
+  });
+
+  it("rejects an unknown key inside the tool task section", () => {
+    expect(() =>
+      parseOpenCodeDescriptor(
+        drifted((root) => {
+          const parts = (
+            (root.messages as Record<string, unknown>).parts as Record<string, unknown>
+          ).tool as Record<string, unknown>;
+          parts.task = { ...(parts.task as object), sessionIdPath: "state.session" };
+        }),
+      ),
+    ).toThrowError(/messages\.parts\.tool\.task: unknown key\(s\) sessionIdPath/);
+  });
+
+  it("accepts a descriptor without the optional tool task section", () => {
+    const descriptor = parseOpenCodeDescriptor(
+      drifted((root) => {
+        const parts = ((root.messages as Record<string, unknown>).parts as Record<string, unknown>)
+          .tool as Record<string, unknown>;
+        delete parts.task;
+      }),
+    );
+    expect(descriptor.messages.parts.tool.task).toBeUndefined();
   });
 
   it("rejects a fileChanges stateKeyPath into a prototype", () => {

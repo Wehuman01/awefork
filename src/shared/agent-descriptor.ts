@@ -71,6 +71,31 @@ export interface AgentToolPart {
   readonly type: string;
   readonly nameField: string;
   readonly fallbackName: string;
+  /**
+   * Present = the adapter maps this tool's parts to SubagentCall cards.
+   * Optional — a descriptor without it keeps the chip-only tool view.
+   */
+  readonly task?: AgentTaskToolFact;
+}
+
+/**
+ * Where every SubagentCall field lives inside a Task-tool part. Dot-paths
+ * against the raw part; the adapter strips the `<task …><task_result>`
+ * wrapper the backend wraps results in, so the descriptor only names rows.
+ */
+export interface AgentTaskToolFact {
+  /** Tool name that marks a part as a Task delegation (e.g. "task"). */
+  readonly name: string;
+  readonly agentPath: string;
+  readonly titlePath: string;
+  readonly promptPath: string;
+  readonly statusPath: string;
+  readonly resultPath: string;
+  readonly errorPath: string;
+  readonly childSessionIdPaths: readonly string[];
+  readonly modelIdPaths: readonly string[];
+  readonly startedAtPath: string;
+  readonly endedAtPath: string;
 }
 
 export interface AgentFilePart {
@@ -259,6 +284,52 @@ function parseTextPart(value: unknown, where: string): AgentTextPart {
   };
 }
 
+/** One required dot-path, validated segment by segment. */
+function dotPathAt(value: unknown, where: string): string {
+  const path = stringAt(value, where);
+  for (const segment of path.split(".")) {
+    if (segment === "" || FORBIDDEN_SEGMENTS.has(segment)) {
+      throw new DescriptorSchemaError(`${where}: bad path segment "${segment}"`);
+    }
+  }
+  return path;
+}
+
+/** The optional Task-tool section of messages.parts.tool, when present. */
+function parseTaskFact(value: unknown, where: string): AgentTaskToolFact {
+  const record = objectAt(value, where);
+  onlyKeys(
+    record,
+    [
+      "name",
+      "agentPath",
+      "titlePath",
+      "promptPath",
+      "statusPath",
+      "resultPath",
+      "errorPath",
+      "childSessionIdPaths",
+      "modelIdPaths",
+      "startedAtPath",
+      "endedAtPath",
+    ],
+    where,
+  );
+  return {
+    name: stringAt(record.name, `${where}.name`),
+    agentPath: dotPathAt(record.agentPath, `${where}.agentPath`),
+    titlePath: dotPathAt(record.titlePath, `${where}.titlePath`),
+    promptPath: dotPathAt(record.promptPath, `${where}.promptPath`),
+    statusPath: dotPathAt(record.statusPath, `${where}.statusPath`),
+    resultPath: dotPathAt(record.resultPath, `${where}.resultPath`),
+    errorPath: dotPathAt(record.errorPath, `${where}.errorPath`),
+    childSessionIdPaths: dotPathsAt(record.childSessionIdPaths, `${where}.childSessionIdPaths`),
+    modelIdPaths: dotPathsAt(record.modelIdPaths, `${where}.modelIdPaths`),
+    startedAtPath: dotPathAt(record.startedAtPath, `${where}.startedAtPath`),
+    endedAtPath: dotPathAt(record.endedAtPath, `${where}.endedAtPath`),
+  };
+}
+
 export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   const root = objectAt(value, "agent descriptor");
   onlyKeys(
@@ -364,7 +435,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   const parts = objectAt(messages.parts, "messages.parts");
   onlyKeys(parts, ["text", "thinking", "tool", "file"], "messages.parts");
   const tool = section(parts, "tool", "messages.parts");
-  onlyKeys(tool, ["type", "nameField", "fallbackName"], "messages.parts.tool");
+  onlyKeys(tool, ["type", "nameField", "fallbackName", "task"], "messages.parts.tool");
   const file = section(parts, "file", "messages.parts");
   onlyKeys(
     file,
@@ -427,6 +498,9 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
           type: stringAt(tool.type, "messages.parts.tool.type"),
           nameField: stringAt(tool.nameField, "messages.parts.tool.nameField"),
           fallbackName: stringAt(tool.fallbackName, "messages.parts.tool.fallbackName"),
+          ...(tool.task !== undefined
+            ? { task: parseTaskFact(tool.task, "messages.parts.tool.task") }
+            : {}),
         },
         file: {
           type: stringAt(file.type, "messages.parts.file.type"),
