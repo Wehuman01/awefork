@@ -238,8 +238,11 @@
             class="draft-model"
             :model-value="store.draft?.model ?? null"
             :models="store.models"
+            :favorite-models="store.favoriteModels"
+            :recent-models="store.recentModels"
             title="用哪个模型跑这条分支"
             @update:model-value="setDraftModel"
+            @toggle-favorite="toggleFavoriteModel"
           />
           <VariantPicker
             :model="store.draft?.model ?? null"
@@ -376,6 +379,7 @@ import {
   storySearchHits,
   tagColor,
   tagsOf,
+  toggleFavoriteModel,
   toggleTurnMark,
   turnGraph,
 } from "../state";

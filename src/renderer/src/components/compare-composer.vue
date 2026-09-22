@@ -51,8 +51,11 @@
           <ModelPicker
             :model-value="target.model"
             :models="models"
+            :favorite-models="favoriteModels"
+            :recent-models="recentModels"
             :title="`选择「${target.title}」的模型`"
             @update:model-value="setModel(target.id, $event)"
+            @toggle-favorite="$emit('toggle-favorite', $event)"
           />
           <VariantPicker
             :model="target.model"
@@ -123,19 +126,29 @@ interface CompareTarget {
   running: boolean;
 }
 
-const props = defineProps<{
-  targets: readonly CompareTarget[];
-  models: readonly ModelOption[];
-  allowAttachments: boolean;
-  send: (
-    ids: readonly string[],
-    text: string,
-    models: Readonly<Record<string, ModelChoice | null>>,
-    attachments: PromptAttachment[],
-  ) => Promise<PromptSendResult[]>;
-  abort: (sessionId: string) => Promise<string | null>;
+const props = withDefaults(
+  defineProps<{
+    targets: readonly CompareTarget[];
+    models: readonly ModelOption[];
+    allowAttachments: boolean;
+    /** Starred models for the picker's 常用 group. */
+    favoriteModels?: readonly ModelChoice[];
+    /** Recent hand-picked models for the picker's 最近 group. */
+    recentModels?: readonly ModelChoice[];
+    send: (
+      ids: readonly string[],
+      text: string,
+      models: Readonly<Record<string, ModelChoice | null>>,
+      attachments: PromptAttachment[],
+    ) => Promise<PromptSendResult[]>;
+    abort: (sessionId: string) => Promise<string | null>;
+  }>(),
+  { favoriteModels: () => [], recentModels: () => [] },
+);
+const emit = defineEmits<{
+  "set-model": [sessionId: string, model: ModelChoice | null];
+  "toggle-favorite": [model: ModelChoice];
 }>();
-const emit = defineEmits<{ "set-model": [sessionId: string, model: ModelChoice | null] }>();
 
 const text = ref("");
 const attachments = ref<DraftAttachment[]>([]);

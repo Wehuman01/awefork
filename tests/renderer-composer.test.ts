@@ -445,3 +445,81 @@ describe("pane composer follows the selected session", () => {
     });
   });
 });
+
+/**
+ * Model quick access: hand-picked models feed a small LRU shown as the
+ * picker's 最近 group, starring pins one into 常用, and both ride along on
+ * the composer sidecar like lastModel does.
+ */
+describe("model quick access (常用 / 最近)", () => {
+  it("keeps a variant-free, most-recent-first LRU of hand-picked models", async () => {
+    const h = await bootState({ messages: { s1: [] } });
+
+    h.mod.setPaneModel("s1", { providerId: "oc", modelId: "m1", variant: "high" });
+    h.mod.setPaneModel("s1", { providerId: "oc", modelId: "m2" });
+    // Re-picking m1 moves it back to the front instead of duplicating it.
+    h.mod.setPaneModel("s1", { providerId: "oc", modelId: "m1" });
+    for (let i = 3; i <= 8; i += 1) {
+      h.mod.setPaneModel("s1", { providerId: "oc", modelId: `m${i}` });
+    }
+
+    expect(h.store.recentModels).toEqual([
+      { providerId: "oc", modelId: "m8" },
+      { providerId: "oc", modelId: "m7" },
+      { providerId: "oc", modelId: "m6" },
+      { providerId: "oc", modelId: "m5" },
+      { providerId: "oc", modelId: "m4" },
+    ]);
+  });
+
+  it("a 默认模型 pick seeds neither lastModel nor the LRU", async () => {
+    const h = await bootState({ messages: { s1: [] } });
+
+    h.mod.setPaneModel("s1", null);
+
+    expect(h.store.lastModel).toBeNull();
+    expect(h.store.recentModels).toEqual([]);
+  });
+
+  it("toggles 常用 by provider+model, ignoring the variant", async () => {
+    const h = await bootState({ messages: { s1: [] } });
+
+    h.mod.toggleFavoriteModel({ ...MODEL, variant: "high" });
+    h.mod.toggleFavoriteModel({ providerId: "oc", modelId: "glm-5.3-flash" });
+    expect(h.store.favoriteModels).toEqual([MODEL, { providerId: "oc", modelId: "glm-5.3-flash" }]);
+
+    h.mod.toggleFavoriteModel(MODEL);
+    expect(h.store.favoriteModels).toEqual([{ providerId: "oc", modelId: "glm-5.3-flash" }]);
+  });
+
+  it("persists favorites and recents on the debounced sidecar flush", async () => {
+    const h = await bootState({ messages: { s1: [] } });
+    h.mod.setPaneModel("s1", { ...MODEL, variant: "low" });
+    h.mod.toggleFavoriteModel(MODEL);
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(h.saves).toContainEqual({
+      backend: "opencode",
+      value: expect.objectContaining({
+        favoriteModels: [MODEL],
+        recentModels: [{ providerId: "oc", modelId: "glm-5.3" }],
+      }),
+    });
+  });
+
+  it("restores favorites and recents from the sidecar on boot", async () => {
+    const h = await bootState({
+      composer: {
+        draft: null,
+        paneModels: {},
+        lastModel: null,
+        favoriteModels: [MODEL],
+        recentModels: [MODEL, { providerId: "oc", modelId: "glm-5.3-flash" }],
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.store.favoriteModels).toEqual([MODEL]);
+    expect(h.store.recentModels).toEqual([MODEL, { providerId: "oc", modelId: "glm-5.3-flash" }]);
+  });
+});

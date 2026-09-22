@@ -208,6 +208,10 @@ interface AppState {
    * fork or conversation starts where the last one left off.
    */
   lastModel: ModelChoice | null;
+  /** Models the user starred in a picker; the model list shows them as 常用. */
+  favoriteModels: ModelChoice[];
+  /** Recent hand-picked models, most-recent-first; feeds the picker's 最近. */
+  recentModels: ModelChoice[];
   /** Bumped to ask the canvas to center on a session's latest node. */
   focusRequest: { sessionId: string; nonce: number } | null;
   /**
@@ -298,6 +302,8 @@ const state = reactive<AppState>({
   forkTagAsk: null,
   paneModels: {},
   lastModel: null,
+  favoriteModels: [],
+  recentModels: [],
   focusRequest: null,
   fitRequest: null,
   turnJumpRequest: null,
@@ -2989,7 +2995,7 @@ export function setDraftText(text: string): void {
 export function setDraftModel(model: ModelChoice | null): void {
   if (!state.draft) return;
   state.draft.model = model;
-  rememberLastModel(model);
+  rememberModelPick(model);
 }
 
 /** Swap the draft's reasoning-effort variant, keeping its model. */
@@ -3157,9 +3163,19 @@ function composerSnapshot(): PersistedComposer | null {
     if (model && state.sessions.some((s) => s.id === id)) paneModels[id] = model;
   }
   const draft = plainPersistedDraft();
-  return draft === null && Object.keys(paneModels).length === 0 && state.lastModel === null
+  return draft === null &&
+    Object.keys(paneModels).length === 0 &&
+    state.lastModel === null &&
+    state.favoriteModels.length === 0 &&
+    state.recentModels.length === 0
     ? null
-    : { draft, paneModels, lastModel: plainModel(state.lastModel) };
+    : {
+        draft,
+        paneModels,
+        lastModel: plainModel(state.lastModel),
+        favoriteModels: state.favoriteModels.map(plainQuickModel),
+        recentModels: state.recentModels.map(plainQuickModel),
+      };
 }
 
 function scheduleComposerPersist(): void {
@@ -3207,6 +3223,14 @@ watch(
   () => scheduleComposerPersist(),
   { deep: true },
 );
+watch(
+  () => state.favoriteModels,
+  () => scheduleComposerPersist(),
+);
+watch(
+  () => state.recentModels,
+  () => scheduleComposerPersist(),
+);
 
 /**
  * Bring back the unsent draft and pane model picks of the active backend
@@ -3231,6 +3255,8 @@ async function restoreComposer(): Promise<void> {
     }
     state.paneModels = paneModels;
     state.lastModel = persisted?.lastModel ?? null;
+    state.favoriteModels = persisted?.favoriteModels ?? [];
+    state.recentModels = persisted?.recentModels ?? [];
     const draft = persisted?.draft ?? null;
     // An empty draft is nothing to hand back; a fresh openDraft is better.
     if (draft && draft.text.trim() !== "") {
@@ -3508,16 +3534,45 @@ export async function sendPrompt(
 /** Remember the model the pane composer should use for this session's next run. */
 export function setPaneModel(sessionId: string, model: ModelChoice | null): void {
   state.paneModels = { ...state.paneModels, [sessionId]: model };
-  rememberLastModel(model);
+  rememberModelPick(model);
+}
+
+/** How many hand-picked models the picker's 最近 group keeps. */
+const RECENT_MODEL_CAP = 5;
+
+/** A model's identity for the quick-access lists: provider + model, no variant. */
+function modelKey(model: ModelChoice): string {
+  return `${model.providerId}:${model.modelId}`;
+}
+
+/** A quick-list entry copy: plain, clone-safe, free of the variant choice. */
+function plainQuickModel(model: ModelChoice): ModelChoice {
+  return { providerId: model.providerId, modelId: model.modelId };
 }
 
 /**
- * Track the last deliberate model pick for future fresh sessions. Only an
- * actual model counts — picking 默认模型 is a per-session choice and must
- * not overwrite what a new session should start from.
+ * Track the last deliberate model pick for future fresh sessions, and feed
+ * the recent-picks LRU behind the picker's 最近 group. Only an actual model
+ * counts — picking 默认模型 is a per-session choice and must not overwrite
+ * what a new session should start from.
  */
-function rememberLastModel(model: ModelChoice | null): void {
-  if (model) state.lastModel = { ...model };
+function rememberModelPick(model: ModelChoice | null): void {
+  if (!model) return;
+  state.lastModel = { ...model };
+  const rest = state.recentModels.filter((m) => modelKey(m) !== modelKey(model));
+  state.recentModels = [plainQuickModel(model), ...rest].slice(0, RECENT_MODEL_CAP);
+}
+
+/**
+ * Star or unstar a model for the picker's 常用 group. Identity is the same
+ * provider+model pair the recent list keys on — the reasoning variant is a
+ * per-run choice, not part of what "a model" means here.
+ */
+export function toggleFavoriteModel(model: ModelChoice): void {
+  const pinned = state.favoriteModels.some((m) => modelKey(m) === modelKey(model));
+  state.favoriteModels = pinned
+    ? state.favoriteModels.filter((m) => modelKey(m) !== modelKey(model))
+    : [...state.favoriteModels, plainQuickModel(model)];
 }
 
 /** Ask the canvas to fit the whole working set in view (command palette). */
@@ -3827,6 +3882,8 @@ function resetWorkspace(): void {
   // Backend-specific like the draft: the incoming backend's own composer
   // sidecar refills it during boot.
   state.lastModel = null;
+  state.favoriteModels = [];
+  state.recentModels = [];
   state.focusRequest = null;
   state.composerFocusRequest = null;
   state.fitRequest = null;

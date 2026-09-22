@@ -23,20 +23,38 @@
           :class="{ hl: highlighted === -1 }"
           @click="pick(null)"
         >
-          <span class="mp-name">默认模型</span>
-          <span class="mp-sub">agent 配置的默认</span>
+          <span class="mp-main">
+            <span class="mp-name">默认模型</span>
+            <span class="mp-sub">agent 配置的默认</span>
+          </span>
         </button>
-        <button
-          v-for="(m, i) in filtered"
-          :key="`${m.providerId}:${m.modelId}`"
-          type="button"
-          class="mp-item"
-          :class="{ hl: highlighted === i }"
-          @click="pickChoice(m)"
+        <template
+          v-for="(entry, i) in entries"
+          :key="entry.kind === 'header' ? `h${i}` : `r${entry.index}`"
         >
-          <span class="mp-name">{{ m.modelName }}</span>
-          <span class="mp-sub">{{ m.providerName }} / {{ m.modelId }}</span>
-        </button>
+          <p v-if="entry.kind === 'header'" class="mp-sec">{{ entry.label }}</p>
+          <button
+            v-else
+            type="button"
+            class="mp-item"
+            :class="{ hl: highlighted === entry.index }"
+            @click="pickChoice(entry.option)"
+          >
+            <span class="mp-main">
+              <span class="mp-name">{{ entry.option.modelName }}</span>
+              <span class="mp-sub">{{ entry.option.providerName }} / {{ entry.option.modelId }}</span>
+            </span>
+            <!-- 行本身是 button，星标只能是 span；点击只切收藏，不选模型 -->
+            <span
+              class="mp-star"
+              :class="{ on: isFavorite(entry.option) }"
+              role="button"
+              tabindex="-1"
+              :title="isFavorite(entry.option) ? '从常用移除' : '设为常用'"
+              @click.stop="toggleFavorite(entry.option)"
+            >{{ isFavorite(entry.option) ? "★" : "☆" }}</span>
+          </button>
+        </template>
         <p v-if="filtered.length === 0" class="mp-empty">没有匹配的模型</p>
       </div>
       </div>
@@ -48,16 +66,26 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { ModelChoice, ModelOption } from "../../../shared/types";
 
-const props = defineProps<{
-  modelValue: ModelChoice | null;
-  models: readonly ModelOption[];
-  title?: string;
+const props = withDefaults(
+  defineProps<{
+    modelValue: ModelChoice | null;
+    models: readonly ModelOption[];
+    /** Starred models, listed first as the 常用 group. */
+    favoriteModels?: readonly ModelChoice[];
+    /** Recent hand-picked models (most-recent-first) for the 最近 group. */
+    recentModels?: readonly ModelChoice[];
+    title?: string;
+  }>(),
+  { favoriteModels: () => [], recentModels: () => [] },
+);
+const emit = defineEmits<{
+  "update:modelValue": [model: ModelChoice | null];
+  "toggle-favorite": [model: ModelChoice];
 }>();
-const emit = defineEmits<{ "update:modelValue": [model: ModelChoice | null] }>();
 
 const open = ref(false);
 const query = ref("");
-/** -1 = the "agent default" row; otherwise an index into `filtered`. */
+/** -1 = the "agent default" row; otherwise an index into `navRows`. */
 const highlighted = ref(-1);
 const rootEl = ref<HTMLElement | null>(null);
 const btnEl = ref<HTMLElement | null>(null);
@@ -88,6 +116,74 @@ const filtered = computed(() => {
     `${m.modelName} ${m.modelId} ${m.providerName}`.toLowerCase().includes(needle),
   );
 });
+
+/** Catalog lookup for the quick lists: their entries may be stale or starred. */
+const catalogByKey = computed(() => {
+  const map = new Map<string, ModelOption>();
+  for (const m of props.models) map.set(`${m.providerId}:${m.modelId}`, m);
+  return map;
+});
+
+/** 常用 rows：收藏夹里仍在当前 catalog 中的模型，保持收藏顺序。 */
+const favoriteRows = computed(() => {
+  if (query.value.trim() !== "") return [];
+  return props.favoriteModels.flatMap((choice) => {
+    const option = catalogByKey.value.get(`${choice.providerId}:${choice.modelId}`);
+    return option ? [option] : [];
+  });
+});
+
+/** 最近 rows：最近用过、未收藏、仍在 catalog 中的模型。 */
+const recentRows = computed(() => {
+  if (query.value.trim() !== "") return [];
+  const starred = new Set(props.favoriteModels.map((c) => `${c.providerId}:${c.modelId}`));
+  return props.recentModels.flatMap((choice) => {
+    const key = `${choice.providerId}:${choice.modelId}`;
+    if (starred.has(key)) return [];
+    const option = catalogByKey.value.get(key);
+    return option ? [option] : [];
+  });
+});
+
+/** What the keyboard walks: default row (-1) + quick rows + catalog rows. */
+const navRows = computed(() => [...favoriteRows.value, ...recentRows.value, ...filtered.value]);
+
+type Entry =
+  | { kind: "header"; label: string }
+  | { kind: "row"; option: ModelOption; index: number };
+
+/** Rendered list: 常用/最近 groups (search-less only), then the full catalog. */
+const entries = computed<Entry[]>(() => {
+  const list: Entry[] = [];
+  let index = 0;
+  const addRows = (options: readonly ModelOption[]): void => {
+    for (const option of options) {
+      list.push({ kind: "row", option, index });
+      index += 1;
+    }
+  };
+  if (favoriteRows.value.length > 0) {
+    list.push({ kind: "header", label: "常用" });
+    addRows(favoriteRows.value);
+  }
+  if (recentRows.value.length > 0) {
+    list.push({ kind: "header", label: "最近使用" });
+    addRows(recentRows.value);
+  }
+  if (index > 0) list.push({ kind: "header", label: "全部模型" });
+  addRows(filtered.value);
+  return list;
+});
+
+function isFavorite(option: ModelOption): boolean {
+  return props.favoriteModels.some(
+    (c) => c.providerId === option.providerId && c.modelId === option.modelId,
+  );
+}
+
+function toggleFavorite(option: ModelOption): void {
+  emit("toggle-favorite", { providerId: option.providerId, modelId: option.modelId });
+}
 
 function toggle(): void {
   open.value ? close() : show();
@@ -135,14 +231,19 @@ function onSearchKeydown(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    const size = filtered.value.length + 1; // + the default row at -1
+    const size = navRows.value.length + 1; // + the default row at -1
     const current = highlighted.value + 1; // 0 = default row
     const step = event.key === "ArrowDown" ? 1 : -1;
     highlighted.value = ((current + step + size) % size) - 1;
   } else if (event.key === "Enter") {
     event.preventDefault();
-    const hit = highlighted.value >= 0 ? filtered.value[highlighted.value] : undefined;
-    pick(hit ? { providerId: hit.providerId, modelId: hit.modelId } : null);
+    if (highlighted.value === -1) {
+      pick(null);
+      return;
+    }
+    // 星标会即时重排快捷区，索引可能指向旧位置：宁可不动，也不误选默认模型。
+    const hit = navRows.value[highlighted.value];
+    if (hit) pickChoice(hit);
   } else if (event.key === "Escape") {
     close();
   }
@@ -229,8 +330,17 @@ onUnmounted(() => document.removeEventListener("mousedown", onDocMousedown));
   gap: 2px;
 }
 
+.mp-sec {
+  padding: 8px 10px 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+
 .mp-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   text-align: left;
   padding: 6px 10px;
@@ -239,6 +349,11 @@ onUnmounted(() => document.removeEventListener("mousedown", onDocMousedown));
 
 .mp-item.hl {
   background: var(--primary-soft);
+}
+
+.mp-main {
+  min-width: 0;
+  flex: 1;
 }
 
 .mp-name {
@@ -258,6 +373,25 @@ onUnmounted(() => document.removeEventListener("mousedown", onDocMousedown));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mp-star {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-faint);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mp-star:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.mp-star.on {
+  color: var(--primary);
 }
 
 .mp-empty {

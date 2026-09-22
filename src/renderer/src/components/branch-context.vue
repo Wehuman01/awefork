@@ -142,10 +142,13 @@
       <CompareComposer
         :targets="compareTargets"
         :models="store.models"
+        :favorite-models="store.favoriteModels"
+        :recent-models="store.recentModels"
         :allow-attachments="store.capabilities.attachments"
         :send="sendCompare"
         :abort="abortCompare"
         @set-model="setPaneModel"
+        @toggle-favorite="toggleFavoriteModel"
       />
     </template>
 
@@ -274,10 +277,13 @@
         :running="isRunning"
         :model="paneModel"
         :models="store.models"
+        :favorite-models="store.favoriteModels"
+        :recent-models="store.recentModels"
         :allow-attachments="store.capabilities.attachments"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
+        @toggle-favorite="toggleFavoriteModel"
       />
     </template>
   </aside>
@@ -315,6 +321,7 @@ import {
   tagBg,
   tagColor,
   tagsOf,
+  toggleFavoriteModel,
   toggleTurnMark,
   turnGraph,
 } from "../state";

@@ -127,6 +127,16 @@ export interface PersistedComposer {
    * configured default; picking 默认模型 never overwrites the memory.
    */
   lastModel: ModelChoice | null;
+  /**
+   * Models the user starred in a picker, shown above the catalog as the 常用
+   * group. Optional: composer.json written before this field exists has none.
+   */
+  favoriteModels?: ModelChoice[];
+  /**
+   * The user's recent hand-picked models, most-recent-first, feeding the
+   * picker's 最近 group. Auto-maintained and capped; optional like the above.
+   */
+  recentModels?: ModelChoice[];
 }
 
 /** Fork lineage recorded by awefork when it forks a session. */

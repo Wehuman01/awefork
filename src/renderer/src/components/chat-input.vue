@@ -61,8 +61,11 @@
       <ModelPicker
         :model-value="model"
         :models="models"
+        :favorite-models="favoriteModels"
+        :recent-models="recentModels"
         title="用哪个模型继续这条分支"
         @update:model-value="onModelPicked"
+        @toggle-favorite="$emit('toggle-favorite', $event)"
       />
       <VariantPicker :model="model" :models="models" @select="onVariantPicked" />
       <button v-if="!running" type="submit" class="send" :disabled="!text.trim()">发送 ➤</button>
@@ -94,13 +97,18 @@ const props = withDefaults(
     models: readonly ModelOption[];
     /** Backend capability gate: codex takes no attachments at all. */
     allowAttachments?: boolean;
+    /** Starred models for the picker's 常用 group. */
+    favoriteModels?: readonly ModelChoice[];
+    /** Recent hand-picked models for the picker's 最近 group. */
+    recentModels?: readonly ModelChoice[];
   }>(),
-  { allowAttachments: true },
+  { allowAttachments: true, favoriteModels: () => [], recentModels: () => [] },
 );
 const emit = defineEmits<{
   send: [text: string, attachments: PromptAttachment[]];
   abort: [];
   "set-model": [model: ModelChoice | null];
+  "toggle-favorite": [model: ModelChoice];
 }>();
 
 const text = ref("");
