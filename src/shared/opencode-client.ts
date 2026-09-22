@@ -175,6 +175,17 @@ export interface OpencodeClient {
     attachments?: PromptAttachment[],
   ): Promise<void>;
   abort(sessionId: string): Promise<void>;
+  /**
+   * POST /session/:id/permissions/:permissionId — answer a `permission.asked`
+   * ask. "once" allows this run, "always" also saves the matched patterns,
+   * "reject" denies. The server 404s an already-settled ask (another client
+   * replied, or the run aborted); callers treat that as a no-op.
+   */
+  permissionRespond(
+    sessionId: string,
+    permissionId: string,
+    response: "once" | "always" | "reject",
+  ): Promise<void>;
 }
 
 export function createOpencodeClient(
@@ -324,5 +335,12 @@ export function createOpencodeClient(
       );
     },
     abort: (id) => request(endpoint("sessionAbort", { id }), { method: "POST" }),
+    permissionRespond: async (id, permissionId, response) => {
+      await request(endpoint("sessionPermissions", { id, permissionId }), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ response }),
+      });
+    },
   };
 }

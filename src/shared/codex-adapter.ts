@@ -933,7 +933,9 @@ function interactionRequest(
 }
 
 function interactionReply(method: string, response: AgentInteractionResponse): unknown {
-  const allowed = response.decision === "allow";
+  // codex has no "save this rule" reply; its dialogs never offer the button,
+  // so an "always" that somehow arrives lands as a plain allow.
+  const allowed = response.decision === "allow" || response.decision === "always";
   switch (method) {
     case "item/commandExecution/requestApproval":
     case "item/fileChange/requestApproval":

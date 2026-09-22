@@ -12,6 +12,7 @@ import {
   createOpencodeClient,
   type OcMessage,
   type OcPart,
+  OpencodeApiError,
   type OpencodeClient,
 } from "./opencode-client.js";
 import { createSseParser } from "./sse.js";
@@ -58,6 +59,57 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
   let abortController: AbortController | null = null;
   /** Set by subscribe; lets detached prompts report request-level failures. */
   let emitEvent: ((event: AgentEvent) => void) | null = null;
+
+  /**
+   * Permission asks awaiting a reply, keyed by opencode's ask id — the same
+   * id the reply endpoint addresses. A run that ends (or a reply that already
+   * went out) removes its entry, so a late respondInteraction is a no-op
+   * instead of a doomed POST.
+   */
+  const pendingPermissions = new Map<string, { sessionId: string }>();
+  /**
+   * Latest tool part per session: a permission.asked frame carries the rule
+   * patterns but not the command it gates, so the dialog's command line is
+   * correlated from the in-flight tool part that preceded the ask.
+   */
+  const lastToolBySession = new Map<string, { tool: string; command: string | null }>();
+  const permissionAskFact = descriptor.events.permissionAsk;
+  const permissionObserver: PermissionAskObserver | undefined = permissionAskFact
+    ? {
+        onToolSnapshot: (sessionId, part) => {
+          const command = firstString(part, permissionAskFact.commandPaths);
+          lastToolBySession.set(sessionId, {
+            tool:
+              firstString(part, [descriptor.messages.parts.tool.nameField]) ??
+              descriptor.messages.parts.tool.fallbackName,
+            command,
+          });
+        },
+        onPermissionAsk: (frame) => {
+          pendingPermissions.set(frame.requestId, { sessionId: frame.sessionId });
+          const tracked = lastToolBySession.get(frame.sessionId);
+          // Only trust the tracked command when it names the same tool the
+          // ask gates; a stale part from an earlier turn explains nothing.
+          const command =
+            tracked?.command && (!frame.tool || tracked.tool === frame.tool)
+              ? tracked.command
+              : undefined;
+          emitEvent?.({
+            type: "interaction.requested",
+            request: {
+              requestId: frame.requestId,
+              sessionId: frame.sessionId,
+              kind: "opencode-permission",
+              title: "允许这次操作？",
+              detail: `一条 ${frame.permission} 操作匹配了你的"需确认"权限规则，等待你决定。`,
+              permission: frame.permission,
+              patterns: frame.patterns,
+              ...(command ? { command } : {}),
+            },
+          });
+        },
+      }
+    : undefined;
 
   /**
    * Observer-seat file-change recording: every tool-part snapshot frame rides
@@ -302,11 +354,33 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       await client.renameSession(sessionId, title);
     },
 
-    // opencode's stream is one-way (server → client notifications); nothing
-    // it does waits on a reply from the host, so an interaction responder is
-    // meaningless here and an attempt to use one is a programming error.
-    async respondInteraction() {
-      throw new Error("opencode has no server-originated interactions to answer");
+    // opencode's stream is one-way except for permission asks: those arrive
+    // as permission.asked frames and are answered through the permissions
+    // endpoint. Everything else still waits on nothing from this host.
+    async respondInteraction(requestId, response) {
+      const pending = pendingPermissions.get(requestId);
+      // Unknown or already-settled ask: the contract makes this a no-op.
+      if (!pending) return;
+      pendingPermissions.delete(requestId);
+      const reply: "once" | "always" | "reject" =
+        response.decision === "allow"
+          ? "once"
+          : response.decision === "always"
+            ? "always"
+            : "reject";
+      try {
+        await client.permissionRespond(pending.sessionId, requestId, reply);
+      } catch (error) {
+        // An ask the server already settled (another client replied, run
+        // aborted) 404s — the outcome is already decided, not an error.
+        if (error instanceof OpencodeApiError && error.status === 404) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        emitEvent?.({
+          type: "server.error",
+          sessionId: pending.sessionId,
+          message: `权限应答未送达：${detail}`,
+        });
+      }
     },
 
     async abort(sessionId) {
@@ -321,6 +395,13 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
 
       const emit = (event: AgentEvent) => {
         if (!stopped) handler(event);
+        // A finished run settles its asks server-side; forgetting them here
+        // keeps a late reply a no-op instead of a guaranteed-404 POST.
+        if (event.type === "session.idle") {
+          for (const [id, pending] of pendingPermissions) {
+            if (pending.sessionId === event.sessionId) pendingPermissions.delete(id);
+          }
+        }
       };
       emitEvent = emit;
 
@@ -352,7 +433,14 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               const { done, value } = await reader.read();
               if (done) break;
               for (const event of parse(decoder.decode(value, { stream: true }))) {
-                emitToAgentEvent(event, emit, partKinds, descriptor, onToolPart);
+                emitToAgentEvent(
+                  event,
+                  emit,
+                  partKinds,
+                  descriptor,
+                  onToolPart,
+                  permissionObserver,
+                );
               }
             }
           } catch (error) {
@@ -379,6 +467,8 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
 
     dispose() {
       abortController?.abort();
+      pendingPermissions.clear();
+      lastToolBySession.clear();
     },
   };
 }
@@ -396,6 +486,25 @@ interface EventPart {
   time?: { start?: unknown; end?: unknown };
 }
 
+/** One permission.asked frame, normalized off the descriptor's paths. */
+interface PermissionAskFrame {
+  sessionId: string;
+  requestId: string;
+  permission: string;
+  tool: string | null;
+  patterns: string[];
+}
+
+/**
+ * The adapter-side halves of permission asking: tool parts are observed as
+ * they stream (command correlation), asks are surfaced as interactions, and
+ * the reply travels back through respondInteraction.
+ */
+interface PermissionAskObserver {
+  onToolSnapshot: (sessionId: string, part: unknown) => void;
+  onPermissionAsk: (frame: PermissionAskFrame) => void;
+}
+
 /**
  * Frame-to-AgentEvent translation. The names and shapes come from the
  * descriptor; the part-kind bookkeeping around them is state the data cannot
@@ -409,6 +518,7 @@ function emitToAgentEvent(
   partKinds: Map<string, "text" | "thinking">,
   descriptor: OpenCodeDescriptor,
   onToolPart?: (sessionId: string, messageId: string, part: unknown) => void,
+  permissionObserver?: PermissionAskObserver,
 ): void {
   const props = event.properties;
   const { events } = descriptor;
@@ -422,11 +532,34 @@ function emitToAgentEvent(
   // Fork creation replays message.updated for every copied message, so this
   // frame can NOT mean "a run started" — running state is driven by the
   // status/idle frames. Nothing else needs it: idle refreshes messages.
+  // permission.replied rides the same list: an ask answered elsewhere (the
+  // TUI, auto mode) settles server-side and the renderer's own cleanup
+  // (idle frame or the 30 s auto-deny) retires the dialog.
   if (events.ignore.includes(event.type)) return;
 
   if (events.idle.includes(event.type)) {
     const id = sessionId();
     if (id) emit({ type: "session.idle", sessionId: id });
+    return;
+  }
+
+  const ask = events.permissionAsk;
+  if (ask && event.type === ask.name) {
+    const id = sessionId();
+    const requestId = firstString(props, [ask.idPath]);
+    if (id && requestId) {
+      const rawPatterns = readPath(props, ask.patternsPath);
+      const tool = firstString(props, [ask.toolPath]);
+      permissionObserver?.onPermissionAsk({
+        sessionId: id,
+        requestId,
+        permission: firstString(props, [ask.permissionPath]) ?? "",
+        tool: tool ?? null,
+        patterns: Array.isArray(rawPatterns)
+          ? rawPatterns.filter((p): p is string => typeof p === "string" && p !== "")
+          : [],
+      });
+    }
     return;
   }
 
@@ -469,6 +602,12 @@ function emitToAgentEvent(
       const id = sessionId();
       const messageId = firstString(props, events.messageIdPaths);
       if (id && messageId) onToolPart(id, messageId, part);
+    }
+    // The permission tracker also watches tool parts — a later ask frame
+    // names no command, so this is where the correlation comes from.
+    if (permissionObserver && partId && !kind) {
+      const id = sessionId();
+      if (id) permissionObserver.onToolSnapshot(id, part);
     }
 
     const id = sessionId();

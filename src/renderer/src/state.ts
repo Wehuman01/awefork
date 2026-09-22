@@ -1502,11 +1502,13 @@ export function respondInteraction(
   const label =
     response.decision === "allow"
       ? "允许交互请求"
-      : response.decision === "deny"
-        ? "拒绝交互请求"
-        : response.decision === "cancel"
-          ? "取消交互请求"
-          : "回答交互问题";
+      : response.decision === "always"
+        ? "总是允许交互请求"
+        : response.decision === "deny"
+          ? "拒绝交互请求"
+          : response.decision === "cancel"
+            ? "取消交互请求"
+            : "回答交互问题";
   void window.awefork
     .respondInteraction(backend, request.requestId, response)
     .then(() => {

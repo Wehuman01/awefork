@@ -4369,8 +4369,21 @@ code.md-code {
   box-shadow: var(--shadow-pop);
 }
 
+/* opencode's rule-save reply: same family as allow, visually quieter so the
+ * one-shot allow stays the default muscle memory. */
+.interaction-always {
+  background: var(--panel);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+}
+
 .interaction-timeout {
   margin-top: 12px;
+  text-align: right;
+}
+
+.interaction-queue {
+  margin-top: 4px;
   text-align: right;
 }
 

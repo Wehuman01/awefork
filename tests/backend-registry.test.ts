@@ -643,11 +643,11 @@ describe("interaction replies route by backend", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("keeps opencode's interaction responder an explicit unsupported error", async () => {
+  it("treats opencode's reply for an unknown permission id as a no-op, like codex", async () => {
     mocks.ensureOpencodeServer.mockResolvedValue({ baseUrl: "http://127.0.0.1:1" });
     const adapter = await registry.get("opencode");
-    await expect(adapter.respondInteraction("any", { decision: "deny" })).rejects.toThrow(
-      "opencode has no server-originated interactions to answer",
-    );
+    // No permission.asked preceded it, so nothing is pending and nothing is
+    // POSTed — the contract makes an unknown id a silent no-op.
+    await expect(adapter.respondInteraction("any", { decision: "deny" })).resolves.toBeUndefined();
   });
 });

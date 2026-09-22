@@ -24,7 +24,7 @@ export interface AgentCapabilities {
   readonly attachments: boolean;
 }
 
-/** REST paths; `{id}` / `{messageId}` are interpolated by the client. */
+/** REST paths; `{id}` / `{messageId}` / `{permissionId}` are interpolated by the client. */
 export interface AgentEndpoints {
   readonly sessions: string;
   readonly session: string;
@@ -32,6 +32,7 @@ export interface AgentEndpoints {
   readonly sessionMessage: string;
   readonly sessionFork: string;
   readonly sessionAbort: string;
+  readonly sessionPermissions: string;
   readonly projects: string;
   readonly providers: string;
   readonly events: string;
@@ -121,6 +122,26 @@ export interface AgentPartDeltaEvent {
 }
 
 /**
+ * A mid-run permission ask (opencode's `permission.asked`: a tool call hit an
+ * "ask" rule in the user's permission config). Optional — a descriptor
+ * without this section drops the frames; awefork then behaves like the TUI
+ * without a terminal: the turn waits until the user answers elsewhere.
+ */
+export interface AgentPermissionAskEvent {
+  readonly name: string;
+  /** Dot-path to the ask's own id (the reply addresses it). */
+  readonly idPath: string;
+  /** Dot-path to the permission class, e.g. "bash". */
+  readonly permissionPath: string;
+  /** Dot-path to the tool the ask gates, when the frame names one. */
+  readonly toolPath: string;
+  /** Dot-path to the matched rule patterns, e.g. ["rm *"]. */
+  readonly patternsPath: string;
+  /** Candidate dot-paths for the gated command on the in-flight tool part. */
+  readonly commandPaths: readonly string[];
+}
+
+/**
  * Per-turn file-change recording facts: which tools touch files, where the
  * state discriminator and the file path live inside a tool part, and which
  * state values mean the tool finished. Optional — a descriptor without this
@@ -143,6 +164,8 @@ export interface AgentEvents {
   readonly status: AgentStatusEvent;
   readonly partSnapshot: AgentPartSnapshotEvent;
   readonly partDelta: AgentPartDeltaEvent;
+  /** Present = mid-run permission asks surface as answerable dialogs. */
+  readonly permissionAsk?: AgentPermissionAskEvent;
   readonly sessionIdPaths: readonly string[];
   readonly messageIdPaths: readonly string[];
 }
@@ -229,6 +252,17 @@ function dotPathsAt(value: unknown, where: string): string[] {
     }
     return path;
   });
+}
+
+/** A single dot-path; same segment rules as dotPathsAt. */
+function singlePathAt(value: unknown, where: string): string {
+  const path = stringAt(value, where);
+  for (const segment of path.split(".")) {
+    if (segment === "" || FORBIDDEN_SEGMENTS.has(segment)) {
+      throw new DescriptorSchemaError(`${where}: bad path segment "${segment}"`);
+    }
+  }
+  return path;
 }
 
 function section(value: unknown, key: string, where: string): Record<string, unknown> {
@@ -327,6 +361,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     "sessionMessage",
     "sessionFork",
     "sessionAbort",
+    "sessionPermissions",
     "projects",
     "providers",
     "events",
@@ -383,6 +418,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       "status",
       "partSnapshot",
       "partDelta",
+      "permissionAsk",
       "sessionIdPaths",
       "messageIdPaths",
     ],
@@ -409,6 +445,25 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     ["name", "field", "textFieldValue", "partIdField", "deltaField"],
     "events.partDelta",
   );
+
+  // Optional section: present = permission asks surface as dialogs.
+  let permissionAsk: AgentPermissionAskEvent | undefined;
+  if (events.permissionAsk !== undefined) {
+    const ask = objectAt(events.permissionAsk, "events.permissionAsk");
+    onlyKeys(
+      ask,
+      ["name", "idPath", "permissionPath", "toolPath", "patternsPath", "commandPaths"],
+      "events.permissionAsk",
+    );
+    permissionAsk = {
+      name: stringAt(ask.name, "events.permissionAsk.name"),
+      idPath: singlePathAt(ask.idPath, "events.permissionAsk.idPath"),
+      permissionPath: singlePathAt(ask.permissionPath, "events.permissionAsk.permissionPath"),
+      toolPath: singlePathAt(ask.toolPath, "events.permissionAsk.toolPath"),
+      patternsPath: singlePathAt(ask.patternsPath, "events.permissionAsk.patternsPath"),
+      commandPaths: dotPathsAt(ask.commandPaths, "events.permissionAsk.commandPaths"),
+    };
+  }
 
   return {
     kind: "opencode",
@@ -464,6 +519,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
         partIdField: stringAt(partDelta.partIdField, "events.partDelta.partIdField"),
         deltaField: stringAt(partDelta.deltaField, "events.partDelta.deltaField"),
       },
+      ...(permissionAsk ? { permissionAsk } : {}),
       sessionIdPaths: dotPathsAt(events.sessionIdPaths, "events.sessionIdPaths"),
       messageIdPaths: dotPathsAt(events.messageIdPaths, "events.messageIdPaths"),
     },

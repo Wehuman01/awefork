@@ -16,6 +16,7 @@
     "sessionMessage": "/session/{id}/message/{messageId}",
     "sessionFork": "/session/{id}/fork",
     "sessionAbort": "/session/{id}/abort",
+    "sessionPermissions": "/session/{id}/permissions/{permissionId}",
     "projects": "/project",
     "providers": "/config/providers",
     "events": "/event"
@@ -58,7 +59,7 @@
   },
   "events": {
     "refresh": ["session.updated", "session.created", "session.deleted"],
-    "ignore": ["message.updated"],
+    "ignore": ["message.updated", "permission.replied"],
     "idle": ["session.idle"],
     "error": { "name": "session.error", "detailPaths": ["error.message", "error.data.message"] },
     "status": {
@@ -81,6 +82,14 @@
       "deltaField": "delta"
     },
     "sessionIdPaths": ["sessionID", "session.sessionID", "session.id", "part.sessionID"],
-    "messageIdPaths": ["messageID", "part.messageID"]
+    "messageIdPaths": ["messageID", "part.messageID"],
+    "permissionAsk": {
+      "name": "permission.asked",
+      "idPath": "id",
+      "permissionPath": "permission",
+      "toolPath": "tool",
+      "patternsPath": "patterns",
+      "commandPaths": ["command"]
+    }
   }
 }

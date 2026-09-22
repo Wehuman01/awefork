@@ -1,7 +1,14 @@
 <template>
   <div v-if="request" class="interaction-backdrop" role="presentation">
-    <section class="interaction-dialog" role="dialog" aria-modal="true" :aria-label="request.title">
-      <p class="interaction-kicker">Codex 正在等待你的决定</p>
+    <section
+      class="interaction-dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="request.title"
+      tabindex="-1"
+      ref="dialogRoot"
+    >
+      <p class="interaction-kicker">{{ backendLabel }} 正在等待你的决定</p>
       <h2>{{ request.title }}</h2>
       <p v-if="request.detail" class="interaction-detail">{{ request.detail }}</p>
 
@@ -17,6 +24,12 @@
       </template>
       <template v-else-if="request.kind === 'mcp-elicitation'">
         <p class="interaction-meta">服务：{{ request.serverName }}</p>
+      </template>
+      <template v-else-if="request.kind === 'opencode-permission'">
+        <pre v-if="request.command" class="interaction-command">{{ request.command }}</pre>
+        <p class="interaction-meta">
+          匹配规则：{{ request.patterns.length > 0 ? request.patterns.join("、") : request.permission }}
+        </p>
       </template>
       <template v-else-if="request.kind === 'user-input'">
         <label v-for="question in request.questions" :key="question.id" class="interaction-question">
@@ -34,14 +47,22 @@
         <button type="button" class="interaction-deny" @click="deny">拒绝</button>
         <button v-if="request.kind === 'user-input'" type="button" class="interaction-allow" @click="submitAnswers">提交</button>
         <button v-else type="button" class="interaction-allow" @click="allow">允许本次</button>
+        <button
+          v-if="request.kind === 'opencode-permission'"
+          type="button"
+          class="interaction-always"
+          @click="allowAlways"
+        >{{ alwaysButtonLabel }}</button>
       </div>
       <p class="interaction-timeout">{{ secondsLeft }} 秒内未响应将自动拒绝</p>
+      <p v-if="queueDepth > 0" class="interaction-queue">还有 {{ queueDepth }} 个待确认</p>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "vue";
+import { BACKEND_LABELS } from "../../../shared/backend";
 import type { AgentInteractionRequest } from "../../../shared/types";
 import { INTERACTION_TIMEOUT_MS, respondInteraction, store } from "../state";
 
@@ -49,6 +70,22 @@ const request = computed<DeepReadonly<AgentInteractionRequest> | null>(
   () => store.interactions[store.activeBackend]?.[0] ?? null,
 );
 const answers = reactive<Record<string, string>>({});
+/** Dialog root, focused on open so keyboard shortcuts need no pre-click. */
+const dialogRoot = ref<HTMLElement | null>(null);
+
+const backendLabel = computed(() => BACKEND_LABELS[store.activeBackend]);
+const queueDepth = computed(() =>
+  Math.max(0, (store.interactions[store.activeBackend]?.length ?? 0) - 1),
+);
+/** The rule "always" would save — shown on the button so it is never misclicked. */
+const alwaysLabel = computed(() =>
+  request.value?.kind === "opencode-permission" && request.value.patterns.length > 0
+    ? request.value.patterns.join("、")
+    : null,
+);
+const alwaysButtonLabel = computed(() =>
+  alwaysLabel.value ? `总是允许 ${alwaysLabel.value}` : "总是允许",
+);
 
 // Ticks only while a dialog is up, so the auto-deny countdown reads live.
 const now = ref(Date.now());
@@ -67,7 +104,10 @@ watch(
       answers[question.id] = "";
     }
     stopTicker();
-    if (value) ticker = setInterval(() => (now.value = Date.now()), 1000);
+    if (value) {
+      ticker = setInterval(() => (now.value = Date.now()), 1000);
+      dialogRoot.value?.focus();
+    }
   },
   { immediate: true },
 );
@@ -89,8 +129,34 @@ function allow(): void {
   if (request.value) respondInteraction(request.value, { decision: "allow" });
 }
 
+function allowAlways(): void {
+  if (request.value) respondInteraction(request.value, { decision: "always" });
+}
+
 function submitAnswers(): void {
   if (request.value?.kind !== "user-input") return;
   respondInteraction(request.value, { decision: "answers", answers: { ...answers } });
 }
+
+// Keyboard: Esc denies, Enter takes the primary action, Shift+Enter saves the
+// rule. Window-level while the modal is up — nothing else reads these keys.
+function onKeydown(event: KeyboardEvent): void {
+  if (!request.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    deny();
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (event.shiftKey && request.value.kind === "opencode-permission") {
+    allowAlways();
+    return;
+  }
+  if (request.value.kind === "user-input") submitAnswers();
+  else allow();
+}
+
+window.addEventListener("keydown", onKeydown);
+onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 </script>
