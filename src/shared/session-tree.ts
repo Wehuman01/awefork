@@ -83,6 +83,50 @@ export function buildSessionTree(
     .sort((a, b) => latestUpdated(b.roots) - latestUpdated(a.roots));
 }
 
+/** One rendered sidebar row: the session plus the tree facts the row shows. */
+export interface FlatSessionRow {
+  session: SessionSummary;
+  /** Nesting level; 0 for tree roots. */
+  depth: number;
+  /** Direct forks under this session. */
+  childCount: number;
+  /** Every session below this one, at any depth. */
+  descendantCount: number;
+}
+
+/**
+ * Depth-first flattening of one directory's tree for the sidebar list. A
+ * session whose id `isCollapsed` reports folded still renders its own row,
+ * but its whole subtree is skipped — the caller owns collapse state (user
+ * toggles; a search forces everything open). Counts that must ignore
+ * collapse pass `() => false`.
+ */
+export function flattenSessionTree(
+  roots: SessionTreeNode[],
+  isCollapsed: (sessionId: string) => boolean,
+): FlatSessionRow[] {
+  const rows: FlatSessionRow[] = [];
+  const walk = (nodes: SessionTreeNode[], depth: number): void => {
+    for (const node of nodes) {
+      rows.push({
+        session: node.session,
+        depth,
+        childCount: node.children.length,
+        descendantCount: countDescendants(node),
+      });
+      if (!isCollapsed(node.session.id)) walk(node.children, depth + 1);
+    }
+  };
+  walk(roots, 0);
+  return rows;
+}
+
+function countDescendants(node: SessionTreeNode): number {
+  let total = 0;
+  for (const child of node.children) total += 1 + countDescendants(child);
+  return total;
+}
+
 /**
  * Sessions strictly below `rootId` in the fork tree — its children and every
  * deeper descendant. Parents resolve lineage-first, like the canvas graph and

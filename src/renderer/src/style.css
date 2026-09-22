@@ -1053,6 +1053,28 @@ mark.hl {
   background: var(--primary);
 }
 
+/* branch fold caret — every row reserves the column so all depths align */
+.sess-caret {
+  flex: 0 0 14px;
+  width: 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sess-caret:hover {
+  color: var(--primary-deep);
+}
+
+/* leaf rows: an empty same-width spacer keeps the dots on one vertical line */
+.sess-caret.ghost {
+  cursor: default;
+}
+
 .pin-star,
 .sess-archive,
 .sess-confirm {

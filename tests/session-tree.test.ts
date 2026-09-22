@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSessionTree,
   descendantSessionIds,
+  flattenSessionTree,
   pickNeighborId,
   withoutArchived,
 } from "../src/shared/session-tree";
@@ -186,5 +187,54 @@ describe("withoutArchived", () => {
       directories: [{ path: "/other", archivedAt: 2 }],
     };
     expect(withoutArchived(sessions, archive)).toEqual([]);
+  });
+});
+
+describe("flattenSessionTree", () => {
+  // a ── b ── c
+  //      └─ d
+  // e
+  const tree = buildSessionTree(
+    [
+      session({ id: "a", updatedAt: 50 }),
+      session({ id: "b", updatedAt: 40, parentSessionId: "a" }),
+      session({ id: "c", updatedAt: 30, parentSessionId: "b" }),
+      session({ id: "d", updatedAt: 20, parentSessionId: "b" }),
+      session({ id: "e", updatedAt: 10 }),
+    ],
+    {},
+  );
+  const roots = tree[0]?.roots ?? [];
+  const ids = (rows: ReturnType<typeof flattenSessionTree>) => rows.map((r) => r.session.id);
+
+  it("flattens depth-first with depth and tree facts", () => {
+    const rows = flattenSessionTree(roots, () => false);
+    expect(ids(rows)).toEqual(["a", "b", "c", "d", "e"]);
+    const byId = new Map(rows.map((r) => [r.session.id, r]));
+    expect(byId.get("a")?.depth).toBe(0);
+    expect(byId.get("b")?.depth).toBe(1);
+    expect(byId.get("d")?.depth).toBe(2);
+    expect(byId.get("b")?.childCount).toBe(2);
+    expect(byId.get("b")?.descendantCount).toBe(2);
+    expect(byId.get("e")?.childCount).toBe(0);
+    expect(byId.get("e")?.descendantCount).toBe(0);
+  });
+
+  it("a collapsed session keeps its own row but skips its whole subtree", () => {
+    const rows = flattenSessionTree(roots, (id) => id === "b");
+    expect(ids(rows)).toEqual(["a", "b", "e"]);
+    const b = rows.find((r) => r.session.id === "b");
+    expect(b?.childCount).toBe(2);
+    expect(b?.descendantCount).toBe(2);
+  });
+
+  it("an inner fold still shows the outer branches", () => {
+    const rows = flattenSessionTree(roots, (id) => id === "a");
+    expect(ids(rows)).toEqual(["a", "e"]);
+  });
+
+  it("counts ignore folds when the caller passes () => false", () => {
+    const rows = flattenSessionTree(roots, () => false);
+    expect(rows).toHaveLength(5);
   });
 });

@@ -220,14 +220,27 @@
           >＋</button>
         </div>
         <template v-if="isOpen(group)">
-          <template v-for="row in flatSessions(group)" :key="row.session.id">
+          <template v-for="row in visibleRows(group)" :key="row.session.id">
             <div class="sess-row" :class="{ active: row.session.id === selectedId }">
+              <button
+                v-if="row.childCount > 0"
+                type="button"
+                class="sess-caret"
+                :title="
+                  isBranchCollapsed(row.session.id)
+                    ? `展开这个分支（折叠了 ${row.descendantCount} 个子会话）`
+                    : '收起这个分支的子会话'
+                "
+                :aria-expanded="!isBranchCollapsed(row.session.id)"
+                @click.stop="toggleBranch(row.session.id)"
+              >{{ isBranchCollapsed(row.session.id) ? "▸" : "▾" }}</button>
+              <span v-else class="sess-caret ghost" aria-hidden="true"></span>
               <input
                 v-if="renaming?.sessionId === row.session.id"
                 :ref="focusRenameInput"
                 v-model="renameText"
                 class="sess-rename"
-                :style="{ marginLeft: `${8 + row.depth * 14}px` }"
+                :style="{ marginLeft: `${22 + row.depth * 14}px` }"
                 @keydown.enter="onRenameEnter"
                 @keydown.esc.stop="onRenameEsc"
                 @mousedown.stop
@@ -314,7 +327,7 @@
                 :key="hit.messageId"
                 type="button"
                 class="sess-snip"
-                :style="{ paddingLeft: `${8 + row.depth * 14 + 10}px` }"
+                :style="{ paddingLeft: `${22 + row.depth * 14 + 10}px` }"
                 title="定位到这条消息所在的回合"
                 @click="jumpToHit(hit)"
               >
@@ -692,7 +705,12 @@ import {
   parseSearchQuery,
   type ScopeSet,
 } from "../../../shared/search-query";
-import type { SessionGroup, SessionTreeNode } from "../../../shared/session-tree";
+import {
+  type FlatSessionRow,
+  flattenSessionTree,
+  type SessionGroup,
+  type SessionTreeNode,
+} from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { panels, persistLayout } from "../layout";
@@ -1197,14 +1215,15 @@ function beginRename(): void {
   const active = menu.value;
   if (!active) return;
   closeMenu();
-  if (active.fromCanvas) revealSessionRow(active.directory);
+  if (active.fromCanvas) revealSessionRow(active.sessionId, active.directory);
   renaming.value = { sessionId: active.sessionId, title: active.title };
   renameText.value = active.title;
 }
 
 /** A canvas-originated rename edits the sidebar row inline, so that row must
- * be reachable: un-collapse the panel and open the session's directory group. */
-function revealSessionRow(directory: string | null): void {
+ * be reachable: un-collapse the panel, open the session's directory group and
+ * unfold any collapsed branch above it. */
+function revealSessionRow(sessionId: string, directory: string | null): void {
   const panel = panels.sidebar;
   if (panel.collapsed) {
     panel.collapsed = false;
@@ -1214,6 +1233,7 @@ function revealSessionRow(directory: string | null): void {
   if (directory && !isDirOpen(directory)) {
     expandedOverride.value = { ...expandedOverride.value, [directory]: true };
   }
+  expandAncestorsOf(sessionId);
 }
 
 function cancelRename(): void {
@@ -1534,7 +1554,7 @@ function beginDirCreate(): void {
  * items apply: archiving needs rows to hide, removal empties the group. */
 function dirSessionCount(directory: string): number {
   const group = sessionGroups.value.find((g) => g.directory === directory);
-  return group ? flatSessions(group).length : 0;
+  return group ? flattenSessionTree(group.roots, () => false).length : 0;
 }
 
 /** Only offered on empty groups: forgetting the registration hides the row,
@@ -1701,25 +1721,63 @@ const visibleGroups = computed<SessionGroup[]>(() => {
   );
 });
 
-interface SessionRow {
-  session: SessionTreeNode["session"];
-  depth: number;
+// ── branch collapse (折叠 fork 子树) ────────────────────────────────
+
+/** Session ids whose subtree the user folded; everything renders open by default. */
+const collapsedBranches = ref<Record<string, true>>({});
+
+/** While a search is active the whole tree must be walkable, so folds are ignored. */
+function isBranchCollapsed(sessionId: string): boolean {
+  return !queryActive.value && collapsedBranches.value[sessionId] === true;
 }
 
-function flatSessions(group: SessionGroup): SessionRow[] {
-  const rows: SessionRow[] = [];
-  const walk = (nodes: SessionTreeNode[], depth: number): void => {
+function toggleBranch(sessionId: string): void {
+  const next = { ...collapsedBranches.value };
+  if (isBranchCollapsed(sessionId)) delete next[sessionId];
+  else next[sessionId] = true;
+  collapsedBranches.value = next;
+}
+
+/** Ancestor chain of a session within the sidebar tree, nearest parent first. */
+function ancestorsInTree(sessionId: string): string[] {
+  const path: string[] = [];
+  const visit = (nodes: SessionTreeNode[]): boolean => {
     for (const node of nodes) {
-      rows.push({ session: node.session, depth });
-      walk(node.children, depth + 1);
+      path.push(node.session.id);
+      if (node.session.id === sessionId) return true;
+      if (visit(node.children)) return true;
+      path.pop();
     }
+    return false;
   };
-  walk(group.roots, 0);
-  return rows;
+  for (const group of sessionGroups.value) {
+    if (visit(group.roots)) return [...path];
+  }
+  return [];
 }
 
+/** Unfold every branch between the root and this session so its row is visible. */
+function expandAncestorsOf(sessionId: string): void {
+  const ancestors = ancestorsInTree(sessionId);
+  if (ancestors.every((id) => collapsedBranches.value[id] !== true)) return;
+  const next = { ...collapsedBranches.value };
+  for (const id of ancestors) delete next[id];
+  collapsedBranches.value = next;
+}
+
+// Opening a session from the canvas or favorites must reveal its row: unfold
+// whatever ancestors the user had folded.
+watch(selectedId, (id) => {
+  if (id) expandAncestorsOf(id);
+});
+
+function visibleRows(group: SessionGroup): FlatSessionRow[] {
+  return flattenSessionTree(group.roots, isBranchCollapsed);
+}
+
+/** Directory and branch counts ignore folds — the badges show every session. */
 function countSessions(group: SessionGroup): number {
-  return flatSessions(group).length;
+  return flattenSessionTree(group.roots, () => false).length;
 }
 
 function selectDirectory(directory: string): void {
