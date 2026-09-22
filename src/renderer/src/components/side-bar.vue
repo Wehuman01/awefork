@@ -1216,6 +1216,7 @@ function beginRename(): void {
   if (!active) return;
   closeMenu();
   if (active.fromCanvas) revealSessionRow(active.sessionId, active.directory);
+  renameInputArmed = true;
   renaming.value = { sessionId: active.sessionId, title: active.title };
   renameText.value = active.title;
 }
@@ -1602,13 +1603,19 @@ function onRestoreSession(sessionId: string): void {
   void restoreSession(sessionId);
 }
 
-/** Function ref: focus (and select) the rename input the moment it mounts. */
+/** The rename input mounts focused with its text selected, so typing replaces
+ * the old title. The function ref re-fires on every patch while v-model types
+ * into it, so it is armed once per rename — otherwise each keystroke would
+ * re-select everything just typed. select() waits one tick because v-model's
+ * mounted hook re-assigns el.value after this ref and would collapse it. */
+let renameInputArmed = false;
+
 function focusRenameInput(el: unknown): void {
   const input = el as HTMLInputElement | null;
-  if (input) {
-    input.focus();
-    input.select();
-  }
+  if (!input || !renameInputArmed) return;
+  renameInputArmed = false;
+  input.focus();
+  void nextTick(() => input.select());
 }
 
 function onDocMousedown(): void {
