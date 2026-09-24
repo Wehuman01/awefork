@@ -1,7 +1,7 @@
 <template>
   <div
     class="cell"
-    :class="[side, { blank: !cell, open: cell && open }]"
+    :class="[side, { blank: !cell, open }]"
     @click="onCellClick"
   >
     <template v-if="cell">
@@ -64,22 +64,33 @@ export interface DisplayCell {
 </script>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { formatDuration, formatTokens } from "../format";
 import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
   cell: DisplayCell | null;
   side: "left" | "right";
-  open: boolean;
 }>();
-
-const emit = defineEmits<{ toggle: [] }>();
 
 const flagTitle = computed(() =>
   props.cell?.flag === "inherited"
     ? "母本复制来的回合 — 这条分支的起点上下文"
     : "上游分支的回合 — 通往这条分支的路上经过的岔路",
+);
+
+/**
+ * Folded/open lives in the card itself: a click flips only this card, so one
+ * column's expansion can never move the other's. Rows are keyed by position,
+ * so a slot can be reused for a different card when the plan rebuilds — that
+ * card starts folded rather than inheriting the previous one's state.
+ */
+const open = ref(false);
+watch(
+  () => props.cell?.id,
+  () => {
+    open.value = false;
+  },
 );
 
 /**
@@ -91,7 +102,7 @@ function onCellClick(event: MouseEvent): void {
   const target = event.target as HTMLElement | null;
   if (target?.closest("a, button")) return;
   if (window.getSelection()?.toString()) return;
-  if (props.cell) emit("toggle");
+  if (props.cell) open.value = !open.value;
 }
 
 function previewOf(cell: DisplayCell): string {

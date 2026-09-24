@@ -88,8 +88,6 @@
                 :key="side"
                 :cell="row[side]"
                 :side="side"
-                :open="openCells.has(row[side] ? row[side].id : '')"
-                @toggle="row[side] && toggleCell(row[side].id)"
               />
             </div>
           </div>
@@ -132,8 +130,6 @@
                 :key="cell.id"
                 :cell="cell"
                 :side="sideOf(ci)"
-                :open="openCells.has(cell.id)"
-                @toggle="toggleCell(cell.id)"
               />
             </div>
           </div>
@@ -531,15 +527,6 @@ function badgeOf(node: TurnNode): number {
   return count;
 }
 
-const openCells = ref(new Set<string>());
-
-function toggleCell(id: string): void {
-  const next = new Set(openCells.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  openCells.value = next;
-}
-
 const prefixOpen = ref(false);
 
 const pagerPos = ref(0);
@@ -581,7 +568,6 @@ watch(
   () => {
     pagerPos.value = 0;
     prefixOpen.value = false;
-    openCells.value = new Set();
     pairEls.clear();
     colEls.clear();
   },
