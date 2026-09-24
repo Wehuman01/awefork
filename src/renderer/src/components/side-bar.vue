@@ -226,6 +226,7 @@
                 v-if="row.childCount > 0"
                 type="button"
                 class="sess-caret"
+                :disabled="queryActive"
                 :title="
                   isBranchCollapsed(row.session.id)
                     ? `展开这个分支（折叠了 ${row.descendantCount} 个子会话）`
@@ -1739,19 +1740,21 @@ function isBranchCollapsed(sessionId: string): boolean {
 }
 
 function toggleBranch(sessionId: string): void {
+  // Flip the stored fold, not the search-masked visibility — isBranchCollapsed
+  // is forced false during a search, which would make every click a "fold".
   const next = { ...collapsedBranches.value };
-  if (isBranchCollapsed(sessionId)) delete next[sessionId];
+  if (next[sessionId] === true) delete next[sessionId];
   else next[sessionId] = true;
   collapsedBranches.value = next;
 }
 
-/** Ancestor chain of a session within the sidebar tree, nearest parent first. */
+/** Strict ancestors of a session within the sidebar tree, root-first. */
 function ancestorsInTree(sessionId: string): string[] {
   const path: string[] = [];
   const visit = (nodes: SessionTreeNode[]): boolean => {
     for (const node of nodes) {
-      path.push(node.session.id);
       if (node.session.id === sessionId) return true;
+      path.push(node.session.id);
       if (visit(node.children)) return true;
       path.pop();
     }
@@ -1763,7 +1766,9 @@ function ancestorsInTree(sessionId: string): string[] {
   return [];
 }
 
-/** Unfold every branch between the root and this session so its row is visible. */
+/** Unfold every branch between the root and this session so its row is
+ * visible — the session's own fold hides its children, not itself, so it
+ * must survive the reveal. */
 function expandAncestorsOf(sessionId: string): void {
   const ancestors = ancestorsInTree(sessionId);
   if (ancestors.every((id) => collapsedBranches.value[id] !== true)) return;

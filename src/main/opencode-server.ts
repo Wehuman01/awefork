@@ -161,7 +161,10 @@ export async function resolveSpawnEnv(
   shellEnvProbe: () => Promise<Record<string, string> | null> = loginShellEnv,
   platform: NodeJS.Platform = process.platform,
 ): Promise<{ PATH?: string; [key: string]: string | undefined }> {
-  const probed = await shellEnvProbe();
+  // The union below joins with ":" — a probed POSIX PATH glued ahead of a
+  // ";"-separated win32 PATH corrupts it (tests simulate win32 on a darwin
+  // host, where the probe otherwise runs).
+  const probed = platform === "win32" ? null : await shellEnvProbe();
   const merged: { PATH?: string; [key: string]: string | undefined } = { ...env };
   if (probed) {
     for (const [key, value] of Object.entries(probed)) {

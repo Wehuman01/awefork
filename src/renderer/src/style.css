@@ -1070,6 +1070,16 @@ mark.hl {
   color: var(--primary-deep);
 }
 
+/* during a search the tree stays fully walkable, so folds don't apply */
+.sess-caret:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.sess-caret:disabled:hover {
+  color: var(--ink-faint);
+}
+
 /* leaf rows: an empty same-width spacer keeps the dots on one vertical line */
 .sess-caret.ghost {
   cursor: default;

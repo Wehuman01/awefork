@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ModelChoice, ModelOption } from "../../../shared/types";
 
 const props = withDefaults(
@@ -147,6 +147,19 @@ const recentRows = computed(() => {
 
 /** What the keyboard walks: default row (-1) + quick rows + catalog rows. */
 const navRows = computed(() => [...favoriteRows.value, ...recentRows.value, ...filtered.value]);
+
+// 星标/取消星标会即时增删快捷区行，索引会整体位移；让高亮跟随模型本身，
+// 而不是死守旧索引（否则 Enter 会选中恰好落到该位置的另一个模型）。
+watch(navRows, (rows, oldRows) => {
+  if (highlighted.value < 0) return;
+  const prev = oldRows?.[highlighted.value];
+  if (!prev) {
+    highlighted.value = -1;
+    return;
+  }
+  const key = `${prev.providerId}:${prev.modelId}`;
+  highlighted.value = rows.findIndex((r) => `${r.providerId}:${r.modelId}` === key);
+});
 
 type Entry =
   | { kind: "header"; label: string }

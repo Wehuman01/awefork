@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { resolveSpawnEnv } from "./opencode-server.js";
 import {
@@ -36,9 +36,11 @@ export interface ZcodeCli {
 /** Candidate .cjs bundle paths, most common first. darwin-only for now. */
 function bundleCandidates(home: string, plat: NodeJS.Platform): string[] {
   if (plat !== "darwin") return [];
+  // POSIX separators on purpose: the layout is darwin's, and tests simulate
+  // darwin from any host (host `join` would emit "\" on Windows).
   return [
     "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
-    join(home, "Applications", "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs"),
+    posix.join(home, "Applications", "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs"),
   ];
 }
 
@@ -85,11 +87,14 @@ export async function resolveZcodeCli(
  * hand it over whenever the file can be located next to the script.
  */
 function builtinProviderEnv(scriptPath: string): Record<string, string> {
-  const dir = dirname(scriptPath);
+  // Same POSIX-separator rule as bundleCandidates: the catalog layout is
+  // part of the darwin bundle, and node's fs accepts "/" on every platform
+  // for an AWEFORK_ZCODE_CLI override.
+  const dir = posix.dirname(scriptPath);
   const candidates = [
-    join(dir, "provider", "zcode-builtin.json"),
-    resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
-    resolve(dir, "../config/provider/zcode-builtin.json"),
+    posix.join(dir, "provider", "zcode-builtin.json"),
+    posix.resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
+    posix.resolve(dir, "../config/provider/zcode-builtin.json"),
   ];
   const found = candidates.find((path) => existsSync(path));
   return found ? { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: found } : {};

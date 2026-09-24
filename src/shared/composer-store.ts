@@ -50,6 +50,11 @@ function sanitizePaneModels(value: unknown): Record<string, ModelChoice> {
   return out;
 }
 
+function sanitizeModelList(value: unknown): ModelChoice[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(sanitizeModel).filter((m): m is ModelChoice => m !== null);
+}
+
 export async function readComposer(filePath: string): Promise<PersistedComposer | null> {
   let raw: string;
   try {
@@ -66,6 +71,8 @@ export async function readComposer(filePath: string): Promise<PersistedComposer 
       draft: sanitizeDraft(v.draft),
       paneModels: sanitizePaneModels(v.paneModels),
       lastModel: sanitizeModel(v.lastModel),
+      favoriteModels: sanitizeModelList(v.favoriteModels),
+      recentModels: sanitizeModelList(v.recentModels),
     };
   } catch {
     return null;

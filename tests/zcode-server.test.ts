@@ -92,6 +92,14 @@ function createFakeChild(overrides: Partial<ChildProcess> = {}): ChildProcess {
   return child;
 }
 
+/**
+ * Only the zcode app-server spawns — killChild() fires a taskkill spawn on
+ * win32, which must not count as a respawn.
+ */
+function zcodeSpawnCount(): number {
+  return mocks.spawn.mock.calls.filter(([command]) => command !== "taskkill").length;
+}
+
 describe("zcode-server", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -143,7 +151,7 @@ describe("zcode-server", () => {
       const [clientA, clientB] = await pending;
 
       // initial spawn + one shared respawn
-      expect(mocks.spawn).toHaveBeenCalledTimes(2);
+      expect(zcodeSpawnCount()).toBe(2);
       expect(clientA).toBe(clientB);
       expect(replacedClients.length).toBe(1);
       expect(replacedClients[0]).toBe(clientB);
@@ -180,7 +188,7 @@ describe("zcode-server", () => {
       await pending;
       // The respawned child must not have been installed — a follow-up client()
       // on a fresh handle (not the stopped one) would spawn again, not adopt it.
-      expect(mocks.spawn).toHaveBeenCalledTimes(2);
+      expect(zcodeSpawnCount()).toBe(2);
       await expect(handle.client()).rejects.toThrow("已停止");
     });
 

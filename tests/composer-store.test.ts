@@ -31,19 +31,41 @@ describe("composer store", () => {
   it("round-trips a draft with attachments and pane models", async () => {
     const path = await tempComposerPath();
     await writeComposer(path, composer);
-    expect(await readComposer(path)).toEqual(composer);
+    expect(await readComposer(path)).toEqual({ ...composer, favoriteModels: [], recentModels: [] });
   });
 
   it("round-trips an empty composer (no draft, no picks)", async () => {
     const path = await tempComposerPath();
     await writeComposer(path, { draft: null, paneModels: {}, lastModel: null });
-    expect(await readComposer(path)).toEqual({ draft: null, paneModels: {}, lastModel: null });
+    expect(await readComposer(path)).toEqual({
+      draft: null,
+      paneModels: {},
+      lastModel: null,
+      favoriteModels: [],
+      recentModels: [],
+    });
   });
 
   it("treats corrupted files as empty", async () => {
     const path = await tempComposerPath();
     await writeFile(path, "not json at all", "utf8");
     expect(await readComposer(path)).toBeNull();
+  });
+
+  it("round-trips starred and recent models", async () => {
+    const path = await tempComposerPath();
+    const composer = {
+      draft: null,
+      paneModels: {},
+      lastModel: null,
+      favoriteModels: [{ providerId: "p", modelId: "m1", variant: null }],
+      recentModels: [
+        { providerId: "p", modelId: "m2", variant: null },
+        { providerId: "q", modelId: "m3", variant: null },
+      ],
+    };
+    await writeComposer(path, composer);
+    expect(await readComposer(path)).toEqual(composer);
   });
 
   it("drops malformed fields instead of failing the whole read", async () => {
@@ -54,6 +76,8 @@ describe("composer store", () => {
         draft: { sessionId: "ses_1", atMessageId: 7, text: "留存的文本", attachments: ["junk"] },
         paneModels: { ses_2: { providerId: "x" }, ses_3: { providerId: "y", modelId: "m" } },
         lastModel: { providerId: "z", modelId: "bad", variant: 3 },
+        favoriteModels: [{ providerId: "p", modelId: "m1" }, "junk"],
+        recentModels: "not a list",
       }),
       "utf8",
     );
@@ -67,6 +91,8 @@ describe("composer store", () => {
       },
       paneModels: { ses_3: { providerId: "y", modelId: "m", variant: null } },
       lastModel: { providerId: "z", modelId: "bad", variant: null },
+      favoriteModels: [{ providerId: "p", modelId: "m1", variant: null }],
+      recentModels: [],
     });
   });
 
@@ -79,7 +105,13 @@ describe("composer store", () => {
 
   it("serializes concurrent writes so the last state wins cleanly", async () => {
     const path = await tempComposerPath();
-    const emptied: PersistedComposer = { draft: null, paneModels: {}, lastModel: null };
+    const emptied: PersistedComposer = {
+      draft: null,
+      paneModels: {},
+      lastModel: null,
+      favoriteModels: [],
+      recentModels: [],
+    };
     // Without serialization both writes race the rename; the queue keeps
     // them ordered so the file never ends up mid-flight.
     await Promise.all([writeComposer(path, composer), writeComposer(path, emptied)]);
