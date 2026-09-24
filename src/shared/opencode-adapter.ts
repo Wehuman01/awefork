@@ -189,9 +189,17 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       const otherWorktrees = projects.filter((p) => p.id !== "global" && p.worktree);
       // One request per worktree, in parallel — the serial loop made every
       // debounced refresh pay the sum of all worktree round-trips. Array
-      // order preserves the later-wins overwrite of duplicate ids.
+      // order preserves the later-wins overwrite of duplicate ids. Each
+      // query is best-effort: a worktree the server cannot read (a macOS
+      // privacy denial under ~/Desktop makes /session?directory=… answer
+      // 500) drops out of this refresh instead of failing every listing.
       const perWorktree = await Promise.all(
-        otherWorktrees.map((project) => client.listSessions(project.worktree)),
+        otherWorktrees.map((project) =>
+          client.listSessions(project.worktree).catch((error: unknown) => {
+            console.warn(`session listing for ${project.worktree} failed: ${String(error)}`);
+            return [];
+          }),
+        ),
       );
       for (const sessions of perWorktree) {
         for (const session of sessions) byId.set(session.id, session);

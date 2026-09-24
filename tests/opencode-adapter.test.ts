@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { opencodeDescriptor, parseOpenCodeDescriptor } from "../src/shared/agent-descriptor";
 import { readLineage } from "../src/shared/lineage-store";
 import { createOpencodeAdapter, sleep } from "../src/shared/opencode-adapter";
@@ -82,6 +82,10 @@ interface FakeState {
   providers: FakeProvider[];
   projects: { id: string; worktree: string }[];
   currentProject: string;
+  /** Directories whose GET /session?directory=… fails with a 500 — the
+   * real server's answer when it cannot stat the directory (e.g. a macOS
+   * privacy denial on a path under ~/Desktop). */
+  failingDirectories?: string[];
   /** SSE frames streamed by GET /event; defaults to one session.idle. */
   eventFrames?: { type: string; properties: Record<string, unknown> }[];
   /** How many leading GET /event requests fail with 503 before streams work. */
@@ -112,6 +116,19 @@ function startFakeServer(state: FakeState): Promise<{
 
       if (method === "GET" && url.pathname === "/session") {
         const directory = url.searchParams.get("directory");
+        if (directory && state.failingDirectories?.includes(directory)) {
+          res.writeHead(500);
+          res.end(
+            JSON.stringify({
+              name: "UnknownError",
+              data: {
+                message: "Unexpected server error. Check server logs for details.",
+                ref: "err_test",
+              },
+            }),
+          );
+          return;
+        }
         const limit = Number(url.searchParams.get("limit") ?? 100);
         const list = directory
           ? state.sessions.filter((s) => s.directory === directory)
@@ -1062,6 +1079,28 @@ describe("opencode adapter", () => {
     const { adapter } = await newAdapter(state);
     const sessions = await adapter.listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["s-other", "s1-sub", "s1"]);
+  });
+
+  it("drops a worktree the server cannot list instead of failing the whole listing", async () => {
+    // One unreadable directory (the real server 500s /session?directory=…
+    // when a macOS privacy denial blocks the stat) must not take the entire
+    // sidebar down — the readable worktrees still list.
+    const state = baseState();
+    state.projects.push({ id: "pd", worktree: "/other" }, { id: "pdenied", worktree: "/denied" });
+    state.sessions.push({
+      id: "s-other",
+      title: "other project",
+      directory: "/other",
+      project: "pd",
+      time: { created: 3, updated: 30 },
+    });
+    state.failingDirectories = ["/denied"];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { adapter } = await newAdapter(state);
+    const sessions = await adapter.listSessions();
+    expect(sessions.map((s) => s.id)).toEqual(["s-other", "s1-sub", "s1"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("/denied"));
+    warn.mockRestore();
   });
 
   it("fetches more than the server's default page size of 100", async () => {
