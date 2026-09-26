@@ -17,7 +17,9 @@
 - **ZCode runs settle after a crash** — when the app-server dies and respawns, event subscriptions are restored, so a running session can reach a final state instead of spinning "运行中" forever.
 - **ZCode crash spawns one replacement, not many** — concurrent requests racing a crashed app-server no longer leak duplicate child processes.
 
-## Unreleased
+## v0.3.4
+
+This release carries everything since v0.3.2 — v0.3.3 was tagged but its release notes never published, so the ZCode alignment work below ships with notes for the first time here.
 
 - **Collapsible fork branches in the sidebar** — fold any session's subtree from the ▸/▾ caret on its row. Folds live in memory only, are suspended while a search is active (the tree stays fully walkable and the caret goes inert), and a session revealed from the canvas, favorites, or rename unfolds only the branches above it — its own fold survives.
 - **Richer compare cells, minimap fork tinting** — comparison cells render real markdown (links and code-copy buttons work; a click on plain space folds the card), each card's fold is its own so one column's expansion can never move the other's, and the minimap tints the selected session's nearest forked families.
@@ -25,6 +27,18 @@
 - **Long runs survive the client's transport timeout** — a prompt whose run passed five minutes died client-side with a misleading "Cannot reach opencode server … (fetch failed)" toast while the server kept executing it. Deadline-less requests now ride an undici agent with the transport timers off, transport-timeout causes get their own message ("the server may still be processing it") instead of claiming the server is unreachable, and every reachability error names its underlying cause (ECONNREFUSED, …) instead of a bare "fetch failed".
 - **One unreadable project no longer blanks the session list** — a worktree the backend cannot list (a macOS privacy denial under ~/Desktop makes the server answer 500) drops out of that refresh with a console warning instead of failing every listing.
 - **Renaming keeps your caret** — the sidebar rename input no longer re-selects its whole text on every keystroke; the initial select-all is unchanged.
+- **ZCode keeps pace with opencode** — the adapter matches opencode's model display, streaming, busy-state forks, and model catalog, speaks the 0.16.5 app-server protocol, runs the CLI under a plain node (not Electron-as-node), and passes `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` through to it.
+- **Backend crashes name their cause** — codex, opencode, and zcode child processes capture stderr and the exit reason, so a dead backend reports what killed it instead of a bare failure.
+- **Idle pi children go home** — a pooled `pi --mode rpc` child exits after two quiet minutes instead of living for the app's lifetime, and the timer only arms once a run settles, so a long run is never killed mid-flight. The pi summary index also re-reads just the session files that changed, and a plain refresh still picks up sessions an external pi CLI added or removed.
+- **The window stays in the app** — `window.open` is denied and navigations away from the renderer are blocked; hash jumps and in-app history still work.
+- **Updates don't orphan backends** — the macOS updater relaunch exits via `app.exit(0)`, which skips before-quit, so backend teardown now runs explicitly before the swap.
+- **Line counts agree with the diff** — created/deleted file totals count lines with git's numstat rule (a single trailing newline opens no line), so the collapsed number equals what the expanded diff shows.
+- **Terminal resume scripts clean up** — the scripts "open in terminal" writes delete themselves once the TUI exits instead of piling up in the temp dir.
+- **Memory and internals** — opencode file-change recorders are released the moment a run settles; codex's memo of never-listed sessions expires after a day instead of haunting the sidebar forever; the SSE parser accepts CRLF frame boundaries; the canvas survives a hand-edited lineage that names a fork cycle; repeat message searches skip re-joining cached session text; the composer draft persists through a watch that no longer traverses the whole draft on every keystroke.
+
+### Install
+
+Installers are attached: `awefork-0.3.4-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.3.4-x64-setup.exe` (Windows x64 — SmartScreen may warn; choose More info → Run anyway).
 
 ## v0.3.1
 
