@@ -3213,11 +3213,11 @@ async function flushComposer(backend: BackendId): Promise<void> {
   }
 }
 
-watch(
-  () => state.draft,
-  () => scheduleComposerPersist(),
-  { deep: true },
-);
+// The draft watch runs on every keystroke, so its source is the persisted
+// snapshot itself: it tracks exactly the fields the sidecar stores (deep
+// watching the whole draft would also re-traverse it on unrelated fields
+// like the canvas nodeId) and fires precisely when their values change.
+watch(plainPersistedDraft, () => scheduleComposerPersist());
 watch(
   () => state.paneModels,
   () => scheduleComposerPersist(),
@@ -3473,8 +3473,7 @@ export async function sendPromptTo(
   attachments: PromptAttachment[] = [],
 ): Promise<PromptSendResult> {
   const backend = state.activeBackend;
-  const generation = workspaceGeneration;
-  if (!text.trim() || generation !== workspaceGeneration) return { sessionId, error: null };
+  if (!text.trim()) return { sessionId, error: null };
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
   appendLocalMessage(sessionId, text, model, attachments);

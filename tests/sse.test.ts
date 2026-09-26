@@ -35,4 +35,15 @@ describe("createSseParser", () => {
     const events = parse('data: {"type":"a",\ndata: "properties":{"x":1}}\n\n');
     expect(events).toEqual([{ type: "a", properties: { x: 1 } }]);
   });
+
+  it("parses CRLF-framed streams, including split chunks and multi-line data", () => {
+    const parse = createSseParser();
+    expect(
+      parse('event: message\r\ndata: {"type":"a","properties":{}}\r\n\r\ndata: {"type":"b",\r'),
+    ).toEqual([{ type: "a", properties: {} }]);
+    // The chunk boundary falls between the CR and LF of a data line's ending.
+    expect(parse('\ndata: "properties":{"x":1}}\r\n\r\n')).toEqual([
+      { type: "b", properties: { x: 1 } },
+    ]);
+  });
 });

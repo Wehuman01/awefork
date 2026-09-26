@@ -21,6 +21,16 @@ import { normalizeVersion } from "./update-check.js";
 
 const RELEASES_DOWNLOAD_BASE = "https://github.com/wehuman01/awefork/releases/download";
 
+/**
+ * Main registers backend teardown here: the macOS relaunch path exits with
+ * app.exit(0), which skips the before-quit event (and thus registry.dispose)
+ * — spawned backends would outlive the swapped-out process.
+ */
+let onUpdaterExit: (() => void) | null = null;
+export function setUpdaterExitHook(handler: () => void): void {
+  onUpdaterExit = handler;
+}
+
 /** Live bytes of an in-flight update download; total is 0 when unknown. */
 export interface UpdateDownloadProgress {
   downloaded: number;
@@ -139,6 +149,8 @@ async function installMacos(
 
   // Start the new process before exiting this one, avoiding the race where a
   // plain re-activate just focuses the dying instance instead of launching it.
+  // app.exit(0) skips before-quit, so tear the backends down explicitly first.
+  onUpdaterExit?.();
   app.relaunch();
   app.exit(0);
   return null;

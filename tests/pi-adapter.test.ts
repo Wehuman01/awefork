@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPiAdapter,
   type PiAdapterNodeSeams,
@@ -47,6 +47,7 @@ interface RpcChild {
   calls: Array<Record<string, unknown>>;
   spawnArgs: string[];
   fire: (event: unknown) => void;
+  killed: boolean;
 }
 
 interface FakePoolOpts {
@@ -74,9 +75,20 @@ function fakeRpcPool(opts: FakePoolOpts = {}) {
       onExit() {
         // A dead child would drop it from the pool; tests keep children alive.
       },
-      kill() {},
+      kill() {
+        killed = true;
+      },
     };
-    const child = { proc, calls, spawnArgs: args, fire: (event: unknown) => eventHandler?.(event) };
+    let killed = false;
+    const child = {
+      proc,
+      calls,
+      spawnArgs: args,
+      fire: (event: unknown) => eventHandler?.(event),
+      get killed() {
+        return killed;
+      },
+    };
     children.push(child);
     return child.proc;
   };
@@ -431,6 +443,116 @@ describe("createPiAdapter summary cache invalidation", () => {
     await adapter.renameSession("s1-mixed", "SDK 改的名");
     const after = await adapter.listSessions();
     expect(after.find((s) => s.id === "s1-mixed")?.title).toBe("SDK 改的名");
+  });
+
+  it("after a prompt, re-reads only the prompted session's file — not the whole store", async () => {
+    const reads: string[] = [];
+    const rpc = fakeRpcPool();
+    const seams: PiAdapterNodeSeams = {
+      async listSessionFiles() {
+        return [FIXTURES["s1-mixed"], FIXTURES["s4-late"]];
+      },
+      async readSessionFile(path) {
+        reads.push(path);
+        return readFile(path, "utf8");
+      },
+      async runNodeScript() {
+        return JSON.stringify({ sessionFile: "/tmp/fake/new.jsonl", sessionId: "made-session-1" });
+      },
+      spawnRpc: rpc.spawn,
+    };
+    const dir = await mkdtemp(join(tmpdir(), "awefork-pi-"));
+    dirs.push(dir);
+    const adapter = createPiAdapter({ ...seams, lineagePath: join(dir, "lineage.json") });
+
+    await adapter.listSessions(); // full index build
+    expect(reads).toHaveLength(2);
+    reads.length = 0;
+
+    await adapter.prompt("s1-mixed", "hi", null);
+    await adapter.listSessions();
+    // Targeted invalidation: the untouched session's file is not re-read.
+    expect(reads).toEqual([FIXTURES["s1-mixed"]]);
+  });
+
+  it("discovers session files an external pi CLI adds after the index was built", async () => {
+    const rpc = fakeRpcPool();
+    // The store starts without s4-late; the external CLI "creates" it later.
+    const installed: string[] = [FIXTURES["s1-mixed"]];
+    const seams: PiAdapterNodeSeams = {
+      async listSessionFiles() {
+        return [...installed];
+      },
+      readSessionFile(path) {
+        return readFile(path, "utf8");
+      },
+      async runNodeScript() {
+        return JSON.stringify({ sessionFile: "/tmp/fake/new.jsonl", sessionId: "made-session-1" });
+      },
+      spawnRpc: rpc.spawn,
+    };
+    const dir = await mkdtemp(join(tmpdir(), "awefork-pi-"));
+    dirs.push(dir);
+    const adapter = createPiAdapter({ ...seams, lineagePath: join(dir, "lineage.json") });
+
+    expect((await adapter.listSessions()).map((s) => s.id)).toEqual(["s1-mixed"]);
+    installed.push(FIXTURES["s4-late"]);
+    // A plain sidebar refresh (no awefork mutation) still surfaces the file.
+    expect((await adapter.listSessions()).map((s) => s.id)).toEqual(["s4-late", "s1-mixed"]);
+
+    installed.splice(0, installed.length);
+    installed.push(FIXTURES["s1-mixed"]);
+    // And a file removed underneath the store drops out of the listing.
+    expect((await adapter.listSessions()).map((s) => s.id)).toEqual(["s1-mixed"]);
+  });
+});
+
+// ── idle child reaping ───────────────────────────────────────────────────────
+
+describe("createPiAdapter idle child reaping", () => {
+  it("kills a pooled child only once its run settled AND the quiet window passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, rpc } = await makeHarness(["s1-mixed"]);
+      await adapter.prompt("s1-mixed", "hi", null);
+      expect(rpc.children).toHaveLength(1);
+
+      // Run settles → the reap timer arms, but the child stays pooled.
+      rpc.children[0]?.fire({ type: "agent_end" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(rpc.children[0]?.killed).toBe(false);
+
+      // A prompt inside the window cancels the reap and keeps the child.
+      await adapter.prompt("s1-mixed", "again", null);
+      expect(rpc.children).toHaveLength(1);
+
+      rpc.children[0]?.fire({ type: "agent_end" });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(rpc.children[0]?.killed).toBe(true);
+
+      // The next prompt spawns a fresh child instead of reusing the reaped one.
+      await adapter.prompt("s1-mixed", "once more", null);
+      expect(rpc.children).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("arms the reap when a prompt request fails — no agent_end will come", async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, rpc } = await makeHarness(["s1-mixed"], { failPrompt: true });
+      await expect(adapter.prompt("s1-mixed", "hi")).rejects.toThrow("boom");
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(rpc.children[0]?.killed).toBe(true);
+
+      // The wedged child is gone from the pool; a retry spawns fresh.
+      await expect(adapter.prompt("s1-mixed", "hi")).rejects.toThrow("boom");
+      expect(rpc.children).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

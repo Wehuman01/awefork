@@ -82,8 +82,13 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
    * listing the id (its first own turn) or the session is deleted here. It
    * lives on the facade, not a home adapter: a crashed app-server rebuilds
    * its adapter, and the rollout on disk keeps the session alive regardless.
+   *
+   * A row the server never picks up (a created session nobody sends to, a
+   * fork cut and abandoned) is dropped after UNLISTED_TTL_MS — without the
+   * expiry it would haunt the sidebar forever, invisible to codex's own TUI.
    */
-  const unlistedSessions = new Map<string, SessionSummary>();
+  const unlistedSessions = new Map<string, { summary: SessionSummary; createdAt: number }>();
+  const UNLISTED_TTL_MS = 24 * 60 * 60 * 1000;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
 
@@ -242,11 +247,15 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
           merged.push(session);
         }
       }
-      // Retire memo rows the server now lists; merge the rest in so a
-      // zero-own-turn session stays selectable between refreshes.
-      for (const [id, summary] of unlistedSessions) {
-        if (seen.has(id)) unlistedSessions.delete(id);
-        else merged.push(summary);
+      // Retire memo rows the server now lists; expire the ones it never
+      // will; merge the rest in so a zero-own-turn session stays selectable
+      // between refreshes.
+      for (const [id, record] of unlistedSessions) {
+        if (seen.has(id) || Date.now() - record.createdAt > UNLISTED_TTL_MS) {
+          unlistedSessions.delete(id);
+        } else {
+          merged.push(record.summary);
+        }
       }
       return merged.sort((a, b) => b.updatedAt - a.updatedAt);
     },
@@ -267,7 +276,7 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     async createSession(directory) {
       // New sessions always belong to the default home.
       const created = await (await defaultAdapter()).createSession(directory);
-      unlistedSessions.set(created.id, created);
+      unlistedSessions.set(created.id, { summary: created, createdAt: Date.now() });
       return created;
     },
 
@@ -278,7 +287,7 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
         importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
       }
       const forked = await (await adapterFor(sessionId)).fork(sessionId, atMessageId, forkOptions);
-      unlistedSessions.set(forked.id, forked);
+      unlistedSessions.set(forked.id, { summary: forked, createdAt: Date.now() });
       return forked;
     },
 
@@ -351,6 +360,7 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       }
       entries.clear();
       owners.clear();
+      unlistedSessions.clear();
     },
   };
 }

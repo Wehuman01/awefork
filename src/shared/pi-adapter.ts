@@ -16,7 +16,8 @@ import type {
  * conversation as an append-only JSONL file under
  * `$PI_CODING_AGENT_DIR/sessions/<encoded-cwd>/`. Executing a prompt taps a
  * separate `pi --mode rpc` child over newline JSON, whose lifecycle this
- * adapter manages and pools. Fork/rename/create run through the SDK's
+ * adapter manages and pools (an idle child is reaped after a quiet window).
+ * Fork/rename/create run through the SDK's
  * SessionManager once, driven by a short ESM script main executes on-node (a
  * long-lived SDK process would duplicate the RPC child). This shared module
  * imports no node built-ins: the seams below are what main wires to real
@@ -58,6 +59,9 @@ const STOP_REASON_TO_FINISH: Record<string, string> = {
   stop: "stop",
   length: "length",
 };
+
+/** An idle RPC child (no run in flight) is reaped after this quiet window. */
+const RPC_IDLE_MS = 120_000;
 
 /** A persisted entry's `message` field — the pi-ai Message union, read-only. */
 interface PiMessage {
@@ -138,6 +142,34 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   const sessions = new Map<string, PiRpcProcess>();
   /** sessionId → an RPC spawn still in flight, so racing prompts share one child. */
   const spawning = new Map<string, Promise<PiRpcProcess>>();
+  /** sessionId → pending idle-reap timer; a new prompt for the session cancels it. */
+  const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const cancelReap = (sessionId: string): void => {
+    const timer = idleTimers.get(sessionId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    idleTimers.delete(sessionId);
+  };
+
+  /**
+   * Reap an idle child after a quiet window. Armed when a run settles, never
+   * when prompt() resolves — that only means the request was ACCEPTED, and a
+   * long run must not be killed mid-flight.
+   */
+  const scheduleReap = (sessionId: string): void => {
+    cancelReap(sessionId);
+    const timer = setTimeout(() => {
+      idleTimers.delete(sessionId);
+      const proc = sessions.get(sessionId);
+      if (!proc) return;
+      sessions.delete(sessionId);
+      proc.kill();
+    }, RPC_IDLE_MS);
+    // A pending reap must not hold a test process (or embedder) open.
+    (timer as { unref?: () => void }).unref?.();
+    idleTimers.set(sessionId, timer);
+  };
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
   const str = (value: unknown): string | undefined =>
@@ -315,13 +347,20 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
 
   /**
-   * The id→file table, rebuilt lazily. `listSessionFiles` is the cheapest
-   * discovery this adapter has; a store mutation flips the dirty flag.
+   * The id→file table, rebuilt lazily. A mutation marks its own session
+   * stale — the next refresh re-parses only those files instead of the whole
+   * store. create/fork add files the mutation cannot name, so they drop the
+   * whole table; listSessions additionally walks the (cheap) file list so
+   * sessions an external pi CLI created still surface on a plain refresh.
    */
   let index = new Map<string, ParsedSession>();
   let indexed = false;
-  const refreshIndex = async (): Promise<Map<string, ParsedSession>> => {
-    if (indexed) return index;
+  /** Session ids whose files changed since they were last parsed. */
+  const stale = new Set<string>();
+  const invalidate = (sessionId: string): void => {
+    if (indexed) stale.add(sessionId);
+  };
+  const rebuildIndex = async (): Promise<void> => {
     index = new Map();
     for (const file of await options.listSessionFiles()) {
       const parsed = await parseSession(file);
@@ -329,6 +368,38 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       if (id) index.set(id, parsed);
     }
     indexed = true;
+    stale.clear();
+  };
+  const refreshIndex = async (discover = false): Promise<Map<string, ParsedSession>> => {
+    if (!indexed) {
+      await rebuildIndex();
+      return index;
+    }
+    for (const id of stale) {
+      const cached = index.get(id);
+      if (!cached) continue;
+      const parsed = await parseSession(cached.file);
+      const freshId = parsed.header?.id;
+      // Always drop the old key: a rewritten file may carry a new id, and a
+      // vanished/unreadable file (no header) must not keep serving stale data.
+      index.delete(id);
+      if (freshId) index.set(freshId, parsed);
+    }
+    stale.clear();
+    if (discover) {
+      const files = await options.listSessionFiles();
+      const live = new Set(files);
+      const known = new Set([...index.values()].map((p) => p.file));
+      for (const [id, parsed] of index) {
+        if (!live.has(parsed.file)) index.delete(id);
+      }
+      for (const file of files) {
+        if (known.has(file)) continue;
+        const parsed = await parseSession(file);
+        const id = parsed.header?.id;
+        if (id) index.set(id, parsed);
+      }
+    }
     return index;
   };
   const requireSession = async (sessionId: string): Promise<ParsedSession> => {
@@ -352,11 +423,12 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
 
   /**
-   * Pool guard: one live RPC child per session, pruned on exit. Cwd is the
-   * session's project dir so pi resolves project config. The child is handed
-   * the exact session on spawn (`--session file`) — a bare `pi --mode rpc`
-   * would CREATE a fresh empty session file on startup, so letting it fall
-   * back to "recent session under cwd" would leak one junk file per prompt.
+   * Pool guard: one live RPC child per session, pruned on exit and reaped
+   * once it has been idle past RPC_IDLE_MS. Cwd is the session's project dir
+   * so pi resolves project config. The child is handed the exact session on
+   * spawn (`--session file`) — a bare `pi --mode rpc` would CREATE a fresh
+   * empty session file on startup, so letting it fall back to "recent
+   * session under cwd" would leak one junk file per prompt.
    */
   const ensureRpc = (sessionId: string, file: string, cwd: string): Promise<PiRpcProcess> => {
     // Concurrent prompts for one session must land on one child: two racing
@@ -365,12 +437,19 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     const inFlight = spawning.get(sessionId);
     if (inFlight) return inFlight;
     const spawnOnce = options.spawnRpc(["--session", file], cwd).then((proc) => {
-      proc.onExit(() => sessions.delete(sessionId));
+      proc.onExit(() => {
+        sessions.delete(sessionId);
+        cancelReap(sessionId);
+      });
       proc.setEventHandler((event) => {
         emitPiEvent(sessionId, event, emit);
         // A finished agent turn appended entries (updatedAt moved); the
-        // summary cache must not keep serving the pre-run branch.
-        if ((event as { type?: unknown } | null)?.type === "agent_end") indexed = false;
+        // summary cache must not keep serving the pre-run branch. The run is
+        // over, so the idle-reap clock starts here.
+        if ((event as { type?: unknown } | null)?.type === "agent_end") {
+          invalidate(sessionId);
+          scheduleReap(sessionId);
+        }
       });
       spawning.delete(sessionId);
       return proc;
@@ -387,7 +466,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
 
     async listSessions() {
       const lineage = await readLineage(lineagePath);
-      const table = await refreshIndex();
+      const table = await refreshIndex(true);
       const summaries: SessionSummary[] = [];
       for (const parsed of table.values()) {
         const summary = mapSession(parsed);
@@ -519,7 +598,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     async renameSession(sessionId, title) {
       const found = await requireSession(sessionId);
       await options.runNodeScript(renameScript(PI_SDK_IMPORT, found.file, title));
-      indexed = false;
+      invalidate(sessionId);
     },
 
     async prompt(sessionId, text, model) {
@@ -527,6 +606,9 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       let proc = sessions.get(sessionId);
       if (!proc) proc = await ensureRpc(sessionId, found.file, found.header?.cwd ?? "");
       sessions.set(sessionId, proc);
+      // A run is starting on this child; a reap armed by the previous run
+      // must not fire mid-flight.
+      cancelReap(sessionId);
       try {
         if (model) {
           await proc.request({
@@ -546,12 +628,15 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         // would leave a phantom run polling forever.
         const detail = error instanceof Error ? error.message : String(error);
         emit({ type: "server.error", sessionId, message: `pi prompt failed: ${detail}` });
+        // A failed acceptance produces no agent_end; without arming the reap
+        // here, a dead or wedged child would sit in the pool until dispose.
+        scheduleReap(sessionId);
         throw error instanceof Error ? error : new Error(detail);
       } finally {
         // The accepted prompt (and any entries a failed run still appended)
         // moved the file; without this the sidebar keeps pre-run summaries
         // until some create/fork happens to invalidate the cache.
-        indexed = false;
+        invalidate(sessionId);
       }
     },
 
@@ -564,6 +649,9 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       // Nothing running means the idle UI's stop button has nothing to stop.
       if (!proc) throw new Error("该会话当前没有正在运行的回合");
       await proc.request({ type: "abort" });
+      // agent_end normally follows an abort and re-arms the reap; arming here
+      // too covers a backend that skips it.
+      scheduleReap(sessionId);
     },
 
     async subscribe(handler) {
@@ -579,6 +667,8 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
 
     dispose() {
       emitEvent = null;
+      for (const timer of idleTimers.values()) clearTimeout(timer);
+      idleTimers.clear();
       for (const proc of sessions.values()) proc.kill();
       sessions.clear();
       spawning.clear();

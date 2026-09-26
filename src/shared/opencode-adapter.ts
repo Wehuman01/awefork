@@ -299,6 +299,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
 
     async deleteSession(sessionId) {
       await client.deleteSession(sessionId);
+      recorders.delete(sessionId);
       await removeFork(options.lineagePath, sessionId);
     },
 
@@ -328,7 +329,15 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       let stopped = false;
 
       const emit = (event: AgentEvent) => {
-        if (!stopped) handler(event);
+        if (!stopped) {
+          handler(event);
+          // A settled run streams no more tool parts; drop the recorder so
+          // its pinned snapshot contents don't accumulate per session. The
+          // in-flight queue is self-contained and still lands on disk; a
+          // later part (replay after reconnect) builds a fresh recorder that
+          // rehydrates from that sidecar.
+          if (event.type === "session.idle") recorders.delete(event.sessionId);
+        }
       };
       emitEvent = emit;
 

@@ -152,7 +152,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
   for (const session of sessions) {
     const parent = parentOf.get(session.id);
     if (!parent) continue;
-    sharedCount.set(session.id, sharedPrefixCount(session.id, parent, options));
+    sharedCount.set(session.id, sharedPrefixCount(session.id, parent, turnsOf, options));
   }
 
   const childrenOf = new Map<string, SessionSummary[]>();
@@ -179,6 +179,10 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
   const nodeBySessionLast = new Map<string, string>();
   const occupied = new Set<string>();
   let maxRow = -1;
+  /** Sessions already placed: a lineage sidecar can name a cycle (hand-edited,
+   *  or a fork recorded both ways), and revisiting would recurse until the
+   *  stack dies. Each session has one parent, so no legitimate visit repeats. */
+  const visitedSessions = new Set<string>();
 
   const findFreeRow = (col: number, from: number): number => {
     const row = freeRowIn(occupied, col, from);
@@ -222,6 +226,8 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     sourceNodeId: string | null,
     edgeKind: GraphEdge["kind"],
   ): void => {
+    if (visitedSessions.has(session.id)) return;
+    visitedSessions.add(session.id);
     const turns = turnsOf.get(session.id) ?? [];
     const fresh = turns.slice(sharedCount.get(session.id) ?? 0);
 
@@ -329,10 +335,13 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
 function sharedPrefixCount(
   sessionId: string,
   parentId: string,
+  turnsOf: ReadonlyMap<string, Turn[]>,
   options: BuildGraphOptions,
 ): number {
-  const childTurns = buildTurns(sessionId, options.messages[sessionId] ?? []);
-  const parentTurns = buildTurns(parentId, options.messages[parentId] ?? []);
+  // turnsOf already holds every session's turns; rebuilding them here (per
+  // fork relationship, on every layout) doubled the graph's parsing cost.
+  const childTurns = turnsOf.get(sessionId) ?? [];
+  const parentTurns = turnsOf.get(parentId) ?? [];
   const parentIds = new Set(parentTurns.map((t) => t.messageId));
 
   let count = 0;

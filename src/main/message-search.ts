@@ -90,8 +90,23 @@ function toRows(messages: ChatMessage[]): BodyRow[] {
  * rows are cached pre-lowered, so every comparison here is a plain
  * case-insensitive `includes`/`indexOf`.
  */
+
+/** rows array → its joined lowered body. Rows identities persist in the
+ *  session cache, so repeat searches (every keystroke) skip the join. */
+const joinedLoweredOf = (() => {
+  const cache = new WeakMap<readonly BodyRow[], string>();
+  return (rows: readonly BodyRow[]): string => {
+    let joined = cache.get(rows);
+    if (joined === undefined) {
+      joined = rows.map((row) => row.lowered).join("\n");
+      cache.set(rows, joined);
+    }
+    return joined;
+  };
+})();
+
 function matchSession(rows: BodyRow[], request: BodySearchRequest): Verdict {
-  const joinedLowered = rows.map((row) => row.lowered).join("\n");
+  const joinedLowered = joinedLoweredOf(rows);
   if (request.excludes.some((term) => joinedLowered.includes(term))) {
     return { matched: false, excluded: true, snippetRows: [] };
   }

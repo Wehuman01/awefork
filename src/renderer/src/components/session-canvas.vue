@@ -878,10 +878,39 @@ const cardObserver = new ResizeObserver((entries) => {
   }
 });
 
+/** Cards this observer still watches; ref(null) sweeps the detached ones. */
+const observedCards = new Set<HTMLElement>();
+let sweepQueued = false;
+
+/** Cards that left the graph (branch switch, delete) are detached elements
+ *  the observer would retain forever; drop them once the patch settles. */
+function sweepDetachedCards(): void {
+  if (sweepQueued) return;
+  sweepQueued = true;
+  queueMicrotask(() => {
+    sweepQueued = false;
+    for (const card of observedCards) {
+      if (!card.isConnected) {
+        observedCards.delete(card);
+        cardObserver.unobserve(card);
+      }
+    }
+  });
+}
+
 /** Template ref for turn cards: observe them and record measured heights. */
 function cardRef(el: unknown): void {
   const card = el as HTMLElement | null;
-  if (card?.dataset.nodeId) cardObserver.observe(card);
+  if (card?.dataset.nodeId) {
+    if (!observedCards.has(card)) {
+      observedCards.add(card);
+      cardObserver.observe(card);
+    }
+    return;
+  }
+  // Vue calls ref(null) on unmount but does not say WHICH element left, and
+  // ResizeObserver cannot enumerate its targets — sweep for the detached ones.
+  sweepDetachedCards();
 }
 
 onMounted(() => {
@@ -894,6 +923,7 @@ onMounted(() => {
 onUnmounted(() => {
   resizeObserver?.disconnect();
   cardObserver.disconnect();
+  observedCards.clear();
   draftObserver.disconnect();
   mmAnimating = false;
   camTarget = null;

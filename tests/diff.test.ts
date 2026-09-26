@@ -1,10 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { lineDiff } from "../src/shared/diff";
+import { countLines, lineDiff } from "../src/shared/diff";
+
+describe("countLines", () => {
+  it("does not count a single trailing newline as a line (git numstat rule)", () => {
+    expect(countLines("")).toBe(0);
+    expect(countLines("a\nb\n")).toBe(2);
+    expect(countLines("a\nb")).toBe(2);
+    // A file of one empty line ("`\n`") is one line, not zero.
+    expect(countLines("\n")).toBe(1);
+    // Only ONE trailing newline folds; a trailing blank line still counts.
+    expect(countLines("a\n\n")).toBe(2);
+  });
+});
 
 describe("lineDiff", () => {
   it("reports nothing for identical content", () => {
     const result = lineDiff("a\nb\nc", "a\nb\nc");
     expect(result).toEqual({ added: 0, removed: 0, hunks: [] });
+  });
+
+  it("does not count a trailing newline as a line on either side", () => {
+    // "a\nb\n" is 2 lines: a file grown by "c\n" reports +1, matching what
+    // countLines-based created/deleted totals report for the same content.
+    const result = lineDiff("a\nb\n", "a\nb\nc\n");
+    expect(result.added).toBe(1);
+    expect(result.removed).toBe(0);
+    expect(lineDiff("", "a\nb\n").added).toBe(2);
+    expect(lineDiff("a\nb\n", "").removed).toBe(2);
   });
 
   it("counts a pure addition", () => {

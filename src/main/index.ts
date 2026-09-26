@@ -5,10 +5,14 @@ import { createBackendRegistry } from "./backend-registry.js";
 import { registerIpc } from "./ipc.js";
 import { registerSaveFileIpc } from "./save-file.js";
 import { readBackendSelection } from "./settings-store.js";
+import { setUpdaterExitHook } from "./update-install.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
 registerIpc(registry);
 registerSaveFileIpc();
+// The updater's macOS relaunch exits via app.exit(0), which never fires
+// before-quit — hook the same teardown so no backend child survives the swap.
+setUpdaterExitHook(() => registry.dispose());
 
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no
@@ -41,6 +45,16 @@ async function createWindow(): Promise<void> {
   // would throw "Object has been destroyed" on the next forwarded event.
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  // The renderer is not a web browser: a compromised or confused page must
+  // not be able to navigate the window to an arbitrary origin or pop one
+  // open. Same-document moves (hash jumps, SPA history) stay allowed.
+  const contents = mainWindow.webContents;
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (event, url) => {
+    if (url.split("#")[0] === contents.getURL().split("#")[0]) return;
+    event.preventDefault();
   });
 
   if (demoMode) {

@@ -92,9 +92,13 @@ describe("shellQuote", () => {
 describe("sessionScriptBody", () => {
   it("runs opencode with -s in the session directory", () => {
     expect(sessionScriptBody(OPENCODE)).toBe(
-      ["#!/bin/sh", "cd '/Users/tester/repo' || exit 1", "exec opencode -s 'ses_abc123'", ""].join(
-        "\n",
-      ),
+      [
+        "#!/bin/sh",
+        'rm -f -- "$0"',
+        "cd '/Users/tester/repo' || exit 1",
+        "exec opencode -s 'ses_abc123'",
+        "",
+      ].join("\n"),
     );
   });
 
@@ -125,6 +129,7 @@ describe("sessionScriptBody", () => {
     expect(sessionScriptBody(PI)).toBe(
       [
         "#!/bin/sh",
+        'rm -f -- "$0"',
         "cd '/Users/tester/repo' || exit 1",
         "exec pi --session '/Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl'",
         "",
@@ -136,6 +141,7 @@ describe("sessionScriptBody", () => {
     expect(sessionScriptBody(ZCODE)).toBe(
       [
         "#!/bin/sh",
+        'rm -f -- "$0"',
         "cd '/Users/tester/repo' || exit 1",
         "exec node '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs' --resume 'sess_abcdef1234567890'",
         "",
@@ -153,7 +159,7 @@ describe("sessionScriptBody", () => {
 });
 
 describe("sessionBatchBody", () => {
-  it("cds with quoting and runs the TUI", () => {
+  it("cds with quoting, runs the TUI, then self-deletes", () => {
     expect(sessionBatchBody(OPENCODE)).toBe(
       [
         "@echo off",
@@ -162,6 +168,7 @@ describe("sessionBatchBody", () => {
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
         "opencode -s ses_abc123",
+        '(goto) 2>nul & del "%~f0"',
         "",
       ].join("\r\n"),
     );
@@ -198,6 +205,7 @@ describe("sessionBatchBody", () => {
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
         'pi --session "/Users/tester/.local/share/pi/sessions/6f0e9b28-1111-2222-3333-444455556666.jsonl"',
+        '(goto) 2>nul & del "%~f0"',
         "",
       ].join("\r\n"),
     );
@@ -212,6 +220,7 @@ describe("sessionBatchBody", () => {
         'cd /d "/Users/tester/repo"',
         "if errorlevel 1 exit /b 1",
         'node "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs" --resume sess_abcdef1234567890',
+        '(goto) 2>nul & del "%~f0"',
         "",
       ].join("\r\n"),
     );

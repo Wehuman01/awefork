@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import type { AgentFileChangesFact } from "./agent-descriptor.js";
-import { lineDiff } from "./diff.js";
+import { countLines, lineDiff } from "./diff.js";
 import {
   emptySessionChanges,
   readSessionChanges,
@@ -271,12 +271,14 @@ export function createFileChangeRecorder(options: FileChangeRecorderOptions): Fi
 
     if (before.kind === "absent" && after.kind === "ok") {
       entry.status = "created";
-      entry.added = after.content === "" ? 0 : after.content.split("\n").length;
+      // countLines shares lineDiff's trailing-newline rule, so the number
+      // here equals the rows the expanded diff later shows.
+      entry.added = countLines(after.content);
       entry.removed = 0;
     } else if (before.kind === "ok" && after.kind === "absent") {
       entry.status = "deleted";
       entry.added = 0;
-      entry.removed = before.content === "" ? 0 : before.content.split("\n").length;
+      entry.removed = countLines(before.content);
     } else if (before.kind === "ok" && after.kind === "ok") {
       const diff = lineDiff(before.content, after.content);
       if (diff.added === 0 && diff.removed === 0) {

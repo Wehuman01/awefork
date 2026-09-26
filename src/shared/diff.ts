@@ -34,6 +34,26 @@ const HUNK_GAP = CONTEXT * 2;
 type Mask = Array<"same" | "removed" | "added">;
 
 /**
+ * Split content with git-numstat semantics: a single trailing newline does
+ * not open a new line, so "a\nb\n" is 2 lines, not 3.
+ */
+function toLines(content: string): string[] {
+  if (content === "") return [];
+  const lines = content.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/**
+ * Logical line count under the same rule as toLines. The recorder's
+ * created/deleted totals use it directly so the collapsed number matches
+ * what lineDiff (which diffs via toLines) reports when the row expands.
+ */
+export function countLines(content: string): number {
+  return toLines(content).length;
+}
+
+/**
  * Longest-common-subsequence walk over two line arrays. Classic DP table;
  * callers stay within LCS_CAP so the table stays bounded. Returns one entry
  * per output row: same / removed (before-only) / added (after-only).
@@ -135,8 +155,8 @@ function toHunks(mask: Mask, before: string[], after: string[]): DiffHunk[] {
 
 export function lineDiff(before: string, after: string): LineDiffResult {
   if (before === after) return { added: 0, removed: 0, hunks: [] };
-  const beforeLines = before === "" ? [] : before.split("\n");
-  const afterLines = after === "" ? [] : after.split("\n");
+  const beforeLines = toLines(before);
+  const afterLines = toLines(after);
 
   // Strip the shared prefix/suffix first: they are usually most of the file,
   // and the LCS only needs to see what actually moved.

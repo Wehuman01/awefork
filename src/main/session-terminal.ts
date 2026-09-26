@@ -9,7 +9,9 @@ const execFileAsync = promisify(execFile);
 
 /**
  * "Jump to this session in the agent's native TUI": write the backend's
- * resume command into a temp script, then hand it to a system terminal.
+ * resume command into a temp script, then hand it to a system terminal. The
+ * script deletes itself once its command has run — without that, every
+ * "open in terminal" click leaves a file in the temp dir forever.
  *
  * Terminal choice follows the user, in this order (macOS):
  *   1. the app registered for `.command` files, when the user picked one
@@ -100,7 +102,14 @@ function batchQuote(value: string): string {
 
 /** The POSIX script a macOS/Linux terminal runs: cd, optional CODEX_HOME, TUI. */
 export function sessionScriptBody(request: SessionTerminalRequest): string {
-  const lines = ["#!/bin/sh", `cd ${shellQuote(request.directory)} || exit 1`];
+  const lines = [
+    "#!/bin/sh",
+    // Self-clean first: the shell already holds the script open, so the
+    // unlink cannot disturb the lines below — and a later `cd` failure
+    // leaves no litter behind either.
+    'rm -f -- "$0"',
+    `cd ${shellQuote(request.directory)} || exit 1`,
+  ];
   if (request.backend === "codex" && request.codexHome !== null) {
     lines.push(`export CODEX_HOME=${shellQuote(request.codexHome)}`);
   }
@@ -141,6 +150,10 @@ export function sessionBatchBody(request: SessionTerminalRequest): string {
           ? `node ${batchQuote(request.zcodeCli ?? "")} --resume ${request.sessionId}`
           : `opencode -s ${request.sessionId}`,
   );
+  // Self-clean once the TUI exits: the parenthesized (goto) closes cmd's
+  // batch context so the running file can be deleted, while /k keeps the
+  // window open afterwards.
+  lines.push('(goto) 2>nul & del "%~f0"');
   return `${lines.join("\r\n")}\r\n`;
 }
 

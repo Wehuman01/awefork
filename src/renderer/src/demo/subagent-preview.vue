@@ -183,7 +183,15 @@
                     >{{ name }}</span
                   >
                 </p>
-                <div class="md pv-report" v-html="drillTask.report"></div>
+                <div class="md pv-report">
+                  <p>{{ drillTask.report.intro }}</p>
+                  <ul>
+                    <li v-for="(item, index) in drillTask.report.items" :key="index">
+                      {{ item }}
+                    </li>
+                  </ul>
+                  <p>{{ drillTask.report.outro }}</p>
+                </div>
               </div>
             </div>
           </article>
@@ -205,7 +213,8 @@ interface TaskView {
   prompt: string;
   result: string;
   thought: string;
-  report: string;
+  /** 抽屉里的只读回报：三段式静态文案，模板循环渲染，不走 v-html。 */
+  report: { intro: string; items: string[]; outro: string };
   tools: string[];
   feed: string[];
   /** 回放里这一段跑多少毫秒。 */
@@ -231,13 +240,15 @@ const TASKS: TaskView[] = [
       "发现 3 个 /api/admin/* 路由未挂 requireRole 中间件，其中 /api/admin/users 普通用户可直接访问（高危），另 2 个为中危。",
     thought:
       "先从路由注册处入手，逐一核对每个端点的中间件链，再交叉比对 permissions.ts 里的角色声明。",
-    report: `<p>扫描了 <code>auth/router.go</code> 注册的全部 12 个路由，逐条核对中间件链：</p>
-<ul>
-<li><code>/api/admin/users</code> — 未挂 <code>requireRole</code>，普通用户可直接访问，<strong>高危</strong></li>
-<li><code>/api/admin/stats</code>、<code>/api/admin/audit</code> — 同样缺失，但仅泄露统计信息，中危</li>
-<li>其余 9 个端点中间件齐全</li>
-</ul>
-<p>修复建议：在路由组上统一注册 <code>requireRole("admin")</code>，一行改动覆盖全部缺口。</p>`,
+    report: {
+      intro: "扫描了 auth/router.go 注册的全部 12 个路由，逐条核对中间件链：",
+      items: [
+        "/api/admin/users — 未挂 requireRole，普通用户可直接访问，高危",
+        "/api/admin/stats、/api/admin/audit — 同样缺失，但仅泄露统计信息，中危",
+        "其余 9 个端点中间件齐全",
+      ],
+      outro: '修复建议：在路由组上统一注册 requireRole("admin")，一行改动覆盖全部缺口。',
+    },
     tools: ["read", "grep", "read", "grep", "read", "read"],
     feed: [
       "read auth/router.go",
@@ -263,12 +274,14 @@ const TASKS: TaskView[] = [
     result:
       "迁移脚本本身正确；但登录成功后的 argon2 回填没有事务保护，进程崩溃会留下半迁移用户，建议补成单事务 UPSERT。",
     thought: "先读迁移脚本确认双写窗口设计，再顺着登录成功路径看回填发生在哪个事务里。",
-    report: `<p><code>migration_007</code> 的双写窗口设计正确，没有发现问题。风险在回填路径：</p>
-<ul>
-<li>登录验证成功后回填 <code>argon2_hash</code> 的 UPDATE 与会话签发不在同一事务</li>
-<li>崩溃窗口内会出现「已验证明文、未写入新哈希」的半迁移用户，下次登录会重复迁移（幂等，但浪费）</li>
-</ul>
-<p>建议：回填改成单事务 UPSERT，失败时整单回滚，登录照常走旧哈希兜底。</p>`,
+    report: {
+      intro: "migration_007 的双写窗口设计正确，没有发现问题。风险在回填路径：",
+      items: [
+        "登录验证成功后回填 argon2_hash 的 UPDATE 与会话签发不在同一事务",
+        "崩溃窗口内会出现「已验证明文、未写入新哈希」的半迁移用户，下次登录会重复迁移（幂等，但浪费）",
+      ],
+      outro: "建议：回填改成单事务 UPSERT，失败时整单回滚，登录照常走旧哈希兜底。",
+    },
     tools: ["read", "read", "grep", "read"],
     feed: [
       "read migration_007_argon2.sql",
@@ -292,13 +305,16 @@ const TASKS: TaskView[] = [
     result:
       "新增 session_test.go，3 个用例全绿。顺带发现登出没有清 redis 黑名单缓存（已在报告中标注，未改代码）。",
     thought: "先看 session/store.go 的三条路径，按行为逐条写用例，最后 go test 收口。",
-    report: `<p>新增 <code>auth/session_test.go</code>：</p>
-<ul>
-<li>滑动过期 — 过期前访问续期 30 分钟 ✓</li>
-<li>登出 — session 键立即删除 ✓</li>
-<li>记住我 — 持久 cookie + 30 天 TTL ✓</li>
-</ul>
-<p><code>go test ./auth/...</code> 全绿。顺带发现：登出未清 redis 黑名单缓存，留存到下个 TTL 窗口，已标注未改。</p>`,
+    report: {
+      intro: "新增 auth/session_test.go：",
+      items: [
+        "滑动过期 — 过期前访问续期 30 分钟 ✓",
+        "登出 — session 键立即删除 ✓",
+        "记住我 — 持久 cookie + 30 天 TTL ✓",
+      ],
+      outro:
+        "go test ./auth/... 全绿。顺带发现：登出未清 redis 黑名单缓存，留存到下个 TTL 窗口，已标注未改。",
+    },
     tools: ["read", "write", "bash"],
     feed: [
       "read session/store.go",
@@ -938,23 +954,16 @@ onUnmounted(() => {
   padding: 12px 14px;
 }
 
-.pv-report :deep(p) {
+.pv-report p {
   margin: 0 0 8px;
 }
 
-.pv-report :deep(ul) {
+.pv-report ul {
   margin: 0 0 8px;
   padding-left: 18px;
 }
 
-.pv-report :deep(li) {
+.pv-report li {
   margin-bottom: 4px;
-}
-
-.pv-report :deep(code) {
-  background: var(--primary-soft);
-  border-radius: 4px;
-  padding: 0 4px;
-  font-size: 11.5px;
 }
 </style>

@@ -201,6 +201,11 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       })
       .then((unsubscribe) => {
         unsubscribers.push(unsubscribe);
+      })
+      .catch((error: unknown) => {
+        // A backend whose event stream cannot start still serves requests;
+        // its runs just won't stream until the adapter is recreated.
+        console.warn(`subscribing to ${backend} events failed: ${String(error)}`);
       });
   };
 
@@ -245,7 +250,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
                 return adapter;
               })
             : // pi: browsing reads the session files directly; RPC children
-              // spawn only while a run is in flight.
+              // live only while a run is in flight plus a short idle window.
               Promise.resolve().then(async () => {
                 const adapter = createPiAdapter({
                   lineagePath: storePaths("pi").lineage,
