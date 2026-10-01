@@ -1641,8 +1641,10 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
     }
     case "session.compressed": {
       // The summarize round-trip finished: the marker row + summary are on the
-      // server. Reload even if the idle frame raced, then toast the outcome —
-      // background backends only refresh (their views aren't on screen).
+      // server. Reload even if the idle frame raced, then toast the outcome.
+      // Background backends need neither: their messages land in the shared
+      // per-session cache through the regular run-settle path (idle →
+      // finishRun), and the index refresh rides the next switch-back.
       if (backend === state.activeBackend) {
         void loadSessionMessages(event.sessionId);
         void refreshSessions();
@@ -3122,7 +3124,7 @@ export function answerCompressAsk(model: ModelChoice | null): void {
 export async function compressSession(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
   if (!state.capabilities.compress) return;
-  if (state.running[sessionId]) {
+  if (isSessionRunning(backend, sessionId)) {
     state.actionError = "会话正在运行，等它结束后再压缩";
     return;
   }
@@ -3142,14 +3144,23 @@ export async function compressSession(sessionId: string): Promise<void> {
     };
   const model = await askCompressModel(sessionId, preset);
   if (!model) return;
-  if (state.running[sessionId]) {
+  if (isSessionRunning(backend, sessionId)) {
     state.actionError = "会话正在运行，等它结束后再压缩";
     return;
   }
   state.actionError = null;
+  // Optimistic running + watchdog, the same contract as a prompt: the
+  // summarize request resolves only when the whole compaction is done, so
+  // without this the session stays actionable until the server's first stream
+  // frame lands (and forever on a build that publishes none) — leaving a
+  // window where a second compress races the first.
+  setRunning(backend, sessionId, true);
+  const sentAt = Date.now();
   try {
     await window.awefork.compressSession(backend, sessionId, plainModel(model) ?? preset);
+    watchCompletion(backend, sessionId, sentAt);
   } catch (error) {
+    setRunning(backend, sessionId, false);
     state.actionError = `压缩失败：${error instanceof Error ? error.message : String(error)}`;
   }
 }
