@@ -101,6 +101,14 @@ export class OpencodeApiError extends Error {
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
+ * Fork is server-side data copying: a ~60 MB session takes ~50 s on the
+ * server (measured), far past the CRUD budget above and with no event stream
+ * to detach onto like prompt/summarize — the caller awaits it. Still finite
+ * so a half-dead server cannot hang the awaiting IPC forever.
+ */
+export const FORK_TIMEOUT_MS = 120_000;
+
+/**
  * undici's transport defaults (300s headers/body) contradict a request with
  * no app deadline: a prompt's response headers arrive only when the whole
  * run finishes, so a run past five minutes used to die client-side with a
@@ -187,7 +195,13 @@ export interface OpencodeClient {
 
 export function createOpencodeClient(
   baseUrl: string,
-  config: { timeoutMs?: number; descriptor?: OpenCodeDescriptor } = {},
+  config: {
+    timeoutMs?: number;
+    /** Overrides FORK_TIMEOUT_MS — for tests; copy time scales with session
+     *  size, so the CRUD-level `timeoutMs` never constrains fork. */
+    forkTimeoutMs?: number;
+    descriptor?: OpenCodeDescriptor;
+  } = {},
 ): OpencodeClient {
   const descriptor = config.descriptor ?? opencodeDescriptor();
   const url = (path: string) => `${baseUrl.replace(/\/$/, "")}${path}`;
@@ -207,6 +221,9 @@ export function createOpencodeClient(
     path: string,
     init?: UndiciRequestInit,
     timeoutMs: number = config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    /** Replaces the default "restart the server" guidance when a timeout on
+     *  this request means "the server may still finish it" (fork). */
+    timeoutHint?: string,
   ): Promise<T> {
     let response: UndiciResponse;
     // Without a deadline, a half-dead server (port open, never responding)
@@ -223,7 +240,9 @@ export function createOpencodeClient(
       if (timer?.aborted) {
         throw new OpencodeApiError(
           0,
-          `opencode API ${path} timed out after ${timeoutMs}ms — the server is not responding. Restart it with: ${serveHint}`,
+          `opencode API ${path} timed out after ${timeoutMs}ms — ${
+            timeoutHint ?? `the server is not responding. Restart it with: ${serveHint}`
+          }`,
         );
       }
       const causeCode = fetchFailureCode(error);
@@ -281,11 +300,18 @@ export function createOpencodeClient(
       return options.filter((o) => o.modelId);
     },
     fork: (id, cutMessageId) =>
-      request<OcSession>(endpoint("sessionFork", { id }), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(cutMessageId ? { messageID: cutMessageId } : {}),
-      }),
+      request<OcSession>(
+        endpoint("sessionFork", { id }),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(cutMessageId ? { messageID: cutMessageId } : {}),
+        },
+        config.forkTimeoutMs ?? FORK_TIMEOUT_MS,
+        // A timed-out fork is often still copying on the server; restarting it
+        // or retrying blind each spawn another 60 MB copy of the same session.
+        "the server may still be copying the session — refresh the session list and confirm no fork appeared before retrying",
+      ),
     createSession: (directory) => {
       const query = new URLSearchParams();
       if (directory) query.set("directory", directory);

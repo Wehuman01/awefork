@@ -1,7 +1,12 @@
 import { createServer, type Server } from "node:http";
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { afterEach, describe, expect, it } from "vitest";
-import { createOpencodeClient, OpencodeApiError } from "../src/shared/opencode-client";
+import {
+  createOpencodeClient,
+  DEFAULT_TIMEOUT_MS,
+  FORK_TIMEOUT_MS,
+  OpencodeApiError,
+} from "../src/shared/opencode-client";
 
 /** Fake endpoints for the timeout behavior only; full API semantics live in
  *  opencode-adapter.test.ts. */
@@ -85,6 +90,48 @@ describe("request timeouts", () => {
     } finally {
       setGlobalDispatcher(previous);
     }
+  });
+
+  it("keeps the CRUD budget off fork — copy time scales with session size", async () => {
+    // 150 ms is past the client budget below but nothing to FORK_TIMEOUT_MS:
+    // a real ~60 MB session copy takes ~50 s server-side, which used to die
+    // on the 15 s default while the server finished the fork anyway.
+    const baseUrl = await listen((req, res) => {
+      if (req.method === "POST" && req.url?.includes("/fork")) {
+        setTimeout(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              id: "s2",
+              title: "",
+              directory: "",
+              time: { created: 0, updated: 0 },
+            }),
+          );
+        }, 150);
+        return;
+      }
+      res.writeHead(404);
+      res.end("{}");
+    });
+    expect(FORK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_TIMEOUT_MS);
+    const client = createOpencodeClient(baseUrl, { timeoutMs: 100 });
+    await expect(client.fork("s1", null)).resolves.toMatchObject({ id: "s2" });
+  });
+
+  it("tells a timed-out fork apart from a dead server", async () => {
+    // Never responds: the copy is still running. The old wording told the
+    // user to restart the server and invite a blind retry — each spawning
+    // another full copy of the session.
+    const baseUrl = await listen(() => {});
+    const client = createOpencodeClient(baseUrl, { forkTimeoutMs: 100 });
+
+    const error: unknown = await client.fork("s1", null).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OpencodeApiError);
+    const message = (error as OpencodeApiError).message;
+    expect(message).toMatch(/timed out after 100ms/);
+    expect(message).toMatch(/confirm no fork appeared before retrying/);
+    expect(message).not.toMatch(/Restart it/);
   });
 });
 
