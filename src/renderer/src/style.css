@@ -3031,6 +3031,9 @@ mark.hl {
 .pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* natural heights: a folded card (or blank slot) must not stretch to an
+     open neighbor's height — the folded list stays compact to browse */
+  align-items: start;
   gap: 8px;
   scroll-margin-top: 8px;
 }
