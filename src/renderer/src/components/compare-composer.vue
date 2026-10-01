@@ -161,10 +161,15 @@ const notice = ref("");
 const textareaEl = ref<HTMLTextAreaElement | null>(null);
 const fileInputEl = ref<HTMLInputElement | null>(null);
 
+// Key on the joined ids, not the array: targets recomputes on every running/
+// model flip, and an array source would wipe error chips mid-run — a failed
+// side's notice must survive until the other side's run settles.
 watch(
-  () => props.targets.map((target) => target.id),
-  (ids) => {
-    selected.value = Object.fromEntries(ids.map((id) => [id, selected.value[id] ?? true]));
+  () => props.targets.map((target) => target.id).join("\n"),
+  () => {
+    selected.value = Object.fromEntries(
+      props.targets.map((target) => [target.id, selected.value[target.id] ?? true]),
+    );
     errors.value = {};
   },
   { immediate: true },
