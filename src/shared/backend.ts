@@ -38,6 +38,12 @@ export interface BackendCapabilities {
   /** Per-turn file-change recording from tool events (observer sidecar). */
   fileChanges: boolean;
   /**
+   * Folding a session's history into a summary through the backend's own
+   * compaction primitive (opencode's summarize). History stays intact — the
+   * backend just carries summary + recent turns on later prompts.
+   */
+  compress: boolean;
+  /**
    * Copying a branch out as a standalone native session. Needs a fork whose
    * parent linkage awefork owns (opencode's sidecar lineage) — a backend
    * that records fork parents itself cannot offer a detached copy.
@@ -82,6 +88,7 @@ export function backendCapabilities(backend: BackendId): BackendCapabilities {
         deleteSession: true,
         attachments: false,
         fileChanges: false,
+        compress: false,
         exportBranch: false,
       };
     case "pi":
@@ -94,6 +101,7 @@ export function backendCapabilities(backend: BackendId): BackendCapabilities {
         deleteSession: false,
         attachments: true,
         fileChanges: false,
+        compress: false,
         exportBranch: false,
       };
     case "zcode":
@@ -105,6 +113,7 @@ export function backendCapabilities(backend: BackendId): BackendCapabilities {
         deleteSession: false,
         attachments: false,
         fileChanges: false,
+        compress: false,
         exportBranch: false,
       };
   }

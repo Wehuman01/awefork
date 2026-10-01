@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Compress a session into a summary (🗜 压缩会话)** — opencode conversations can be folded on demand through the backend's summarize primitive. Right-click a session (🗜 压缩会话…) or use the pane header's 🗜 button; the dialog preselects the branch's current model and lets you swap to a cheaper one before it starts. Non-destructive: history stays fully readable, later prompts just carry summary + the most recent turns. The compaction lands as a 🧹 压缩会话 turn on the canvas and a divider banner in the pane, the summary streams in live like any run, and completion toasts. Capability-gated — codex/pi/zcode hide the affordance (their adapters reject with a named error).
+
 ## v0.3.2 - 2026-09-18
 
 - **Cross-platform backend compatibility** — Windows global npm installs now locate pi's SDK for session creation, forking, and renaming; terminal resume scripts preserve literal `%` and `!` in paths; and macOS discovers ZCode installed in `~/Applications` as well as `/Applications`.

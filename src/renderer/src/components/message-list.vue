@@ -3,7 +3,12 @@
     <slot name="context" />
     <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
       <template v-if="message.role === 'user'">
-        <div class="message-row user-row">
+        <!-- 压缩标记行：不是对话内容，是"此前的历史已折叠为摘要"的分界线 -->
+        <div v-if="message.compaction" class="compaction-banner" role="separator">
+          <span class="compaction-glyph">🧹</span>
+          <span class="compaction-text">以上对话已压缩为摘要 — 历史仍保留，后续对话只携带摘要与最近几轮</span>
+        </div>
+        <div v-else class="message-row user-row">
           <div class="user-body">
             <MarkdownView :source="message.text" user />
             <p v-if="message.attachmentNames.length > 0" class="att-row">

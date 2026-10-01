@@ -1,7 +1,7 @@
 {
   "kind": "opencode",
   "compat": { "min": "1.18.0", "max": "1.19.0" },
-  "capabilities": { "deleteMessage": true, "attachments": true },
+  "capabilities": { "deleteMessage": true, "attachments": true, "compress": true },
   "fork": { "cut": "next-user-exclusive" },
   "fileChanges": {
     "tools": ["edit", "write"],
@@ -16,6 +16,7 @@
     "sessionMessage": "/session/{id}/message/{messageId}",
     "sessionFork": "/session/{id}/fork",
     "sessionAbort": "/session/{id}/abort",
+    "sessionSummarize": "/session/{id}/summarize",
     "projects": "/project",
     "providers": "/config/providers",
     "events": "/event"
@@ -46,6 +47,7 @@
     "parts": {
       "text": { "type": "text", "field": "text", "join": "\n" },
       "thinking": { "type": "reasoning", "field": "text", "join": "\n\n" },
+      "compaction": { "type": "compaction" },
       "tool": { "type": "tool", "nameField": "tool", "fallbackName": "tool" },
       "file": {
         "type": "file",

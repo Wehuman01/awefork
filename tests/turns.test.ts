@@ -69,6 +69,21 @@ describe("buildTurns", () => {
     expect(turns[0]?.title).toBe("fix the bug in main.ts");
   });
 
+  it("titles a compaction marker row 压缩会话 and carries the summary as preview", () => {
+    const turns = buildTurns("s1", [
+      user("u1", "first question"),
+      assistant("a1", "first answer"),
+      { ...user("cmp1", ""), compaction: true },
+      assistant("sum1", "整个会话的摘要"),
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]).toMatchObject({
+      messageId: "cmp1",
+      title: "🧹 压缩会话",
+      preview: "整个会话的摘要",
+    });
+  });
+
   it("merges multi-message replies and dedupes tool names", () => {
     const turns = buildTurns("s1", [
       user("u1", "q"),

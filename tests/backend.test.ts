@@ -19,6 +19,7 @@ describe("backendCapabilities", () => {
       deleteSession: true,
       attachments: true,
       fileChanges: true,
+      compress: true,
       exportBranch: true,
     });
   });
@@ -29,6 +30,7 @@ describe("backendCapabilities", () => {
       deleteSession: true,
       attachments: false,
       fileChanges: false,
+      compress: false,
       exportBranch: false,
     });
   });

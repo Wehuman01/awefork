@@ -638,6 +638,12 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       throw new Error("zcode 不支持导出独立会话");
     },
 
+    // The app-server protocol has no compaction primitive; the renderer hides
+    // the affordance (capabilities.compress === false).
+    async compress() {
+      throw new Error("zcode 暂不支持会话压缩");
+    },
+
     // The app-server protocol has no delete primitives; the renderer hides
     // the affordances (capabilities.deleteSession/deleteMessage === false).
     async deleteSession() {

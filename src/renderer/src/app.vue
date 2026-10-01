@@ -75,6 +75,7 @@
     <CommandPalette />
     <InteractionDialog />
     <ForkTagDialog />
+    <CompressDialog />
     <HistoryPanel />
     <div
       v-if="store.actionError"
@@ -105,6 +106,9 @@
     <div v-if="store.updateToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.updateToast }}
     </div>
+    <div v-if="store.compressedToast" class="toast banner-update" role="status" aria-live="polite">
+      {{ store.compressedToast }}
+    </div>
     <div v-if="historyStore.toast" class="toast banner-update" role="status" aria-live="polite">
       {{ historyStore.toast }}
     </div>
@@ -115,6 +119,7 @@
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
 import CommandPalette from "./components/command-palette.vue";
+import CompressDialog from "./components/compress-dialog.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
 import InteractionDialog from "./components/interaction-dialog.vue";

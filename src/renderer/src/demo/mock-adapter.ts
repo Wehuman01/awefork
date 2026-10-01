@@ -716,6 +716,81 @@ export function installMockAdapter(): void {
       timers.delete(sessionId);
       emit({ type: "session.idle", sessionId });
     },
+    // Session compaction, the demo stand-in for opencode's summarize: the
+    // summary streams in like a run, then the compaction marker row + the
+    // completed summary land together and session.compressed announces it.
+    compressSession: async (_backend, sessionId, model) => {
+      promptSeq += 1;
+      const summaryText =
+        "（演示摘要）这条会话先梳理了登录接口的三个问题（明文 MD5、无限流、双查库），随后把密码哈希迁移到 argon2 并给出三步上线计划；对比了 JWT 与 session 两种方案并按 JWT 落地（HS256、access token 15 分钟过期）；压测 500 并发 P95 312ms，修复了限流器的内存泄漏，补齐忘记密码 e2e。历史消息完整保留，后续对话只携带本摘要与最近几轮。";
+      const marker: ChatMessage = {
+        id: `cmp${promptSeq}`,
+        role: "user",
+        text: "",
+        thinking: "",
+        toolNames: [],
+        modelId: model?.modelId ?? null,
+        providerId: model?.providerId ?? null,
+        variant: model?.variant ?? null,
+        attachmentNames: [],
+        createdAt: Date.now(),
+        completedAt: null,
+        finish: null,
+        outputTokens: null,
+        error: null,
+        compaction: true,
+      };
+      const summary: ChatMessage = {
+        id: `cmp${promptSeq}-r`,
+        role: "assistant",
+        text: summaryText,
+        thinking: "",
+        toolNames: [],
+        modelId: model?.modelId ?? "glm-5.3-flash",
+        providerId: model?.providerId ?? "oc-awerouter",
+        variant: model?.variant ?? null,
+        attachmentNames: [],
+        createdAt: Date.now(),
+        completedAt: Date.now() + 3200,
+        finish: "stop",
+        outputTokens: 620,
+        error: null,
+      };
+      emit({ type: "message.started", sessionId, messageId: summary.id });
+      const pending = timers.get(sessionId) ?? [];
+      const partId = `${summary.id}-tx`;
+      const chunks = summaryText.match(/.{1,18}/g) ?? [];
+      chunks.forEach((chunk, i) => {
+        pending.push(
+          setTimeout(
+            () => {
+              emit({
+                type: "message.delta",
+                sessionId,
+                messageId: summary.id,
+                partId,
+                kind: "text",
+                delta: chunk,
+              });
+            },
+            500 + i * 300,
+          ),
+        );
+      });
+      pending.push(
+        setTimeout(
+          () => {
+            timers.delete(sessionId);
+            ensureMessages(sessionId).push(marker, summary);
+            emit({ type: "session.updated", sessionId });
+            emit({ type: "session.compressed", sessionId });
+            emit({ type: "session.idle", sessionId });
+          },
+          500 + chunks.length * 300 + 400,
+        ),
+      );
+      timers.set(sessionId, pending);
+    },
     respondInteraction: async () => {
       // The in-memory demo never leaves an interaction pending, so there is
       // nothing to reply to — the API surface demands the method, and the
@@ -868,6 +943,7 @@ export function installMockAdapter(): void {
       deleteSession: true,
       attachments: true,
       fileChanges: false,
+      compress: true,
       exportBranch: true,
     }),
     // The demo has no sidecar recorder; the pane never shows the card here.

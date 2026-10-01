@@ -7,6 +7,9 @@ import type { ChatMessage, ModelChoice } from "./types.js";
 /** Stand-in shown when a turn's user text is blank and nothing else is known. */
 const EMPTY_TITLE = "(empty prompt)";
 
+/** Title of the marker turn a session compaction inserted. */
+const COMPACTION_TITLE = "🧹 压缩会话";
+
 export interface Turn {
   /** User message that opens the turn. */
   messageId: string;
@@ -63,11 +66,15 @@ export function buildTurns(sessionId: string, messages: readonly ChatMessage[]):
 
   for (const message of messages) {
     if (message.role === "user") {
-      const title =
-        message.text
-          .split("\n")
-          .find((line) => line.trim())
-          ?.trim() ?? "";
+      // A compaction marker row has no text of its own; the summary that
+      // follows lands in the turn's preview, so the title is fixed here
+      // rather than falling through to the tool/reply stand-in below.
+      const title = message.compaction
+        ? COMPACTION_TITLE
+        : (message.text
+            .split("\n")
+            .find((line) => line.trim())
+            ?.trim() ?? "");
       current = {
         messageId: message.id,
         sessionId,

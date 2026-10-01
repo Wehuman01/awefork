@@ -174,6 +174,14 @@ export interface OpencodeClient {
     model?: ModelChoice | null,
     attachments?: PromptAttachment[],
   ): Promise<void>;
+  /**
+   * POST /session/:id/summarize — fold the session's history into a summary.
+   * Same contract as prompt: resolves only when the whole compaction is done
+   * while the summary itself streams in on /event, so callers detach it and
+   * it rides no deadline. providerID/modelID are required (no server
+   * fallback); auto:false marks a user-triggered compaction.
+   */
+  summarize(sessionId: string, model: ModelChoice): Promise<void>;
   abort(sessionId: string): Promise<void>;
 }
 
@@ -318,6 +326,21 @@ export function createOpencodeClient(
             ],
             ...(model ? { model: { providerID: model.providerId, modelID: model.modelId } } : {}),
             ...(model?.variant ? { variant: model.variant } : {}),
+          }),
+        },
+        0,
+      );
+    },
+    summarize: async (id, model) => {
+      await request(
+        endpoint("sessionSummarize", { id }),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            providerID: model.providerId,
+            modelID: model.modelId,
+            auto: false,
           }),
         },
         0,
