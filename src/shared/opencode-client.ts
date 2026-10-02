@@ -97,6 +97,19 @@ export class OpencodeApiError extends Error {
   }
 }
 
+/**
+ * The app-level deadline fired while the server held the request. Distinct
+ * from other API errors because the operation may still complete server-side
+ * (a slow fork keeps copying after the client gives up) — callers reconcile
+ * instead of treating it as a hard failure.
+ */
+export class OpencodeTimeoutError extends OpencodeApiError {
+  constructor(message: string) {
+    super(0, message);
+    this.name = "OpencodeTimeoutError";
+  }
+}
+
 /** Per-request deadline; 0 disables it (only the prompt endpoint needs that). */
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -238,8 +251,7 @@ export function createOpencodeClient(
       });
     } catch (error) {
       if (timer?.aborted) {
-        throw new OpencodeApiError(
-          0,
+        throw new OpencodeTimeoutError(
           `opencode API ${path} timed out after ${timeoutMs}ms — ${
             timeoutHint ?? `the server is not responding. Restart it with: ${serveHint}`
           }`,

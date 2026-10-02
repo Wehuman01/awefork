@@ -12,7 +12,9 @@ import {
   createOpencodeClient,
   type OcMessage,
   type OcPart,
+  type OcSession,
   type OpencodeClient,
+  OpencodeTimeoutError,
 } from "./opencode-client.js";
 import { createSseParser } from "./sse.js";
 import type {
@@ -33,11 +35,15 @@ export interface OpenCodeAdapterOptions {
   descriptor?: OpenCodeDescriptor;
   /**
    * Snapshot reader handed to the file-change recorder; defaults to node:fs.
-   * Tests use it to learn when a baseline read has actually landed, since the
-   * recorder reads "before" asynchronously and a wall-clock guess loses that
+   * Tests use it to learn when a baseline read has actually landed, since
+   * the recorder reads "before" asynchronously and a wall-clock guess loses that
    * race under load.
    */
   readFile?: (path: string) => Promise<Buffer>;
+  /** Passed to the client; tests shrink fork's long copy deadline. */
+  forkTimeoutMs?: number;
+  /** Sleep between fork-adoption polls; tests inject a no-op. */
+  adoptSleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -53,7 +59,11 @@ export interface OpenCodeAdapterOptions {
  */
 export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAdapter {
   const descriptor = options.descriptor ?? opencodeDescriptor();
-  const client: OpencodeClient = createOpencodeClient(options.baseUrl, { descriptor });
+  const client: OpencodeClient = createOpencodeClient(options.baseUrl, {
+    descriptor,
+    forkTimeoutMs: options.forkTimeoutMs,
+  });
+  const adoptSleep = options.adoptSleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 
   let abortController: AbortController | null = null;
   /** Set by subscribe; lets detached prompts report request-level failures. */
@@ -185,6 +195,59 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     return cut ? (firstString(cut, descriptor.messages.fields.id) ?? null) : null;
   }
 
+  /** Adoption polls past the fork deadline: one immediate, then this many apart. */
+  const ADOPT_POLLS = 6;
+  const ADOPT_POLL_INTERVAL_MS = 5_000;
+
+  /**
+   * client.fork with adoption. Copying a huge session can outlive the request
+   * deadline while the server keeps working — the new session row lands only
+   * when the copy finishes, and the fork DID happen. Failing here sent users
+   * into blind retries, each spawning another full copy. Instead, poll the
+   * sessions list for the row the server created: same directory (listSessions
+   * is scoped to it), title the server derives from the parent's — "parent
+   * (fork #N)" — and created no earlier than this request (server and client
+   * share the localhost clock; the slack only absorbs truncation). Earliest
+   * match wins, so a copy from an earlier blind retry may be adopted but is
+   * never skipped past. Polls that fail read as "not landed yet"; nothing
+   * found after the window rethrows the original timeout, whose message
+   * already says how to check before retrying.
+   */
+  async function forkOrAdopt(sessionId: string, cut: string | null): Promise<OcSession> {
+    const startedAt = Date.now();
+    try {
+      return await client.fork(sessionId, cut);
+    } catch (error) {
+      if (!(error instanceof OpencodeTimeoutError)) throw error;
+      let parent: OcSession;
+      try {
+        parent = await client.session(sessionId);
+      } catch {
+        throw error;
+      }
+      const titlePrefix = `${parent.title} (fork #`;
+      for (let poll = 0; poll < ADOPT_POLLS; poll++) {
+        if (poll > 0) await adoptSleep(ADOPT_POLL_INTERVAL_MS);
+        let candidates: OcSession[] = [];
+        try {
+          candidates = await client.listSessions(parent.directory || undefined);
+        } catch {
+          continue; // Server hiccup mid-reconcile — the next poll retries.
+        }
+        const adopted = candidates
+          .filter(
+            (s) =>
+              s.id !== sessionId &&
+              s.time.created >= startedAt - 2_000 &&
+              s.title.startsWith(titlePrefix),
+          )
+          .sort((a, b) => a.time.created - b.time.created)[0];
+        if (adopted) return adopted;
+      }
+      throw error;
+    }
+  }
+
   return {
     kind: "opencode",
 
@@ -267,7 +330,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         return { ...created, origin: "fork", parentSessionId: sessionId };
       }
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
-      const forked = await client.fork(sessionId, cut);
+      const forked = await forkOrAdopt(sessionId, cut);
       await recordFork(options.lineagePath, forked.id, {
         parentId: sessionId,
         atMessageId,
@@ -282,7 +345,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // copy exists) — but the copy records no lineage, so it lands as a
       // plain root session the TUI or any other opencode client can continue.
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
-      const exported = await client.fork(sessionId, cut);
+      const exported = await forkOrAdopt(sessionId, cut);
       return { ...mapSession(exported), origin: "root", parentSessionId: null };
     },
 

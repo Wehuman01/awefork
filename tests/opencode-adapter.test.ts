@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { opencodeDescriptor, parseOpenCodeDescriptor } from "../src/shared/agent-descriptor";
 import { readLineage } from "../src/shared/lineage-store";
 import { createOpencodeAdapter, sleep } from "../src/shared/opencode-adapter";
+import { OpencodeTimeoutError } from "../src/shared/opencode-client";
 import type { AgentEvent } from "../src/shared/types";
 
 /**
@@ -74,6 +75,8 @@ interface FakeState {
   sessions: FakeSession[];
   messages: Record<string, FakeMessage[]>;
   forkCalls: { sessionId: string; cutMessageId: string | null }[];
+  /** Hold fork requests open forever — a copy still running server-side. */
+  forkHangs?: boolean;
   /** directory query param per POST /session; null = the client sent none. */
   createCalls: (string | null)[];
   promptCalls: { sessionId: string; body: Record<string, unknown> }[];
@@ -273,6 +276,12 @@ function startFakeServer(state: FakeState): Promise<{
         const sessionId = forkMatch[1] ?? "";
         const cut = typeof payload.messageID === "string" ? payload.messageID : null;
         state.forkCalls.push({ sessionId, cutMessageId: cut });
+        if (state.forkHangs) return; // Never responds; the copy drags on.
+        if (!state.sessions.some((s) => s.id === sessionId)) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ data: { message: `Session not found: ${sessionId}` } }));
+          return;
+        }
         const source = state.messages[sessionId] ?? [];
         const cutIndex = cut ? source.findIndex((m) => m.info.id === cut) : -1;
         const kept = cutIndex >= 0 ? source.slice(0, cutIndex) : source;
@@ -637,6 +646,116 @@ describe("opencode adapter", () => {
     const forked = await adapter.fork("s1", "u1");
     const lineage = await readLineage(lineagePath);
     expect(lineage[forked.id]).toMatchObject({ parentId: "s1", atMessageId: "u1" });
+  });
+
+  // ── fork adoption: a copy that outlives the request deadline ──────────
+  // The real 1.18 server copies a ~60 MB session for ~50 s; the deadline
+  // firing does not mean the fork died — the row lands when the copy
+  // finishes. These tests hold the fork request open and land the row late.
+
+  /** Adapter against a hanging fork, with the late row landed on demand. */
+  async function hangingForkAdapter(
+    state: FakeState,
+    onFirstSleep: () => void,
+  ): Promise<{ adapter: ReturnType<typeof createOpencodeAdapter>; lineagePath: string }> {
+    const { server, baseUrl } = await startFakeServer(state);
+    const lineagePath = join(await mkdtemp(join(tmpdir(), "awefork-adapter-")), "lineage.json");
+    let slept = false;
+    const adapter = createOpencodeAdapter({
+      baseUrl,
+      lineagePath,
+      forkTimeoutMs: 100,
+      adoptSleep: async () => {
+        if (!slept) {
+          slept = true;
+          onFirstSleep();
+        }
+      },
+    });
+    cleanup.push(async () => {
+      adapter.dispose();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    return { adapter, lineagePath };
+  }
+
+  it("adopts the session the server landed after the fork deadline, with lineage", async () => {
+    const state = baseState();
+    state.forkHangs = true;
+    const landed: FakeSession = {
+      id: "late-fork",
+      title: "root session (fork #1)",
+      directory: "/repo",
+      time: { created: Date.now(), updated: Date.now() },
+    };
+    const { adapter, lineagePath } = await hangingForkAdapter(state, () => {
+      state.sessions.push(landed);
+    });
+
+    const forked = await adapter.fork("s1", null);
+    expect(forked).toMatchObject({ id: "late-fork", origin: "fork", parentSessionId: "s1" });
+    const lineage = await readLineage(lineagePath);
+    expect(lineage["late-fork"]).toMatchObject({ parentId: "s1" });
+  });
+
+  it("adopts the earliest matching copy when several land", async () => {
+    const state = baseState();
+    state.forkHangs = true;
+    const now = Date.now();
+    const early: FakeSession = {
+      id: "early",
+      title: "root session (fork #1)",
+      directory: "/repo",
+      time: { created: now, updated: now },
+    };
+    const late: FakeSession = {
+      id: "late",
+      title: "root session (fork #2)",
+      directory: "/repo",
+      time: { created: now + 1_000, updated: now + 1_000 },
+    };
+    const { adapter } = await hangingForkAdapter(state, () => {
+      state.sessions.push(early, late);
+    });
+
+    await expect(adapter.fork("s1", null)).resolves.toMatchObject({ id: "early" });
+  });
+
+  it("rethrows the original timeout when no session ever lands", async () => {
+    const state = baseState();
+    state.forkHangs = true;
+    const { adapter } = await hangingForkAdapter(state, () => {});
+
+    const error: unknown = await adapter.fork("s1", null).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OpencodeTimeoutError);
+    expect((error as Error).message).toMatch(/timed out after 100ms/);
+    expect((error as Error).message).toMatch(/before retrying/);
+  });
+
+  it("exportSession adopts a late landing copy too — no lineage", async () => {
+    const state = baseState();
+    state.forkHangs = true;
+    const landed: FakeSession = {
+      id: "late-export",
+      title: "root session (fork #1)",
+      directory: "/repo",
+      time: { created: Date.now(), updated: Date.now() },
+    };
+    const { adapter, lineagePath } = await hangingForkAdapter(state, () => {
+      state.sessions.push(landed);
+    });
+
+    const exported = await adapter.exportSession("s1", null);
+    expect(exported).toMatchObject({ id: "late-export", origin: "root", parentSessionId: null });
+    const lineage = await readLineage(lineagePath);
+    expect(lineage["late-export"]).toBeUndefined();
+  });
+
+  it("passes non-timeout fork failures through without adopting", async () => {
+    const state = baseState();
+    const { adapter } = await newAdapter(state);
+    // Unknown source: a real 404, not a deadline — nothing to adopt.
+    await expect(adapter.fork("ghost", null)).rejects.toThrow(/failed: 404/);
   });
 
   it("empty-context fork creates a fresh session in the parent's directory, no copy", async () => {
