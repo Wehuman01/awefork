@@ -109,7 +109,7 @@ function uniquePorts(ports: number[]): number[] {
 
 /** The port a baseUrl names, or null when it is not a loopback http URL. */
 function portOf(baseUrl: string): number | null {
-  const match = baseUrl.match(/:(\d+)\s*$/);
+  const match = baseUrl.match(/:(\d+)\s*\/?$/);
   const port = match?.[1] ? Number(match[1]) : Number.NaN;
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
 }
@@ -269,6 +269,16 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     opencodeProbe ??= probeOpencode();
     return opencodeProbe;
   };
+  /**
+   * Replace the cached probe with a fresh one. An explicit select() is the
+   * moment the CLI may have changed under the running app (an install that
+   * landed since boot), and the cached "not installed" would refuse a backend
+   * that now works. probeOpencode never rejects, so the cache cannot poison.
+   */
+  const reprobeOpencode = (): Promise<OpencodeProbe> => {
+    opencodeProbe = probeOpencode();
+    return opencodeProbe;
+  };
 
   const storePaths = (backend: BackendId): StorePaths => {
     const cached = caches.get(backend);
@@ -421,7 +431,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
             ? (await probeZcode()).installed
             : backend === "pi"
               ? await isPiInstalled()
-              : (await probeOpencodeCached()).installed;
+              : (await reprobeOpencode()).installed;
       if (!installed) {
         const hint =
           backend === "codex"

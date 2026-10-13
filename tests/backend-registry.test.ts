@@ -491,6 +491,36 @@ describe("switcher data and selection", () => {
     expect(result.error).toMatch(/opencode CLI/);
     expect(await readBackendSelection(join(userDataDir, "settings.json"))).toBe("opencode");
   });
+
+  it("selects opencode installed after boot — the probe cache refreshes", async () => {
+    // The app may have been running across an install: the boot probe cached
+    // "not installed", and an explicit select must see the CLI as it is NOW,
+    // not as it was when the switcher first painted.
+    const missing = (
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      callback: (error: Error) => void,
+    ): void => {
+      callback(new Error("spawn opencode ENOENT"));
+    };
+    mocks.execFile.mockImplementation(missing);
+    const { backends } = await registry.listBackends();
+    expect(backends[0]).toMatchObject({ installed: false });
+    // The CLI lands while the app keeps running.
+    mocks.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _opts: unknown,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(null, "2.0.26\n", "");
+      },
+    );
+    await expect(registry.select("opencode")).resolves.toEqual({ ok: true });
+    expect(await readBackendSelection(join(userDataDir, "settings.json"))).toBe("opencode");
+  });
 });
 
 describe("probeOpencode platform handling", () => {

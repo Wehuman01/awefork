@@ -455,3 +455,29 @@ describe("v2 protocol transport", () => {
   });
 });
 
+/**
+ * v1's historical URLs, kept byte-for-byte: the sessions list pages at 1000
+ * (with the optional directory filter), and the message list took no query at
+ * all. The v2 paging rewrite shares one code path, so these pin the shapes
+ * v1 must not drift into — a `limit` the v1 server honors would silently
+ * truncate a long session's messages.
+ */
+describe("v1 protocol URLs", () => {
+  it("keeps the sessions list at limit=1000 and the message list query-less", async () => {
+    const seen: string[] = [];
+    const baseUrl = await listen((req, res) => {
+      seen.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(req.url?.includes("/message") ? [] : []));
+    });
+    const client = createOpencodeClient(baseUrl);
+    await client.listSessions();
+    await client.listSessions("/tmp/work");
+    await client.messages("s1");
+    expect(seen).toEqual([
+      "/session?limit=1000",
+      "/session?directory=%2Ftmp%2Fwork&limit=1000",
+      "/session/s1/message",
+    ]);
+  });
+});

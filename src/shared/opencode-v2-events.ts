@@ -37,9 +37,11 @@ export interface V2EventDeps {
   recordToolFrame: (sessionId: string, frame: ToolPartFrame) => void;
 }
 
-/** Run lifecycle frames that settle a run in the UI. */
-const EXECUTION_SUCCEEDED = "session.execution.succeeded";
-const EXECUTION_INTERRUPTED = "session.execution.interrupted";
+/**
+ * Run-lifecycle frames with no descriptor home of their own: the frames that
+ * settle a run and the error frame ride the descriptor's `idle` / `error`
+ * lists, like every other event name here.
+ */
 const EXECUTION_FAILED = "session.execution.failed";
 const EXECUTION_STARTED = "session.execution.started";
 
@@ -167,17 +169,20 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
       return;
     }
     if (events.ignore.includes(frame.type)) return;
+    // The descriptor names the frames that settle a run (execution.succeeded
+    // / .interrupted), exactly as v1's `idle` list does — one spelling, read
+    // from data like every other event name here.
+    if (events.idle.includes(frame.type)) {
+      if (id) {
+        dropSessionTools(id);
+        emit({ type: "session.idle", sessionId: id });
+      }
+      return;
+    }
 
     switch (frame.type) {
       case EXECUTION_STARTED:
         if (id) emit({ type: "message.started", sessionId: id, messageId: "" });
-        return;
-      case EXECUTION_SUCCEEDED:
-      case EXECUTION_INTERRUPTED:
-        if (id) {
-          dropSessionTools(id);
-          emit({ type: "session.idle", sessionId: id });
-        }
         return;
       case EXECUTION_FAILED:
         emitError(props, id);
@@ -186,7 +191,7 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
           emit({ type: "session.idle", sessionId: id });
         }
         return;
-      case "session.error":
+      case events.error.name:
         emitError(props, id);
         return;
       case "session.text.started":

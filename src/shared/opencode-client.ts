@@ -317,8 +317,9 @@ export function createOpencodeClient(
         // conversation backwards and misreads the fork cut.
         if (cursor) params.set(paging.cursorParam, cursor);
         else if (paging.order) params.set("order", paging.order);
-      } else {
-        // v1's historical one-shot: a big limit, no cursor.
+      } else if (endpointKey === "sessions") {
+        // v1's historical one-shot: the sessions list pages at 1000; the
+        // message list took no query at all, and gains none here.
         params.set("limit", "1000");
       }
       const search = params.toString();
