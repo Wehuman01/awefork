@@ -5,11 +5,19 @@
  * boundary spellings are recognized; data lines keep their exact content
  * (JSON.parse treats a trailing CR as whitespace, so CRLF payloads need no
  * extra stripping).
+ *
+ * The payload envelope moved between protocols: v1 frames are
+ * `{type, properties}`, v2 frames are `{id, created, type, location, data}`.
+ * Both spellings are normalized here so adapters read one shape — the
+ * fallback is safe because no frame carries both keys.
  */
 
 export interface ServerEvent {
   type: string;
+  /** The frame's payload — `properties` on opencode v1, `data` on v2. */
   properties: Record<string, unknown>;
+  /** Frame timestamp (v2); null on v1, whose payloads carry their own times. */
+  created: number | null;
 }
 
 /** Earliest blank-line boundary: `\n\n`, `\r\n\r\n`, or whichever comes first. */
@@ -50,13 +58,19 @@ function parseFrame(frame: string): ServerEvent | null {
     const parsed = JSON.parse(dataLines.join("\n")) as {
       type?: unknown;
       properties?: unknown;
+      data?: unknown;
+      created?: unknown;
     };
     if (typeof parsed.type !== "string") return null;
-    const properties =
-      parsed.properties && typeof parsed.properties === "object"
-        ? (parsed.properties as Record<string, unknown>)
-        : {};
-    return { type: parsed.type, properties };
+    const payload = parsed.properties ?? parsed.data;
+    return {
+      type: parsed.type,
+      properties:
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {},
+      created: typeof parsed.created === "number" ? parsed.created : null,
+    };
   } catch {
     return null;
   }

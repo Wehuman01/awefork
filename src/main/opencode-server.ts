@@ -1,9 +1,11 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import type { OpenCodeDescriptor } from "../shared/agent-descriptor.js";
 import { createOpencodeClient } from "../shared/opencode-client.js";
 
 const execFileAsync = promisify(execFile);
@@ -12,6 +14,8 @@ export interface EnsureServerResult {
   /** true if awefork started the server itself (and owns its lifetime). */
   spawned: boolean;
   baseUrl: string;
+  /** The server password this spawn pinned; absent when a live server was reused. */
+  password?: string;
 }
 
 /**
@@ -210,6 +214,10 @@ export interface EnsureServerOptions {
   heldPortWaitMs?: number;
   portRaceGraceMs?: number;
   readyDeadlineMs?: number;
+  /** Protocol the readiness probe speaks; absent = the bundled v1 descriptor. */
+  descriptor?: OpenCodeDescriptor;
+  /** Server password for that protocol's auth; pinned into the spawn env. */
+  password?: string;
 }
 
 /**
@@ -230,15 +238,39 @@ function isPortFree(port: number): Promise<boolean> {
   });
 }
 
+/** Which protocol (and credentials) a readiness probe speaks. */
+interface ProbeProtocol {
+  descriptor: OpenCodeDescriptor;
+  password?: string;
+}
+
+/** Auth headers the descriptor's scheme needs for a bare fetch (the event probe). */
+function authHeaders(protocol?: ProbeProtocol): Record<string, string> {
+  const auth = protocol?.descriptor.auth;
+  if (!auth || protocol?.password === undefined) return {};
+  return {
+    authorization: `Basic ${Buffer.from(`${auth.username}:${protocol.password}`).toString("base64")}`,
+  };
+}
+
 /**
  * Reuse a running opencode on `port` when its REST + event stream are both
  * ready. Returns null otherwise — never spawns. Callers use this to walk
- * remembered / discovered ports before starting a new child.
+ * remembered / discovered ports before starting a new child. `protocol`
+ * selects the wire dialect (and credentials) the probe speaks; absent = the
+ * historical v1 shape, which is what port discovery walks.
  */
-export async function tryReuseOpencodeServer(port: number): Promise<{ baseUrl: string } | null> {
+export async function tryReuseOpencodeServer(
+  port: number,
+  protocol?: ProbeProtocol,
+): Promise<{ baseUrl: string } | null> {
   const baseUrl = `http://127.0.0.1:${port}`;
-  const client = createOpencodeClient(baseUrl, { timeoutMs: PROBE_TIMEOUT_MS });
-  return (await isFullyReady(client, baseUrl)) ? { baseUrl } : null;
+  const client = createOpencodeClient(baseUrl, {
+    timeoutMs: PROBE_TIMEOUT_MS,
+    descriptor: protocol?.descriptor,
+    password: protocol?.password,
+  });
+  return (await isFullyReady(client, baseUrl, protocol)) ? { baseUrl } : null;
 }
 
 /**
@@ -305,9 +337,16 @@ export async function ensureOpencodeServer(
   const heldPortWaitMs = options.heldPortWaitMs ?? HELD_PORT_WAIT_MS;
   const portRaceGraceMs = options.portRaceGraceMs ?? PORT_RACE_GRACE_MS;
   const readyDeadlineMs = options.readyDeadlineMs ?? 30_000;
+  const protocol: ProbeProtocol | undefined = options.descriptor
+    ? { descriptor: options.descriptor, password: options.password }
+    : undefined;
   const baseUrl = `http://127.0.0.1:${port}`;
-  const client = createOpencodeClient(baseUrl, { timeoutMs: PROBE_TIMEOUT_MS });
-  if (await isFullyReady(client, baseUrl)) {
+  const client = createOpencodeClient(baseUrl, {
+    timeoutMs: PROBE_TIMEOUT_MS,
+    descriptor: options.descriptor,
+    password: options.password,
+  });
+  if (await isFullyReady(client, baseUrl, protocol)) {
     return { spawned: false, baseUrl };
   }
   // Held by another process. A cold opencode can sit between listen() and the
@@ -318,7 +357,7 @@ export async function ensureOpencodeServer(
   if (!(await isPortFree(port))) {
     const waitUntil = Date.now() + heldPortWaitMs;
     while (Date.now() < waitUntil) {
-      if (await isFullyReady(client, baseUrl)) {
+      if (await isFullyReady(client, baseUrl, protocol)) {
         return { spawned: false, baseUrl };
       }
       if (await isReachable(client)) break;
@@ -326,7 +365,7 @@ export async function ensureOpencodeServer(
     }
     if (!(await isReachable(client))) {
       throw new Error(
-        `${baseUrl} is already in use by another process (not an opencode server). Free port ${port}, or start opencode on another port.`,
+        `${baseUrl} is already in use by another process (not an opencode server this build can drive). Free port ${port}, or start opencode on another port.`,
       );
     }
   }
@@ -335,7 +374,13 @@ export async function ensureOpencodeServer(
     stdio: ["ignore", "ignore", "pipe"],
     detached: false,
     cwd: homedir(),
-    env: await resolveSpawnEnv(),
+    env: {
+      ...(await resolveSpawnEnv()),
+      // v2 authenticates every route with a per-start password printed on
+      // stdout — which this spawn ignores. Pinning one through the env is the
+      // documented way to know it; the client then authenticates with it.
+      ...(options.password ? { OPENCODE_SERVER_PASSWORD: options.password } : {}),
+    },
     // npm installs CLIs as .cmd shims on Windows; only cmd.exe runs those,
     // plain spawn gets ENOENT. The fixed args contain no shell metacharacters.
     ...(process.platform === "win32" ? { shell: true, windowsHide: true } : {}),
@@ -384,8 +429,12 @@ export async function ensureOpencodeServer(
     }
     // Reachability wins over exit: a child that lost a port race to another
     // opencode instance still leaves a working server behind.
-    if (await isFullyReady(client, baseUrl)) {
-      return { spawned: true, baseUrl };
+    if (await isFullyReady(client, baseUrl, protocol)) {
+      return {
+        spawned: true,
+        baseUrl,
+        ...(options.password ? { password: options.password } : {}),
+      };
     }
     if (child.exitCode !== null) {
       // Port race: the winner may still be warming its event stream. Keep
@@ -396,8 +445,8 @@ export async function ensureOpencodeServer(
   }
   // The loop only reaches here via deadline or grace-after-exit. One last
   // probe covers the warm-up race before diagnosing the failure.
-  if (await isFullyReady(client, baseUrl)) {
-    return { spawned: true, baseUrl };
+  if (await isFullyReady(client, baseUrl, protocol)) {
+    return { spawned: true, baseUrl, ...(options.password ? { password: options.password } : {}) };
   }
   if (await isReachable(client)) {
     return fail(
@@ -447,16 +496,19 @@ async function isReachable(client: ReturnType<typeof createOpencodeClient>): Pro
  * subscribes the moment we resolve — which is what produced the
  * "Event stream lost, reconnecting" toast on every cold launch. The same
  * probe gates reuse, so a port held by anything but an opencode is never
- * adopted silently.
+ * adopted silently. The event path and its auth come from the protocol.
  */
 async function isFullyReady(
   client: ReturnType<typeof createOpencodeClient>,
   baseUrl: string,
+  protocol?: ProbeProtocol,
 ): Promise<boolean> {
   if (!(await isReachable(client))) return false;
+  const eventsPath = protocol?.descriptor.endpoints.events ?? "/event";
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/event`, {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}${eventsPath}`, {
       signal: AbortSignal.timeout(2000),
+      headers: authHeaders(protocol),
     });
     // SSE keeps the connection open; the response headers alone prove the
     // endpoint is accepting streams, so release the socket right away.
@@ -464,6 +516,36 @@ async function isFullyReady(
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The v2 CLI's background service registers itself at
+ * `$XDG_STATE_HOME/opencode/service.json` (default `~/.local/state/…`) with
+ * its url, pid and password — the file the TUI itself reads to connect. A
+ * foreign `opencode serve` cannot be adopted (its per-start password is
+ * unknowable), but the service can, and it is the server a v2 user most
+ * likely already has running.
+ */
+export async function readRegisteredOpencodeService(
+  home: string = homedir(),
+  stateHome: string | undefined = process.env.XDG_STATE_HOME,
+): Promise<{ baseUrl: string; password: string; version: string | null } | null> {
+  const file = join(stateHome || join(home, ".local", "state"), "opencode", "service.json");
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8")) as {
+      url?: unknown;
+      password?: unknown;
+      version?: unknown;
+    };
+    if (typeof parsed.url !== "string" || typeof parsed.password !== "string") return null;
+    return {
+      baseUrl: parsed.url,
+      password: parsed.password,
+      version: typeof parsed.version === "string" ? parsed.version : null,
+    };
+  } catch {
+    return null;
   }
 }
 

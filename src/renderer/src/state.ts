@@ -77,6 +77,17 @@ interface BackendRunState {
   recent: Record<string, number>;
 }
 
+/**
+ * Capability surface computed in the renderer, for the paint-without-waiting
+ * paths (parked workspace restore, the pre-IPC fallback). The opencode flags
+ * live in the descriptor the probed CLI version selects, and the version is
+ * already in hand from the backend list.
+ */
+function localCapabilities(backend: BackendId): BackendCapabilities {
+  const entry = state.backendList.find((b) => b.id === backend);
+  return backendCapabilities(backend, entry?.version ?? null);
+}
+
 interface AppState {
   connectionError: string | null;
   /**
@@ -910,7 +921,7 @@ export async function init(): Promise<void> {
   try {
     state.capabilities = await window.awefork.capabilities(backend);
   } catch {
-    state.capabilities = backendCapabilities(backend);
+    state.capabilities = localCapabilities(backend);
   }
   // Subscribe before the first fetch: a cold-started agent announces its
   // session scan right as it comes up, and those frames would be dropped by
@@ -1314,7 +1325,7 @@ async function loadSessionMessages(
  * backends without recording (the invoke would only come back empty).
  */
 function refreshFileChanges(sessionId: string, backend: BackendId): void {
-  if (!backendCapabilities(backend).fileChanges) return;
+  if (!localCapabilities(backend).fileChanges) return;
   void window.awefork
     .fileChanges(backend, sessionId)
     .then((changes) => {
@@ -4031,7 +4042,7 @@ export async function switchBackend(backend: BackendId): Promise<void> {
     if (parked) {
       // Pure value of the descriptor-backed flag; the IPC hop would buy
       // nothing on a path whose whole point is painting without waiting.
-      state.capabilities = backendCapabilities(backend);
+      state.capabilities = localCapabilities(backend);
       restoreWorkspace(parked);
       void revalidateBackend(backend);
     } else {
@@ -4039,7 +4050,7 @@ export async function switchBackend(backend: BackendId): Promise<void> {
       try {
         state.capabilities = await window.awefork.capabilities(backend);
       } catch {
-        state.capabilities = backendCapabilities(backend);
+        state.capabilities = localCapabilities(backend);
       }
       await bootBackend(backend);
     }

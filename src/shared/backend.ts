@@ -1,4 +1,4 @@
-import { opencodeDescriptor } from "./agent-descriptor.js";
+import { opencodeDescriptor, selectOpencodeDescriptor } from "./agent-descriptor.js";
 import type { AgentEvent } from "./types.js";
 
 /**
@@ -75,10 +75,15 @@ export function isBackendId(value: unknown): value is BackendId {
 /**
  * Per-backend feature surface. The renderer hides affordances the backend
  * lacks (attach button, turn delete) instead of surfacing errors on click.
- * opencode's flags live in its agent descriptor; the CLI-spawn backends stay
- * literal until their differences migrate to a descriptor too.
+ * opencode's flags live in the agent descriptor the probed CLI version
+ * selects — v2 dropped single-message delete — so `opencodeVersion` (when the
+ * caller knows it) picks the right one; the CLI-spawn backends stay literal
+ * until their differences migrate to a descriptor too.
  */
-export function backendCapabilities(backend: BackendId): BackendCapabilities {
+export function backendCapabilities(
+  backend: BackendId,
+  opencodeVersion: string | null = null,
+): BackendCapabilities {
   switch (backend) {
     case "codex":
       // codex records fork parents itself, so no detached export; no
@@ -117,11 +122,13 @@ export function backendCapabilities(backend: BackendId): BackendCapabilities {
         exportBranch: false,
       };
   }
+  const descriptor =
+    opencodeVersion === null ? opencodeDescriptor() : selectOpencodeDescriptor(opencodeVersion);
   return {
-    ...opencodeDescriptor().capabilities,
+    ...descriptor.capabilities,
     // The descriptor's optional fileChanges section is the capability: no
     // section, no recorder, no card.
-    fileChanges: opencodeDescriptor().fileChanges !== undefined,
+    fileChanges: descriptor.fileChanges !== undefined,
     exportBranch: true,
     deleteSession: true,
   };

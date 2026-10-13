@@ -3,12 +3,17 @@ import {
   firstNumber,
   firstString,
   opencodeDescriptor,
+  opencodeDescriptors,
+  opencodeV2Descriptor,
+  opencodeVersionWarning,
   parseOpenCodeDescriptor,
   parseVersion,
   readPath,
+  selectOpencodeDescriptor,
   versionInRange,
 } from "../src/shared/agent-descriptor";
 import bundledJson from "../src/shared/agents/opencode.json";
+import bundledV2Json from "../src/shared/agents/opencode-v2.json";
 
 /**
  * The descriptor is the place backend facts live now, so the vocabulary must
@@ -182,6 +187,59 @@ describe("vocabulary enforcement", () => {
       /expected "opencode"/,
     );
   });
+
+  it("rejects a v1 descriptor that dropped its part-streaming sections", () => {
+    // The v1 translator is data-driven off those three sections; a v1
+    // descriptor without them would translate nothing, silently.
+    expect(() =>
+      parseOpenCodeDescriptor(
+        drifted((root) => {
+          delete (root.events as Record<string, unknown>).partSnapshot;
+        }),
+      ),
+    ).toThrow(/protocol v1 requires status, partSnapshot and partDelta/);
+  });
+
+  it("accepts a v2 descriptor without the part-streaming sections", () => {
+    const descriptor = parseOpenCodeDescriptor(
+      JSON.parse(JSON.stringify(bundledV2Json)) as unknown,
+    );
+    expect(descriptor.protocol).toBe("v2");
+    expect(descriptor.events.partSnapshot).toBeUndefined();
+  });
+
+  it("rejects an unknown protocol name", () => {
+    expect(() => parseOpenCodeDescriptor(drifted((root) => (root.protocol = "v3")))).toThrow(
+      /expected "v1" or "v2"/,
+    );
+  });
+
+  it("rejects an unknown key inside the new optional sections", () => {
+    expect(() =>
+      parseOpenCodeDescriptor(drifted((root) => (root.auth = { scheme: "basic", token: "x" }))),
+    ).toThrow(/auth: unknown key\(s\) token/);
+    expect(() =>
+      parseOpenCodeDescriptor(
+        drifted((root) => ((root.pagination as Record<string, unknown>) = { style: "cursor" })),
+      ),
+    ).toThrow(/pagination\.limitParam: missing/);
+    expect(() =>
+      parseOpenCodeDescriptor(drifted((root) => (root.envelope = { dataKey: "data" }))),
+    ).toThrow(/envelope\.bare: expected a non-empty array/);
+    expect(() =>
+      parseOpenCodeDescriptor(drifted((root) => (root.prompt = { style: "text" }))),
+    ).toThrow(/prompt\./);
+  });
+
+  it("defaults the v1 prompt/fork facts when the sections are absent", () => {
+    const descriptor = opencodeDescriptor();
+    expect(descriptor.protocol).toBe("v1");
+    expect(descriptor.fork.cutParam).toBe("messageID");
+    expect(descriptor.prompt).toBeUndefined();
+    expect(descriptor.sessions.create).toBeUndefined();
+    expect(descriptor.messages.partsPath).toBeUndefined();
+    expect(descriptor.messages.textPath).toBeUndefined();
+  });
 });
 
 describe("read helpers", () => {
@@ -224,5 +282,89 @@ describe("version probe helpers", () => {
     expect(versionInRange("1.17.9", compat)).toBe(false);
     expect(versionInRange("1.19.0", compat)).toBe(false);
     expect(versionInRange("2.0.0", compat)).toBe(false);
+  });
+});
+
+describe("bundled v2 descriptor", () => {
+  it("parses and carries the /api protocol's facts", () => {
+    const descriptor = opencodeV2Descriptor();
+    expect(descriptor.protocol).toBe("v2");
+    expect(descriptor.compat).toEqual({ min: "2.0.0", max: "2.1.0" });
+    // v2 dropped single-message delete; the renderer must not offer it.
+    expect(descriptor.capabilities.deleteMessage).toBe(false);
+    expect(descriptor.auth).toEqual({ scheme: "basic", username: "opencode" });
+    expect(descriptor.envelope).toEqual({ dataKey: "data", bare: ["projects"] });
+    expect(descriptor.fork).toEqual({ cut: "next-user-exclusive", cutParam: "before" });
+    expect(descriptor.endpoints.sessionPrompt).toBe("/api/session/{id}/prompt");
+    expect(descriptor.endpoints.sessionModel).toBe("/api/session/{id}/model");
+    expect(descriptor.endpoints.sessionAbort).toBe("/api/session/{id}/interrupt");
+    expect(descriptor.endpoints.sessionSummarize).toBe("/api/session/{id}/compact");
+    expect(descriptor.sessions.fields.directory).toEqual(["location.directory"]);
+    expect(descriptor.sessions.fields.parentSessionId).toEqual(["fork.sessionID", "parentID"]);
+    expect(descriptor.messages.partsPath).toBe("content");
+    expect(descriptor.messages.textPath).toEqual(["text"]);
+    expect(descriptor.messages.parts.tool.nameField).toBe("name");
+    expect(descriptor.messages.parts.compaction).toEqual({
+      type: "compaction",
+      rowTypeField: "type",
+    });
+    expect(descriptor.fileChanges).toEqual({
+      tools: ["edit", "write"],
+      filePathPaths: ["input.path", "input.filePath"],
+      doneStates: ["completed", "error"],
+    });
+    // v2 replaced the streaming family, so the v1 part sections are absent.
+    expect(descriptor.events.status).toBeUndefined();
+    expect(descriptor.events.partSnapshot).toBeUndefined();
+    expect(descriptor.events.partDelta).toBeUndefined();
+    expect(descriptor.events.idle).toContain("session.execution.succeeded");
+  });
+
+  it("omits a stateKeyPath — v2's tool events name the state outright", () => {
+    expect(opencodeV2Descriptor().fileChanges?.stateKeyPath).toBeUndefined();
+  });
+});
+
+describe("protocol selection", () => {
+  it("picks each protocol's descriptor for a version inside its range", () => {
+    expect(selectOpencodeDescriptor("1.18.30").protocol).toBe("v1");
+    expect(selectOpencodeDescriptor("2.0.26").protocol).toBe("v2");
+    expect(selectOpencodeDescriptor("2.0.0").protocol).toBe("v2");
+  });
+
+  it("falls back to the closest known protocol for an untested version", () => {
+    // A future release is more likely to still speak the newer API.
+    expect(selectOpencodeDescriptor("2.5.0").protocol).toBe("v2");
+    expect(selectOpencodeDescriptor("3.0.0").protocol).toBe("v2");
+    // An old build below every floor gets the historical protocol.
+    expect(selectOpencodeDescriptor("1.17.0").protocol).toBe("v1");
+    // A gap between ranges (1.19.x) is still the v1 API line.
+    expect(selectOpencodeDescriptor("1.19.5").protocol).toBe("v1");
+  });
+
+  it("keeps the v1 default when the probe read no version", () => {
+    expect(selectOpencodeDescriptor(null).protocol).toBe("v1");
+  });
+
+  it("ships both descriptors, oldest first", () => {
+    expect(opencodeDescriptors().map((d) => d.protocol)).toEqual(["v1", "v2"]);
+  });
+});
+
+describe("version warning", () => {
+  it("stays silent for versions inside either tested range", () => {
+    expect(opencodeVersionWarning("1.18.30")).toBeNull();
+    expect(opencodeVersionWarning("2.0.26")).toBeNull();
+  });
+
+  it("names every tested range for a version outside them", () => {
+    const warning = opencodeVersionWarning("2.5.0");
+    expect(warning).toContain("2.5.0");
+    expect(warning).toContain("≥1.18.0，<1.19.0");
+    expect(warning).toContain("≥2.0.0，<2.1.0");
+  });
+
+  it("stays silent when the probe could not read a version", () => {
+    expect(opencodeVersionWarning(null)).toBeNull();
   });
 });

@@ -189,8 +189,10 @@ describe("routing and adapter lifecycle", () => {
     const adapter = await registry.get("opencode");
     expect(adapter.kind).toBe("opencode");
     expect(mocks.ensureOpencodeServer).toHaveBeenCalledTimes(2);
-    expect(mocks.ensureOpencodeServer).toHaveBeenNthCalledWith(1, 4096);
-    expect(mocks.ensureOpencodeServer).toHaveBeenNthCalledWith(2, 4097);
+    // The port is the first argument; the protocol the probe/spawn speaks
+    // rides along as options, chosen from the probed CLI version.
+    expect(mocks.ensureOpencodeServer.mock.calls[0]?.[0]).toBe(4096);
+    expect(mocks.ensureOpencodeServer.mock.calls[1]?.[0]).toBe(4097);
   });
 
   it("aborts port fallback when the opencode CLI is missing", async () => {
@@ -223,7 +225,6 @@ describe("routing and adapter lifecycle", () => {
     );
 
     await registry.get("opencode");
-    expect(mocks.tryReuseOpencodeServer).toHaveBeenCalledWith(5555);
     expect(mocks.tryReuseOpencodeServer.mock.calls[0]?.[0]).toBe(5555);
     expect(mocks.ensureOpencodeServer).not.toHaveBeenCalled();
   });
@@ -534,8 +535,8 @@ describe("probeOpencode platform handling", () => {
 });
 
 describe("capabilities and store paths", () => {
-  it("serves opencode capabilities from its agent descriptor", () => {
-    expect(registry.capabilities("codex")).toEqual({
+  it("serves opencode capabilities from its agent descriptor", async () => {
+    expect(await registry.capabilities("codex")).toEqual({
       deleteMessage: false,
       deleteSession: true,
       attachments: false,
@@ -543,7 +544,7 @@ describe("capabilities and store paths", () => {
       compress: false,
       exportBranch: false,
     });
-    expect(registry.capabilities("opencode")).toEqual({
+    expect(await registry.capabilities("opencode")).toEqual({
       deleteMessage: true,
       deleteSession: true,
       attachments: true,

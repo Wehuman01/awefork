@@ -215,7 +215,7 @@ export function registerIpc(registry: BackendRegistry): void {
     ) => {
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
-      if (!registry.capabilities(id).exportBranch) {
+      if (!(await registry.capabilities(id)).exportBranch) {
         throw new Error("这个后端不支持导出独立会话");
       }
       return adapter.exportSession(sessionId, atMessageId);
@@ -280,7 +280,7 @@ export function registerIpc(registry: BackendRegistry): void {
     ) => {
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
-      if (!registry.capabilities(id).compress) {
+      if (!(await registry.capabilities(id)).compress) {
         throw new Error("这个后端不支持会话压缩");
       }
       await adapter.compress(sessionId, model);

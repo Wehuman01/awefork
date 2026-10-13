@@ -1,9 +1,15 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { opencodeDescriptor, parseVersion, versionInRange } from "../shared/agent-descriptor.js";
+import {
+  type OpenCodeDescriptor,
+  opencodeVersionWarning,
+  parseVersion,
+  selectOpencodeDescriptor,
+} from "../shared/agent-descriptor.js";
 import {
   BACKEND_LABELS,
   type BackendCapabilities,
@@ -23,6 +29,7 @@ import { isCodexInstalled, stopCodexServer } from "./codex-server.js";
 import {
   ensureOpencodeServer,
   findListeningLocalPorts,
+  readRegisteredOpencodeService,
   resolveSpawnEnv,
   stopManagedServer,
   tryReuseOpencodeServer,
@@ -69,7 +76,8 @@ export interface BackendRegistry {
   listBackends(): Promise<{ selected: BackendId; backends: BackendInfo[] }>;
   /** Probe + persist a selection; {ok:false} keeps the current one. */
   select(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
-  capabilities(backend: BackendId): BackendCapabilities;
+  /** Feature surface for one backend; opencode's depends on the probed CLI version. */
+  capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /** Per-backend overlay-store paths (legacy bare files stay on opencode). */
   storePaths(backend: BackendId): StorePaths;
   /** Root of the per-session file-change sidecar directories. */
@@ -99,6 +107,64 @@ function uniquePorts(ports: number[]): number[] {
   return [...new Set(ports)];
 }
 
+/** The port a baseUrl names, or null when it is not a loopback http URL. */
+function portOf(baseUrl: string): number | null {
+  const match = baseUrl.match(/:(\d+)\s*$/);
+  const port = match?.[1] ? Number(match[1]) : Number.NaN;
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+}
+
+/** What the opencode backend needs to drive one server: where it is and how. */
+interface OpenCodeServer {
+  baseUrl: string;
+  descriptor: OpenCodeDescriptor;
+  /** v2's server password; absent on v1, which authenticates nothing. */
+  password?: string;
+}
+
+/**
+ * v2's server cannot be adopted by port scan: every route requires the
+ * per-start password, and a foreign `opencode serve` never tells anyone what
+ * it picked. The one adoptable v2 server is the CLI's background service,
+ * which registers its url + password where the TUI itself looks. Anything
+ * else gets awefork's own spawn, with a password this app chose.
+ */
+async function resolveV2Server(
+  settingsPath: string,
+  descriptor: OpenCodeDescriptor,
+): Promise<OpenCodeServer> {
+  const registered = await readRegisteredOpencodeService();
+  const registeredPort = registered ? portOf(registered.baseUrl) : null;
+  if (registered && registeredPort !== null) {
+    const reused = await tryReuseOpencodeServer(registeredPort, {
+      descriptor,
+      password: registered.password,
+    });
+    if (reused) {
+      return { baseUrl: reused.baseUrl, descriptor, password: registered.password };
+    }
+  }
+  const preferred = uniquePorts(await preferredOpenCodePorts(settingsPath));
+  const password = randomBytes(32).toString("base64url");
+  let lastError: unknown = null;
+  for (const port of preferred) {
+    try {
+      const spawned = await ensureOpencodeServer(port, undefined, { descriptor, password });
+      await writeOpencodePort(settingsPath, port);
+      return { baseUrl: spawned.baseUrl, descriptor, password };
+    } catch (error) {
+      lastError = error;
+      // Missing CLI fails the same on every port — no point walking further.
+      if (error instanceof Error && error.message.includes("ENOENT")) {
+        throw error;
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(String(lastError ?? "opencode server did not start"));
+}
+
 /**
  * Locate (reuse first, then spawn) a ready opencode and remember the port.
  *
@@ -113,14 +179,26 @@ function uniquePorts(ports: number[]): number[] {
  *
  * On success the winning port is written back to settings so the next boot
  * skips the hunt. Codex has no port (stdio app-server) and never lands here.
+ *
+ * Which wire protocol to speak comes from the probed CLI version: v2 servers
+ * authenticate and live under `/api`, so they resolve through the service
+ * registration (or a fresh spawn) instead of the port walk.
  */
-async function resolveOpenCodeServer(settingsPath: string): Promise<{ baseUrl: string }> {
+async function resolveOpenCodeServer(
+  settingsPath: string,
+  probe: () => Promise<OpencodeProbe>,
+): Promise<OpenCodeServer> {
+  const version = (await probe()).version;
+  const descriptor = selectOpencodeDescriptor(version);
+  if (descriptor.protocol === "v2") {
+    return resolveV2Server(settingsPath, descriptor);
+  }
   const preferred = uniquePorts(await preferredOpenCodePorts(settingsPath));
   for (const port of preferred) {
-    const reused = await tryReuseOpencodeServer(port);
+    const reused = await tryReuseOpencodeServer(port, { descriptor });
     if (reused) {
       await writeOpencodePort(settingsPath, port);
-      return reused;
+      return { baseUrl: reused.baseUrl, descriptor };
     }
   }
 
@@ -131,25 +209,28 @@ async function resolveOpenCodeServer(settingsPath: string): Promise<{ baseUrl: s
     .filter((port) => !alreadyProbed.has(port))
     .sort((a, b) => a - b);
   const hits = await Promise.all(
-    discovered.map(async (port) => ({ port, reused: await tryReuseOpencodeServer(port) })),
+    discovered.map(async (port) => ({
+      port,
+      reused: await tryReuseOpencodeServer(port, { descriptor }),
+    })),
   );
   // First hit in scan order, not first to settle — the pick between two live
   // instances stays deterministic across boots.
   const winner = hits.find((hit) => hit.reused !== null);
   if (winner?.reused) {
     await writeOpencodePort(settingsPath, winner.port);
-    return winner.reused;
+    return { baseUrl: winner.reused.baseUrl, descriptor };
   }
 
-  if (!(await probeOpencode()).installed) {
+  if (!(await probe()).installed) {
     throw new Error("未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。");
   }
   let lastError: unknown = null;
   for (const port of preferred) {
     try {
-      const spawned = await ensureOpencodeServer(port);
+      const spawned = await ensureOpencodeServer(port, undefined, { descriptor });
       await writeOpencodePort(settingsPath, port);
-      return spawned;
+      return { baseUrl: spawned.baseUrl, descriptor };
     } catch (error) {
       lastError = error;
       // Missing CLI fails the same on every port — no point walking further.
@@ -177,6 +258,17 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const adapters = new Map<BackendId, Promise<AgentAdapter>>();
   const unsubscribers: Array<() => void> = [];
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
+  /**
+   * `opencode --version` decides which protocol awefork speaks, so it gates
+   * the switcher warning, the capabilities and the adapter itself. One probe
+   * per app session: the CLI does not change under a running app, and every
+   * listBackends call would otherwise re-spawn it.
+   */
+  let opencodeProbe: Promise<OpencodeProbe> | null = null;
+  const probeOpencodeCached = (): Promise<OpencodeProbe> => {
+    opencodeProbe ??= probeOpencode();
+    return opencodeProbe;
+  };
 
   const storePaths = (backend: BackendId): StorePaths => {
     const cached = caches.get(backend);
@@ -214,15 +306,19 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     if (existing) return existing;
     const promise =
       backend === "opencode"
-        ? resolveOpenCodeServer(settingsPath).then(({ baseUrl }) => {
-            const adapter = createOpencodeAdapter({
-              baseUrl,
-              lineagePath: storePaths("opencode").lineage,
-              fileChangesDir: fileChangesRoot("opencode"),
-            });
-            subscribeAdapter("opencode", adapter);
-            return adapter;
-          })
+        ? resolveOpenCodeServer(settingsPath, probeOpencodeCached).then(
+            ({ baseUrl, descriptor, password }) => {
+              const adapter = createOpencodeAdapter({
+                baseUrl,
+                lineagePath: storePaths("opencode").lineage,
+                fileChangesDir: fileChangesRoot("opencode"),
+                descriptor,
+                password,
+              });
+              subscribeAdapter("opencode", adapter);
+              return adapter;
+            },
+          )
         : // The codex facade manages one app-server per home (default +
           // aweswitch accounts) internally, including crash re-spawns.
           backend === "codex"
@@ -274,7 +370,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     async listBackends() {
       const [selected, opencode, codexInstalled, pi, zcode] = await Promise.all([
         readBackendSelection(settingsPath),
-        probeOpencode(),
+        probeOpencodeCached(),
         isCodexInstalled(),
         isPiInstalled(),
         probeZcode(),
@@ -287,7 +383,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
             label: BACKEND_LABELS.opencode,
             installed: opencode.installed,
             version: opencode.version,
-            versionWarning: versionWarning(opencode),
+            versionWarning: opencodeVersionWarning(opencode.version),
           },
           {
             id: "codex",
@@ -325,7 +421,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
             ? (await probeZcode()).installed
             : backend === "pi"
               ? await isPiInstalled()
-              : (await probeOpencode()).installed;
+              : (await probeOpencodeCached()).installed;
       if (!installed) {
         const hint =
           backend === "codex"
@@ -341,7 +437,13 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       return { ok: true };
     },
 
-    capabilities: backendCapabilities,
+    // opencode's flags live in the descriptor the probed version selects —
+    // v2 dropped single-message delete, so the renderer must not offer it.
+    async capabilities(backend) {
+      if (backend !== "opencode") return backendCapabilities(backend);
+      const version = (await probeOpencodeCached()).version;
+      return backendCapabilities(backend, version);
+    },
 
     storePaths,
 
@@ -395,17 +497,4 @@ export async function probeOpencode(
   } catch {
     return { installed: false, version: null };
   }
-}
-
-/**
- * The README's old failure mode was silent degradation: an opencode whose
- * event shapes drifted away made runs hang forever with nothing saying why.
- * A version outside the descriptor's tested range now carries an explicit
- * warning instead — visible, but not a block (it may well still work).
- */
-function versionWarning(probe: OpencodeProbe): string | null {
-  if (!probe.installed || probe.version === null) return null;
-  const { compat } = opencodeDescriptor();
-  if (versionInRange(probe.version, compat)) return null;
-  return `opencode ${probe.version} 不在 awefork 已测试的版本区间（≥${compat.min}，<${compat.max}）；若运行不结束或回复为空，请切换到已测试版本`;
 }
