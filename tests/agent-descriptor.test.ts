@@ -224,6 +224,20 @@ describe("vocabulary enforcement", () => {
       ),
     ).toThrow(/pagination\.limitParam: missing/);
     expect(() =>
+      parseOpenCodeDescriptor(
+        drifted((root) => {
+          (root.pagination as Record<string, unknown>) = {
+            style: "cursor",
+            limitParam: "limit",
+            cursorParam: "cursor",
+            nextPath: "cursor.next",
+            limit: 200,
+            order: "sideways",
+          };
+        }),
+      ),
+    ).toThrow(/pagination\.order: expected "asc" or "desc"/);
+    expect(() =>
       parseOpenCodeDescriptor(drifted((root) => (root.envelope = { dataKey: "data" }))),
     ).toThrow(/envelope\.bare: expected a non-empty array/);
     expect(() =>
@@ -294,6 +308,11 @@ describe("bundled v2 descriptor", () => {
     expect(descriptor.capabilities.deleteMessage).toBe(false);
     expect(descriptor.auth).toEqual({ scheme: "basic", username: "opencode" });
     expect(descriptor.envelope).toEqual({ dataKey: "data", bare: ["projects"] });
+    // Every timeline is consumed oldest-first; the first page asks for it and
+    // the cursor carries the order onward.
+    expect(descriptor.pagination?.order).toBe("asc");
+    // Attachments ride the data URL as the prompt file's uri.
+    expect(descriptor.prompt?.fileEncoding).toBe("data-url-uri");
     expect(descriptor.fork).toEqual({ cut: "next-user-exclusive", cutParam: "before" });
     expect(descriptor.endpoints.sessionPrompt).toBe("/api/session/{id}/prompt");
     expect(descriptor.endpoints.sessionModel).toBe("/api/session/{id}/model");

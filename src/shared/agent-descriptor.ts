@@ -57,6 +57,13 @@ export interface AgentPagination {
   readonly limits?: Readonly<Record<string, number>>;
   /** Fallback page size when an endpoint has no entry in `limits`. */
   readonly limit: number;
+  /**
+   * Timeline order the FIRST page is asked for; the cursor returned by it
+   * carries the order onward (sending both is rejected). awefork consumes
+   * every timeline oldest-first — the fork cut and the rendered conversation
+   * both walk forward — while the servers default to newest-first.
+   */
+  readonly order?: "asc" | "desc";
 }
 
 /** How a prompt body is built. v1 posts parts + the model; v2 posts text. */
@@ -64,8 +71,12 @@ export interface AgentPrompt {
   readonly style: "parts" | "text";
   /** Whether the model rides the prompt body (v1) or lives on the session (v2). */
   readonly modelInBody: boolean;
-  /** How attachments encode: v1 file parts carry a data URL; v2 wants raw base64. */
-  readonly fileEncoding: "data-url-part" | "inline-base64";
+  /**
+   * How attachments encode: v1 file parts carry a data URL in their `url`
+   * field; v2's prompt files take that same data URL as their `uri` (the
+   * server materializes it into the inline attachment).
+   */
+  readonly fileEncoding: "data-url-part" | "data-url-uri";
   /** POST the session's model before prompting (v2's prompt body has none). */
   readonly setModelFirst: boolean;
 }
@@ -479,11 +490,20 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     const record = objectAt(root.pagination, "pagination");
     onlyKeys(
       record,
-      ["style", "limitParam", "cursorParam", "nextPath", "limits", "limit"],
+      ["style", "limitParam", "cursorParam", "nextPath", "limits", "limit", "order"],
       "pagination",
     );
     if (record.style !== "cursor") {
       throw new DescriptorSchemaError(`pagination.style: unknown style "${String(record.style)}"`);
+    }
+    let order: "asc" | "desc" | undefined;
+    if (record.order !== undefined) {
+      if (record.order !== "asc" && record.order !== "desc") {
+        throw new DescriptorSchemaError(
+          `pagination.order: expected "asc" or "desc", got ${describe(record.order)}`,
+        );
+      }
+      order = record.order;
     }
     const limits: Record<string, number> = {};
     if (record.limits !== undefined) {
@@ -501,6 +521,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       cursorParam: stringAt(record.cursorParam, "pagination.cursorParam"),
       nextPath: stringAt(record.nextPath, "pagination.nextPath"),
       ...(Object.keys(limits).length > 0 ? { limits } : {}),
+      ...(order ? { order } : {}),
       limit: (() => {
         const fallback = record.limit;
         if (typeof fallback !== "number" || !Number.isInteger(fallback) || fallback <= 0) {
@@ -521,7 +542,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     if (style !== "parts" && style !== "text") {
       throw new DescriptorSchemaError(`prompt.style: unknown style "${String(style)}"`);
     }
-    if (fileEncoding !== "data-url-part" && fileEncoding !== "inline-base64") {
+    if (fileEncoding !== "data-url-part" && fileEncoding !== "data-url-uri") {
       throw new DescriptorSchemaError(
         `prompt.fileEncoding: unknown encoding "${String(fileEncoding)}"`,
       );

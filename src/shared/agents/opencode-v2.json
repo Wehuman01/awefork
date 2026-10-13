@@ -12,12 +12,13 @@
     "cursorParam": "cursor",
     "nextPath": "cursor.next",
     "limit": 200,
-    "limits": { "sessions": 2000, "sessionMessages": 200 }
+    "limits": { "sessions": 2000, "sessionMessages": 200 },
+    "order": "asc"
   },
   "prompt": {
     "style": "text",
     "modelInBody": false,
-    "fileEncoding": "inline-base64",
+    "fileEncoding": "data-url-uri",
     "setModelFirst": true
   },
   "fileChanges": {

@@ -310,12 +310,19 @@ export function createOpencodeClient(
       const params = new URLSearchParams(query);
       if (paging) {
         params.set(paging.limitParam, String(paging.limits?.[endpointKey] ?? paging.limit));
+        // The cursor carries the timeline order onward, so the two never ride
+        // together: the server rejects the combination (InvalidCursorError).
+        // Only the first page asks for the order the descriptor names —
+        // without it the server defaults to newest-first, which renders the
+        // conversation backwards and misreads the fork cut.
         if (cursor) params.set(paging.cursorParam, cursor);
+        else if (paging.order) params.set("order", paging.order);
       } else {
         // v1's historical one-shot: a big limit, no cursor.
         params.set("limit", "1000");
       }
-      return `${path}?${params.toString()}`;
+      const search = params.toString();
+      return search ? `${path}?${search}` : path;
     };
     const rowsOf = (envelope: unknown): Record<string, unknown>[] => {
       const wrapped = descriptor.envelope && !descriptor.envelope.bare.includes(endpointKey);
@@ -368,15 +375,14 @@ export function createOpencodeClient(
     );
   }
 
-  /** v2's prompt body: plain text plus inline-base64 file attachments. */
+  /**
+   * v2's prompt files: the data URL itself is the `uri` — the server
+   * materializes a `data:` uri into the inline attachment (mime sniffed from
+   * it), which is why the body carries no mime or source of its own.
+   */
   const promptFiles = (attachments: PromptAttachment[] | undefined): unknown[] | undefined => {
     if (!attachments || attachments.length === 0) return undefined;
-    return attachments.map((a) => ({
-      data: a.dataUrl.slice(a.dataUrl.indexOf(",") + 1),
-      mime: a.mime,
-      source: { type: "inline" },
-      name: a.filename,
-    }));
+    return attachments.map((a) => ({ uri: a.dataUrl, name: a.filename }));
   };
 
   return {

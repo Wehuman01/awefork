@@ -169,9 +169,21 @@ describe("v2 protocol transport", () => {
   /** A fake v2 server recording requests; `routes` answers per path+method. */
   function listenV2(routes: Record<string, (body: unknown) => unknown>): Promise<{
     baseUrl: string;
-    calls: { method: string; path: string; auth: string | undefined; body: unknown }[];
+    calls: {
+      method: string;
+      path: string;
+      search: string;
+      auth: string | undefined;
+      body: unknown;
+    }[];
   }> {
-    const calls: { method: string; path: string; auth: string | undefined; body: unknown }[] = [];
+    const calls: {
+      method: string;
+      path: string;
+      search: string;
+      auth: string | undefined;
+      body: unknown;
+    }[] = [];
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
       const chunks: string[] = [];
@@ -181,6 +193,7 @@ describe("v2 protocol transport", () => {
         calls.push({
           method: req.method ?? "GET",
           path: url.pathname,
+          search: url.search,
           auth: req.headers.authorization,
           body,
         });
@@ -259,6 +272,28 @@ describe("v2 protocol transport", () => {
     expect(calls.map((c) => c.path)).toEqual(["/api/session", "/api/session", "/api/session"]);
   });
 
+  it("asks the first page for oldest-first and never pairs order with a cursor", async () => {
+    // The server defaults to newest-first — which renders the conversation
+    // backwards and misreads the fork cut — and rejects a cursor combined
+    // with `order` (InvalidCursorError), so only the first page carries it.
+    let page = 0;
+    const { baseUrl, calls } = await listenV2({
+      "GET /api/session/s1/message": () => {
+        page += 1;
+        return page < 2
+          ? { data: [{ id: `m${page}` }], cursor: { next: "c1" } }
+          : { data: [{ id: `m${page}` }], cursor: {} };
+      },
+    });
+    const client = createOpencodeClient(baseUrl, {
+      descriptor: opencodeV2Descriptor(),
+      password: PASSWORD,
+    });
+    await expect(client.messages("s1")).resolves.toEqual([{ id: "m1" }, { id: "m2" }]);
+    const searches = calls.map((c) => c.search);
+    expect(searches).toEqual(["?limit=200&order=asc", "?limit=200&cursor=c1"]);
+  });
+
   it("rejects a non-array list answer — a foreign server on the port", async () => {
     const { baseUrl } = await listenV2({ "GET /api/session": () => ({ ok: true }) });
     const client = createOpencodeClient(baseUrl, {
@@ -322,11 +357,11 @@ describe("v2 protocol transport", () => {
     expect(calls[0]?.body).toEqual({
       model: { id: "glm/glm-5.3", providerID: "oc-awerouter", variant: "low" },
     });
+    // The data URL itself is the attachment's uri — the server materializes
+    // it (mime and all) into the inline file.
     expect(calls[1]?.body).toEqual({
       text: "hello",
-      files: [
-        { data: "cGluZw==", mime: "text/markdown", source: { type: "inline" }, name: "p.md" },
-      ],
+      files: [{ uri: "data:text/markdown;base64,cGluZw==", name: "p.md" }],
     });
   });
 
@@ -419,3 +454,4 @@ describe("v2 protocol transport", () => {
     ]);
   });
 });
+

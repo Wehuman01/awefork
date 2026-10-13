@@ -49,8 +49,8 @@ which is a bare array; list endpoints paginate by cursor):
 | create session | `POST /session?directory=` | `POST /api/session` body `{location:{directory}}` |
 | rename | `PATCH /session/:id` `{title}` | same path under `/api`, answers 204 |
 | delete session | `DELETE /session/:id` | same under `/api` |
-| messages | `GET /session/:id/message` | `GET /api/session/:id/message` (cursor pages, max 200) |
-| prompt | `POST /session/:id/message` `{parts,model,variant}` | `POST /api/session/:id/prompt` `{text,files:[{data(base64),mime,source:{type:"inline"},name}]}`; the model lives on the session (`POST /api/session/:id/model`) |
+| messages | `GET /session/:id/message` | `GET /api/session/:id/message` (cursor pages, max 200; `?order=asc` on the first page — the default is newest-first, and a cursor already carries its order) |
+| prompt | `POST /session/:id/message` `{parts,model,variant}` | `POST /api/session/:id/prompt` `{text,files:[{uri:"data:<mime>;base64,<data>",name}]}`; the model lives on the session (`POST /api/session/:id/model`) |
 | fork | `POST /session/:id/fork` `{messageID}` | `POST /api/session/:id/fork` `{before}` |
 | compress | `POST /session/:id/summarize` `{providerID,modelID,auto:false}` | `POST /api/session/:id/compact` `{}` (model from the session) |
 | abort | `POST /session/:id/abort` | `POST /api/session/:id/interrupt` |
@@ -92,9 +92,12 @@ to `"completed"`).
 ## Architecture
 
 - `agents/opencode-v2.json` — the v2 descriptor. Same vocabulary plus new
-  optional sections: `protocol`, `auth`, `envelope`, `pagination`, `prompt`,
-  `sessions.create`, `messages.partsPath` / `textPath` / `attachments`,
-  `parts.compaction.rowTypeField`, `events.payloadKey`, `partTimeKeys`.
+  optional sections: `protocol`, `auth`, `envelope`, `pagination` (with the
+  first-page `order`), `prompt`, `sessions.create`, `messages.partsPath` /
+  `textPath` / `attachments`, `parts.compaction.rowTypeField`,
+  `partTimeKeys`. The frame payload's move from `properties` to `data` is
+  normalized in `sse.ts` instead — both spellings reach the adapters as one
+  shape.
 - `agent-descriptor.ts` — parses both files, exposes
   `selectOpencodeDescriptor(version)` (exact compat hit, else the closest
   known protocol) and `opencodeVersionWarning(version)` (union of tested
