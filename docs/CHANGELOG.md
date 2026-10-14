@@ -1,9 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.3.5
 
 - **opencode v2 support (1.18.x keeps working)** — awefork now drives opencode v2's `/api` server as well as the 1.18–1.19 API it was built on. The probed CLI version picks the protocol: v2 means Basic auth with the server's password, `{data}`-wrapped responses, cursor-paged lists, prompts whose model lives on the session (pinned before each send), forks that spell the cut `before`, compaction through `/compact`, interrupts through `/interrupt`, a flat model catalog, and the new streaming event family (`session.execution.*`, `session.text.*`, `session.reasoning.*`, `session.tool.*`) — a v2 run streams, settles and records file changes exactly like a v1 one. v2's server is adopted from the CLI's background service (its registered password) or spawned with one awefork pins; single-message delete is capability-hidden because v2 dropped the endpoint. An untested version still carries the ⚠ warning, now naming both tested ranges.
 - **Compress a session into a summary (🗜 压缩会话)** — opencode conversations can be folded on demand through the backend's summarize primitive. Right-click a session (🗜 压缩会话…) or use the pane header's 🗜 button; the dialog preselects the branch's current model and lets you swap to a cheaper one before it starts. Non-destructive: history stays fully readable, later prompts just carry summary + the most recent turns. The compaction lands as a 🧹 压缩会话 turn on the canvas and a divider banner in the pane, the summary streams in live like any run, and completion toasts. Capability-gated — codex/pi/zcode hide the affordance (their adapters reject with a named error).
+- **A slow fork is a copy, not a dead server** — fork requests ride their own long deadline, and a copy that lands after the request deadline is adopted instead of reported as a failure, so a big branch never reads as a timeout while the server keeps working.
+- **Compare fixes** — the shared composer keeps a failed side's error notice while the other side's run settles, and a folded card keeps its natural height instead of stretching to its open row-neighbour.
+
+### Install
+
+Installers are attached: `awefork-0.3.5-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.3.5-x64-setup.exe` (Windows x64 — SmartScreen may warn; choose More info → Run anyway).
 
 ## v0.3.2 - 2026-09-18
 
