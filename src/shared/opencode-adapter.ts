@@ -11,7 +11,7 @@ import {
   type FileChangeRecorder,
   type ToolPartFrame,
 } from "./file-change-recorder.js";
-import { recordFork, removeFork } from "./lineage-store.js";
+import { readDetachedExportIds, recordFork, removeFork } from "./lineage-store.js";
 import {
   createOpencodeClient,
   type OcMessage,
@@ -134,10 +134,18 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         }
       : undefined;
 
-  const mapSession = (raw: unknown): SessionSummary => {
-    const parentSessionId = firstString(raw, descriptor.sessions.fields.parentSessionId);
+  /**
+   * `detached` names the sessions exported as standalone copies: the server
+   * stamped its fork parent on their row (v2's `fork.sessionID`), and that
+   * link is overridden here so the copy maps as the plain root it is.
+   */
+  const mapSession = (raw: unknown, detached?: ReadonlySet<string>): SessionSummary => {
+    const id = firstString(raw, descriptor.sessions.fields.id) ?? "";
+    const parentSessionId = detached?.has(id)
+      ? null
+      : firstString(raw, descriptor.sessions.fields.parentSessionId);
     return {
-      id: firstString(raw, descriptor.sessions.fields.id) ?? "",
+      id,
       title: firstString(raw, descriptor.sessions.fields.title) ?? "",
       directory: firstString(raw, descriptor.sessions.fields.directory) ?? "",
       parentSessionId,
@@ -320,6 +328,9 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     kind: "opencode",
 
     async listSessions() {
+      // Exported copies must map as roots, so their override is read before
+      // any row is mapped.
+      const detached = await readDetachedExportIds(options.lineagePath);
       const [current, projects] = await Promise.all([client.listSessions(), client.listProjects()]);
       const byId = new Map(current.map((s) => [s.id, s]));
       const otherWorktrees = projects.filter((p) => p.id !== "global" && p.worktree);
@@ -344,7 +355,9 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // different symlink spellings (macOS /var vs /private/var) stays one
       // sidebar group instead of splitting.
       return canonicalizeSessionDirectories(
-        [...byId.values()].map(mapSession).sort((a, b) => b.updatedAt - a.updatedAt),
+        [...byId.values()]
+          .map((raw) => mapSession(raw, detached))
+          .sort((a, b) => b.updatedAt - a.updatedAt),
       );
     },
 
@@ -435,10 +448,24 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     async exportSession(sessionId, atMessageId) {
       // Same cut translation and stale-anchor error as fork (the pre-check:
       // an anchor the server no longer has must fail loudly here, before any
-      // copy exists) — but the copy records no lineage, so it lands as a
-      // plain root session the TUI or any other opencode client can continue.
+      // copy exists) — but the copy lands as a plain root session the TUI or
+      // any other opencode client can continue.
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
       const exported = await forkOrAdopt(sessionId, cut);
+      const id = firstString(exported, descriptor.sessions.fields.id) ?? "";
+      // A protocol that stamps the fork parent onto the new row (v2's
+      // fork.sessionID) would present the copy as an agent-spawned subagent —
+      // hidden from the sidebar and the canvas, which is the whole export
+      // undone. Recording the copy as detached makes the mapping drop that
+      // link. A protocol that leaves the row parentless (v1) needs no record.
+      if (firstString(exported, descriptor.sessions.fields.parentSessionId) !== null) {
+        await recordFork(options.lineagePath, id, {
+          parentId: sessionId,
+          atMessageId,
+          createdAt: firstNumber(exported, descriptor.sessions.fields.createdAt) ?? Date.now(),
+          detached: true,
+        });
+      }
       return { ...mapSession(exported), origin: "root", parentSessionId: null };
     },
 

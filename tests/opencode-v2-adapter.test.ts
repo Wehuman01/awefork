@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { opencodeV2Descriptor } from "../src/shared/agent-descriptor";
-import { readLineage } from "../src/shared/lineage-store";
+import { lineageForDisplay, readLineage } from "../src/shared/lineage-store";
 import { createOpencodeAdapter } from "../src/shared/opencode-adapter";
+import { buildSessionTree } from "../src/shared/session-tree";
 import type { AgentEvent, ModelChoice } from "../src/shared/types";
 
 /**
@@ -517,7 +518,7 @@ describe("v2 mutations", () => {
     });
   });
 
-  it("exports a branch as a detached root session with no lineage", async () => {
+  it("exports a branch as a detached root session — the fork link is overridden", async () => {
     const fake = await startFakeV2({
       messages: {
         ses_1: [
@@ -534,7 +535,71 @@ describe("v2 mutations", () => {
 
     const exported = await adapter.exportSession("ses_1", "msg_a1");
     expect(exported).toMatchObject({ id: "ses_fork", origin: "root", parentSessionId: null });
-    expect(existsSync(lineagePath)).toBe(false);
+    // The server stamped its fork parent on the copy's row, so the export
+    // records the copy as detached — the only thing that keeps the link from
+    // resurfacing as a subagent on the next listing.
+    expect(await readLineage(lineagePath)).toEqual({
+      ses_fork: {
+        parentId: "ses_1",
+        atMessageId: "msg_a1",
+        createdAt: 600,
+        detached: true,
+      },
+    });
+  });
+
+  it("an exported copy stays a visible root after a re-list, not a hidden subagent", async () => {
+    const fake = await startFakeV2({
+      messages: {
+        ses_1: [
+          userRow({ id: "msg_u1" }),
+          assistantRow({ id: "msg_a1" }),
+          userRow({ id: "msg_u2" }),
+        ],
+      },
+    });
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+
+    await adapter.exportSession("ses_1", "msg_a1");
+    // What refreshSessions() sees right after the export: the copy's row still
+    // carries fork.sessionID server-side.
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "ses_fork")).toMatchObject({
+      origin: "root",
+      parentSessionId: null,
+    });
+    // The sidebar tree hides subagent-origin sessions, so a copy that mapped
+    // as one vanished from every view — the export looked like it did nothing.
+    const groups = buildSessionTree(
+      sessions,
+      lineageForDisplay(await readLineage(join(dir, "lineage.json"))),
+    );
+    const roots = groups.flatMap((g) => g.roots.map((r) => r.session.id));
+    expect(roots).toContain("ses_fork");
+    expect(roots).toContain("ses_1");
+  });
+
+  it("deleting an exported copy forgets its detached record", async () => {
+    const fake = await startFakeV2({
+      messages: {
+        ses_1: [
+          userRow({ id: "msg_u1" }),
+          assistantRow({ id: "msg_a1" }),
+          userRow({ id: "msg_u2" }),
+        ],
+      },
+    });
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const lineagePath = join(dir, "lineage.json");
+    const adapter = await adapterFor(fake, lineagePath);
+
+    await adapter.exportSession("ses_1", "msg_a1");
+    await adapter.deleteSession("ses_fork");
+
+    expect(await readLineage(lineagePath)).toEqual({});
   });
 
   it("pins the model before prompting and before compacting", async () => {

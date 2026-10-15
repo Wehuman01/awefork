@@ -2,7 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readLineage, recordFork, removeFork } from "../src/shared/lineage-store";
+import {
+  lineageForDisplay,
+  readDetachedExportIds,
+  readLineage,
+  recordFork,
+  removeFork,
+} from "../src/shared/lineage-store";
 
 async function tempLineagePath(): Promise<string> {
   return join(await mkdtemp(join(tmpdir(), "awefork-lineage-")), "lineage.json");
@@ -72,6 +78,56 @@ describe("lineage store", () => {
       "fork-1": { parentId: "p", atMessageId: null, createdAt: 1 },
       "fork-2": { parentId: "p", atMessageId: "m", createdAt: 2 },
     });
+  });
+
+  it("readDetachedExportIds names only detached records", async () => {
+    const path = await tempLineagePath();
+    await recordFork(path, "fork-1", { parentId: "p", atMessageId: null, createdAt: 1 });
+    await recordFork(path, "export-1", {
+      parentId: "p",
+      atMessageId: "m",
+      createdAt: 2,
+      detached: true,
+    });
+
+    expect(await readDetachedExportIds(path)).toEqual(new Set(["export-1"]));
+  });
+
+  it("readDetachedExportIds is empty without a sidecar and survives a broken one", async () => {
+    expect(await readDetachedExportIds(await tempLineagePath())).toEqual(new Set());
+    const path = await tempLineagePath();
+    await writeFile(path, "not json at all", "utf8");
+    expect(await readDetachedExportIds(path)).toEqual(new Set());
+  });
+
+  it("lineageForDisplay keeps forks and drops detached exports", async () => {
+    const path = await tempLineagePath();
+    await recordFork(path, "fork-1", { parentId: "p", atMessageId: null, createdAt: 1 });
+    await recordFork(path, "export-1", {
+      parentId: "p",
+      atMessageId: "m",
+      createdAt: 2,
+      detached: true,
+    });
+
+    expect(lineageForDisplay(await readLineage(path))).toEqual({
+      "fork-1": { parentId: "p", atMessageId: null, createdAt: 1 },
+    });
+  });
+
+  it("removeFork also forgets a detached export", async () => {
+    const path = await tempLineagePath();
+    await recordFork(path, "export-1", {
+      parentId: "p",
+      atMessageId: null,
+      createdAt: 1,
+      detached: true,
+    });
+
+    await removeFork(path, "export-1");
+
+    expect(await readLineage(path)).toEqual({});
+    expect(await readDetachedExportIds(path)).toEqual(new Set());
   });
 });
 

@@ -17,7 +17,7 @@ import {
   readSnapshotBlob,
   sessionChangesDir,
 } from "../shared/file-changes.js";
-import { readLineage } from "../shared/lineage-store.js";
+import { lineageForDisplay, readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
 import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
@@ -119,7 +119,9 @@ export function registerIpc(registry: BackendRegistry): void {
     const id = storeBackend(backend);
     const adapter = await withAdapter(id);
     const sessions = await adapter.listSessions();
-    const lineage = await readLineage(registry.storePaths(id).lineage);
+    // Detached exports carry a record only to override a server-side fork
+    // link; the renderer must never see it, or the copy would read as a branch.
+    const lineage = lineageForDisplay(await readLineage(registry.storePaths(id).lineage));
     return { sessions, lineage };
   });
 

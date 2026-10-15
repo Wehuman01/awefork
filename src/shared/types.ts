@@ -158,6 +158,15 @@ export interface ForkRecord {
    * re-keyed-ids fallback would otherwise swallow them).
    */
   context?: ForkContextMode;
+  /**
+   * Set on a session exported as a standalone copy: the session is a plain
+   * root in every awefork view. The record exists only because a protocol
+   * that stamps the fork parent onto the new row (opencode v2's
+   * `fork.sessionID`) would otherwise present the copy as an agent-spawned
+   * subagent and hide it — the session mapping drops that link, and the
+   * renderer never sees this record at all.
+   */
+  detached?: boolean;
 }
 
 /** Lineage store content. Key = forked session id. */
@@ -430,11 +439,11 @@ export interface AgentAdapter {
   ): Promise<SessionSummary>;
   /**
    * Copy the branch through `atMessageId` into a standalone native session —
-   * the same server-side copy primitive as fork, but detached: no lineage
-   * record, no canvas branch, just a plain root session the backend's own
-   * tools can open and continue anywhere. `atMessageId === null` copies the
-   * session at its latest state. Backends whose fork linkage lives inside
-   * the backend itself (and therefore cannot detach) reject.
+   * the same server-side copy primitive as fork, but detached: no canvas
+   * branch, just a plain root session the backend's own tools can open and
+   * continue anywhere. `atMessageId === null` copies the session at its
+   * latest state. Backends whose fork linkage lives inside the backend itself
+   * (and therefore cannot detach) reject.
    */
   exportSession(sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
   /** Permanently remove a session (and awefork's lineage record for it). */

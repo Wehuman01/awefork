@@ -3061,9 +3061,11 @@ export function dismissDraft(): void {
 
 /**
  * Copy a branch out as a standalone native session — the same server-side
- * primitive a fork uses, but detached: no lineage entry, no canvas branch, no
- * inherited tags. The copy is a plain root session in its directory, openable
- * and continuable by the backend's own tools (opencode TUI, another machine).
+ * primitive a fork uses, but detached: no canvas branch, no inherited tags.
+ * The copy is a plain root session in its directory, openable and continuable
+ * by the backend's own tools (opencode TUI, another machine). A protocol that
+ * stamps the fork parent on the copy's row records a detached marker so the
+ * link never surfaces here; it names no branch either way.
  * `atMessageId` bounds the copy through that turn; null copies the whole
  * session at its tip. The exported session lands selected, so the user sees
  * exactly what got copied; undo hard-deletes the copy again.
