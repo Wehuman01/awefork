@@ -48,6 +48,10 @@ describe("bundled opencode descriptor", () => {
     });
     expect(descriptor.compat).toEqual({ min: "1.18.0", max: "1.19.0" });
     expect(descriptor.events.partSnapshot.kinds).toEqual({ text: "text", reasoning: "thinking" });
+    // v1 rows carry no fork link at all — only subagents ever set a parent,
+    // which is why v1 needed no fork/subagent distinction.
+    expect(descriptor.sessions.fields.parentSessionId).toEqual(["parentID"]);
+    expect(descriptor.sessions.fields.forkSessionId).toEqual([]);
   });
 
   it("accepts a legitimate variation — the drift scenario this exists for", () => {
@@ -319,7 +323,10 @@ describe("bundled v2 descriptor", () => {
     expect(descriptor.endpoints.sessionAbort).toBe("/api/session/{id}/interrupt");
     expect(descriptor.endpoints.sessionSummarize).toBe("/api/session/{id}/compact");
     expect(descriptor.sessions.fields.directory).toEqual(["location.directory"]);
-    expect(descriptor.sessions.fields.parentSessionId).toEqual(["fork.sessionID", "parentID"]);
+    // v2 split the two parent relationships: a subagent parent and a fork
+    // parent. Reading both as one turned every fork into a hidden subagent.
+    expect(descriptor.sessions.fields.parentSessionId).toEqual(["parentID"]);
+    expect(descriptor.sessions.fields.forkSessionId).toEqual(["fork.sessionID"]);
     expect(descriptor.messages.partsPath).toBe("content");
     expect(descriptor.messages.textPath).toEqual(["text"]);
     expect(descriptor.messages.parts.tool.nameField).toBe("name");

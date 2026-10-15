@@ -32,7 +32,8 @@
       "id": ["id"],
       "title": ["title"],
       "directory": ["location.directory"],
-      "parentSessionId": ["fork.sessionID", "parentID"],
+      "parentSessionId": ["parentID"],
+      "forkSessionId": ["fork.sessionID"],
       "createdAt": ["time.created"],
       "updatedAt": ["time.updated"]
     }

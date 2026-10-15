@@ -27,6 +27,7 @@ import type {
   AgentEvent,
   ChatMessage,
   PromptAttachment,
+  SessionOrigin,
   SessionSummary,
 } from "./types.js";
 
@@ -135,21 +136,33 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       : undefined;
 
   /**
-   * `detached` names the sessions exported as standalone copies: the server
-   * stamped its fork parent on their row (v2's `fork.sessionID`), and that
-   * link is overridden here so the copy maps as the plain root it is.
+   * A session row carries two different parent relationships, and only one of
+   * them hides the session: `parentSessionId` is the agent that spawned it as
+   * a subagent (the agent's own work), while `forkSessionId` is the session it
+   * was forked from (a branch the user chose). v1 spelled both on one field
+   * because only subagents ever set it; v2 gave forks their own, so reading
+   * either as "the parent" turned every fork into a hidden subagent.
+   * `detached` names exported copies, whose fork link is overridden so the
+   * copy maps as the plain root it was exported as.
    */
   const mapSession = (raw: unknown, detached?: ReadonlySet<string>): SessionSummary => {
     const id = firstString(raw, descriptor.sessions.fields.id) ?? "";
-    const parentSessionId = detached?.has(id)
-      ? null
-      : firstString(raw, descriptor.sessions.fields.parentSessionId);
+    const subagentParent = firstString(raw, descriptor.sessions.fields.parentSessionId);
+    const forkParent = firstString(raw, descriptor.sessions.fields.forkSessionId);
+    const parentSessionId = detached?.has(id) ? null : (subagentParent ?? forkParent);
+    const origin: SessionOrigin = detached?.has(id)
+      ? "root"
+      : subagentParent
+        ? "subagent"
+        : forkParent
+          ? "fork"
+          : "root";
     return {
       id,
       title: firstString(raw, descriptor.sessions.fields.title) ?? "",
       directory: firstString(raw, descriptor.sessions.fields.directory) ?? "",
       parentSessionId,
-      origin: parentSessionId ? "subagent" : "root",
+      origin,
       createdAt: firstNumber(raw, descriptor.sessions.fields.createdAt) ?? 0,
       updatedAt: firstNumber(raw, descriptor.sessions.fields.updatedAt) ?? 0,
     };
@@ -453,12 +466,13 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
       const exported = await forkOrAdopt(sessionId, cut);
       const id = firstString(exported, descriptor.sessions.fields.id) ?? "";
-      // A protocol that stamps the fork parent onto the new row (v2's
-      // fork.sessionID) would present the copy as an agent-spawned subagent —
-      // hidden from the sidebar and the canvas, which is the whole export
-      // undone. Recording the copy as detached makes the mapping drop that
-      // link. A protocol that leaves the row parentless (v1) needs no record.
-      if (firstString(exported, descriptor.sessions.fields.parentSessionId) !== null) {
+      // A fork leaves the copy's row naming the session it came from, which
+      // would make the copy read as a branch of its source — visible, but
+      // nested where an export does not belong. Recording the copy as detached
+      // makes the mapping drop that link, so it lands as the plain root the
+      // export promised. A protocol whose rows carry no fork link (v1) needs
+      // no record.
+      if (firstString(exported, descriptor.sessions.fields.forkSessionId) !== null) {
         await recordFork(options.lineagePath, id, {
           parentId: sessionId,
           atMessageId,

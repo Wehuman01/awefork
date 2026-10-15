@@ -113,7 +113,18 @@ export interface AgentSessionFields {
   readonly id: readonly string[];
   readonly title: readonly string[];
   readonly directory: readonly string[];
+  /**
+   * The session an agent spawned this one as a subagent. A session carrying
+   * this link is the agent's own work and stays out of the user's session
+   * list — it is NOT the same relationship as a fork.
+   */
   readonly parentSessionId: readonly string[];
+  /**
+   * The session this one was forked from. A fork is a branch the user chose,
+   * so it shows as one; a protocol whose rows carry no fork link omits this,
+   * which parses to an empty path list.
+   */
+  readonly forkSessionId: readonly string[];
   readonly createdAt: readonly string[];
   readonly updatedAt: readonly string[];
 }
@@ -394,12 +405,30 @@ function parseFieldPaths<T extends object>(
   value: unknown,
   keys: readonly (keyof T & string)[],
   where: string,
+  /**
+   * Keys a protocol may omit. An omitted one parses to an empty path list,
+   * which every reader already treats as "this protocol has no such field";
+   * a missing required key is still a schema error.
+   */
+  optional: readonly (keyof T & string)[] = [],
 ): T {
   const record = objectAt(value, where);
-  onlyKeys(record, keys, where);
-  return Object.fromEntries(
-    keys.map((key) => [key, dotPathsAt(record[key], `${where}.${key}`)]),
-  ) as unknown as T;
+  onlyKeys(record, [...keys, ...optional], where);
+  const entries: [string, string[]][] = [];
+  for (const key of keys) entries.push([key, dotPathsAt(record[key], `${where}.${key}`)]);
+  for (const key of optional) {
+    // Omitted, or spelled as an empty list: both mean "no such field here".
+    // A parsed descriptor round-tripped back through JSON lands on the second
+    // spelling, so both have to parse.
+    const raw = record[key];
+    entries.push([
+      key,
+      raw === undefined || (Array.isArray(raw) && raw.length === 0)
+        ? []
+        : dotPathsAt(raw, `${where}.${key}`),
+    ]);
+  }
+  return Object.fromEntries(entries) as unknown as T;
 }
 
 function parseTextPart(value: unknown, where: string): AgentTextPart {
@@ -613,6 +642,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     sessions.fields,
     ["id", "title", "directory", "parentSessionId", "createdAt", "updatedAt"],
     "sessions.fields",
+    ["forkSessionId"],
   );
   let createDirectoryIn: "query" | "body" | undefined;
   if (sessions.create !== undefined) {

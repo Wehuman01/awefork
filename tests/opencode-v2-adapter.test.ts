@@ -255,7 +255,7 @@ async function adapterFor(fake: FakeV2, lineagePath: string, fileChangesDir?: st
 }
 
 describe("v2 session listing", () => {
-  it("maps location.directory, fork.sessionID and the row's own fields", async () => {
+  it("maps location.directory and the row's own fields", async () => {
     const fake = await startFakeV2({
       sessions: [
         session({ id: "ses_root", title: "root", time: { created: 1, updated: 2 } }),
@@ -265,19 +265,36 @@ describe("v2 session listing", () => {
           fork: { sessionID: "ses_root", boundary: { type: "before", messageID: "msg_u1" } },
           time: { created: 3, updated: 4 },
         }),
+        session({
+          id: "ses_sub",
+          title: "a subagent task",
+          parentID: "ses_root",
+          time: { created: 5, updated: 6 },
+        }),
       ],
     });
     const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
     cleanup.push(() => rm(dir, { recursive: true, force: true }));
     const adapter = await adapterFor(fake, join(dir, "lineage.json"));
 
+    // A fork and a subagent are two different relationships, and only the
+    // subagent one hides the session: the fork is a branch the user chose.
     await expect(adapter.listSessions()).resolves.toEqual([
+      {
+        id: "ses_sub",
+        title: "a subagent task",
+        directory: "/tmp/project",
+        parentSessionId: "ses_root",
+        origin: "subagent",
+        createdAt: 5,
+        updatedAt: 6,
+      },
       {
         id: "ses_fork",
         title: "root (fork #1)",
         directory: "/tmp/project",
         parentSessionId: "ses_root",
-        origin: "subagent",
+        origin: "fork",
         createdAt: 3,
         updatedAt: 4,
       },
@@ -293,6 +310,37 @@ describe("v2 session listing", () => {
     ]);
     // Every request authenticated.
     expect(fake.calls.every((c) => c.auth === AUTH)).toBe(true);
+  });
+
+  it("a fork made outside awefork stays visible as a branch of its source", async () => {
+    // No lineage record exists for it — awefork never made this fork — so
+    // before the two relationships were split it read as a subagent and the
+    // sidebar and the canvas both dropped it.
+    const fake = await startFakeV2({
+      sessions: [
+        session({ id: "ses_root", title: "root", time: { created: 1, updated: 2 } }),
+        session({
+          id: "ses_tui_fork",
+          title: "root (fork #1)",
+          fork: { sessionID: "ses_root", boundary: { type: "before", messageID: "msg_u1" } },
+          time: { created: 3, updated: 4 },
+        }),
+      ],
+    });
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+
+    const sessions = await adapter.listSessions();
+    const groups = buildSessionTree(sessions, {});
+    const rows = groups.flatMap((g) => [
+      ...g.roots.map((r) => ({ id: r.session.id, depth: 0 })),
+      ...g.roots.flatMap((r) => r.children.map((c) => ({ id: c.session.id, depth: 1 }))),
+    ]);
+    expect(rows).toEqual([
+      { id: "ses_root", depth: 0 },
+      { id: "ses_tui_fork", depth: 1 },
+    ]);
   });
 
   it("fans out to each project's worktree (canonical) like v1 did", async () => {
