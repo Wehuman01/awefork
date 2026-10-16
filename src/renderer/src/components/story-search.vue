@@ -108,6 +108,7 @@ function jump(hit: TurnSearchHit): void {
   if (!node) return;
   void selectTurn(node);
   emit("jump", node);
+  close();
 }
 
 // ⌘/Ctrl+F opens the story search from anywhere in the app.
