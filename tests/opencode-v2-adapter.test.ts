@@ -201,6 +201,10 @@ function startFakeV2(
       }
       const compactMatch = path.match(/^\/api\/session\/([^/]+)\/compact$/);
       if (compactMatch && method === "POST") return json({ data: {} });
+      const permissionReplyMatch = path.match(
+        /^\/api\/session\/([^/]+)\/permission\/([^/]+)\/reply$/,
+      );
+      if (permissionReplyMatch && method === "POST") return json({ data: true });
       const interruptMatch = path.match(/^\/api\/session\/([^/]+)\/interrupt$/);
       if (interruptMatch && method === "POST") return json({ data: { interrupted: true } });
       res.writeHead(404, { "content-type": "application/json" });
@@ -830,6 +834,66 @@ describe("v2 event stream", () => {
       };
       const entry = recorded.messages.msg_a1?.find((e) => e.path === file);
       expect(entry).toMatchObject({ status: "modified", added: 1 });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("surfaces a permission ask as an interaction and replies on the v2 route", async () => {
+    const fake = await startFakeV2();
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    try {
+      for (let i = 0; i < 40 && !fake.calls.some((c) => c.path === "/api/event"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      // The command correlation comes from the tool call's parsed input.
+      fake.pushFrame({
+        id: "evt_1",
+        created: 1,
+        type: "session.tool.called",
+        data: {
+          sessionID: "ses_1",
+          assistantMessageID: "msg_a1",
+          id: "call_1",
+          name: "bash",
+          input: { command: "rm -rf node_modules" },
+          executed: false,
+        },
+      });
+      fake.pushFrame({
+        id: "evt_2",
+        created: 2,
+        type: "permission.asked",
+        data: {
+          sessionID: "ses_1",
+          id: "perm_1",
+          permission: "bash",
+          tool: "bash",
+          patterns: ["rm"],
+        },
+      });
+      for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const ask = events.find((e) => e.type === "interaction.requested");
+      expect(ask).toMatchObject({
+        request: {
+          requestId: "perm_1",
+          sessionId: "ses_1",
+          kind: "opencode-permission",
+          permission: "bash",
+          patterns: ["rm"],
+          command: "rm -rf node_modules",
+        },
+      });
+
+      await adapter.respondInteraction("perm_1", { decision: "always" });
+      const reply = fake.calls.find((c) => c.path === "/api/session/ses_1/permission/perm_1/reply");
+      expect(reply).toMatchObject({ method: "POST", body: { decision: "always" } });
     } finally {
       unsubscribe();
     }

@@ -19,7 +19,7 @@
  * the wire; tool frames carry the path `session.tool.called` parsed for us.
  */
 
-import { firstString, type OpenCodeDescriptor } from "./agent-descriptor.js";
+import { firstString, type OpenCodeDescriptor, readPath } from "./agent-descriptor.js";
 import type { ToolPartFrame } from "./file-change-recorder.js";
 import type { AgentEvent } from "./types.js";
 
@@ -30,11 +30,24 @@ export interface V2Frame {
   created: number | null;
 }
 
+/** One `permission.asked` frame, normalized off the descriptor's paths. */
+export interface V2PermissionAskFrame {
+  sessionId: string;
+  requestId: string;
+  permission: string;
+  tool: string | null;
+  patterns: string[];
+}
+
 export interface V2EventDeps {
   descriptor: OpenCodeDescriptor;
   emit: (event: AgentEvent) => void;
   /** Feed one tool frame to the session's file-change recorder. */
   recordToolFrame: (sessionId: string, frame: ToolPartFrame) => void;
+  /** Surface a permission ask as an answerable interaction. */
+  onPermissionAsk?: (frame: V2PermissionAskFrame) => void;
+  /** Track a tool call's name + parsed input for the ask's command correlation. */
+  onToolCalled?: (sessionId: string, tool: string, input: unknown) => void;
 }
 
 /**
@@ -180,6 +193,26 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
       return;
     }
 
+    // v2 kept the ask frame's name and payload shape; the reply moved to
+    // POST /api/session/{id}/permission/{requestId}/reply (descriptor data).
+    const ask = events.permissionAsk;
+    if (ask && frame.type === ask.name) {
+      const requestId = firstString(props, [ask.idPath]);
+      if (id && requestId && deps.onPermissionAsk) {
+        const rawPatterns = readPath(props, ask.patternsPath);
+        deps.onPermissionAsk({
+          sessionId: id,
+          requestId,
+          permission: firstString(props, [ask.permissionPath]) ?? "",
+          tool: firstString(props, [ask.toolPath]) ?? null,
+          patterns: Array.isArray(rawPatterns)
+            ? rawPatterns.filter((p): p is string => typeof p === "string" && p !== "")
+            : [],
+        });
+      }
+      return;
+    }
+
     switch (frame.type) {
       case EXECUTION_STARTED:
         if (id) emit({ type: "message.started", sessionId: id, messageId: "" });
@@ -225,6 +258,9 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
         );
         return;
       case "session.tool.called":
+        if (id && deps.onToolCalled) {
+          deps.onToolCalled(id, typeof props.name === "string" ? props.name : "", props.input);
+        }
         recordTool(props, "running", undefined);
         return;
       case "session.tool.success": {

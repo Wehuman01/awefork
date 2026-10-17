@@ -84,6 +84,8 @@ interface FakeState {
   summarizeCalls: { sessionId: string; body: Record<string, unknown> }[];
   /** Fail every summarize with a 500 — the compress failure path. */
   summarizeFails?: boolean;
+  /** POST /session/:id/permissions/:pid bodies — the permission replies. */
+  permissionReplies: { sessionId: string; permissionId: string; response: string }[];
   deleteCalls: string[];
   deleteMessageCalls: { sessionId: string; messageId: string }[];
   providers: FakeProvider[];
@@ -325,6 +327,18 @@ function startFakeServer(state: FakeState): Promise<{
         return;
       }
 
+      const permissionMatch = url.pathname.match(/^\/session\/([^/]+)\/permissions\/([^/]+)$/);
+      if (method === "POST" && permissionMatch) {
+        state.permissionReplies.push({
+          sessionId: permissionMatch[1] ?? "",
+          permissionId: permissionMatch[2] ?? "",
+          response: typeof payload.response === "string" ? payload.response : "",
+        });
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
       res.writeHead(404);
       res.end("{}");
     }
@@ -383,6 +397,7 @@ function baseState(): FakeState {
     createCalls: [],
     promptCalls: [],
     summarizeCalls: [],
+    permissionReplies: [],
     deleteCalls: [],
     deleteMessageCalls: [],
     providers: [
@@ -1321,6 +1336,148 @@ describe("opencode adapter", () => {
     const { adapter } = await newAdapter(state);
     const sessions = await adapter.listSessions();
     expect(sessions.filter((s) => s.id === "s1")).toHaveLength(1);
+  });
+
+  it("surfaces a permission.asked as an answerable interaction, command correlated from the tool part", async () => {
+    const state = baseState();
+    // The real order: the bash tool part streams in, then the ask frame gates
+    // it — the ask itself carries only the rule patterns, so the command line
+    // in the dialog comes from the tracked tool part.
+    state.eventFrames = [
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "a1",
+          part: { id: "t1", type: "tool", tool: "bash", command: "rm -rf node_modules" },
+        },
+      },
+      {
+        type: "permission.asked",
+        properties: {
+          id: "perm_1",
+          sessionID: "s1",
+          permission: "bash",
+          tool: "bash",
+          patterns: ["rm *"],
+        },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+
+    const asked = events.find((e) => e.type === "interaction.requested");
+    expect(asked?.type === "interaction.requested").toBe(true);
+    if (asked?.type !== "interaction.requested") return;
+    expect(asked.request).toMatchObject({
+      requestId: "perm_1",
+      sessionId: "s1",
+      kind: "opencode-permission",
+      permission: "bash",
+      patterns: ["rm *"],
+      command: "rm -rf node_modules",
+    });
+  });
+
+  it("an ask without a correlatable tool part omits the command", async () => {
+    const state = baseState();
+    state.eventFrames = [
+      {
+        type: "permission.asked",
+        properties: { id: "perm_9", sessionID: "s1", permission: "bash", patterns: ["rm"] },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+
+    const asked = events.find((e) => e.type === "interaction.requested");
+    if (asked?.type !== "interaction.requested") throw new Error("no interaction.requested event");
+    expect("command" in asked.request).toBe(false);
+  });
+
+  it("maps the three dialog decisions onto once/always/reject", async () => {
+    const state = baseState();
+    const ask = (id: string): { type: string; properties: Record<string, unknown> } => ({
+      type: "permission.asked",
+      properties: { id, sessionID: "s1", permission: "bash", patterns: ["rm *"] },
+    });
+    state.eventFrames = [ask("perm_a"), ask("perm_b"), ask("perm_c")];
+    const { adapter } = await newAdapter(state);
+    const unsubscribe = await adapter.subscribe(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    await adapter.respondInteraction("perm_a", { decision: "allow" });
+    await adapter.respondInteraction("perm_b", { decision: "always" });
+    await adapter.respondInteraction("perm_c", { decision: "deny" });
+    unsubscribe();
+
+    expect(state.permissionReplies).toEqual([
+      { sessionId: "s1", permissionId: "perm_a", response: "once" },
+      { sessionId: "s1", permissionId: "perm_b", response: "always" },
+      { sessionId: "s1", permissionId: "perm_c", response: "reject" },
+    ]);
+  });
+
+  it("a finished run settles its asks — a late reply is a no-op, not a POST", async () => {
+    const state = baseState();
+    state.eventFrames = [
+      {
+        type: "permission.asked",
+        properties: { id: "perm_1", sessionID: "s1", permission: "bash", patterns: ["rm *"] },
+      },
+      { type: "session.idle", properties: { sessionID: "s1" } },
+    ];
+    const { adapter } = await newAdapter(state);
+    const unsubscribe = await adapter.subscribe(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    await expect(
+      adapter.respondInteraction("perm_1", { decision: "deny" }),
+    ).resolves.toBeUndefined();
+    expect(state.permissionReplies).toEqual([]);
+    unsubscribe();
+  });
+
+  it("drops permission.asked frames when the descriptor has no permissionAsk section", async () => {
+    const descriptor = parseOpenCodeDescriptor({
+      ...(opencodeDescriptor() as unknown as object),
+      events: { ...(opencodeDescriptor().events as unknown as object), permissionAsk: undefined },
+    });
+    const state = baseState();
+    state.eventFrames = [
+      {
+        type: "permission.asked",
+        properties: { id: "perm_1", sessionID: "s1", permission: "bash", patterns: ["rm *"] },
+      },
+    ];
+    const { adapter } = await newAdapter(state, descriptor);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    expect(events.filter((e) => e.type === "interaction.requested")).toHaveLength(0);
+  });
+
+  it("permission.replied rides the ignore list — no event, no dialog", async () => {
+    const state = baseState();
+    state.eventFrames = [
+      {
+        type: "permission.replied",
+        properties: { sessionID: "s1", requestID: "perm_1", reply: "once" },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    expect(events).toHaveLength(0);
   });
 
   // The whole point of the descriptor: when opencode renames things, the fix

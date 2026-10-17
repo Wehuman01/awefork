@@ -83,6 +83,7 @@
     "sessionFork": "/api/session/{id}/fork",
     "sessionAbort": "/api/session/{id}/interrupt",
     "sessionSummarize": "/api/session/{id}/compact",
+    "sessionPermissions": "/api/session/{id}/permission/{permissionId}/reply",
     "projects": "/api/project",
     "providers": "/api/model",
     "events": "/api/event"
@@ -120,6 +121,14 @@
     ],
     "idle": ["session.execution.succeeded", "session.execution.interrupted"],
     "error": { "name": "session.error", "detailPaths": ["error.message", "error.type"] },
+    "permissionAsk": {
+      "name": "permission.asked",
+      "idPath": "id",
+      "permissionPath": "permission",
+      "toolPath": "tool",
+      "patternsPath": "patterns",
+      "commandPaths": ["metadata.command", "command"]
+    },
     "sessionIdPaths": ["sessionID", "session.sessionID", "session.id", "part.sessionID"],
     "messageIdPaths": ["assistantMessageID", "messageID", "part.messageID"]
   }

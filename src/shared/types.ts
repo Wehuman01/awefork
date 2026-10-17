@@ -378,16 +378,35 @@ export type AgentInteractionRequest =
       detail: string;
       /** The MCP server codex wants to connect to. */
       serverName: string;
+    }
+  | {
+      requestId: string;
+      sessionId: string | null;
+      kind: "opencode-permission";
+      title: string;
+      detail: string;
+      /** Permission class the ask is about, e.g. "bash". */
+      permission: string;
+      /** Rule patterns that matched, e.g. ["rm *"] — what "always" would save. */
+      patterns: string[];
+      /**
+       * Best-effort: the pending tool command this ask gates, read off the
+       * in-flight tool part when the stream carried one. Absent = the ask
+       * arrived without a correlatable command.
+       */
+      command?: string;
     };
 
 /**
  * How the user resolved an `interaction.requested`. The adapter translates
  * each decision to the backend's wire shape: approvals/elicitations get
- * allow/deny/cancel; `"answers"` carries the form values for a `"user-input"`
- * request (question id → one answer or several).
+ * allow/deny/cancel; `"always"` saves the rule too (opencode: the matched
+ * patterns stop asking); `"answers"` carries the form values for a
+ * `"user-input"` request (question id → one answer or several).
  */
 export type AgentInteractionResponse =
   | { decision: "allow" }
+  | { decision: "always" }
   | { decision: "deny" }
   | { decision: "cancel" }
   | { decision: "answers"; answers: Record<string, string | string[]> };
