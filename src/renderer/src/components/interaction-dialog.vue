@@ -64,10 +64,24 @@
 import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "vue";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { AgentInteractionRequest } from "../../../shared/types";
-import { INTERACTION_TIMEOUT_MS, pickModalInteraction, respondInteraction, store } from "../state";
+import {
+  INTERACTION_TIMEOUT_MS,
+  inlineHostVisible,
+  pickModalInteraction,
+  respondInteraction,
+  store,
+} from "../state";
 
+// The modal owns every ask the pane cannot show inline — including opencode
+// asks that would be inline while the pane is off screen (compare mode, no
+// visible session selected), so a pending ask never renders nowhere.
 const request = computed<DeepReadonly<AgentInteractionRequest> | null>(() =>
-  pickModalInteraction(store.activeBackend, store.interactions, store.selectedId),
+  pickModalInteraction(
+    store.activeBackend,
+    store.interactions,
+    store.selectedId,
+    inlineHostVisible.value,
+  ),
 );
 const answers = reactive<Record<string, string>>({});
 /** Dialog root, focused on open so keyboard shortcuts need no pre-click. */

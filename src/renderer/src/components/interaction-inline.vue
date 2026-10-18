@@ -19,7 +19,13 @@
 <script setup lang="ts">
 import { computed, type DeepReadonly } from "vue";
 import type { AgentInteractionRequest } from "../../../shared/types";
-import { pickInlineInteraction, respondInteraction, store } from "../state";
+import {
+  countPendingInline,
+  inlineHostVisible,
+  pickInlineInteraction,
+  respondInteraction,
+  store,
+} from "../state";
 
 /** The opencode-permission variant, as components read it out of the store. */
 type PermissionAsk = DeepReadonly<
@@ -34,7 +40,12 @@ type PermissionAsk = DeepReadonly<
  * listener owns Esc/Enter while it is up, and a second one here would fight it.
  */
 const request = computed<PermissionAsk | null>(() => {
-  const picked = pickInlineInteraction(store.activeBackend, store.interactions, store.selectedId);
+  const picked = pickInlineInteraction(
+    store.activeBackend,
+    store.interactions,
+    store.selectedId,
+    inlineHostVisible.value,
+  );
   return picked?.kind === "opencode-permission" ? (picked as PermissionAsk) : null;
 });
 
@@ -49,14 +60,14 @@ const alwaysButtonLabel = computed(() =>
 );
 
 /** Other inline asks for this same session still waiting behind this one. */
-const queueDepth = computed(() => {
-  const selectedId = store.selectedId;
-  if (!selectedId) return 0;
-  const inline = (store.interactions[store.activeBackend] ?? []).filter(
-    (item) => item.kind === "opencode-permission" && item.sessionId === selectedId,
-  );
-  return Math.max(0, inline.length - 1);
-});
+const queueDepth = computed(() =>
+  countPendingInline(
+    store.activeBackend,
+    store.interactions,
+    store.selectedId,
+    inlineHostVisible.value,
+  ),
+);
 
 function deny(): void {
   if (request.value) respondInteraction(request.value, { decision: "deny" });

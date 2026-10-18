@@ -32,6 +32,19 @@ function commandApproval(requestId: string, sessionId = "s1"): AgentInteractionR
   };
 }
 
+function opencodePermission(requestId: string, sessionId = "s1"): AgentInteractionRequest {
+  return {
+    requestId,
+    sessionId,
+    kind: "opencode-permission",
+    title: "允许这次操作？",
+    detail: "一条 bash 操作匹配了你的需确认权限规则。",
+    permission: "bash",
+    patterns: ["rm *"],
+    command: "rm -rf build",
+  };
+}
+
 async function bootState(
   options: {
     promptError?: Error;
@@ -321,5 +334,82 @@ describe("renderer interaction state", () => {
     expect(h.store.interactions.codex.map((item) => item.requestId)).toEqual(["req-2"]);
     expect(h.store.interactionDeadlines["codex:req-2"]).toBeTypeOf("number");
     expect(h.store.interactionDeadlines["codex:req-1"]).toBeUndefined();
+  });
+
+  it("queues an opencode permission ask with no auto-deny timer or deadline", async () => {
+    const h = await bootState();
+    h.send("opencode", { type: "interaction.requested", request: opencodePermission("perm-1") });
+
+    expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["perm-1"]);
+    expect(h.store.interactionDeadlines["opencode:perm-1"]).toBeUndefined();
+
+    // The server holds the run open until the user answers, so the ask must
+    // outlive the 30s window codex approvals are capped by.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(h.replies).toHaveLength(0);
+    expect(h.store.interactions.opencode).toHaveLength(1);
+  });
+
+  it("still drops an opencode permission ask when the turn goes idle", async () => {
+    const h = await bootState();
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodePermission("perm-1", "s1"),
+    });
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodePermission("perm-2", "s2"),
+    });
+
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+
+    // The settled session's ask is gone; the other session's survives.
+    expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["perm-2"]);
+  });
+
+  it("still drops an opencode permission ask on a connection-level server error", async () => {
+    const h = await bootState();
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodePermission("perm-1", "s1"),
+    });
+
+    h.send("opencode", { type: "server.error", message: "opencode: stream dead" });
+
+    expect(h.store.interactions.opencode).toHaveLength(0);
+    expect(h.store.interactionDeadlines).toEqual({});
+  });
+
+  it("answers an opencode permission ask without arming a late timer", async () => {
+    const h = await bootState();
+    // The inline card only ever renders the active backend's queue, and
+    // respondInteraction routes back through the active backend — the ask
+    // lands on codex here because that is the backend this boot selected.
+    h.send("codex", { type: "interaction.requested", request: opencodePermission("perm-1") });
+    const request = h.store.interactions.codex[0];
+
+    h.respondInteraction(request, { decision: "always" });
+    expect(h.replies).toEqual([
+      { backend: "codex", requestId: "perm-1", response: { decision: "always" } },
+    ]);
+    expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactionDeadlines["codex:perm-1"]).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.replies).toHaveLength(1);
+  });
+
+  it("routes a background backend's opencode ask to its own backend on idle", async () => {
+    const h = await bootState(); // active backend is codex
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodePermission("perm-1", "s1"),
+    });
+
+    expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactions.opencode).toHaveLength(1);
+
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+    expect(h.store.interactions.opencode).toHaveLength(0);
   });
 });

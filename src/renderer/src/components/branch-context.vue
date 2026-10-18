@@ -270,7 +270,7 @@
           </div>
         </template>
       </MessageList>
-      <InteractionInline v-if="selectedSession" />
+      <InteractionInline v-if="inlineHostVisible" />
       <FileChangesCard v-if="selectedSession && store.capabilities.fileChanges" />
       <div v-if="!selectedSession" class="ctx-empty">
         <p>左侧选会话，或在画布上点一张卡片。</p>
@@ -311,6 +311,7 @@ import {
   compressSession,
   exitCompare,
   exportBranchMarkdown,
+  inlineHostVisible,
   isTurnMarked,
   paneComposerModel,
   paneMessages,

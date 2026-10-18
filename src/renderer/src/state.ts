@@ -1499,9 +1499,22 @@ function interactionKey(backend: BackendId, requestId: string): string {
  * Where a queued interaction renders, re-exported so components read the split
  * through one module (state) without reaching into the pure dispatch helpers.
  * `pickInlineInteraction` is the inline card's gate; `pickModalInteraction` is
- * the modal's. They partition the queue: every request lands in exactly one.
+ * the modal's. They read one predicate, so every request lands in exactly one.
  */
-export { pickInlineInteraction, pickModalInteraction } from "./interaction-dispatch";
+export {
+  countPendingInline,
+  pickInlineInteraction,
+  pickModalInteraction,
+} from "./interaction-dispatch";
+
+/**
+ * Whether the inline interaction card has a pane to render in. The card sits at
+ * the tail of the selected session's message flow inside the pane's normal
+ * (non-compare) branch, so it is on screen only when a visible session is
+ * selected and compare mode is not up. The modal reads the same flag: an ask
+ * the pane cannot show must fall back to the modal rather than render nowhere.
+ */
+export const inlineHostVisible = computed(() => selectedSession.value !== null && !state.compare);
 
 /** Remove one queued request (and its auto-deny timer) without replying. */
 function dropInteraction(backend: BackendId, requestId: string): void {
