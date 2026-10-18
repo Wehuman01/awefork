@@ -1495,6 +1495,14 @@ function interactionKey(backend: BackendId, requestId: string): string {
   return `${backend}:${requestId}`;
 }
 
+/**
+ * Where a queued interaction renders, re-exported so components read the split
+ * through one module (state) without reaching into the pure dispatch helpers.
+ * `pickInlineInteraction` is the inline card's gate; `pickModalInteraction` is
+ * the modal's. They partition the queue: every request lands in exactly one.
+ */
+export { pickInlineInteraction, pickModalInteraction } from "./interaction-dispatch";
+
 /** Remove one queued request (and its auto-deny timer) without replying. */
 function dropInteraction(backend: BackendId, requestId: string): void {
   const key = interactionKey(backend, requestId);
@@ -1555,6 +1563,11 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
   const existing = state.interactions[backend] ?? [];
   if (existing.some((item) => item.requestId === request.requestId)) return;
   state.interactions[backend] = [...existing, request];
+  // opencode permission asks wait indefinitely: the server holds the run open
+  // until the user answers, and the inline card carries no countdown, so arming
+  // the 30s auto-deny here would silently kill a question the user can still
+  // see. Idle/error cleanup still drops them when the turn actually ends.
+  if (request.kind === "opencode-permission") return;
   state.interactionDeadlines[key] = Date.now() + INTERACTION_TIMEOUT_MS;
   interactionTimers.set(
     key,

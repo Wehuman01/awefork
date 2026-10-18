@@ -270,6 +270,7 @@
           </div>
         </template>
       </MessageList>
+      <InteractionInline v-if="selectedSession" />
       <FileChangesCard v-if="selectedSession && store.capabilities.fileChanges" />
       <div v-if="!selectedSession" class="ctx-empty">
         <p>左侧选会话，或在画布上点一张卡片。</p>
@@ -334,6 +335,7 @@ import ChatInput from "./chat-input.vue";
 import CmpCell, { type DisplayCell } from "./cmp-cell.vue";
 import CompareComposer from "./compare-composer.vue";
 import FileChangesCard from "./file-changes-card.vue";
+import InteractionInline from "./interaction-inline.vue";
 import MessageList from "./message-list.vue";
 
 const pane = computed(() => paneTurn.value);

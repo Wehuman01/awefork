@@ -54,7 +54,7 @@
           @click="allowAlways"
         >{{ alwaysButtonLabel }}</button>
       </div>
-      <p class="interaction-timeout">{{ secondsLeft }} 秒内未响应将自动拒绝</p>
+      <p v-if="hasDeadline" class="interaction-timeout">{{ secondsLeft }} 秒内未响应将自动拒绝</p>
       <p v-if="queueDepth > 0" class="interaction-queue">还有 {{ queueDepth }} 个待确认</p>
     </section>
   </div>
@@ -64,10 +64,10 @@
 import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "vue";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { AgentInteractionRequest } from "../../../shared/types";
-import { INTERACTION_TIMEOUT_MS, respondInteraction, store } from "../state";
+import { INTERACTION_TIMEOUT_MS, pickModalInteraction, respondInteraction, store } from "../state";
 
-const request = computed<DeepReadonly<AgentInteractionRequest> | null>(
-  () => store.interactions[store.activeBackend]?.[0] ?? null,
+const request = computed<DeepReadonly<AgentInteractionRequest> | null>(() =>
+  pickModalInteraction(store.activeBackend, store.interactions, store.selectedId),
 );
 const answers = reactive<Record<string, string>>({});
 /** Dialog root, focused on open so keyboard shortcuts need no pre-click. */
@@ -119,6 +119,15 @@ const secondsLeft = computed(() => {
   const deadline = store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`];
   if (!deadline) return 0;
   return Math.max(0, Math.ceil((deadline - now.value) / 1000));
+});
+
+// Only requests with an auto-deny timer show the countdown; the inline-only
+// opencode asks carry none, and the modal would otherwise read "0 秒".
+const hasDeadline = computed(() => {
+  if (!request.value) return false;
+  return (
+    store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`] !== undefined
+  );
 });
 
 function deny(): void {

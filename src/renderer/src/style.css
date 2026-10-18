@@ -4422,6 +4422,65 @@ code.md-code {
   text-align: right;
 }
 
+/* ── opencode permission ask, inline in the conversation pane ─────── */
+
+.inline-interaction {
+  margin: 0 16px 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--primary-border);
+  border-radius: 12px;
+  background: var(--primary-soft);
+}
+
+.inline-interaction-kicker {
+  color: var(--primary-deep);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inline-interaction-command {
+  margin-top: 10px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font:
+    12px / 1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: pre-wrap;
+}
+
+.inline-interaction-meta {
+  margin-top: 8px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.inline-interaction-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inline-interaction-actions button {
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inline-interaction-queue {
+  margin-top: 6px;
+  text-align: right;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
 /* fork tag-inheritance ask — reuses the interaction dialog frame */
 .fork-tag-chips {
   display: flex;
