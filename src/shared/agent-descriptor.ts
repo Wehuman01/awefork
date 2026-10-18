@@ -237,6 +237,13 @@ export interface AgentPermissionAskEvent {
   readonly patternsPath: string;
   /** Candidate dot-paths for the gated command on the in-flight tool part. */
   readonly commandPaths: readonly string[];
+  /**
+   * Candidate dot-paths for the gated tool call's id on the ask frame itself
+   * (v2 names it under `source`). Absent/empty on v1, whose frames name the
+   * tool but not the call — command correlation there falls back to the tool
+   * name.
+   */
+  readonly sourceIdPaths?: readonly string[];
 }
 
 /**
@@ -829,7 +836,15 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     const ask = objectAt(events.permissionAsk, "events.permissionAsk");
     onlyKeys(
       ask,
-      ["name", "idPath", "permissionPath", "toolPath", "patternsPath", "commandPaths"],
+      [
+        "name",
+        "idPath",
+        "permissionPath",
+        "toolPath",
+        "patternsPath",
+        "commandPaths",
+        "sourceIdPaths",
+      ],
       "events.permissionAsk",
     );
     permissionAsk = {
@@ -839,6 +854,9 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       toolPath: singlePathAt(ask.toolPath, "events.permissionAsk.toolPath"),
       patternsPath: singlePathAt(ask.patternsPath, "events.permissionAsk.patternsPath"),
       commandPaths: dotPathsAt(ask.commandPaths, "events.permissionAsk.commandPaths"),
+      ...(ask.sourceIdPaths === undefined
+        ? {}
+        : { sourceIdPaths: dotPathsAt(ask.sourceIdPaths, "events.permissionAsk.sourceIdPaths") }),
     };
   }
 

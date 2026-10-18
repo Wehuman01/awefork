@@ -868,12 +868,15 @@ describe("v2 event stream", () => {
         id: "evt_2",
         created: 2,
         type: "permission.asked",
+        // Real 2.0.28 wire shape: action/resources plus a source pointing at
+        // the gated tool call — no permission/patterns/tool keys exist.
         data: {
           sessionID: "ses_1",
           id: "perm_1",
-          permission: "bash",
-          tool: "bash",
-          patterns: ["rm"],
+          action: "shell",
+          resources: ["rm -rf node_modules"],
+          save: ["rm *"],
+          source: { type: "tool", messageID: "msg_a1", id: "call_1" },
         },
       });
       for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
@@ -885,8 +888,8 @@ describe("v2 event stream", () => {
           requestId: "perm_1",
           sessionId: "ses_1",
           kind: "opencode-permission",
-          permission: "bash",
-          patterns: ["rm"],
+          permission: "shell",
+          patterns: ["rm -rf node_modules"],
           command: "rm -rf node_modules",
         },
       });
@@ -894,6 +897,29 @@ describe("v2 event stream", () => {
       await adapter.respondInteraction("perm_1", { decision: "always" });
       const reply = fake.calls.find((c) => c.path === "/api/session/ses_1/permission/perm_1/reply");
       expect(reply).toMatchObject({ method: "POST", body: { decision: "always" } });
+
+      // An ask naming an unknown call must not borrow the tracked call's
+      // command — the source id is exact, so a mismatch means no correlation.
+      fake.pushFrame({
+        id: "evt_3",
+        created: 3,
+        type: "permission.asked",
+        data: {
+          sessionID: "ses_1",
+          id: "perm_2",
+          action: "webfetch",
+          resources: ["https://example.com"],
+          source: { type: "tool", messageID: "msg_a1", id: "call_999" },
+        },
+      });
+      for (let i = 0; i < 40 && events.filter((e) => e.type === "interaction.requested").length < 2; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const second = events
+        .filter((e) => e.type === "interaction.requested")
+        .find((e) => e.request.requestId === "perm_2");
+      expect(second?.request).toMatchObject({ permission: "webfetch" });
+      expect((second?.request as { command?: string }).command).toBeUndefined();
     } finally {
       unsubscribe();
     }

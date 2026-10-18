@@ -1,18 +1,39 @@
 {
   "kind": "opencode",
   "protocol": "v2",
-  "compat": { "min": "2.0.0", "max": "2.1.0" },
-  "capabilities": { "deleteMessage": false, "attachments": true, "compress": true },
-  "fork": { "cut": "next-user-exclusive", "cutParam": "before" },
-  "auth": { "scheme": "basic", "username": "opencode" },
-  "envelope": { "dataKey": "data", "bare": ["projects"] },
+  "compat": {
+    "min": "2.0.0",
+    "max": "2.1.0"
+  },
+  "capabilities": {
+    "deleteMessage": false,
+    "attachments": true,
+    "compress": true
+  },
+  "fork": {
+    "cut": "next-user-exclusive",
+    "cutParam": "before"
+  },
+  "auth": {
+    "scheme": "basic",
+    "username": "opencode"
+  },
+  "envelope": {
+    "dataKey": "data",
+    "bare": [
+      "projects"
+    ]
+  },
   "pagination": {
     "style": "cursor",
     "limitParam": "limit",
     "cursorParam": "cursor",
     "nextPath": "cursor.next",
     "limit": 200,
-    "limits": { "sessions": 2000, "sessionMessages": 200 },
+    "limits": {
+      "sessions": 2000,
+      "sessionMessages": 200
+    },
     "order": "asc"
   },
   "prompt": {
@@ -22,25 +43,52 @@
     "setModelFirst": true
   },
   "fileChanges": {
-    "tools": ["edit", "write"],
-    "filePathPaths": ["input.path", "input.filePath"],
-    "doneStates": ["completed", "error"]
+    "tools": [
+      "edit",
+      "write"
+    ],
+    "filePathPaths": [
+      "input.path",
+      "input.filePath"
+    ],
+    "doneStates": [
+      "completed",
+      "error"
+    ]
   },
   "sessions": {
-    "create": { "directoryIn": "body" },
+    "create": {
+      "directoryIn": "body"
+    },
     "fields": {
-      "id": ["id"],
-      "title": ["title"],
-      "directory": ["location.directory"],
-      "parentSessionId": ["parentID"],
-      "forkSessionId": ["fork.sessionID"],
-      "createdAt": ["time.created"],
-      "updatedAt": ["time.updated"]
+      "id": [
+        "id"
+      ],
+      "title": [
+        "title"
+      ],
+      "directory": [
+        "location.directory"
+      ],
+      "parentSessionId": [
+        "parentID"
+      ],
+      "forkSessionId": [
+        "fork.sessionID"
+      ],
+      "createdAt": [
+        "time.created"
+      ],
+      "updatedAt": [
+        "time.updated"
+      ]
     }
   },
   "messages": {
     "partsPath": "content",
-    "textPath": ["text"],
+    "textPath": [
+      "text"
+    ],
     "attachments": {
       "path": "files",
       "nameField": "name",
@@ -48,22 +96,58 @@
       "dataField": "data"
     },
     "fields": {
-      "id": ["id"],
-      "role": ["type"],
-      "modelId": ["model.id"],
-      "providerId": ["model.providerID"],
-      "variant": ["model.variant"],
-      "createdAt": ["time.created"],
-      "completedAt": ["time.completed"],
-      "finish": ["finish"],
-      "outputTokens": ["tokens.output"],
-      "error": ["error.message", "error.type"]
+      "id": [
+        "id"
+      ],
+      "role": [
+        "type"
+      ],
+      "modelId": [
+        "model.id"
+      ],
+      "providerId": [
+        "model.providerID"
+      ],
+      "variant": [
+        "model.variant"
+      ],
+      "createdAt": [
+        "time.created"
+      ],
+      "completedAt": [
+        "time.completed"
+      ],
+      "finish": [
+        "finish"
+      ],
+      "outputTokens": [
+        "tokens.output"
+      ],
+      "error": [
+        "error.message",
+        "error.type"
+      ]
     },
     "parts": {
-      "text": { "type": "text", "field": "text", "join": "\n" },
-      "thinking": { "type": "reasoning", "field": "text", "join": "\n\n" },
-      "compaction": { "type": "compaction", "rowTypeField": "type" },
-      "tool": { "type": "tool", "nameField": "name", "fallbackName": "tool" },
+      "text": {
+        "type": "text",
+        "field": "text",
+        "join": "\n"
+      },
+      "thinking": {
+        "type": "reasoning",
+        "field": "text",
+        "join": "\n\n"
+      },
+      "compaction": {
+        "type": "compaction",
+        "rowTypeField": "type"
+      },
+      "tool": {
+        "type": "tool",
+        "nameField": "name",
+        "fallbackName": "tool"
+      },
       "file": {
         "type": "file",
         "nameField": "name",
@@ -73,7 +157,10 @@
       }
     }
   },
-  "partTimeKeys": { "start": "created", "end": "completed" },
+  "partTimeKeys": {
+    "start": "created",
+    "end": "completed"
+  },
   "endpoints": {
     "sessions": "/api/session",
     "session": "/api/session/{id}",
@@ -119,17 +206,42 @@
       "model.updated",
       "server.connected"
     ],
-    "idle": ["session.execution.succeeded", "session.execution.interrupted"],
-    "error": { "name": "session.error", "detailPaths": ["error.message", "error.type"] },
+    "idle": [
+      "session.execution.succeeded",
+      "session.execution.interrupted"
+    ],
+    "error": {
+      "name": "session.error",
+      "detailPaths": [
+        "error.message",
+        "error.type"
+      ]
+    },
     "permissionAsk": {
       "name": "permission.asked",
       "idPath": "id",
-      "permissionPath": "permission",
+      "permissionPath": "action",
       "toolPath": "tool",
-      "patternsPath": "patterns",
-      "commandPaths": ["metadata.command", "command"]
+      "patternsPath": "resources",
+      "commandPaths": [
+        "metadata.command",
+        "command"
+      ],
+      "sourceIdPaths": [
+        "source.id",
+        "source.callID"
+      ]
     },
-    "sessionIdPaths": ["sessionID", "session.sessionID", "session.id", "part.sessionID"],
-    "messageIdPaths": ["assistantMessageID", "messageID", "part.messageID"]
+    "sessionIdPaths": [
+      "sessionID",
+      "session.sessionID",
+      "session.id",
+      "part.sessionID"
+    ],
+    "messageIdPaths": [
+      "assistantMessageID",
+      "messageID",
+      "part.messageID"
+    ]
   }
 }

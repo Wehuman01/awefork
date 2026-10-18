@@ -91,28 +91,39 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
    * patterns but not the command it gates, so the dialog's command line is
    * correlated from the in-flight tool part that preceded the ask.
    */
-  const lastToolBySession = new Map<string, { tool: string; command: string | null }>();
+  const lastToolBySession = new Map<string, {
+    tool: string;
+    command: string | null;
+    callId: string | null;
+  }>();
   const permissionAskFact = descriptor.events.permissionAsk;
   const permissionObserver: PermissionAskObserver | undefined = permissionAskFact
     ? {
         onToolSnapshot: (sessionId, part) => {
           const command = firstString(part, permissionAskFact.commandPaths);
+          const partId = readPath(part, "id");
           lastToolBySession.set(sessionId, {
             tool:
               firstString(part, [descriptor.messages.parts.tool.nameField]) ??
               descriptor.messages.parts.tool.fallbackName,
             command,
+            callId: typeof partId === "string" ? partId : null,
           });
         },
         onPermissionAsk: (frame) => {
           pendingPermissions.set(frame.requestId, { sessionId: frame.sessionId });
           const tracked = lastToolBySession.get(frame.sessionId);
-          // Only trust the tracked command when it names the same tool the
-          // ask gates; a stale part from an earlier turn explains nothing.
+          // Correlate the ask to the tracked call: by call id when the frame
+          // names one (v2's source.id is exact), else by tool name (v1); a
+          // stale entry from an earlier turn explains nothing.
           const command =
-            tracked?.command && (!frame.tool || tracked.tool === frame.tool)
-              ? tracked.command
-              : undefined;
+            frame.callId !== null
+              ? tracked?.callId === frame.callId
+                ? tracked.command ?? undefined
+                : undefined
+              : tracked?.command && (!frame.tool || tracked.tool === frame.tool)
+                ? tracked.command
+                : undefined;
           emitEvent?.({
             type: "interaction.requested",
             request: {
@@ -655,11 +666,17 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               // v2's tool.called names the tool on the frame and carries the
               // parsed input apart — the command the ask gates lives there.
               onPermissionAsk: permissionObserver.onPermissionAsk,
-              onToolCalled: (sessionId: string, tool: string, input: unknown) => {
+              onToolCalled: (
+                sessionId: string,
+                tool: string,
+                input: unknown,
+                callId: string | null,
+              ) => {
                 if (!permissionAskFact) return;
                 lastToolBySession.set(sessionId, {
                   tool,
                   command: firstString(input, permissionAskFact.commandPaths),
+                  callId,
                 });
               },
             }
@@ -762,6 +779,8 @@ interface PermissionAskFrame {
   permission: string;
   tool: string | null;
   patterns: string[];
+  /** The gated tool call's id (v2's `source.id`); null when unnamed. */
+  callId: string | null;
 }
 
 /**
@@ -835,6 +854,7 @@ function emitToAgentEvent(
         patterns: Array.isArray(rawPatterns)
           ? rawPatterns.filter((p): p is string => typeof p === "string" && p !== "")
           : [],
+        callId: firstString(props, ask.sourceIdPaths ?? []),
       });
     }
     return;

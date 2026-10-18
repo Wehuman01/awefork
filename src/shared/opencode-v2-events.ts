@@ -37,6 +37,8 @@ export interface V2PermissionAskFrame {
   permission: string;
   tool: string | null;
   patterns: string[];
+  /** The gated tool call's id, when the frame names one under `source`. */
+  callId: string | null;
 }
 
 export interface V2EventDeps {
@@ -47,7 +49,7 @@ export interface V2EventDeps {
   /** Surface a permission ask as an answerable interaction. */
   onPermissionAsk?: (frame: V2PermissionAskFrame) => void;
   /** Track a tool call's name + parsed input for the ask's command correlation. */
-  onToolCalled?: (sessionId: string, tool: string, input: unknown) => void;
+  onToolCalled?: (sessionId: string, tool: string, input: unknown, callId: string | null) => void;
 }
 
 /**
@@ -208,6 +210,7 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
           patterns: Array.isArray(rawPatterns)
             ? rawPatterns.filter((p): p is string => typeof p === "string" && p !== "")
             : [],
+          callId: firstString(props, ask.sourceIdPaths ?? []),
         });
       }
       return;
@@ -259,7 +262,12 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
         return;
       case "session.tool.called":
         if (id && deps.onToolCalled) {
-          deps.onToolCalled(id, typeof props.name === "string" ? props.name : "", props.input);
+          deps.onToolCalled(
+            id,
+            typeof props.name === "string" ? props.name : "",
+            props.input,
+            typeof props.id === "string" ? props.id : null,
+          );
         }
         recordTool(props, "running", undefined);
         return;
