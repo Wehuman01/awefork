@@ -1576,11 +1576,11 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
   const existing = state.interactions[backend] ?? [];
   if (existing.some((item) => item.requestId === request.requestId)) return;
   state.interactions[backend] = [...existing, request];
-  // opencode permission asks wait indefinitely: the server holds the run open
-  // until the user answers, and the inline card carries no countdown, so arming
-  // the 30s auto-deny here would silently kill a question the user can still
-  // see. Idle/error cleanup still drops them when the turn actually ends.
-  if (request.kind === "opencode-permission") return;
+  // opencode permission and form asks wait indefinitely: the server holds the
+  // run open until the user answers, and the card carries no countdown, so
+  // arming the 30s auto-deny here would silently kill a question the user can
+  // still see. Idle/error cleanup still drops them when the turn actually ends.
+  if (request.kind === "opencode-permission" || request.kind === "opencode-form") return;
   state.interactionDeadlines[key] = Date.now() + INTERACTION_TIMEOUT_MS;
   interactionTimers.set(
     key,
@@ -1611,6 +1611,12 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
   switch (event.type) {
     case "interaction.requested": {
       queueInteraction(backend, event.request);
+      break;
+    }
+    case "interaction.settled": {
+      // Answered elsewhere (the TUI) or cancelled: drop the queued dialog
+      // without replying — the backend already settled it.
+      dropInteraction(backend, event.requestId);
       break;
     }
     case "session.updated": {

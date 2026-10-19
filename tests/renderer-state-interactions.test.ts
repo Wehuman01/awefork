@@ -45,6 +45,17 @@ function opencodePermission(requestId: string, sessionId = "s1"): AgentInteracti
   };
 }
 
+function opencodeForm(requestId: string, sessionId = "s1"): AgentInteractionRequest {
+  return {
+    requestId,
+    sessionId,
+    kind: "opencode-form",
+    title: "需要你的输入",
+    detail: "opencode 需要你填写一份表单后才能继续。",
+    fields: [{ key: "method", type: "string", title: "方式", required: true }],
+  };
+}
+
 async function bootState(
   options: {
     promptError?: Error;
@@ -411,5 +422,48 @@ describe("renderer interaction state", () => {
 
     h.send("opencode", { type: "session.idle", sessionId: "s1" });
     expect(h.store.interactions.opencode).toHaveLength(0);
+  });
+
+  it("queues an opencode form with no auto-deny timer, like a permission ask", async () => {
+    const h = await bootState();
+    h.send("opencode", { type: "interaction.requested", request: opencodeForm("frm-1") });
+
+    expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["frm-1"]);
+    expect(h.store.interactionDeadlines["opencode:frm-1"]).toBeUndefined();
+
+    // The server holds the run open until the form is answered, so it must
+    // outlive the 30s window codex approvals are capped by.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(h.replies).toHaveLength(0);
+    expect(h.store.interactions.opencode).toHaveLength(1);
+  });
+
+  it("drops a form answered elsewhere when the backend reports it settled", async () => {
+    const h = await bootState();
+    h.send("opencode", { type: "interaction.requested", request: opencodeForm("frm-1") });
+    expect(h.store.interactions.opencode).toHaveLength(1);
+
+    h.send("opencode", { type: "interaction.settled", requestId: "frm-1", sessionId: "s1" });
+
+    // Dropped without a reply — the backend already settled it (the TUI
+    // answered); sending a reply would 404.
+    expect(h.store.interactions.opencode).toHaveLength(0);
+    expect(h.replies).toHaveLength(0);
+  });
+
+  it("drops a form when its turn goes idle", async () => {
+    const h = await bootState();
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodeForm("frm-1", "s1"),
+    });
+    h.send("opencode", {
+      type: "interaction.requested",
+      request: opencodeForm("frm-2", "s2"),
+    });
+
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+
+    expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["frm-2"]);
   });
 });

@@ -293,6 +293,13 @@ export type AgentEvent =
    */
   | { type: "interaction.requested"; request: AgentInteractionRequest }
   /**
+   * A previously requested interaction was settled outside awefork — an
+   * opencode form answered in the TUI, or cancelled. The renderer drops the
+   * matching queued request so a dialog never outlives the question it asks.
+   * `sessionId` is carried when the settling frame named one.
+   */
+  | { type: "interaction.settled"; requestId: string; sessionId?: string }
+  /**
    * `sessionId` is set when the failure concerns one session (a failed prompt
    * request, a session.error frame) so the renderer can settle that session's
    * run right away; background-level failures carry none.
@@ -322,6 +329,79 @@ export interface AgentInteractionQuestion {
   /** The reply is sensitive (a secret); renders masked instead of echoed. */
   isSecret?: boolean;
 }
+
+/**
+ * One selectable choice on an opencode form field. Distinct from
+ * `AgentInteractionQuestion.options`: a form option carries a separate `value`
+ * (what the server matches and receives) and `label` (what the user reads), so
+ * a renderer must submit `value`, never `label`.
+ */
+export interface AgentFormOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+/**
+ * One field of an opencode `form.created` ask, as awefork renders it. A tagged
+ * union on `type` so the renderer renders exactly the control the field needs.
+ * `external` fields are display-only links: they carry no answer and are
+ * omitted from the submitted map.
+ */
+export type AgentFormField =
+  | {
+      key: string;
+      type: "string";
+      title?: string;
+      description?: string;
+      required?: boolean;
+      /** Present = a closed set (a select); absent = free text. */
+      options?: AgentFormOption[];
+      placeholder?: string;
+      default?: string;
+      /** The user may type a value outside `options`. */
+      custom?: boolean;
+      /** Loose hint ("email"/"uri"/"date"/"date-time"); drives the input type. */
+      format?: string;
+    }
+  | {
+      key: string;
+      type: "number" | "integer";
+      title?: string;
+      description?: string;
+      required?: boolean;
+      minimum?: number;
+      maximum?: number;
+      default?: number;
+    }
+  | {
+      key: string;
+      type: "boolean";
+      title?: string;
+      description?: string;
+      required?: boolean;
+      default?: boolean;
+    }
+  | {
+      key: string;
+      type: "multiselect";
+      title?: string;
+      description?: string;
+      required?: boolean;
+      options: AgentFormOption[];
+      minItems?: number;
+      maxItems?: number;
+      default?: string[];
+      custom?: boolean;
+    }
+  | {
+      key: string;
+      type: "external";
+      title?: string;
+      description?: string;
+      /** The link the user opens; the field yields no answer. */
+      url: string;
+    };
 
 /**
  * A server-originated interaction the backend is blocked on. Modelled as a
@@ -395,21 +475,32 @@ export type AgentInteractionRequest =
        * arrived without a correlatable command.
        */
       command?: string;
+    }
+  | {
+      requestId: string;
+      sessionId: string | null;
+      kind: "opencode-form";
+      title: string;
+      detail: string;
+      /** The typed fields the user fills; external ones yield no answer. */
+      fields: AgentFormField[];
     };
 
 /**
  * How the user resolved an `interaction.requested`. The adapter translates
  * each decision to the backend's wire shape: approvals/elicitations get
  * allow/deny/cancel; `"always"` saves the rule too (opencode: the matched
- * patterns stop asking); `"answers"` carries the form values for a
- * `"user-input"` request (question id → one answer or several).
+ * patterns stop asking); `"answers"` carries the submitted values keyed by
+ * field/question id — a `"user-input"` request sends one answer or several per
+ * question, an `"opencode-form"` request sends each field's own type (text,
+ * number, boolean, or a string array for a multiselect).
  */
 export type AgentInteractionResponse =
   | { decision: "allow" }
   | { decision: "always" }
   | { decision: "deny" }
   | { decision: "cancel" }
-  | { decision: "answers"; answers: Record<string, string | string[]> };
+  | { decision: "answers"; answers: Record<string, string | number | boolean | string[]> };
 
 /**
  * How much of the parent a fork carries: "inherit" (the default) copies

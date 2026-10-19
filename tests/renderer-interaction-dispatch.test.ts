@@ -5,7 +5,7 @@ import {
   pickModalInteraction,
 } from "../src/renderer/src/interaction-dispatch";
 import type { BackendId } from "../src/shared/backend";
-import type { AgentInteractionRequest } from "../src/shared/types";
+import type { AgentFormField, AgentInteractionRequest } from "../src/shared/types";
 
 /**
  * The dispatch split decides where a queued interaction renders: opencode
@@ -46,6 +46,21 @@ function commandApproval(
     detail: "Codex 请求执行一条命令。",
     command: "rm -rf /",
     cwd: "/demo/shop-api",
+  };
+}
+
+function form(
+  requestId: string,
+  sessionId: string | null,
+  fields: AgentFormField[] = [],
+): AgentInteractionRequest {
+  return {
+    requestId,
+    sessionId,
+    kind: "opencode-form",
+    title: "需要你的输入",
+    detail: "opencode 需要你填写一份表单后才能继续。",
+    fields,
   };
 }
 
@@ -219,5 +234,32 @@ describe("interaction dispatch — inline queue depth", () => {
     const q = queue([commandApproval("x", "s1"), permission("a", null)]);
 
     expect(countPendingInline(BACKEND, q, "s1")).toBe(0);
+  });
+});
+
+describe("interaction dispatch — forms always take the modal", () => {
+  it("never hoists a form inline, even for the selected session", () => {
+    const q = queue([form("f1", "s1")]);
+
+    // Forms carry typed fields the inline card cannot render; the modal owns
+    // them regardless of session match.
+    expect(pickInlineInteraction(BACKEND, q, "s1")).toBeNull();
+    expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("f1");
+  });
+
+  it("keeps a global-session form in the modal (MCP elicitation's hack session)", () => {
+    // `sessionID: "global"` is opencode's placeholder for a form with no real
+    // session; it must never match a selection that happens to be "global".
+    const q = queue([form("f1", "global")]);
+
+    expect(pickInlineInteraction(BACKEND, q, "global")).toBeNull();
+    expect(pickModalInteraction(BACKEND, q, "global")?.requestId).toBe("f1");
+  });
+
+  it("does not count a form toward the inline queue depth", () => {
+    const q = queue([permission("a", "s1"), form("f1", "s1"), permission("b", "s1")]);
+
+    // The form is not an inline waiter, so only the second permission counts.
+    expect(countPendingInline(BACKEND, q, "s1")).toBe(1);
   });
 });

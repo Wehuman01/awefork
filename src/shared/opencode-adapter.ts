@@ -26,6 +26,8 @@ import { createSseParser, type ServerEvent } from "./sse.js";
 import type {
   AgentAdapter,
   AgentEvent,
+  AgentFormField,
+  AgentFormOption,
   ChatMessage,
   PromptAttachment,
   SessionOrigin,
@@ -87,15 +89,25 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
    */
   const pendingPermissions = new Map<string, { sessionId: string }>();
   /**
+   * Form asks awaiting a reply, keyed by opencode's form id. Same lifecycle as
+   * `pendingPermissions`: a settled run, a form answered elsewhere (its
+   * `form.replied`/`form.cancelled` frame), or a reply that already went out
+   * removes the entry, so a late respondInteraction is a no-op.
+   */
+  const pendingForms = new Map<string, { sessionId: string }>();
+  /**
    * Latest tool part per session: a permission.asked frame carries the rule
    * patterns but not the command it gates, so the dialog's command line is
    * correlated from the in-flight tool part that preceded the ask.
    */
-  const lastToolBySession = new Map<string, {
-    tool: string;
-    command: string | null;
-    callId: string | null;
-  }>();
+  const lastToolBySession = new Map<
+    string,
+    {
+      tool: string;
+      command: string | null;
+      callId: string | null;
+    }
+  >();
   const permissionAskFact = descriptor.events.permissionAsk;
   const permissionObserver: PermissionAskObserver | undefined = permissionAskFact
     ? {
@@ -119,7 +131,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           const command =
             frame.callId !== null
               ? tracked?.callId === frame.callId
-                ? tracked.command ?? undefined
+                ? (tracked.command ?? undefined)
                 : undefined
               : tracked?.command && (!frame.tool || tracked.tool === frame.tool)
                 ? tracked.command
@@ -136,6 +148,38 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               patterns: frame.patterns,
               ...(command ? { command } : {}),
             },
+          });
+        },
+      }
+    : undefined;
+
+  const formFact = descriptor.events.form;
+  const formObserver: FormAskObserver | undefined = formFact
+    ? {
+        onFormAsk: (frame) => {
+          pendingForms.set(frame.formId, { sessionId: frame.sessionId });
+          const fields = frame.fields.flatMap(normalizeFormField);
+          emitEvent?.({
+            type: "interaction.requested",
+            request: {
+              requestId: frame.formId,
+              sessionId: frame.sessionId,
+              kind: "opencode-form",
+              title: frame.title,
+              detail: "opencode 需要你填写一份表单后才能继续。",
+              fields,
+            },
+          });
+        },
+        onFormSettled: (frame) => {
+          // Answered elsewhere (the TUI) or cancelled: the run no longer waits
+          // on it, so the dialog must go. The renderer drops the queued ask on
+          // the same frame, which reaches it as an interaction retirement.
+          pendingForms.delete(frame.formId);
+          emitEvent?.({
+            type: "interaction.settled",
+            requestId: frame.formId,
+            ...(frame.sessionId ? { sessionId: frame.sessionId } : {}),
           });
         },
       }
@@ -596,10 +640,32 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       await client.renameSession(sessionId, title);
     },
 
-    // opencode's stream is one-way except for permission asks: those arrive
-    // as permission.asked frames and are answered through the permissions
-    // endpoint. Everything else still waits on nothing from this host.
+    // opencode's stream is one-way except for permission and form asks: those
+    // arrive as frames and are answered through their reply endpoints.
+    // Everything else still waits on nothing from this host.
     async respondInteraction(requestId, response) {
+      const pendingForm = pendingForms.get(requestId);
+      if (pendingForm) {
+        pendingForms.delete(requestId);
+        // A form is answered (answers) or abandoned (cancel/deny); opencode has
+        // no allow/always semantics here, so any non-answers decision cancels.
+        const answer = response.decision === "answers" ? response.answers : null;
+        try {
+          if (answer) await client.formReply(pendingForm.sessionId, requestId, answer);
+          else await client.formCancel(pendingForm.sessionId, requestId);
+        } catch (error) {
+          // A form the server already settled (answered in the TUI, run
+          // aborted) 404s — the outcome is already decided, not an error.
+          if (error instanceof OpencodeApiError && error.status === 404) return;
+          const detail = error instanceof Error ? error.message : String(error);
+          emitEvent?.({
+            type: "server.error",
+            sessionId: pendingForm.sessionId,
+            message: `表单应答未送达：${detail}`,
+          });
+        }
+        return;
+      }
       const pending = pendingPermissions.get(requestId);
       // Unknown or already-settled ask: the contract makes this a no-op.
       if (!pending) return;
@@ -649,6 +715,9 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           for (const [id, pending] of pendingPermissions) {
             if (pending.sessionId === event.sessionId) pendingPermissions.delete(id);
           }
+          for (const [id, pending] of pendingForms) {
+            if (pending.sessionId === event.sessionId) pendingForms.delete(id);
+          }
         }
       };
       emitEvent = emit;
@@ -679,6 +748,12 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
                   callId,
                 });
               },
+            }
+          : {}),
+        ...(formObserver
+          ? {
+              onFormAsk: formObserver.onFormAsk,
+              onFormSettled: formObserver.onFormSettled,
             }
           : {}),
       });
@@ -754,6 +829,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     dispose() {
       abortController?.abort();
       pendingPermissions.clear();
+      pendingForms.clear();
       lastToolBySession.clear();
     },
   };
@@ -791,6 +867,111 @@ interface PermissionAskFrame {
 interface PermissionAskObserver {
   onToolSnapshot: (sessionId: string, part: unknown) => void;
   onPermissionAsk: (frame: PermissionAskFrame) => void;
+}
+
+/** One form.created frame, normalized off the descriptor's paths. */
+interface FormAskFrame {
+  sessionId: string;
+  formId: string;
+  title: string;
+  /** The raw `form.fields` array; each entry is narrowed by `normalizeFormField`. */
+  fields: unknown[];
+}
+
+/**
+ * The adapter-side halves of form asking: `form.created` is surfaced as an
+ * interaction and the reply/cancel travel back through respondInteraction,
+ * while `form.replied`/`form.cancelled` retire a form the user answered
+ * elsewhere (the TUI).
+ */
+interface FormAskObserver {
+  onFormAsk: (frame: FormAskFrame) => void;
+  onFormSettled: (frame: { sessionId: string | null; formId: string }) => void;
+}
+
+/**
+ * Narrow one raw `form.fields` entry into an `AgentFormField`. A field the
+ * descriptor's vocabulary cannot express (an unknown `type`, or a multiselect
+ * with no options) is dropped rather than guessed at — rendering a control the
+ * server will reject on submit is the worse failure. `external` fields survive
+ * as display-only links; every other field keeps its answer-bearing shape.
+ */
+function normalizeFormField(raw: unknown): AgentFormField[] {
+  if (typeof raw !== "object" || raw === null) return [];
+  const field = raw as Record<string, unknown>;
+  const key = typeof field.key === "string" ? field.key : null;
+  const type = typeof field.type === "string" ? field.type : null;
+  if (!key || !type) return [];
+  const base = {
+    key,
+    ...(typeof field.title === "string" ? { title: field.title } : {}),
+    ...(typeof field.description === "string" ? { description: field.description } : {}),
+    ...(typeof field.required === "boolean" ? { required: field.required } : {}),
+  };
+  const options = Array.isArray(field.options)
+    ? field.options.flatMap((option): AgentFormOption[] => {
+        if (typeof option !== "object" || option === null) return [];
+        const o = option as Record<string, unknown>;
+        if (typeof o.value !== "string" || typeof o.label !== "string") return [];
+        return [
+          {
+            value: o.value,
+            label: o.label,
+            ...(typeof o.description === "string" ? { description: o.description } : {}),
+          },
+        ];
+      })
+    : undefined;
+  const numbers = (names: readonly string[]): Record<string, number> =>
+    Object.fromEntries(
+      names.flatMap((name) =>
+        typeof field[name] === "number" ? [[name, field[name] as number]] : [],
+      ),
+    );
+  switch (type) {
+    case "string":
+      return [
+        {
+          ...base,
+          type: "string",
+          ...(options ? { options } : {}),
+          ...(typeof field.placeholder === "string" ? { placeholder: field.placeholder } : {}),
+          ...(typeof field.default === "string" ? { default: field.default } : {}),
+          ...(field.custom === true ? { custom: true } : {}),
+          ...(typeof field.format === "string" ? { format: field.format } : {}),
+        },
+      ];
+    case "number":
+    case "integer":
+      return [{ ...base, type, ...numbers(["minimum", "maximum", "default"]) }];
+    case "boolean":
+      return [
+        {
+          ...base,
+          type: "boolean",
+          ...(typeof field.default === "boolean" ? { default: field.default } : {}),
+        },
+      ];
+    case "multiselect":
+      // A multiselect without options renders nothing to pick from.
+      if (!options) return [];
+      return [
+        {
+          ...base,
+          type: "multiselect",
+          options,
+          ...numbers(["minItems", "maxItems"]),
+          ...(Array.isArray(field.default)
+            ? { default: field.default.filter((v): v is string => typeof v === "string") }
+            : {}),
+          ...(field.custom === true ? { custom: true } : {}),
+        },
+      ];
+    case "external":
+      return typeof field.url === "string" ? [{ ...base, type: "external", url: field.url }] : [];
+    default:
+      return [];
+  }
 }
 
 /**

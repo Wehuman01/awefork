@@ -105,6 +105,10 @@ export interface AgentEndpoints {
   readonly sessionSummarize: string;
   /** POST — answers a `permission.asked` ask ({permissionId} interpolated). */
   readonly sessionPermissions: string;
+  /** POST — answers a `form.created` ask ({formId} interpolated). */
+  readonly sessionFormReply?: string;
+  /** DELETE — cancels a `form.created` ask ({formId} interpolated). */
+  readonly sessionFormCancel?: string;
   readonly projects: string;
   readonly providers: string;
   readonly events: string;
@@ -247,6 +251,35 @@ export interface AgentPermissionAskEvent {
 }
 
 /**
+ * A mid-run form ask (opencode's `form.created`: a tool wants structured
+ * input the user must fill before the run continues). Distinct from
+ * `permissionAsk`: a form carries typed fields (string/number/boolean/
+ * multiselect/external) and their answers, not an allow/deny. Optional — a
+ * descriptor without this section drops the frames; awefork then behaves like
+ * the TUI without a terminal: the turn waits until the user answers elsewhere.
+ */
+export interface AgentFormEvent {
+  /** Frame name that opens a form. */
+  readonly created: string;
+  /** Frame name emitted when the form was answered elsewhere (TUI). */
+  readonly replied: string;
+  /** Frame name emitted when the form was cancelled elsewhere. */
+  readonly cancelled: string;
+  /** Dot-path to the form's own id inside `created` (the reply addresses it). */
+  readonly idPath: string;
+  /** Dot-path to the owning session id inside `created`. */
+  readonly sessionIdPath: string;
+  /** Dot-path to the form title inside `created`. */
+  readonly titlePath: string;
+  /** Dot-path to the field array inside `created`. */
+  readonly fieldsPath: string;
+  /** Dot-path to the form id inside `replied`/`cancelled` (frame root). */
+  readonly replyIdPath: string;
+  /** Dot-path to the session id inside `replied`/`cancelled` (frame root). */
+  readonly replySessionIdPath: string;
+}
+
+/**
  * Per-turn file-change recording facts: which tools touch files, where the
  * state discriminator and the file path live inside a tool part, and which
  * state values mean the tool finished. Optional — a descriptor without this
@@ -289,6 +322,8 @@ export interface AgentEvents {
   readonly partDelta?: AgentPartDeltaEvent;
   /** Present = mid-run permission asks surface as answerable dialogs. */
   readonly permissionAsk?: AgentPermissionAskEvent;
+  /** Present = mid-run form asks surface as answerable dialogs. */
+  readonly form?: AgentFormEvent;
   readonly sessionIdPaths: readonly string[];
   readonly messageIdPaths: readonly string[];
 }
@@ -668,6 +703,8 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     "sessionAbort",
     "sessionSummarize",
     "sessionPermissions",
+    "sessionFormReply",
+    "sessionFormCancel",
     "projects",
     "providers",
     "events",
@@ -790,6 +827,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       "partSnapshot",
       "partDelta",
       "permissionAsk",
+      "form",
       "sessionIdPaths",
       "messageIdPaths",
     ],
@@ -857,6 +895,38 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       ...(ask.sourceIdPaths === undefined
         ? {}
         : { sourceIdPaths: dotPathsAt(ask.sourceIdPaths, "events.permissionAsk.sourceIdPaths") }),
+    };
+  }
+
+  // Optional section: present = form asks surface as dialogs.
+  let form: AgentFormEvent | undefined;
+  if (events.form !== undefined) {
+    const record = objectAt(events.form, "events.form");
+    onlyKeys(
+      record,
+      [
+        "created",
+        "replied",
+        "cancelled",
+        "idPath",
+        "sessionIdPath",
+        "titlePath",
+        "fieldsPath",
+        "replyIdPath",
+        "replySessionIdPath",
+      ],
+      "events.form",
+    );
+    form = {
+      created: stringAt(record.created, "events.form.created"),
+      replied: stringAt(record.replied, "events.form.replied"),
+      cancelled: stringAt(record.cancelled, "events.form.cancelled"),
+      idPath: singlePathAt(record.idPath, "events.form.idPath"),
+      sessionIdPath: singlePathAt(record.sessionIdPath, "events.form.sessionIdPath"),
+      titlePath: singlePathAt(record.titlePath, "events.form.titlePath"),
+      fieldsPath: singlePathAt(record.fieldsPath, "events.form.fieldsPath"),
+      replyIdPath: singlePathAt(record.replyIdPath, "events.form.replyIdPath"),
+      replySessionIdPath: singlePathAt(record.replySessionIdPath, "events.form.replySessionIdPath"),
     };
   }
 
@@ -943,6 +1013,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
           }
         : {}),
       ...(permissionAsk ? { permissionAsk } : {}),
+      ...(form ? { form } : {}),
 
       sessionIdPaths: dotPathsAt(events.sessionIdPaths, "events.sessionIdPaths"),
       messageIdPaths: dotPathsAt(events.messageIdPaths, "events.messageIdPaths"),

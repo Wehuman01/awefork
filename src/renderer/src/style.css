@@ -4378,6 +4378,60 @@ code.md-code {
   background: var(--panel);
 }
 
+/* opencode form asks: one field per row, same control styling as the codex
+ * question block so the two read as one dialog family. */
+.interaction-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.interaction-field {
+  display: grid;
+  gap: 5px;
+}
+
+.interaction-field-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.interaction-field input[type="text"],
+.interaction-field input[type="number"],
+.interaction-field input[type="email"],
+.interaction-field input[type="url"],
+.interaction-field input[type="date"],
+.interaction-field input[type="datetime-local"],
+.interaction-field select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.interaction-field input[type="checkbox"] {
+  justify-self: start;
+}
+
+.interaction-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+}
+
+.interaction-field-link {
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.interaction-form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .interaction-actions {
   display: flex;
   justify-content: flex-end;

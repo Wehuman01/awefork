@@ -42,10 +42,20 @@
           <input v-else v-model="answers[question.id]" :type="question.isSecret ? 'password' : 'text'" />
         </label>
       </template>
+      <template v-else-if="request.kind === 'opencode-form'">
+        <InteractionForm ref="formRef" :fields="request.fields" />
+      </template>
 
       <div class="interaction-actions">
-        <button type="button" class="interaction-deny" @click="deny">拒绝</button>
-        <button v-if="request.kind === 'user-input'" type="button" class="interaction-allow" @click="submitAnswers">提交</button>
+        <button type="button" class="interaction-deny" @click="deny">
+          {{ request.kind === "opencode-form" ? "取消" : "拒绝" }}
+        </button>
+        <button
+          v-if="request.kind === 'user-input' || request.kind === 'opencode-form'"
+          type="button"
+          class="interaction-allow"
+          @click="submitAnswers"
+        >提交</button>
         <button v-else type="button" class="interaction-allow" @click="allow">允许本次</button>
         <button
           v-if="request.kind === 'opencode-permission'"
@@ -71,6 +81,7 @@ import {
   respondInteraction,
   store,
 } from "../state";
+import type InteractionForm from "./interaction-form.vue";
 
 // The modal owns every ask the pane cannot show inline — including opencode
 // asks that would be inline while the pane is off screen (compare mode, no
@@ -86,6 +97,8 @@ const request = computed<DeepReadonly<AgentInteractionRequest> | null>(() =>
 const answers = reactive<Record<string, string>>({});
 /** Dialog root, focused on open so keyboard shortcuts need no pre-click. */
 const dialogRoot = ref<HTMLElement | null>(null);
+/** The form component, whose `collect` validates + builds the answer map. */
+const formRef = ref<InstanceType<typeof InteractionForm> | null>(null);
 
 const backendLabel = computed(() => BACKEND_LABELS[store.activeBackend]);
 const queueDepth = computed(() =>
@@ -145,6 +158,12 @@ const hasDeadline = computed(() => {
 });
 
 function deny(): void {
+  // An abandoned form is cancelled (opencode has no deny for forms); every
+  // other ask denies.
+  if (request.value?.kind === "opencode-form") {
+    respondInteraction(request.value, { decision: "cancel" });
+    return;
+  }
   if (request.value) respondInteraction(request.value, { decision: "deny" });
 }
 
@@ -157,7 +176,15 @@ function allowAlways(): void {
 }
 
 function submitAnswers(): void {
-  if (request.value?.kind !== "user-input") return;
+  if (!request.value) return;
+  if (request.value.kind === "opencode-form") {
+    // collect() validates and narrows each field's type; null = blocked (the
+    // component shows why) so a doomed POST never goes out.
+    const collected = formRef.value?.collect();
+    if (collected) respondInteraction(request.value, { decision: "answers", answers: collected });
+    return;
+  }
+  if (request.value.kind !== "user-input") return;
   respondInteraction(request.value, { decision: "answers", answers: { ...answers } });
 }
 
@@ -177,7 +204,9 @@ function onKeydown(event: KeyboardEvent): void {
     return;
   }
   if (request.value.kind === "user-input") submitAnswers();
-  else allow();
+  // A form is multi-field: Enter in one input must not fire the whole form
+  // (that would submit unfilled required fields). The user submits explicitly.
+  else if (request.value.kind !== "opencode-form") allow();
 }
 
 window.addEventListener("keydown", onKeydown);

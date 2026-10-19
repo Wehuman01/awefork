@@ -349,6 +349,39 @@ describe("bundled v2 descriptor", () => {
   it("omits a stateKeyPath — v2's tool events name the state outright", () => {
     expect(opencodeV2Descriptor().fileChanges?.stateKeyPath).toBeUndefined();
   });
+
+  it("carries the form ask facts and its reply/cancel endpoints", () => {
+    const descriptor = opencodeV2Descriptor();
+    expect(descriptor.events.form).toEqual({
+      created: "form.created",
+      replied: "form.replied",
+      cancelled: "form.cancelled",
+      idPath: "form.id",
+      sessionIdPath: "form.sessionID",
+      titlePath: "form.title",
+      fieldsPath: "form.fields",
+      replyIdPath: "id",
+      replySessionIdPath: "sessionID",
+    });
+    expect(descriptor.endpoints.sessionFormReply).toBe("/api/session/{id}/form/{formId}/reply");
+    expect(descriptor.endpoints.sessionFormCancel).toBe("/api/session/{id}/form/{formId}");
+    // The form's session id lives under `form.sessionID`, which the shared
+    // sessionIdPaths do not cover — the fact carries its own path.
+    expect(descriptor.events.sessionIdPaths).not.toContain("form.sessionID");
+  });
+
+  it("accepts a descriptor without the optional form section", () => {
+    const raw = JSON.parse(JSON.stringify(bundledV2Json)) as Record<string, unknown>;
+    delete (raw.events as Record<string, unknown>).form;
+    expect(parseOpenCodeDescriptor(raw).events.form).toBeUndefined();
+  });
+
+  it("rejects an unknown key inside the form section", () => {
+    const raw = JSON.parse(JSON.stringify(bundledV2Json)) as Record<string, unknown>;
+    ((raw.events as Record<string, unknown>).form as Record<string, unknown>).titelPath =
+      "form.title";
+    expect(() => parseOpenCodeDescriptor(raw)).toThrow(/events\.form.*titelPath/);
+  });
 });
 
 describe("protocol selection", () => {

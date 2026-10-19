@@ -41,6 +41,21 @@ export interface V2PermissionAskFrame {
   callId: string | null;
 }
 
+/** One `form.created` frame, normalized off the descriptor's paths. */
+export interface V2FormAskFrame {
+  sessionId: string;
+  formId: string;
+  title: string;
+  /** The raw `form.fields` array; the adapter narrows each field's type. */
+  fields: unknown[];
+}
+
+/** One `form.replied` / `form.cancelled` frame — the form settled elsewhere. */
+export interface V2FormSettledFrame {
+  sessionId: string | null;
+  formId: string;
+}
+
 export interface V2EventDeps {
   descriptor: OpenCodeDescriptor;
   emit: (event: AgentEvent) => void;
@@ -48,6 +63,10 @@ export interface V2EventDeps {
   recordToolFrame: (sessionId: string, frame: ToolPartFrame) => void;
   /** Surface a permission ask as an answerable interaction. */
   onPermissionAsk?: (frame: V2PermissionAskFrame) => void;
+  /** Surface a form ask as an answerable interaction. */
+  onFormAsk?: (frame: V2FormAskFrame) => void;
+  /** A form settled elsewhere (TUI answered it, or it was cancelled). */
+  onFormSettled?: (frame: V2FormSettledFrame) => void;
   /** Track a tool call's name + parsed input for the ask's command correlation. */
   onToolCalled?: (sessionId: string, tool: string, input: unknown, callId: string | null) => void;
 }
@@ -214,6 +233,39 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
         });
       }
       return;
+    }
+
+    // A form ask is the typed sibling of a permission ask: the fields ride
+    // `form.fields`, the owning session under `form.sessionID` (which is not
+    // in sessionIdPaths — hence the descriptor's own sessionIdPath). Its
+    // settlement frames (`form.replied`/`form.cancelled`) name the id at the
+    // frame root, not under `form`.
+    const form = events.form;
+    if (form) {
+      if (frame.type === form.created) {
+        const formId = firstString(props, [form.idPath]);
+        const session = firstString(props, [form.sessionIdPath]);
+        const rawFields = readPath(props, form.fieldsPath);
+        if (formId && session && deps.onFormAsk) {
+          deps.onFormAsk({
+            sessionId: session,
+            formId,
+            title: firstString(props, [form.titlePath]) ?? "需要你的输入",
+            fields: Array.isArray(rawFields) ? rawFields : [],
+          });
+        }
+        return;
+      }
+      if (frame.type === form.replied || frame.type === form.cancelled) {
+        const formId = firstString(props, [form.replyIdPath]);
+        if (formId && deps.onFormSettled) {
+          deps.onFormSettled({
+            sessionId: firstString(props, [form.replySessionIdPath]),
+            formId,
+          });
+        }
+        return;
+      }
     }
 
     switch (frame.type) {

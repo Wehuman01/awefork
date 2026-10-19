@@ -20,9 +20,7 @@
   },
   "envelope": {
     "dataKey": "data",
-    "bare": [
-      "projects"
-    ]
+    "bare": ["projects"]
   },
   "pagination": {
     "style": "cursor",
@@ -43,52 +41,27 @@
     "setModelFirst": true
   },
   "fileChanges": {
-    "tools": [
-      "edit",
-      "write"
-    ],
-    "filePathPaths": [
-      "input.path",
-      "input.filePath"
-    ],
-    "doneStates": [
-      "completed",
-      "error"
-    ]
+    "tools": ["edit", "write"],
+    "filePathPaths": ["input.path", "input.filePath"],
+    "doneStates": ["completed", "error"]
   },
   "sessions": {
     "create": {
       "directoryIn": "body"
     },
     "fields": {
-      "id": [
-        "id"
-      ],
-      "title": [
-        "title"
-      ],
-      "directory": [
-        "location.directory"
-      ],
-      "parentSessionId": [
-        "parentID"
-      ],
-      "forkSessionId": [
-        "fork.sessionID"
-      ],
-      "createdAt": [
-        "time.created"
-      ],
-      "updatedAt": [
-        "time.updated"
-      ]
+      "id": ["id"],
+      "title": ["title"],
+      "directory": ["location.directory"],
+      "parentSessionId": ["parentID"],
+      "forkSessionId": ["fork.sessionID"],
+      "createdAt": ["time.created"],
+      "updatedAt": ["time.updated"]
     }
   },
   "messages": {
     "partsPath": "content",
-    "textPath": [
-      "text"
-    ],
+    "textPath": ["text"],
     "attachments": {
       "path": "files",
       "nameField": "name",
@@ -96,37 +69,16 @@
       "dataField": "data"
     },
     "fields": {
-      "id": [
-        "id"
-      ],
-      "role": [
-        "type"
-      ],
-      "modelId": [
-        "model.id"
-      ],
-      "providerId": [
-        "model.providerID"
-      ],
-      "variant": [
-        "model.variant"
-      ],
-      "createdAt": [
-        "time.created"
-      ],
-      "completedAt": [
-        "time.completed"
-      ],
-      "finish": [
-        "finish"
-      ],
-      "outputTokens": [
-        "tokens.output"
-      ],
-      "error": [
-        "error.message",
-        "error.type"
-      ]
+      "id": ["id"],
+      "role": ["type"],
+      "modelId": ["model.id"],
+      "providerId": ["model.providerID"],
+      "variant": ["model.variant"],
+      "createdAt": ["time.created"],
+      "completedAt": ["time.completed"],
+      "finish": ["finish"],
+      "outputTokens": ["tokens.output"],
+      "error": ["error.message", "error.type"]
     },
     "parts": {
       "text": {
@@ -171,6 +123,8 @@
     "sessionAbort": "/api/session/{id}/interrupt",
     "sessionSummarize": "/api/session/{id}/compact",
     "sessionPermissions": "/api/session/{id}/permission/{permissionId}/reply",
+    "sessionFormReply": "/api/session/{id}/form/{formId}/reply",
+    "sessionFormCancel": "/api/session/{id}/form/{formId}",
     "projects": "/api/project",
     "providers": "/api/model",
     "events": "/api/event"
@@ -206,16 +160,10 @@
       "model.updated",
       "server.connected"
     ],
-    "idle": [
-      "session.execution.succeeded",
-      "session.execution.interrupted"
-    ],
+    "idle": ["session.execution.succeeded", "session.execution.interrupted"],
     "error": {
       "name": "session.error",
-      "detailPaths": [
-        "error.message",
-        "error.type"
-      ]
+      "detailPaths": ["error.message", "error.type"]
     },
     "permissionAsk": {
       "name": "permission.asked",
@@ -223,25 +171,21 @@
       "permissionPath": "action",
       "toolPath": "tool",
       "patternsPath": "resources",
-      "commandPaths": [
-        "metadata.command",
-        "command"
-      ],
-      "sourceIdPaths": [
-        "source.id",
-        "source.callID"
-      ]
+      "commandPaths": ["metadata.command", "command"],
+      "sourceIdPaths": ["source.id", "source.callID"]
     },
-    "sessionIdPaths": [
-      "sessionID",
-      "session.sessionID",
-      "session.id",
-      "part.sessionID"
-    ],
-    "messageIdPaths": [
-      "assistantMessageID",
-      "messageID",
-      "part.messageID"
-    ]
+    "form": {
+      "created": "form.created",
+      "replied": "form.replied",
+      "cancelled": "form.cancelled",
+      "idPath": "form.id",
+      "sessionIdPath": "form.sessionID",
+      "titlePath": "form.title",
+      "fieldsPath": "form.fields",
+      "replyIdPath": "id",
+      "replySessionIdPath": "sessionID"
+    },
+    "sessionIdPaths": ["sessionID", "session.sessionID", "session.id", "part.sessionID"],
+    "messageIdPaths": ["assistantMessageID", "messageID", "part.messageID"]
   }
 }

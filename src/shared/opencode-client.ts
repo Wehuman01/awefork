@@ -187,7 +187,27 @@ export interface OpencodeClient {
     permissionId: string,
     response: "once" | "always" | "reject",
   ): Promise<void>;
+  /**
+   * POST /api/session/:id/form/:formId/reply — answer a `form.created` ask with
+   * the field values keyed by field key. The server 404s an already-settled
+   * form (another client answered, the run aborted, or the form expired);
+   * callers treat that as a no-op.
+   */
+  formReply(sessionId: string, formId: string, answer: FormAnswer): Promise<void>;
+  /**
+   * DELETE /api/session/:id/form/:formId — cancel a `form.created` ask the user
+   * chose not to fill. Same 404-means-settled contract as `formReply`.
+   */
+  formCancel(sessionId: string, formId: string): Promise<void>;
 }
+
+/**
+ * A form answer: field key → its value. The value's type is dictated by the
+ * field — text for string, a number for number/integer, a boolean for
+ * boolean, a string array for multiselect. External fields never appear (they
+ * carry no answer).
+ */
+export type FormAnswer = Record<string, string | number | boolean | string[]>;
 
 export function createOpencodeClient(
   baseUrl: string,
@@ -626,5 +646,25 @@ export function createOpencodeClient(
         "sessionPermissions",
       );
     },
+    formReply: (id, formId, answer) =>
+      request(
+        endpoint("sessionFormReply", { id, formId }),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ answer }),
+        },
+        undefined,
+        undefined,
+        "sessionFormReply",
+      ),
+    formCancel: (id, formId) =>
+      request(
+        endpoint("sessionFormCancel", { id, formId }),
+        { method: "DELETE" },
+        undefined,
+        undefined,
+        "sessionFormCancel",
+      ),
   };
 }

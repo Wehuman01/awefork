@@ -205,6 +205,14 @@ function startFakeV2(
         /^\/api\/session\/([^/]+)\/permission\/([^/]+)\/reply$/,
       );
       if (permissionReplyMatch && method === "POST") return json({ data: true });
+      const formReplyMatch = path.match(/^\/api\/session\/([^/]+)\/form\/([^/]+)\/reply$/);
+      if (formReplyMatch && method === "POST") {
+        return json({ data: true });
+      }
+      const formCancelMatch = path.match(/^\/api\/session\/([^/]+)\/form\/([^/]+)$/);
+      if (formCancelMatch && method === "DELETE") {
+        return json({ data: true });
+      }
       const interruptMatch = path.match(/^\/api\/session\/([^/]+)\/interrupt$/);
       if (interruptMatch && method === "POST") return json({ data: { interrupted: true } });
       res.writeHead(404, { "content-type": "application/json" });
@@ -912,14 +920,170 @@ describe("v2 event stream", () => {
           source: { type: "tool", messageID: "msg_a1", id: "call_999" },
         },
       });
-      for (let i = 0; i < 40 && events.filter((e) => e.type === "interaction.requested").length < 2; i += 1) {
+      for (
+        let i = 0;
+        i < 40 && events.filter((e) => e.type === "interaction.requested").length < 2;
+        i += 1
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       const second = events
         .filter((e) => e.type === "interaction.requested")
         .find((e) => e.request.requestId === "perm_2");
       expect(second?.request).toMatchObject({ permission: "webfetch" });
-      expect((second?.request as { command?: string }).command).toBeUndefined();
+      if (second?.type !== "interaction.requested") {
+        throw new Error("expected a second permission interaction");
+      }
+      expect((second.request as { command?: string }).command).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("surfaces a form ask as an interaction and replies with the typed answer map", async () => {
+    const fake = await startFakeV2();
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    try {
+      for (let i = 0; i < 40 && !fake.calls.some((c) => c.path === "/api/event"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      // Real 2.0.28 wire shape: `{form: {id, sessionID, title, fields}}`, with
+      // a string select, a boolean, a multiselect and an external link.
+      fake.pushFrame({
+        id: "evt_form_1",
+        created: 1,
+        type: "form.created",
+        data: {
+          form: {
+            id: "frm_1",
+            sessionID: "ses_1",
+            title: "连接服务",
+            fields: [
+              {
+                key: "method",
+                type: "string",
+                title: "方式",
+                required: true,
+                options: [
+                  { value: "api", label: "API Key" },
+                  { value: "oauth", label: "OAuth" },
+                ],
+              },
+              { key: "remember", type: "boolean", title: "记住", default: true },
+              {
+                key: "scopes",
+                type: "multiselect",
+                title: "权限",
+                options: [{ value: "read", label: "读" }],
+                minItems: 1,
+              },
+              { key: "docs", type: "external", url: "https://example.com/help" },
+              { key: "mystery", type: "quantum" },
+            ],
+          },
+        },
+      });
+      for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const ask = events.find((e) => e.type === "interaction.requested");
+      expect(ask).toMatchObject({
+        request: {
+          requestId: "frm_1",
+          sessionId: "ses_1",
+          kind: "opencode-form",
+          title: "连接服务",
+        },
+      });
+      if (ask?.type !== "interaction.requested" || ask.request.kind !== "opencode-form") {
+        throw new Error("expected an opencode-form interaction");
+      }
+      const fields = ask.request.fields;
+      // The unknown `quantum` field is dropped; the rest keep their shapes,
+      // and options carry the server's `value` alongside the display `label`.
+      expect(fields.map((f) => `${f.key}:${f.type}`)).toEqual([
+        "method:string",
+        "remember:boolean",
+        "scopes:multiselect",
+        "docs:external",
+      ]);
+      const method = fields[0];
+      expect(method.type === "string" ? method.options?.[0] : undefined).toMatchObject({
+        value: "api",
+        label: "API Key",
+      });
+
+      await adapter.respondInteraction("frm_1", {
+        decision: "answers",
+        answers: { method: "api", remember: true, scopes: ["read"] },
+      });
+      const reply = fake.calls.find((c) => c.path === "/api/session/ses_1/form/frm_1/reply");
+      expect(reply).toMatchObject({
+        method: "POST",
+        body: { answer: { method: "api", remember: true, scopes: ["read"] } },
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("cancels a form on a non-answers decision and retires it when settled elsewhere", async () => {
+    const fake = await startFakeV2();
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    try {
+      for (let i = 0; i < 40 && !fake.calls.some((c) => c.path === "/api/event"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      fake.pushFrame({
+        id: "evt_form_2",
+        created: 1,
+        type: "form.created",
+        data: {
+          form: { id: "frm_2", sessionID: "ses_1", title: "取消我", fields: [] },
+        },
+      });
+      for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await adapter.respondInteraction("frm_2", { decision: "cancel" });
+      const cancel = fake.calls.find(
+        (c) => c.path === "/api/session/ses_1/form/frm_2" && c.method === "DELETE",
+      );
+      expect(cancel).toBeDefined();
+
+      // A form answered elsewhere (TUI) emits form.replied; the adapter retires
+      // it as an interaction.settled event so the dialog is dropped.
+      fake.pushFrame({
+        id: "evt_form_3",
+        created: 2,
+        type: "form.created",
+        data: { form: { id: "frm_3", sessionID: "ses_1", title: "别处答", fields: [] } },
+      });
+      fake.pushFrame({
+        id: "evt_form_4",
+        created: 3,
+        type: "form.replied",
+        data: { id: "frm_3", sessionID: "ses_1", answer: { x: "y" } },
+      });
+      for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.settled"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(events.find((e) => e.type === "interaction.settled")).toMatchObject({
+        requestId: "frm_3",
+        sessionId: "ses_1",
+      });
+      // Retired: a late reply is a no-op (no POST for the settled form).
+      const before = fake.calls.length;
+      await adapter.respondInteraction("frm_3", { decision: "answers", answers: { x: "y" } });
+      expect(fake.calls.length).toBe(before);
     } finally {
       unsubscribe();
     }
