@@ -284,7 +284,7 @@ describe("createCodexJsonRpc", () => {
     rpc.dispose();
   });
 
-  it("safe-replies an approval once the 30s user-input deadline lapses", async () => {
+  it("safe-replies an approval once the 60s backstop deadline lapses (renderer's 30s decline lands first)", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
@@ -299,7 +299,7 @@ describe("createCodexJsonRpc", () => {
       })}\n`,
     );
     expect(written).toHaveLength(0);
-    vi.advanceTimersByTime(29_999);
+    vi.advanceTimersByTime(59_999);
     expect(written).toHaveLength(0);
     vi.advanceTimersByTime(1);
     expect(JSON.parse(written[0] ?? "{}")).toEqual({
@@ -325,7 +325,7 @@ describe("createCodexJsonRpc", () => {
         params: { questions: [{ id: "q1", question: "？" }] },
       })}\n`,
     );
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(60_000);
     expect(JSON.parse(written[0] ?? "{}")).toEqual({
       jsonrpc: "2.0",
       id: 32,
@@ -350,7 +350,7 @@ describe("createCodexJsonRpc", () => {
         params: {},
       })}\n`,
     );
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(60_000);
     resolveHandler({ decision: "accept" });
     await Promise.resolve();
     await Promise.resolve();

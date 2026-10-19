@@ -206,7 +206,19 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       } while (cursor);
       return turns;
     };
-    let turns = await walk();
+    let turns: CodexTurn[];
+    try {
+      turns = await walk();
+    } catch (error) {
+      // A thread/start thread has no rollout until its first user message —
+      // turns/list refuses it outright. That is the empty list, not an error:
+      // messages() runs right after createSession and must not toast.
+      if (isNotMaterialized(error)) {
+        indexTurnItems(threadId, []);
+        return [];
+      }
+      throw error;
+    }
     if (turns.length === 0) {
       try {
         await resumeThread(threadId);
@@ -388,6 +400,11 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   function isWriterConflict(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("already has an active writer");
+  }
+
+  function isNotMaterialized(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("is not materialized yet");
   }
 
   return {
@@ -723,6 +740,10 @@ function emitCodexNotification(
       if (p.status?.type === "active") {
         emit({ type: "message.started", sessionId: threadId, messageId: "" });
       } else if (p.status?.type === "idle") {
+        // Mirror turn/completed's bookkeeping: without this, a dropped
+        // completed frame leaves a stale turnId that a later abort would
+        // interrupt (and surface as a raw codex error).
+        activeTurns.delete(threadId);
         emit({ type: "session.idle", sessionId: threadId });
       }
       break;

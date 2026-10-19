@@ -152,6 +152,26 @@ describe("createCodexAdapter messages()", () => {
     });
   });
 
+  it("treats a not-yet-materialized thread as empty instead of erroring", async () => {
+    // Regression: messages() runs right after thread/start (new session), and
+    // turns/list refuses a thread with no rollout yet ("is not materialized
+    // yet"); that surfaced as an awefork:messages error toast on every fresh
+    // codex session.
+    const { client, callsOf } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () => {
+        throw new Error(
+          "thread s1 is not materialized yet; thread/turns/list is unavailable before first user message",
+        );
+      },
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    await expect(adapter.messages("s1")).resolves.toEqual([]);
+    // No resume either: an empty fresh thread must not take the writer.
+    expect(callsOf("thread/resume")).toHaveLength(0);
+  });
+
   it("reads reasoning history content sent as string[] (codex 0.154 format)", async () => {
     // Regression: 0.154's ReasoningThreadItem.content is string[]; reading it
     // as {text}[] dropped the whole thinking trail on history reload.
@@ -709,6 +729,25 @@ describe("createCodexAdapter notification mapping", () => {
       { type: "message.started", sessionId: "s1", messageId: "turn-5" },
       { type: "session.idle", sessionId: "s1" },
     ]);
+  });
+
+  it("clears the active turn on an idle status change, not just turn/completed", async () => {
+    // Regression: a dropped turn/completed frame left a stale turnId, so a
+    // later abort interrupted an already-finished turn and surfaced codex's
+    // raw RPC error instead of the friendly no-active-turn message.
+    const fake = fakeClient({ "turn/interrupt": () => ({}) });
+    const adapter = createCodexAdapter({
+      client: fake.client,
+      lineagePath: await tempLineagePath(),
+    });
+    const events: AgentEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+
+    fake.notify("turn/started", { threadId: "s1", turn: { id: "turn-5" } });
+    // turn/completed is lost; the idle status twin arrives instead.
+    fake.notify("thread/status/changed", { threadId: "s1", status: { type: "idle" } });
+    expect(events.map((e) => e.type)).toEqual(["message.started", "session.idle"]);
+    await expect(adapter.abort("s1")).rejects.toThrow("该会话当前没有正在运行的回合");
   });
 
   it("reports a failed turn as server.error before idle", async () => {

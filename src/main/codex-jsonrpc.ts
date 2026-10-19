@@ -59,7 +59,14 @@ const SAFE_REPLIES: Record<string, unknown> = {
 };
 
 const KNOWN_REQUESTS = new Set([...Object.keys(SAFE_REPLIES), "item/tool/requestUserInput"]);
-const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Backstop only: the renderer arms its own (30s) auto-decline when the event
+ * arrives — strictly after this timer would start at equal timeouts, so the
+ * backstop would decline first and silently swallow a user "allow" clicked in
+ * that gap. Staying well above the renderer's deadline lets its visible
+ * decline always land; this guard fires only when the renderer is gone.
+ */
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export function createCodexJsonRpc(
   stdin: { write(chunk: string | Uint8Array): boolean },
