@@ -404,12 +404,24 @@ export type AgentFormField =
     };
 
 /**
+ * Interpolation values for a `title`/`detail` that is an i18n key rather than
+ * prose. Adapters run in the main process, where the UI locale (the renderer's
+ * localStorage) is out of reach — so this feature's adapters ship a
+ * translation key and the renderer interpolates it through `t()`. Absent on
+ * requests whose strings are plain prose (the codex titles, backend-named
+ * form titles), which the renderer shows verbatim.
+ */
+interface InteractionVars {
+  vars?: Record<string, string | number>;
+}
+
+/**
  * A server-originated interaction the backend is blocked on. Modelled as a
  * discriminated union so the renderer renders exactly the fields of the kind
  * it got. `requestId` is backend-internal and opaque — the renderer echoes it
  * back verbatim, never peels it apart.
  */
-export type AgentInteractionRequest =
+export type AgentInteractionRequest = (
   | {
       requestId: string;
       sessionId: string | null;
@@ -484,7 +496,9 @@ export type AgentInteractionRequest =
       detail: string;
       /** The typed fields the user fills; external ones yield no answer. */
       fields: AgentFormField[];
-    };
+    }
+) &
+  InteractionVars;
 
 /**
  * How the user resolved an `interaction.requested`. The adapter translates

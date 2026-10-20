@@ -22,23 +22,23 @@
             :checked="hasChoice(field.key, option.value)"
             @change="toggleChoice(field.key, option.value)"
           />
-          {{ option.label }}
+          {{ t(option.label) }}
         </span>
       </template>
 
       <template v-else-if="field.type === 'string' && field.options?.length">
         <select v-model="answers[field.key]">
-          <option disabled value="">请选择</option>
+          <option disabled value="">{{ t("form.pleaseSelect") }}</option>
           <option v-for="option in field.options" :key="option.value" :value="option.value">
-            {{ option.label }}
+            {{ t(option.label) }}
           </option>
-          <option v-if="field.custom" :value="CUSTOM">其他…</option>
+          <option v-if="field.custom" :value="CUSTOM">{{ t("form.other") }}</option>
         </select>
         <input
           v-if="field.custom && answers[field.key] === CUSTOM"
           v-model="custom[field.key]"
           type="text"
-          placeholder="请输入"
+          :placeholder="t('form.pleaseEnter')"
         />
       </template>
 
@@ -58,6 +58,7 @@
 <script setup lang="ts">
 import { type DeepReadonly, reactive, ref, watch } from "vue";
 import type { AgentFormField } from "../../../shared/types";
+import { t } from "../i18n";
 
 /**
  * The fields as components actually hold them: deep-readonly straight out of
@@ -106,7 +107,8 @@ watch(() => props.fields, seed, { immediate: true });
 
 function fieldLabel(field: ReadonlyField): string {
   if (field.title) {
-    return field.type !== "external" && field.required ? `${field.title} *` : field.title;
+    const label = t(field.title);
+    return field.type !== "external" && field.required ? `${label} *` : label;
   }
   return field.type === "external" ? field.url : field.key;
 }
@@ -151,15 +153,21 @@ function collect(): Record<string, string | number | boolean | string[]> | null 
     if (field.type === "multiselect") {
       const selected = Array.isArray(raw) ? (raw as string[]) : [];
       if (field.required && selected.length === 0) {
-        validationError.value = `${fieldLabel(field)}：请至少选择一项`;
+        validationError.value = t("form.selectAtLeastOne", { label: fieldLabel(field) });
         return null;
       }
       if (field.minItems !== undefined && selected.length < field.minItems) {
-        validationError.value = `${fieldLabel(field)}：请至少选择 ${field.minItems} 项`;
+        validationError.value = t("form.selectAtLeastN", {
+          label: fieldLabel(field),
+          n: field.minItems,
+        });
         return null;
       }
       if (field.maxItems !== undefined && selected.length > field.maxItems) {
-        validationError.value = `${fieldLabel(field)}：最多选择 ${field.maxItems} 项`;
+        validationError.value = t("form.selectAtMostN", {
+          label: fieldLabel(field),
+          n: field.maxItems,
+        });
         return null;
       }
       out[field.key] = selected;
@@ -169,33 +177,42 @@ function collect(): Record<string, string | number | boolean | string[]> | null 
       const text = String(raw ?? "").trim();
       if (text === "") {
         if (field.required) {
-          validationError.value = `${fieldLabel(field)}：必填`;
+          validationError.value = t("form.required", { label: fieldLabel(field) });
           return null;
         }
         continue;
       }
       const value = Number(text);
       if (!Number.isFinite(value) || (field.type === "integer" && !Number.isInteger(value))) {
-        validationError.value = `${fieldLabel(field)}：请输入${field.type === "integer" ? "整数" : "数字"}`;
+        validationError.value = t(
+          field.type === "integer" ? "form.enterInteger" : "form.enterNumber",
+          { label: fieldLabel(field) },
+        );
         return null;
       }
       if (field.minimum !== undefined && value < field.minimum) {
-        validationError.value = `${fieldLabel(field)}：不能小于 ${field.minimum}`;
+        validationError.value = t("form.minError", {
+          label: fieldLabel(field),
+          min: field.minimum,
+        });
         return null;
       }
       if (field.maximum !== undefined && value > field.maximum) {
-        validationError.value = `${fieldLabel(field)}：不能大于 ${field.maximum}`;
+        validationError.value = t("form.maxError", {
+          label: fieldLabel(field),
+          max: field.maximum,
+        });
         return null;
       }
       out[field.key] = value;
       continue;
     }
-    // string — a "其他…" pick resolves to the free-text the user typed.
+    // string — a "Other…" pick resolves to the free-text the user typed.
     const rawText = raw === CUSTOM ? (custom[field.key] ?? "") : String(raw ?? "");
     const text = rawText.trim();
     if (text === "") {
       if (field.required) {
-        validationError.value = `${fieldLabel(field)}：必填`;
+        validationError.value = t("form.required", { label: fieldLabel(field) });
         return null;
       }
       continue;

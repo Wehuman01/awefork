@@ -250,7 +250,7 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
           deps.onFormAsk({
             sessionId: session,
             formId,
-            title: firstString(props, [form.titlePath]) ?? "需要你的输入",
+            title: firstString(props, [form.titlePath]) ?? "opencode.formTitleFallback",
             fields: Array.isArray(rawFields) ? rawFields : [],
           });
         }

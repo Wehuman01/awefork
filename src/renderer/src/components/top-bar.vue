@@ -34,8 +34,8 @@
           :disabled="!entry.installed"
           :title="
             entry.installed
-              ? `切换到 ${entry.label}`
-              : `未在 PATH 上找到 ${entry.label} CLI`
+              ? t('topbar.switchToWithWindow', { label: entry.label })
+              : t('topbar.notOnPath', { label: entry.label })
           "
           @click="pickBackend(entry.id)"
         >
@@ -75,15 +75,11 @@
       :class="{ on: multiWindow }"
       role="switch"
       :aria-checked="multiWindow"
-      :title="
-        multiWindow
-          ? '多窗口已开：点 Agent 会在独立窗口打开（同一 Agent 只聚焦已有窗口）'
-          : '多窗口已关：点 Agent 在当前窗口内切换；打开后点击将新开独立窗口'
-      "
+      :title="multiWindow ? t('topbar.multiWindowOn') : t('topbar.multiWindowOff')"
       @click="toggleMultiWindow"
     >
       <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
-      独立窗口
+      {{ t("topbar.multiWindowLabel") }}
     </button>
     <button
       type="button"
@@ -91,6 +87,24 @@
       title="命令面板（⌘K / Ctrl+K）"
       @click="togglePalette()"
     >⌘K</button>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button
+        type="button"
+        class="lang-btn"
+        :class="{ on: locale === 'zh' }"
+        :aria-pressed="locale === 'zh'"
+        title="中文"
+        @click="setLocale('zh')"
+      >中</button>
+      <button
+        type="button"
+        class="lang-btn"
+        :class="{ on: locale === 'en' }"
+        :aria-pressed="locale === 'en'"
+        title="English"
+        @click="setLocale('en')"
+      >EN</button>
+    </div>
     <HistoryButton />
     <div class="version-wrap" @click.stop>
       <button type="button" class="version-btn" @click="toggleVersionMenu">
@@ -109,6 +123,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
+import { locale, setLocale, t } from "../i18n";
 import { togglePalette } from "../layout";
 import {
   checkForUpdates,

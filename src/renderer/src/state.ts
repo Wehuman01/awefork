@@ -48,6 +48,7 @@ import type {
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
+import { t } from "./i18n";
 import { panels, persistLayout } from "./layout";
 
 interface DraftState {
@@ -922,15 +923,17 @@ function currentHash(): string {
 
 /**
  * Focus (or open) the agent's own window. Called from the switcher: on a
- * right-click "在新窗口打开", and for every pick inside an agent window — one
- * window per agent, so a second ask for the same agent just focuses it.
+ * right-click "open in new window", and for every pick inside an agent
+ * window — one window per agent, so a second ask for the same agent just
+ * focuses it.
  */
 export async function openAgentWindow(backend: BackendId): Promise<void> {
   try {
     const result = await window.awefork.openAgentWindow(backend);
-    if (!result.ok) state.actionError = result.error ?? `无法打开 ${backend} 窗口。`;
+    if (!result.ok) state.actionError = result.error ?? t("error.openWindowFailed", { backend });
   } catch (error) {
-    state.actionError = error instanceof Error ? error.message : `无法打开 ${backend} 窗口。`;
+    state.actionError =
+      error instanceof Error ? error.message : t("error.openWindowFailed", { backend });
   }
 }
 
@@ -1590,14 +1593,14 @@ export function respondInteraction(
   // Irreversible: the reply already went out, so record it as a journal lock.
   const label =
     response.decision === "allow"
-      ? "允许交互请求"
+      ? t("interaction.respondAllow")
       : response.decision === "always"
-        ? "总是允许交互请求"
+        ? t("interaction.respondAlways")
         : response.decision === "deny"
-          ? "拒绝交互请求"
+          ? t("interaction.respondDeny")
           : response.decision === "cancel"
-            ? "取消交互请求"
-            : "回答交互问题";
+            ? t("interaction.respondCancel")
+            : t("interaction.respondAnswers");
   void window.awefork
     .respondInteraction(backend, request.requestId, response)
     .then(() => {

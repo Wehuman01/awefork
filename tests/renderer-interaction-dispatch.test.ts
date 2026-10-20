@@ -26,8 +26,8 @@ function permission(
     requestId,
     sessionId,
     kind: "opencode-permission",
-    title: "允许这次操作？",
-    detail: "一条 bash 操作匹配了你的需确认权限规则。",
+    title: "Allow this action?",
+    detail: "A bash action matched your ask permission rule.",
     permission: extra.permission ?? "bash",
     patterns: extra.patterns ?? ["rm *"],
     ...(extra.command ? { command: extra.command } : {}),
@@ -42,8 +42,8 @@ function commandApproval(
     requestId,
     sessionId,
     kind: "command-approval",
-    title: "允许执行命令？",
-    detail: "Codex 请求执行一条命令。",
+    title: "Allow running the command?",
+    detail: "Codex requests to run a command.",
     command: "rm -rf /",
     cwd: "/demo/shop-api",
   };
@@ -58,8 +58,8 @@ function form(
     requestId,
     sessionId,
     kind: "opencode-form",
-    title: "需要你的输入",
-    detail: "opencode 需要你填写一份表单后才能继续。",
+    title: "Your input is needed",
+    detail: "opencode needs you to fill in a form to continue.",
     fields,
   };
 }

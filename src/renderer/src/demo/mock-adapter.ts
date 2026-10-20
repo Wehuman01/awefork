@@ -1000,13 +1000,15 @@ export function installMockAdapter(): void {
   const demoForm: DemoAsk = {
     sessionId: null,
     kind: "opencode-form",
-    title: "连接 GitHub MCP",
-    detail: "opencode 需要完成一次 OAuth 授权才能继续本次运行。",
+    // Titles/details/labels ship as i18n keys — the renderer's `t()` turns
+    // them into the active locale at render time.
+    title: "mock.githubMcpTitle",
+    detail: "mock.githubMcpDetail",
     fields: [
       {
         key: "email",
         type: "string",
-        title: "账号",
+        title: "mock.fieldAccount",
         required: true,
         format: "email",
         placeholder: "you@example.com",
@@ -1014,19 +1016,19 @@ export function installMockAdapter(): void {
       {
         key: "scope",
         type: "string",
-        title: "授权范围",
+        title: "mock.fieldScope",
         required: true,
         options: [
-          { value: "repo", label: "仓库读写" },
-          { value: "read", label: "只读" },
+          { value: "repo", label: "mock.scopeRepo" },
+          { value: "read", label: "mock.scopeRead" },
         ],
         custom: true,
       },
-      { key: "ttl", type: "integer", title: "有效期（天）", minimum: 1, maximum: 90, default: 30 },
+      { key: "ttl", type: "integer", title: "mock.fieldTtl", minimum: 1, maximum: 90, default: 30 },
       {
         key: "teams",
         type: "multiselect",
-        title: "同步的团队",
+        title: "mock.fieldTeams",
         options: [
           { value: "core", label: "core" },
           { value: "docs", label: "docs" },
@@ -1034,20 +1036,20 @@ export function installMockAdapter(): void {
         ],
         minItems: 1,
       },
-      { key: "remember", type: "boolean", title: "记住此授权", default: true },
-      { key: "docs", type: "external", title: "授权说明", url: "https://example.com/oauth-docs" },
+      { key: "remember", type: "boolean", title: "mock.fieldRemember", default: true },
+      { key: "docs", type: "external", title: "mock.fieldDocs", url: "https://example.com/oauth-docs" },
     ],
   };
   const demoPermission: DemoAsk = {
     sessionId: null,
     kind: "opencode-permission",
-    title: "opencode 请求执行命令",
-    detail: "运行 rm -rf node_modules 需要你的确认。",
+    title: "mock.permTitle",
+    detail: "mock.permDetail",
     permission: "bash",
     patterns: ["rm *"],
     command: "rm -rf node_modules",
   };
-  // "w-root" (官网首页改版) is the session the demo boots with selected, so
+  // "w-root" (homepage redesign) is the session the demo boots with selected, so
   // the auto-fired ask lands inline in the visible context pane right away.
   const INLINE_SESSION = "w-root";
   (window as unknown as Record<string, unknown>).__aweforkDemoAsk = {

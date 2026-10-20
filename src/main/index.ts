@@ -23,7 +23,7 @@ const demoMode = !app.isPackaged && process.env.AWEFORK_DEMO === "1";
 
 let mainWindow: BrowserWindow | null = null;
 /**
- * One window per agent, when the user asks for one ("在新窗口打开"). Keyed by
+ * One window per agent, when the user asks for one ("open in new window"). Keyed by
  * backend id so a second ask for the same agent focuses the existing window —
  * the map's size is bounded by the agent count, never the click count.
  */

@@ -612,8 +612,8 @@ export function registerIpc(
   ipcMain.handle(
     "awefork:openAgentWindow",
     async (_event: IpcMainInvokeEvent, backend: BackendId) => {
-      if (!isBackendId(backend)) return { ok: false, error: `未知后端：${String(backend)}` };
-      if (!openAgentWindow) return { ok: false, error: "多窗口未启用" };
+      if (!isBackendId(backend)) return { ok: false, error: `Unknown backend: ${String(backend)}` };
+      if (!openAgentWindow) return { ok: false, error: "Multi-window is not enabled" };
       return openAgentWindow(backend);
     },
   );

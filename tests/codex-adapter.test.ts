@@ -675,7 +675,7 @@ describe("createCodexAdapter prompt/abort", () => {
   it("throws when aborting a session with no active turn", async () => {
     const { client } = fakeClient({});
     const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
-    await expect(adapter.abort("s1")).rejects.toThrow("该会话当前没有正在运行的回合");
+    await expect(adapter.abort("s1")).rejects.toThrow("No running turn in this session");
   });
 
   it("emits server.error, rejects, and leaves no active turn when turn/start fails", async () => {
@@ -703,7 +703,7 @@ describe("createCodexAdapter prompt/abort", () => {
       },
     ]);
     // No turn id was recorded, so abort cannot interrupt a ghost turn.
-    await expect(adapter.abort("s1")).rejects.toThrow("该会话当前没有正在运行的回合");
+    await expect(adapter.abort("s1")).rejects.toThrow("No running turn in this session");
   });
 });
 
@@ -747,7 +747,7 @@ describe("createCodexAdapter notification mapping", () => {
     // turn/completed is lost; the idle status twin arrives instead.
     fake.notify("thread/status/changed", { threadId: "s1", status: { type: "idle" } });
     expect(events.map((e) => e.type)).toEqual(["message.started", "session.idle"]);
-    await expect(adapter.abort("s1")).rejects.toThrow("该会话当前没有正在运行的回合");
+    await expect(adapter.abort("s1")).rejects.toThrow("No running turn in this session");
   });
 
   it("reports a failed turn as server.error before idle", async () => {

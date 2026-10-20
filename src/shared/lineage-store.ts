@@ -85,7 +85,7 @@ export async function readDetachedExportIds(filePath: string): Promise<Set<strin
  * The lineage map as views see it: standalone exports are dropped. Their
  * record exists only to suppress a server-side fork link (see
  * readDetachedExportIds), so no consumer may treat the copy as a branch — no
- * canvas edge, no 母本, no inherited prefix.
+ * canvas edge, no parent fork, no inherited prefix.
  */
 export function lineageForDisplay(lineage: LineageMap): LineageMap {
   const shown: LineageMap = {};

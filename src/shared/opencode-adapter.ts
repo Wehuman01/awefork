@@ -142,8 +142,12 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               requestId: frame.requestId,
               sessionId: frame.sessionId,
               kind: "opencode-permission",
-              title: "允许这次操作？",
-              detail: `一条 ${frame.permission} 操作匹配了你的"需确认"权限规则，等待你决定。`,
+              // title/detail ship as i18n keys (plus `vars`) — the main
+              // process cannot know the renderer's UI locale, so the renderer
+              // translates them at render time.
+              title: "opencode.permissionTitle",
+              detail: "opencode.permissionDetail",
+              vars: { perm: frame.permission },
               permission: frame.permission,
               patterns: frame.patterns,
               ...(command ? { command } : {}),
@@ -166,7 +170,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               sessionId: frame.sessionId,
               kind: "opencode-form",
               title: frame.title,
-              detail: "opencode 需要你填写一份表单后才能继续。",
+              detail: "opencode.formDetail",
               fields,
             },
           });
@@ -661,7 +665,10 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           emitEvent?.({
             type: "server.error",
             sessionId: pendingForm.sessionId,
-            message: `表单应答未送达：${detail}`,
+            // Plain English rather than an i18n key: AgentEvent carries no
+            // vars, the detail inside is already English, and a failed reply
+            // is a rare transport-level fault.
+            message: `Form reply failed to deliver: ${detail}`,
           });
         }
         return;
@@ -686,7 +693,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         emitEvent?.({
           type: "server.error",
           sessionId: pending.sessionId,
-          message: `权限应答未送达：${detail}`,
+          message: `Permission reply failed to deliver: ${detail}`,
         });
       }
     },

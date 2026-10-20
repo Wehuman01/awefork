@@ -961,24 +961,24 @@ describe("v2 event stream", () => {
           form: {
             id: "frm_1",
             sessionID: "ses_1",
-            title: "连接服务",
+            title: "Connect a service",
             fields: [
               {
                 key: "method",
                 type: "string",
-                title: "方式",
+                title: "Method",
                 required: true,
                 options: [
                   { value: "api", label: "API Key" },
                   { value: "oauth", label: "OAuth" },
                 ],
               },
-              { key: "remember", type: "boolean", title: "记住", default: true },
+              { key: "remember", type: "boolean", title: "Remember", default: true },
               {
                 key: "scopes",
                 type: "multiselect",
-                title: "权限",
-                options: [{ value: "read", label: "读" }],
+                title: "Permissions",
+                options: [{ value: "read", label: "Read" }],
                 minItems: 1,
               },
               { key: "docs", type: "external", url: "https://example.com/help" },
@@ -996,7 +996,7 @@ describe("v2 event stream", () => {
           requestId: "frm_1",
           sessionId: "ses_1",
           kind: "opencode-form",
-          title: "连接服务",
+          title: "Connect a service",
         },
       });
       if (ask?.type !== "interaction.requested" || ask.request.kind !== "opencode-form") {
@@ -1047,7 +1047,7 @@ describe("v2 event stream", () => {
         created: 1,
         type: "form.created",
         data: {
-          form: { id: "frm_2", sessionID: "ses_1", title: "取消我", fields: [] },
+          form: { id: "frm_2", sessionID: "ses_1", title: "Cancel me", fields: [] },
         },
       });
       for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
@@ -1065,7 +1065,7 @@ describe("v2 event stream", () => {
         id: "evt_form_3",
         created: 2,
         type: "form.created",
-        data: { form: { id: "frm_3", sessionID: "ses_1", title: "别处答", fields: [] } },
+        data: { form: { id: "frm_3", sessionID: "ses_1", title: "Answered elsewhere", fields: [] } },
       });
       fake.pushFrame({
         id: "evt_form_4",

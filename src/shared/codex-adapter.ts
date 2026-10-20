@@ -607,7 +607,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
 
     async abort(sessionId) {
       const turnId = activeTurns.get(sessionId);
-      if (!turnId) throw new Error("该会话当前没有正在运行的回合");
+      if (!turnId) throw new Error("No running turn in this session");
       await client.request("turn/interrupt", { threadId: sessionId, turnId });
     },
 

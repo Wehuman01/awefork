@@ -83,7 +83,7 @@
       role="alert"
       @click="dismissActionError"
     >
-      {{ store.actionError }}（点击关闭）
+      {{ store.actionError }}{{ t("app.clickToClose") }}
     </div>
     <div v-if="store.deletedToast" class="toast banner-undo" role="status" aria-live="polite">
       <span class="undo-text">已删除「{{ store.deletedToast.title }}」（⌘/Ctrl+Z 或历史面板可撤销）</span>
@@ -133,6 +133,7 @@ import {
   undoSteps,
   undoTo,
 } from "./history";
+import { t } from "./i18n";
 import { PANEL_LIMITS, panelStyle, panels, persistLayout, togglePanel } from "./layout";
 import {
   dismissActionError,

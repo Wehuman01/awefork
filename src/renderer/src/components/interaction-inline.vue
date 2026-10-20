@@ -2,12 +2,12 @@
   <section v-if="request" class="inline-interaction" role="group" aria-live="polite">
     <!-- ── permission ask: allow / deny / always ── -->
     <template v-if="request.kind === 'opencode-permission'">
-      <p class="inline-interaction-kicker">⏸ 等待你的确认 · {{ request.permission }}</p>
+      <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitConfirm", { perm: request.permission }) }}</p>
       <pre v-if="request.command" class="inline-interaction-command">{{ request.command }}</pre>
-      <p class="inline-interaction-meta">匹配规则：{{ ruleLabel }}</p>
+      <p class="inline-interaction-meta">{{ t("interaction.matchedRule", { rule: ruleLabel }) }}</p>
       <div class="inline-interaction-actions">
-        <button type="button" class="interaction-deny" @click="deny">拒绝</button>
-        <button type="button" class="interaction-allow" @click="allow">允许本次</button>
+        <button type="button" class="interaction-deny" @click="deny">{{ t("interaction.deny") }}</button>
+        <button type="button" class="interaction-allow" @click="allow">{{ t("interaction.allowOnce") }}</button>
         <button type="button" class="interaction-always" @click="allowAlways">
           {{ alwaysButtonLabel }}
         </button>
@@ -16,18 +16,18 @@
 
     <!-- ── form ask: fill the fields right here in the context pane ── -->
     <template v-else>
-      <p class="inline-interaction-kicker">⏸ 等待你的输入</p>
-      <p class="inline-interaction-title">{{ request.title }}</p>
-      <p v-if="request.detail" class="inline-interaction-meta">{{ request.detail }}</p>
+      <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitInput") }}</p>
+      <p class="inline-interaction-title">{{ t(request.title) }}</p>
+      <p v-if="request.detail" class="inline-interaction-meta">{{ t(request.detail, request.vars) }}</p>
       <InteractionForm ref="formRef" :fields="request.fields" />
       <div class="inline-interaction-actions">
-        <button type="button" class="interaction-deny" @click="cancel">取消</button>
-        <button type="button" class="interaction-allow" @click="submit">提交</button>
+        <button type="button" class="interaction-deny" @click="cancel">{{ t("interaction.cancel") }}</button>
+        <button type="button" class="interaction-allow" @click="submit">{{ t("interaction.submit") }}</button>
       </div>
     </template>
 
     <p v-if="queueDepth > 0" class="inline-interaction-queue">
-      同会话还有 {{ queueDepth }} 个待确认
+      {{ t("interaction.inlineQueueDepth", { n: queueDepth }) }}
     </p>
   </section>
 </template>
@@ -35,6 +35,7 @@
 <script setup lang="ts">
 import { computed, type DeepReadonly, ref } from "vue";
 import type { AgentInteractionRequest } from "../../../shared/types";
+import { listSep, t } from "../i18n";
 import {
   countPendingInline,
   inlineHostVisible,
@@ -70,13 +71,15 @@ const request = computed<DeepReadonly<
 /** The rule "always" would save — patterns when present, else the permission class. */
 const ruleLabel = computed(() =>
   request.value && request.value.kind === "opencode-permission" && request.value.patterns.length > 0
-    ? request.value.patterns.join("、")
+    ? request.value.patterns.join(listSep.value)
     : request.value?.kind === "opencode-permission"
       ? request.value.permission
       : "",
 );
 const alwaysButtonLabel = computed(() =>
-  ruleLabel.value ? `总是允许 ${ruleLabel.value}` : "总是允许",
+  ruleLabel.value
+    ? t("interaction.allowAlwaysWith", { rule: ruleLabel.value })
+    : t("interaction.allowAlways"),
 );
 
 /** Other inline asks for this same session still waiting behind this one. */

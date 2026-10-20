@@ -119,7 +119,7 @@ export function pickModalInteraction<R extends Classifiable>(
 
 /**
  * How many further inline asks wait behind the one on screen — same backend,
- * inline-kind, same session. The inline card's "还有 N 个" reads this so a
+ * inline-kind, same session. The inline card's "N more" line reads this so a
  * codex approval queued for the same session is not counted as an opencode ask
  * waiting inline. Zero when no session is selected or the host is off screen,
  * mirroring `pickInlineInteraction`.
