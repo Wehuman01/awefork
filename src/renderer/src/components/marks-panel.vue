@@ -3,25 +3,25 @@
     v-if="!open && marks.length > 0"
     type="button"
     class="panel-pill marks"
-    :title="`当前画布上 ${marks.length} 条关键对话`"
+    :title="t('marks.countTitle', { n: marks.length })"
     @click="open = true"
   >
-    ★ 关键节点
+    {{ t("marks.label") }}
     <span class="marks-count">{{ marks.length }}</span>
   </button>
   <button
     v-else-if="!open"
     type="button"
     class="panel-pill"
-    title="标记过的关键对话列表"
+    :title="t('marks.listTitle')"
     @click="open = true"
   >
-    ★ 关键节点
+    {{ t("marks.label") }}
   </button>
   <div v-else class="marks-panel">
     <div class="marks-head">
-      <span>★ 关键节点 · {{ marks.length }}</span>
-      <button type="button" title="收起" @click="open = false">✕</button>
+      <span>{{ t("marks.head", { n: marks.length }) }}</span>
+      <button type="button" :title="t('marks.collapse')" @click="open = false">✕</button>
     </div>
     <div v-if="marks.length > 0" class="marks-list">
       <button
@@ -36,17 +36,17 @@
           <span class="mark-title" :title="node.title">{{ node.title }}</span>
           <span class="mark-preview">{{
             node.preview ||
-              (node.error
-                ? `⚠ ${node.error}`
-                : node.toolNames.length > 0
-                  ? `(${node.toolNames.length} 个工具调用，无文本回复)`
-                  : "(无文本回复)")
+            (node.error
+              ? `⚠ ${node.error}`
+              : node.toolNames.length > 0
+                ? t("marks.toolCallsOnly", { n: node.toolNames.length })
+                : t("marks.noText"))
           }}</span>
           <span class="mark-meta">{{ relTime(node.createdAt) }}</span>
         </span>
       </button>
     </div>
-    <p v-else class="marks-empty">还没有标记 — 在卡片或右侧回合上点 ★ 标记关键对话</p>
+    <p v-else class="marks-empty">{{ t("marks.empty") }}</p>
   </div>
 </template>
 
@@ -54,6 +54,7 @@
 import { ref } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { relTime } from "../format";
+import { t } from "../i18n";
 import { markedTurnNodes, selectTurn } from "../state";
 
 const emit = defineEmits<{ jump: [node: TurnNode] }>();

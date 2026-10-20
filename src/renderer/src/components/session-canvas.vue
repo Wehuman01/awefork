@@ -92,7 +92,7 @@
           v-if="isTurnDelete(node) ? store.capabilities.deleteMessage : store.capabilities.deleteSession"
           type="button"
           class="del-chip"
-          :title="isTurnDelete(node) ? '删除这个回合（更早的对话保留）' : '删除这个会话（整条分支故事）'"
+          :title="isTurnDelete(node) ? t('canvas.deleteTurnTitle') : t('canvas.deleteSessionTitle')"
           @click.stop="removeNode(node)"
         >🗑</button>
         <button
@@ -100,20 +100,20 @@
           type="button"
           class="mark-chip"
           :class="{ on: isTurnMarked(node.id) }"
-          :title="isTurnMarked(node.id) ? '取消关键标记' : '标记为关键对话'"
+          :title="isTurnMarked(node.id) ? t('canvas.unmarkTitle') : t('canvas.markTitle')"
           @click.stop="toggleTurnMark(node)"
         >{{ isTurnMarked(node.id) ? "★" : "☆" }}</button>
         <button
           v-if="node.kind === 'turn' && node.error"
           type="button"
           class="retry-chip"
-          title="重跑这个回合（预填原文，可先换模型/档位）"
+          :title="t('msg.retryTitle')"
           @click.stop="retryNode(node)"
         >↻</button>
         <button
           type="button"
           class="add-chip"
-          :title="isSessionTip(node) ? '继续这个分支' : '从这里长出新分支'"
+          :title="isSessionTip(node) ? t('canvas.continueBranchHint') : t('canvas.newBranchHint')"
           @click.stop="openDraft(node)"
         >
           ＋
@@ -126,7 +126,7 @@
               v-if="forkCountOf(node) > 0"
               type="button"
               class="fork-chip"
-              :title="`这个回合分出了 ${forkCountOf(node)} 条子分支 — 点击看整个子树`"
+              :title="t('canvas.turnForks', { n: forkCountOf(node) })"
               @click.stop="focusSubtree"
             >⎇ {{ forkCountOf(node) }}</button>
             <span
@@ -149,7 +149,7 @@
             >{{ name }}</span>
           </div>
           <div class="turn-foot">
-            <span v-if="isNodeRunning(node)" class="running-flag">○ 运行中…</span>
+            <span v-if="isNodeRunning(node)" class="running-flag">{{ t("canvas.running") }}</span>
             <span v-else>{{ footMeta(node) }}</span>
             <span
               class="model"
@@ -160,9 +160,9 @@
             <button
               type="button"
               class="retry-now"
-              title="重跑这个回合（预填原文，可先换模型/档位）"
+              :title="t('msg.retryTitle')"
               @click.stop="retryNode(node)"
-            >↻ 换模型重跑</button>
+            >{{ t("msg.retryButton") }}</button>
           </div>
         </template>
         <template v-else>
@@ -173,11 +173,11 @@
               v-if="forkCountOf(node) > 0"
               type="button"
               class="fork-chip"
-              :title="`这条空分支分出了 ${forkCountOf(node)} 条子分支 — 点击看整个子树`"
+              :title="t('canvas.stubForks', { n: forkCountOf(node) })"
               @click.stop="focusSubtree"
             >⎇ {{ forkCountOf(node) }}</button>
           </div>
-          <p class="stub-hint">新分支还没有自己的回合 — 点「＋」写下第一步，或者直接在右侧回复。</p>
+          <p class="stub-hint">{{ t("canvas.stubHint") }}</p>
         </template>
       </article>
 
@@ -189,7 +189,10 @@
         @mousedown.stop
       >
         <div class="draft-head">
-          <span class="draft-tag">🌱 草稿 · {{ store.draft?.atMessageId == null ? "继续分支" : "新分支" }}</span>
+          <span class="draft-tag"
+            >{{ t("canvas.draft") }} ·
+            {{ store.draft?.atMessageId == null ? t("canvas.continueBranch") : t("canvas.newBranch") }}</span
+          >
           <button
             v-if="store.draft?.atMessageId != null"
             type="button"
@@ -197,13 +200,13 @@
             :class="{ on: store.draft?.contextMode === 'none' }"
             :title="
               store.draft?.contextMode === 'none'
-                ? '空上下文：新分支不带这条分支的任何历史，只在谱系上挂在分叉点'
-                : '当前会复制切点前的全部对话到新分支；点击切换为空上下文'
+                ? t('canvas.ctxNoneTitle')
+                : t('canvas.ctxInheritTitle')
             "
             @click="
               setDraftContextMode(store.draft?.contextMode === 'none' ? 'inherit' : 'none')
             "
-          >{{ store.draft?.contextMode === "none" ? "✂ 空上下文" : "⛓ 带历史" }}</button>
+          >{{ store.draft?.contextMode === "none" ? t("canvas.ctxNoneLabel") : t("canvas.ctxInheritLabel") }}</button>
           <button type="button" class="close" @click="dismissDraft">✕</button>
         </div>
         <div v-if="(store.draft?.attachments.length ?? 0) > 0" class="draft-atts">
@@ -219,14 +222,14 @@
             <button
               type="button"
               class="att-x"
-              title="移除"
+              :title="t('canvas.remove')"
               @click="removeDraftAttachment(a.id)"
             >✕</button>
           </span>
         </div>
         <textarea
           :value="store.draft?.text"
-          :placeholder="store.draft?.atMessageId == null ? '描述下一步…（发送后继续这个分支）' : '描述下一步…（发送后从这里长出新分支）'"
+          :placeholder="store.draft?.atMessageId == null ? t('canvas.phContinue') : t('canvas.phNew')"
           @input="setDraftText(($event.target as HTMLTextAreaElement).value)"
           @keydown.meta.enter.prevent="submitDraft"
           @keydown.ctrl.enter.prevent="submitDraft"
@@ -240,7 +243,7 @@
             :models="store.models"
             :favorite-models="store.favoriteModels"
             :recent-models="store.recentModels"
-            title="用哪个模型跑这条分支"
+            :title="t('canvas.branchModelTitle')"
             @update:model-value="setDraftModel"
             @toggle-favorite="toggleFavoriteModel"
           />
@@ -255,42 +258,42 @@
             :disabled="!store.draft?.text.trim() || store.draftSending"
             @click="submitDraft"
           >{{ store.draftSending ? "…" : "➤" }}</button>
-          <span class="hint">⌘/Ctrl ⏎ 发送 · Esc 收起</span>
+          <span class="hint">{{ t("canvas.draftHint") }}</span>
         </div>
       </article>
     </div>
 
     <div v-if="graph.nodes.length === 0 && store.connectionError" class="canvas-empty">
       <div class="empty-mascot">🔌</div>
-      <p class="empty-title">{{ backendLabel }} 未连接</p>
-      <p class="empty-sub">连接恢复后，点左侧「↻ 刷新」重新加载会话</p>
+      <p class="empty-title">{{ t("canvas.offlineTitle", { backend: backendLabel }) }}</p>
+      <p class="empty-sub">{{ t("canvas.offlineSub") }}</p>
     </div>
     <div
       v-else-if="graph.nodes.length === 0 && !store.booted && !store.loadingMessages"
       class="canvas-loading"
-    >正在连接 {{ backendLabel }}…</div>
+    >{{ t("canvas.connecting", { backend: backendLabel }) }}</div>
     <div
       v-else-if="graph.nodes.length === 0 && !store.loadingMessages && selectedSessionEmpty"
       class="canvas-empty"
     >
       <div class="empty-mascot">✨</div>
-      <p class="empty-title">这场对话还是空的</p>
-      <p class="empty-sub">在右侧写下第一条消息，发出后它会作为第一个节点出现在这里</p>
+      <p class="empty-title">{{ t("canvas.emptyConvTitle") }}</p>
+      <p class="empty-sub">{{ t("canvas.emptyConvSub") }}</p>
     </div>
     <div v-else-if="graph.nodes.length === 0 && !store.loadingMessages" class="canvas-empty">
       <div class="empty-mascot">🍑</div>
-      <p class="empty-title">这个项目还没有会话</p>
-      <p class="empty-sub">在终端里用 {{ backendLabel }} 开一场对话，它就会作为第一个节点出现在这里</p>
+      <p class="empty-title">{{ t("canvas.noSessionsTitle") }}</p>
+      <p class="empty-sub">{{ t("canvas.noSessionsSub", { backend: backendLabel }) }}</p>
     </div>
-    <div v-if="store.loadingMessages" class="canvas-loading">正在铺开分支图…</div>
+    <div v-if="store.loadingMessages" class="canvas-loading">{{ t("canvas.layingOut") }}</div>
 
     <div class="canvas-status">
-      {{ graph.nodes.length }} 个节点 · {{ sequenceCount }} 段对话 · {{ forkCount }} 条分支
+      {{ t("canvas.status", { nodes: graph.nodes.length, sessions: sequenceCount, forks: forkCount }) }}
     </div>
 
     <div v-if="pickArmed" class="pick-banner">
-      <span>⇄ 点一张卡片，或在侧栏点一个会话，与「{{ pickFromTitle }}」对比</span>
-      <button type="button" title="取消（Esc）" @click="cancelComparePick()">✕</button>
+      <span>{{ t("canvas.pickBanner", { title: pickFromTitle }) }}</span>
+      <button type="button" :title="t('canvas.cancelEsc')" @click="cancelComparePick()">✕</button>
     </div>
     <div class="canvas-tools">
       <div class="zoom-ctl">
@@ -298,7 +301,7 @@
         <span>{{ Math.round(scale * 100) }}%</span>
         <button type="button" @click="zoomBy(1.18)">＋</button>
       </div>
-      <button type="button" class="fit-btn" title="适配视图" @click="fitView">⛶</button>
+      <button type="button" class="fit-btn" :title="t('canvas.fitView')" @click="fitView">⛶</button>
     </div>
 
     <!-- Search & digest overlays: mousedown/wheel stay inside them so pans and
@@ -337,7 +340,7 @@
         ></div>
       </div>
       <div class="mm-view" :style="mmViewStyle"></div>
-      <div class="mm-hint">滚轮缩放画布 · ⌘滚轮缩放地图</div>
+      <div class="mm-hint">{{ t("canvas.mmHint") }}</div>
     </div>
   </main>
 </template>
@@ -350,6 +353,7 @@ import type { TurnNode } from "../../../shared/canvas-graph";
 import { draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
 import { type DraftAttachment, readAttachments } from "../attachments";
 import { formatDuration, formatTokens } from "../format";
+import { t } from "../i18n";
 import {
   activeChain,
   cancelComparePick,
@@ -650,9 +654,7 @@ function onDraftEsc(event: KeyboardEvent): void {
  */
 function removeNode(node: TurnNode): void {
   if (isTurnDelete(node)) {
-    const ok = window.confirm(
-      `删除回合「${node.title}」？\n只删除这一问一答，更早的对话保留。此操作不可撤销。`,
-    );
+    const ok = window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
     if (ok) void deleteTurn(node);
     return;
   }
@@ -1271,7 +1273,11 @@ function removeDraftAttachment(id: string): void {
 
 /** Foot left side: tool count plus the run's wall time and output tokens when known. */
 function footMeta(node: TurnNode): string {
-  const bits = [node.toolNames.length > 0 ? `${node.toolNames.length} 个工具` : "无工具调用"];
+  const bits = [
+    node.toolNames.length > 0
+      ? t("canvas.toolCount", { n: node.toolNames.length })
+      : t("canvas.noTools"),
+  ];
   if (node.durationMs !== null) bits.push(formatDuration(node.durationMs));
   if (node.outputTokens > 0) bits.push(formatTokens(node.outputTokens));
   return bits.join(" · ");
@@ -1304,25 +1310,25 @@ function previewOf(node: TurnNode): string {
   if (node.kind === "turn" && store.running[node.sessionId] && isSessionTip(node)) {
     const stream = store.streams[node.sessionId]?.trim();
     if (stream) return stream;
-    return node.preview || "正在思考…";
+    return node.preview || t("canvas.thinking");
   }
   return (
     node.preview ||
     (node.error
       ? `⚠ ${node.error}`
       : node.toolNames.length > 0
-        ? "(工具调用，无文本回复)"
-        : "(无文本回复)")
+        ? t("cmp.toolOnly")
+        : t("cmp.noText"))
   );
 }
 
 function relativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return t("canvas.justNow");
+  if (minutes < 60) return t("canvas.minutesAgo", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.floor(hours / 24)} 天前`;
+  if (hours < 24) return t("canvas.hoursAgo", { n: hours });
+  return t("canvas.daysAgo", { n: Math.floor(hours / 24) });
 }
 </script>

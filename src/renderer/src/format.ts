@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 /** Compact render of a run's wall time: 4.2s / 2m05s / 1h30m. */
 export function formatDuration(ms: number): string {
   const seconds = ms / 1000;
@@ -17,13 +19,13 @@ export function formatTokens(count: number): string {
 /** Compact age of a timestamp for sidebar rows: 刚刚 / 5分钟前 / 3小时前 / 2天前. */
 export function relTime(ms: number): string {
   const minutes = Math.floor((Date.now() - ms) / 60000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes}分钟前`;
+  if (minutes < 1) return t("format.justNow");
+  if (minutes < 60) return t("format.minutesAgo", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
+  if (hours < 24) return t("format.hoursAgo", { n: hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}天前`;
-  return `${Math.floor(days / 30)}个月前`;
+  if (days < 30) return t("format.daysAgo", { n: days });
+  return t("format.monthsAgo", { n: Math.floor(days / 30) });
 }
 
 /** Last two segments of a directory for compact display ("/" and "\\" both split). */

@@ -2,12 +2,14 @@
   <Teleport to="body">
     <div v-if="history.panelOpen" class="history-panel">
       <div class="history-panel-head">
-        <span class="history-panel-title">操作历史</span>
-        <span class="history-panel-meta">{{ history.entries.length }} 条记录 · 可撤销 {{ undoDepth() }} 步</span>
+        <span class="history-panel-title">{{ t("histpanel.title") }}</span>
+        <span class="history-panel-meta">{{
+          t("histpanel.meta", { n: history.entries.length, depth: undoDepth() })
+        }}</span>
         <button
           type="button"
           class="history-panel-close"
-          title="关闭"
+          :title="t('histpanel.close')"
           @click="closePanel()"
         >
           ✕
@@ -15,7 +17,7 @@
       </div>
       <div class="history-panel-body">
         <p v-if="history.entries.length === 0" class="history-panel-empty">
-          本次运行还没有记录操作。
+          {{ t("histpanel.empty") }}
         </p>
         <template v-else>
           <div
@@ -57,7 +59,7 @@
         </template>
       </div>
       <div class="history-panel-foot">
-        ⌘/Ctrl+Z 撤销 · ⌘/Ctrl+⇧+Z 重做 · Esc 关闭
+        {{ t("histpanel.foot") }}
       </div>
     </div>
   </Teleport>
@@ -68,6 +70,7 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { relTime } from "../format";
 import type { HistoryEntry } from "../history";
 import { closePanel, history, lockIndex, redoTo, undoDepth, undoTo } from "../history";
+import { t } from "../i18n";
 import { store } from "../state";
 
 interface PanelRow {
@@ -113,14 +116,14 @@ const rows = computed<PanelRow[]>(() => {
 
     // "当前位置"分隔线：前一条已撤销，当前已生效
     if (prev && !prev.applied && r.applied) {
-      result.push({ kind: "separator", separatorLabel: "当前位置" });
+      result.push({ kind: "separator", separatorLabel: t("histpanel.current") });
     }
 
     // "以下操作已锁定"分隔线：在锁行下方第一条 entry 之前插入
     if (!r.entry.undoable) {
       if (li > 0) insertLockSep = true;
     } else if (insertLockSep) {
-      result.push({ kind: "separator", separatorLabel: "以下操作已锁定" });
+      result.push({ kind: "separator", separatorLabel: t("histpanel.locked") });
       insertLockSep = false;
     }
 
@@ -157,10 +160,10 @@ function rowTitle(entry: HistoryEntry, locked = false): string {
   const abs = new Date(entry.time).toLocaleString();
   let title = abs;
   if (!entry.undoable || locked) {
-    title += "——此操作不可撤销，且锁定了更早的历史";
+    title += t("histpanel.lockedTitle");
   }
   if (entry.failed) {
-    title += "——上次撤销/重做失败";
+    title += t("histpanel.failedTitle");
   }
   return title;
 }

@@ -6,6 +6,7 @@
  */
 import { fileKind } from "../../shared/attachment-kinds";
 import type { PromptAttachment } from "../../shared/types";
+import { t } from "./i18n";
 
 /** An image/file staged in a composer, not yet sent. */
 export interface DraftAttachment {
@@ -84,23 +85,29 @@ export async function readAttachments(
   for (const file of [...files]) {
     const kind = fileKind(file);
     if (kind === "unsupported") {
-      notes.push(`暂不支持 ${file.name || "该文件"} 的格式`);
+      notes.push(t("attachments.unsupported", { name: file.name || t("attachments.thisFile") }));
       continue;
     }
     if (kind === "image") {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (bytes.byteLength > MAX_IMAGE_BYTES) {
-        notes.push(`${file.name || "图片"} 超过 20 MB，未添加`);
+        notes.push(
+          t("attachments.imageTooLarge", { name: file.name || t("attachments.imageName") }),
+        );
         continue;
       }
       if (imageBytes + bytes.byteLength > MAX_IMAGE_TOTAL_BYTES) {
-        notes.push(`这批图片总量超过 40 MB，${file.name || "这张图片"} 未添加`);
+        notes.push(
+          t("attachments.imageBatchTotal", {
+            name: file.name || t("attachments.thisImage"),
+          }),
+        );
         continue;
       }
       imageBytes += bytes.byteLength;
       staged.push({
         id: nextId(),
-        name: file.name || "图片",
+        name: file.name || t("attachments.imageName"),
         mime: file.type,
         dataUrl: `data:${file.type};base64,${bytesToBase64(bytes)}`,
       });
@@ -111,21 +118,21 @@ export async function readAttachments(
       try {
         text = await extractDocumentText(file.name, new Uint8Array(await file.arrayBuffer()));
       } catch {
-        notes.push(`无法从 ${file.name} 提取文本`);
+        notes.push(t("attachments.extractFailed", { name: file.name }));
         continue;
       }
       if (!text.trim()) {
-        notes.push(`${file.name} 中没有可提取的文本`);
+        notes.push(t("attachments.noText", { name: file.name }));
         continue;
       }
     } else {
       text = await file.text();
     }
     const clipped = truncateUtf8(text, MAX_TEXT_BYTES);
-    if (clipped !== text) notes.push(`${file.name} 超过 1 MB，已截断`);
+    if (clipped !== text) notes.push(t("attachments.truncated", { name: file.name }));
     staged.push({
       id: nextId(),
-      name: file.name || "文档",
+      name: file.name || t("attachments.docName"),
       // opencode only inlines text/plain data URLs; other text mimes would
       // ship to the model as opaque media blocks, so normalize here and let
       // the filename carry the real extension.

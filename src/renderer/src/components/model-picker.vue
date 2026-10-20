@@ -13,7 +13,7 @@
         v-model="query"
         class="mp-search"
         type="text"
-        placeholder="搜索模型…"
+        :placeholder="t('modelpicker.searchPlaceholder')"
         @keydown="onSearchKeydown"
       />
       <div class="mp-list">
@@ -24,8 +24,8 @@
           @click="pick(null)"
         >
           <span class="mp-main">
-            <span class="mp-name">默认模型</span>
-            <span class="mp-sub">agent 配置的默认</span>
+            <span class="mp-name">{{ t("modelpicker.default") }}</span>
+            <span class="mp-sub">{{ t("modelpicker.defaultSub") }}</span>
           </span>
         </button>
         <template
@@ -50,12 +50,12 @@
               :class="{ on: isFavorite(entry.option) }"
               role="button"
               tabindex="-1"
-              :title="isFavorite(entry.option) ? '从常用移除' : '设为常用'"
+              :title="isFavorite(entry.option) ? t('modelpicker.unfavorite') : t('modelpicker.favorite')"
               @click.stop="toggleFavorite(entry.option)"
             >{{ isFavorite(entry.option) ? "★" : "☆" }}</span>
           </button>
         </template>
-        <p v-if="filtered.length === 0" class="mp-empty">没有匹配的模型</p>
+        <p v-if="filtered.length === 0" class="mp-empty">{{ t("modelpicker.empty") }}</p>
       </div>
       </div>
     </Teleport>
@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ModelChoice, ModelOption } from "../../../shared/types";
+import { t } from "../i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -102,7 +103,7 @@ const popStyle = ref<{ left: string; top?: string; bottom?: string }>({
 
 const label = computed(() => {
   const model = props.modelValue;
-  if (!model) return "默认模型";
+  if (!model) return t("modelpicker.default");
   return (
     props.models.find((m) => m.providerId === model.providerId && m.modelId === model.modelId)
       ?.modelName ?? model.modelId
@@ -176,14 +177,14 @@ const entries = computed<Entry[]>(() => {
     }
   };
   if (favoriteRows.value.length > 0) {
-    list.push({ kind: "header", label: "常用" });
+    list.push({ kind: "header", label: t("modelpicker.groupFavorite") });
     addRows(favoriteRows.value);
   }
   if (recentRows.value.length > 0) {
-    list.push({ kind: "header", label: "最近使用" });
+    list.push({ kind: "header", label: t("modelpicker.groupRecent") });
     addRows(recentRows.value);
   }
-  if (index > 0) list.push({ kind: "header", label: "全部模型" });
+  if (index > 0) list.push({ kind: "header", label: t("modelpicker.groupAll") });
   addRows(filtered.value);
   return list;
 });

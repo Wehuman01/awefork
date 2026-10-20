@@ -20,7 +20,7 @@
         v-if="allowAttachments"
         type="button"
         class="attach"
-        title="添加附件（图片、文档、文本）"
+        :title="t('input.attachTitle')"
         @click="fileInputEl?.click()"
       >
         📎
@@ -29,16 +29,16 @@
         type="button"
         class="preview"
         :class="{ on: previewing }"
-        :title="previewing ? '回到编辑' : '预览发送后的 Markdown 效果'"
+        :title="previewing ? t('input.backToEdit') : t('input.previewTitle')"
         @click="togglePreview"
-      >{{ previewing ? "✎ 编辑" : "👁 预览" }}</button>
+        >{{ previewing ? t("input.edit") : t("input.preview") }}</button>
     </div>
     <div v-if="attachments.length > 0 || notice" class="chat-input-atts">
       <span v-for="a in attachments" :key="a.id" class="att-chip">
         <img v-if="a.mime.startsWith('image/')" :src="a.dataUrl" class="att-thumb" alt="" />
         <span v-else class="att-ico">📎</span>
         <span class="att-name" :title="a.name">{{ a.name }}</span>
-        <button type="button" class="att-x" title="移除" @click="removeAttachment(a.id)">✕</button>
+        <button type="button" class="att-x" :title="t('input.remove')" @click="removeAttachment(a.id)">✕</button>
       </span>
       <span v-if="notice" class="att-notice">{{ notice }}</span>
     </div>
@@ -55,7 +55,7 @@
     ></textarea>
     <div v-else class="chat-input-preview">
       <MarkdownView v-if="text.trim()" :source="text" user />
-      <p v-else class="chat-input-preview-empty">输入内容后，这里显示发送后的 Markdown 效果</p>
+      <p v-else class="chat-input-preview-empty">{{ t("input.previewEmpty") }}</p>
     </div>
     <div class="chat-input-foot">
       <ModelPicker
@@ -63,13 +63,13 @@
         :models="models"
         :favorite-models="favoriteModels"
         :recent-models="recentModels"
-        title="用哪个模型继续这条分支"
+        :title="t('input.modelTitle')"
         @update:model-value="onModelPicked"
         @toggle-favorite="$emit('toggle-favorite', $event)"
       />
       <VariantPicker :model="model" :models="models" @select="onVariantPicked" />
-      <button v-if="!running" type="submit" class="send" :disabled="!text.trim()">发送 ➤</button>
-      <button v-else type="button" class="abort" @click="$emit('abort')">■ 停止</button>
+      <button v-if="!running" type="submit" class="send" :disabled="!text.trim()">{{ t("input.send") }}</button>
+      <button v-else type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
     </div>
   </form>
 </template>
@@ -79,6 +79,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
 import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
+import { t } from "../i18n";
 import {
   indentLines,
   looksLikeCode,
@@ -137,8 +138,8 @@ watch(text, () => {
 onMounted(fitTextarea);
 
 const inputPlaceholder = computed(() => {
-  if (props.running) return "Agent is running…";
-  return "继续这条分支…";
+  if (props.running) return t("input.placeholderRunning");
+  return t("input.placeholder");
 });
 
 /** The selected model's capability, when the catalog already knows it. */
@@ -160,7 +161,7 @@ function flashNotice(message: string): void {
 
 function addFiles(files: FileList | File[]): void {
   if (!props.allowAttachments) {
-    flashNotice("当前后端不支持附件");
+    flashNotice(t("input.noAttachments"));
     return;
   }
   const notes: string[] = [];
@@ -170,7 +171,7 @@ function addFiles(files: FileList | File[]): void {
   if (!canAttach.value) {
     if (list.some((f) => f.type.startsWith("image/"))) {
       list = list.filter((f) => !f.type.startsWith("image/"));
-      notes.push("当前模型不支持图片附件，已跳过图片");
+      notes.push(t("input.noImageSupport"));
     }
   }
   if (list.length === 0) {
@@ -212,7 +213,7 @@ function onPaste(event: ClipboardEvent): void {
   if (fences % 2 === 1) return;
   event.preventDefault();
   insertAtCaret(el, wrapCodeFence(pasted));
-  flashNotice("识别到多行代码，已包成 ``` 围栏（⌘Z 可撤销）");
+  flashNotice(t("input.codeFenceNotice"));
 }
 
 /** Splice an edit in through insertText so it stays on the undo stack. */

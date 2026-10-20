@@ -11,7 +11,7 @@
       </div>
       <div class="cell-chips">
         <span v-if="cell.flag" class="cell-up" :title="flagTitle">
-          ⎇ {{ cell.flag === "up" ? "上游" : "继承" }}</span
+          ⎇ {{ cell.flag === "up" ? t("cmp.flagUp") : t("cmp.flagInherited") }}</span
         >
         <span
           v-if="cell.modelIds.length > 0"
@@ -22,7 +22,7 @@
         <span v-if="cell.durationMs !== null" class="cell-chip">⏱ {{ formatDuration(cell.durationMs) }}</span>
         <span v-if="cell.outputTokens > 0" class="cell-chip">{{ formatTokens(cell.outputTokens) }}</span>
         <span v-if="cell.toolNames.length > 0" class="cell-chip">🔧 {{ cell.toolNames.length }}</span>
-        <span v-if="cell.error" class="cell-chip err" :title="cell.error">⚠ 失败</span>
+        <span v-if="cell.error" class="cell-chip err" :title="cell.error">{{ t("cmp.failed") }}</span>
       </div>
       <p
         v-if="!cell.preview"
@@ -36,7 +36,7 @@
         :class="{ clamped: !open }"
       />
     </template>
-    <p v-else class="cell-blank">{{ side === "left" ? "左栏已到尾" : "右栏已到尾" }}</p>
+    <p v-else class="cell-blank">{{ side === "left" ? t("cmp.leftEnd") : t("cmp.rightEnd") }}</p>
   </div>
 </template>
 
@@ -66,6 +66,7 @@ export interface DisplayCell {
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { formatDuration, formatTokens } from "../format";
+import { t } from "../i18n";
 import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
@@ -74,9 +75,7 @@ const props = defineProps<{
 }>();
 
 const flagTitle = computed(() =>
-  props.cell?.flag === "inherited"
-    ? "母本复制来的回合 — 这条分支的起点上下文"
-    : "上游分支的回合 — 通往这条分支的路上经过的岔路",
+  props.cell?.flag === "inherited" ? t("cmp.inheritedTitle") : t("cmp.upstreamTitle"),
 );
 
 /**
@@ -107,6 +106,6 @@ function onCellClick(event: MouseEvent): void {
 
 function previewOf(cell: DisplayCell): string {
   if (cell.error) return `⚠ ${cell.error}`;
-  return cell.toolNames.length > 0 ? "(工具调用，无文本回复)" : "(无文本回复)";
+  return cell.toolNames.length > 0 ? t("cmp.toolOnly") : t("cmp.noText");
 }
 </script>

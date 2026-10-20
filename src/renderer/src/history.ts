@@ -1,5 +1,6 @@
 import { reactive, readonly } from "vue";
 import type { BackendId } from "../../shared/backend";
+import { t } from "./i18n";
 
 /**
  * Operation history: a linear journal of what the user did this run, with
@@ -182,7 +183,7 @@ async function undoRange(toIdx: number): Promise<boolean> {
     const entry = state.entries[state.cursor - 1];
     if (!entry) break;
     if (!entry.undoable || !entry.undo) {
-      stopped = `「${entry.label}」不可撤销，更早的操作已被锁定`;
+      stopped = t("history.locked", { label: entry.label });
       break;
     }
     try {
@@ -192,13 +193,13 @@ async function undoRange(toIdx: number): Promise<boolean> {
       last = entry;
     } catch (error) {
       entry.failed = true;
-      stopped = `撤销失败：${messageOf(error)}`;
+      stopped = t("history.undoFailed", { message: messageOf(error) });
       break;
     }
   }
   // Why the walk stopped short outranks what it managed before stopping.
   if (stopped) notice(stopped);
-  else if (last) notice(`已撤销：${last.label}`);
+  else if (last) notice(t("history.undone", { label: last.label }));
   return last !== null;
 }
 
@@ -216,12 +217,12 @@ async function redoRange(toIdx: number): Promise<boolean> {
       last = entry;
     } catch (error) {
       entry.failed = true;
-      stopped = `重做失败：${messageOf(error)}`;
+      stopped = t("history.redoFailed", { message: messageOf(error) });
       break;
     }
   }
   if (stopped) notice(stopped);
-  else if (last) notice(`已重做：${last.label}`);
+  else if (last) notice(t("history.redone", { label: last.label }));
   return last !== null;
 }
 

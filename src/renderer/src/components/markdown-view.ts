@@ -10,6 +10,7 @@
 
 import { defineComponent, h, type VNode, type VNodeChild } from "vue";
 import { isLocalPath } from "../../../shared/local-path";
+import { t } from "../i18n";
 import {
   downgradeUserBlocks,
   type MdBlock,
@@ -28,9 +29,9 @@ function openLink(event: MouseEvent, href: string): void {
     void window.awefork
       .openPath(href)
       .then((result) => {
-        if (!result.ok) reportActionError(result.error ?? "路径打不开");
+        if (!result.ok) reportActionError(result.error ?? t("msg.openPathFailed"));
       })
-      .catch(() => reportActionError("路径打不开"));
+      .catch(() => reportActionError(t("msg.openPathFailed")));
     return;
   }
   void window.awefork.openExternal(href).catch(() => {

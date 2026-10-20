@@ -3,9 +3,9 @@
     v-if="!open"
     type="button"
     class="panel-pill"
-    title="搜索画布上所有节点的正文（⌘/Ctrl+F）"
+    :title="t('story.openTitle')"
     @click="openSearch"
-  >🔍 搜节点</button>
+  >{{ t("story.openButton") }}</button>
   <div v-else class="story-search">
     <div class="ss-box">
       <span class="ss-icon">🔍</span>
@@ -13,11 +13,11 @@
         ref="inputEl"
         v-model="searchQuery"
         type="text"
-        placeholder="搜索画布所有节点（提问 / 回复 / 工具）…"
+        :placeholder="t('story.placeholder')"
         @keydown.esc="close"
       />
-      <span v-if="searchQuery.trim()" class="ss-count">{{ storySearchHits.length }} 命中</span>
-      <button type="button" class="ss-close" title="收起（Esc）" @click="close">✕</button>
+      <span v-if="searchQuery.trim()" class="ss-count">{{ t("story.hits", { n: storySearchHits.length }) }}</span>
+      <button type="button" class="ss-close" :title="t('story.closeTitle')" @click="close">✕</button>
     </div>
     <div v-if="searchQuery.trim() && storySearchHits.length > 0" class="ss-results">
       <button
@@ -28,7 +28,7 @@
         @click="jump(hit)"
       >
         <span class="ss-hit-head">
-          <span v-if="pinnedOf(hit)" class="ss-pin" title="已置顶">📌</span>
+          <span v-if="pinnedOf(hit)" class="ss-pin" :title="t('story.pinned')">📌</span>
           <span class="ss-field" :class="hit.field">{{ fieldLabel(hit.field) }}</span>
           <span class="ss-hit-title">{{ titleOf(hit) }}</span>
           <span v-if="hitTags(hit).length > 0" class="ss-tags">
@@ -46,7 +46,7 @@
       </button>
     </div>
     <div v-else-if="searchQuery.trim()" class="ss-results">
-      <p class="ss-empty">没有命中 — 换个关键词试试</p>
+      <p class="ss-empty">{{ t("story.empty") }}</p>
     </div>
   </div>
 </template>
@@ -55,6 +55,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import type { TurnSearchHit } from "../../../shared/turn-search";
+import { t } from "../i18n";
 import {
   searchQuery,
   selectTurn,
@@ -90,7 +91,11 @@ function hitTags(hit: TurnSearchHit): string[] {
 }
 
 function fieldLabel(field: TurnSearchHit["field"]): string {
-  return field === "prompt" ? "提问" : field === "preview" ? "回复" : "工具";
+  return field === "prompt"
+    ? t("story.fieldPrompt")
+    : field === "preview"
+      ? t("story.fieldReply")
+      : t("story.fieldTool");
 }
 
 function openSearch(): void {

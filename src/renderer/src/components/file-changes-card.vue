@@ -1,8 +1,8 @@
 <template>
   <section v-if="rows.length > 0 || unrecorded" class="fchanges">
-    <div class="fchanges-head">文件改动</div>
+    <div class="fchanges-head">{{ t("filechg.title") }}</div>
     <div v-for="row in rows" :key="`${row.messageId}:${row.entry.path}`" class="fchange">
-      <button type="button" class="fchange-row" title="展开保存的 diff" @click="toggle(row)">
+      <button type="button" class="fchange-row" :title="t('filechg.expandDiff')" @click="toggle(row)">
         <span class="fchange-status" :class="`is-${row.entry.status}`">{{
           statusLabel[row.entry.status]
         }}</span>
@@ -17,9 +17,9 @@
       <button
         type="button"
         class="fchange-open"
-        title="在系统中打开这个文件"
+        :title="t('filechg.openInSystem')"
         @click="openFile(row.entry.path)"
-      >打开</button>
+      >{{ t("filechg.open") }}</button>
       <div v-if="open[rowKey(row)]" class="fchange-diff">
         <template v-if="diffs[rowKey(row)]?.length">
           <div v-for="(hunk, hi) in diffs[rowKey(row)]" :key="hi" class="fchange-hunk">
@@ -32,12 +32,12 @@
           </div>
         </template>
         <p v-else-if="rowKey(row) in diffs" class="fchange-note">
-          这个改动没有可展示的 diff（未知状态）。
+          {{ t("filechg.noDiff") }}
         </p>
       </div>
     </div>
     <p v-if="rows.length === 0 && unrecorded" class="fchange-note fchange-unrecorded">
-      文件改动未记录 —— 这个回合在 awefork 之外执行（分叉继承或离线期间的编辑）。
+      {{ t("filechg.unrecorded") }}
     </p>
   </section>
 </template>
@@ -46,6 +46,7 @@
 import { computed, reactive } from "vue";
 import type { DiffHunk } from "../../../shared/diff";
 import type { FileChangeEntry } from "../../../shared/types";
+import { t } from "../i18n";
 import { paneMessages, selectedSession, store } from "../state";
 
 /**
@@ -53,12 +54,12 @@ import { paneMessages, selectedSession, store } from "../state";
  * observer-side snapshots taken as the tool events arrived. Entries key on
  * assistant message ids; the pane's messages pick this turn's slice.
  */
-const statusLabel: Record<FileChangeEntry["status"], string> = {
-  modified: "修改",
-  created: "新增",
-  deleted: "删除",
-  unknown: "未知",
-};
+const statusLabel = computed<Record<FileChangeEntry["status"], string>>(() => ({
+  modified: t("filechg.modified"),
+  created: t("filechg.created"),
+  deleted: t("filechg.deleted"),
+  unknown: t("filechg.unknown"),
+}));
 
 interface Row {
   messageId: string;

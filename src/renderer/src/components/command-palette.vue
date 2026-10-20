@@ -7,7 +7,7 @@
           v-model="query"
           class="palette-input"
           type="text"
-          placeholder="搜索会话，或输入命令…"
+          :placeholder="t('palette.placeholder')"
           @keydown="onInputKeydown"
         />
         <div class="palette-list">
@@ -21,7 +21,7 @@
             @click="run(item)"
           >
             <span class="palette-icon">{{ item.icon }}</span>
-            <span v-if="item.pinned" class="palette-pin" title="已置顶">📌</span>
+            <span v-if="item.pinned" class="palette-pin" :title="t('palette.pinned')">📌</span>
             <span class="palette-label">{{ item.label }}</span>
             <span v-if="(item.tags?.length ?? 0) > 0" class="palette-tags">
               <span
@@ -35,7 +35,7 @@
             </span>
             <span class="palette-hint">{{ item.hint }}</span>
           </button>
-          <p v-if="items.length === 0" class="palette-empty">没有匹配项</p>
+          <p v-if="items.length === 0" class="palette-empty">{{ t("palette.empty") }}</p>
         </div>
       </div>
     </div>
@@ -46,6 +46,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { SessionSummary } from "../../../shared/types";
 import { shortPath as shortDir } from "../format";
+import { t } from "../i18n";
 import { paletteOpen, panels, togglePalette, togglePanel } from "../layout";
 import {
   compareWithParent,
@@ -93,29 +94,35 @@ const items = computed<PaletteItem[]>(() => {
     {
       key: "act:new",
       icon: "＋",
-      label: "新增对话",
-      hint: "新会话",
+      label: t("palette.new"),
+      hint: t("palette.newHint"),
       run: () => void createSession(),
     },
-    { key: "act:fit", icon: "⛶", label: "适配视图", hint: "画布", run: requestCanvasFit },
+    {
+      key: "act:fit",
+      icon: "⛶",
+      label: t("palette.fit"),
+      hint: t("palette.fitHint"),
+      run: requestCanvasFit,
+    },
     {
       key: "act:refresh",
       icon: "↻",
-      label: "刷新会话列表",
+      label: t("palette.refresh"),
       hint: "",
       run: () => void refreshSessions(),
     },
     {
       key: "act:sidebar",
       icon: "▤",
-      label: panels.sidebar.collapsed ? "展开侧栏" : "折叠侧栏",
+      label: panels.sidebar.collapsed ? t("palette.expandSidebar") : t("palette.collapseSidebar"),
       hint: "",
       run: () => togglePanel("sidebar"),
     },
     {
       key: "act:context",
       icon: "▥",
-      label: panels.context.collapsed ? "展开右栏" : "折叠右栏",
+      label: panels.context.collapsed ? t("palette.expandContext") : t("palette.collapseContext"),
       hint: "",
       run: () => togglePanel("context"),
     },
@@ -124,8 +131,8 @@ const items = computed<PaletteItem[]>(() => {
           {
             key: "act:cmp-parent",
             icon: "⇄",
-            label: "与母本分支对比",
-            hint: "对比",
+            label: t("palette.compareParent"),
+            hint: t("palette.compareHint"),
             run: () => {
               const id = store.selectedId;
               if (id) compareWithParent(id);
@@ -134,7 +141,15 @@ const items = computed<PaletteItem[]>(() => {
         ]
       : []),
     ...(store.compare
-      ? [{ key: "act:cmp-exit", icon: "✕", label: "退出分支对比", hint: "", run: exitCompare }]
+      ? [
+          {
+            key: "act:cmp-exit",
+            icon: "✕",
+            label: t("palette.exitCompare"),
+            hint: "",
+            run: exitCompare,
+          },
+        ]
       : []),
   ].filter((action) => match(action.label) || match(action.hint));
 

@@ -3,7 +3,7 @@
     <div class="md-cb-bar">
       <span class="md-cb-lang">{{ lang || "text" }}</span>
       <button type="button" class="md-cb-copy" :class="{ ok: copied }" @click="copy">
-        {{ copied ? "✓ 已复制" : "⧉ 复制" }}
+        {{ copied ? t("code.copied") : t("code.copy") }}
       </button>
     </div>
     <pre><code>{{ code }}</code></pre>
@@ -12,6 +12,7 @@
 
 <script setup lang="ts">
 import { onUnmounted, ref } from "vue";
+import { t } from "../i18n";
 
 const props = defineProps<{
   lang: string;

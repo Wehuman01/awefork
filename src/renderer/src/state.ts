@@ -48,7 +48,7 @@ import type {
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
-import { t } from "./i18n";
+import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
 
 interface DraftState {
@@ -411,7 +411,7 @@ export const archivedSessionViews = computed<ArchivedSessionView[]>(() =>
       const session = state.sessions.find((s) => s.id === entry.id);
       return {
         ...entry,
-        title: session?.title || "(已删除)",
+        title: session?.title || t("state.deletedSessionTitle"),
         directory: session?.directory ?? "",
       };
     })
@@ -1735,7 +1735,7 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       if (backend === state.activeBackend) {
         void loadSessionMessages(event.sessionId);
         void refreshSessions();
-        const text = `🗜 已压缩「${titleOf(event.sessionId)}」— 历史仍完整保留，后续对话只携带摘要与最近几轮`;
+        const text = t("state.compressedToast", { title: titleOf(event.sessionId) });
         state.compressedToast = text;
         setTimeout(() => {
           if (state.compressedToast === text) state.compressedToast = null;
@@ -1871,7 +1871,9 @@ export async function togglePin(sessionId: string): Promise<void> {
   track({
     backend,
     kind: "pin",
-    label: `${wasPinned ? "取消置顶" : "置顶"}「${titleOf(sessionId)}」`,
+    label: t(wasPinned ? "state.unpinLabel" : "state.pinLabel", {
+      title: titleOf(sessionId),
+    }),
     undo: () => togglePinOrThrow(backend, sessionId),
     redo: () => togglePinOrThrow(backend, sessionId),
   });
@@ -1915,7 +1917,9 @@ export async function toggleTurnMark(node: TurnNode): Promise<void> {
   track({
     backend,
     kind: "mark",
-    label: `${wasMarked ? "取消关键标记" : "标记关键对话"}「${truncate(node.title)}」`,
+    label: t(wasMarked ? "state.unmarkLabel" : "state.markLabel", {
+      title: truncate(node.title),
+    }),
     undo: () => toggleMarkOrThrow(backend, node.sessionId, node.messageId ?? ""),
     redo: () => toggleMarkOrThrow(backend, node.sessionId, node.messageId ?? ""),
   });
@@ -2036,11 +2040,17 @@ export async function setSessionTags(sessionId: string, tags: string[]): Promise
   const removed = prev.filter((tag) => !next.includes(tag));
   let label: string;
   if (added.length > 0 && removed.length === 0) {
-    label = `添加标签「${added.join("、")}」到「${titleOf(sessionId)}」`;
+    label = t("state.tagsAddLabel", {
+      tags: added.join(listSep.value),
+      title: titleOf(sessionId),
+    });
   } else if (removed.length > 0 && added.length === 0) {
-    label = `从「${titleOf(sessionId)}」移除标签「${removed.join("、")}」`;
+    label = t("state.tagsRemoveLabel", {
+      title: titleOf(sessionId),
+      tags: removed.join(listSep.value),
+    });
   } else {
-    label = `修改「${titleOf(sessionId)}」的标签`;
+    label = t("state.tagsModifyLabel", { title: titleOf(sessionId) });
   }
   track({
     backend,
@@ -2071,7 +2081,7 @@ export async function setTagColor(tag: string, hue: number | null): Promise<bool
   track({
     backend,
     kind: "tagColor",
-    label: hue === null ? `恢复标签「${tag}」默认色` : `设置标签「${tag}」颜色`,
+    label: hue === null ? t("state.tagColorReset", { tag }) : t("state.tagColorSet", { tag }),
     undo: () => setTagColorOrThrow(backend, tag, prev),
     redo: () => setTagColorOrThrow(backend, tag, hue),
   });
@@ -2109,11 +2119,16 @@ async function setForkTagPrefOrThrow(
   return true;
 }
 
-const FORK_PREF_LABEL = new Map<boolean | null, string>([
-  [true, "始终继承"],
-  [false, "从不继承"],
-  [null, "每次询问"],
-]);
+/** How a fork preference reads in a history label; computed at action time. */
+function forkPrefLabel(pref: boolean | null): string {
+  return t(
+    pref === true
+      ? "state.forkPrefAlways"
+      : pref === false
+        ? "state.forkPrefNever"
+        : "state.forkPrefAsk",
+  );
+}
 
 /** Set (null = back to asking every fork) one session's inheritance preference. */
 export async function setForkTagPref(sessionId: string, pref: boolean | null): Promise<boolean> {
@@ -2129,7 +2144,7 @@ export async function setForkTagPref(sessionId: string, pref: boolean | null): P
   track({
     backend,
     kind: "forkPref",
-    label: `「${titleOf(sessionId)}」分叉时继承标签：${FORK_PREF_LABEL.get(pref)}`,
+    label: t("state.forkPrefLabel", { title: titleOf(sessionId), mode: forkPrefLabel(pref) }),
     undo: async () => {
       await setForkTagPrefOrThrow(backend, sessionId, prev);
       return true;
@@ -2175,7 +2190,11 @@ export async function applyTagsToSubtree(sessionId: string, tags: string[]): Pro
   track({
     backend,
     kind: "subtreeTags",
-    label: `标签「${add.join("、")}」应用到「${titleOf(sessionId)}」的 ${targets.length} 个子会话`,
+    label: t("state.subtreeTagsLabel", {
+      tags: add.join(listSep.value),
+      title: titleOf(sessionId),
+      n: targets.length,
+    }),
     undo: async () => {
       // A child hard-deleted underneath this undo keeps its pruning — writing
       // its old tags back would resurrect a phantom sessions entry.
@@ -2262,7 +2281,9 @@ async function inheritTagsOnFork(
     const store = await window.awefork.setSessionTags(backend, forkedId, tags);
     applyTagStore(backend, generation, store);
   } catch (error) {
-    state.actionError = `分叉已创建，但标签继承失败：${error instanceof Error ? error.message : String(error)}`;
+    state.actionError = t("state.forkInheritTagsFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -2286,7 +2307,7 @@ export async function deleteTag(tag: string): Promise<void> {
   const entry = track({
     backend,
     kind: "tagDelete",
-    label: `删除标签「${tag}」`,
+    label: t("state.tagDeleteLabel", { tag }),
     undo: () => restoreTag(backend, tag, hue, sessionIds),
     redo: async () => {
       await deleteTagOrThrow(backend, tag);
@@ -2383,7 +2404,7 @@ function showTagToast(tag: string, entryId: number): void {
  */
 async function softDeleteSession(backend: BackendId, sessionId: string): Promise<void> {
   if (isSessionRunning(backend, sessionId)) {
-    throw new Error("会话正在运行，先停止再删除。");
+    throw new Error(t("state.sessionRunningDelete"));
   }
   const active = backend === state.activeBackend;
   // Neighbor comes from the pre-delete sidebar order: whatever row now sits
@@ -2438,11 +2459,11 @@ async function restoreTrashedSession(backend: BackendId, sessionId: string): Pro
 /** The redo guard for a soft delete: re-confirm, then hide again. */
 async function confirmSoftDelete(backend: BackendId, sessionId: string): Promise<boolean> {
   if (isSessionRunning(backend, sessionId)) {
-    throw new Error("会话正在运行，先停止再删除。");
+    throw new Error(t("state.sessionRunningDelete"));
   }
   const session = findSessionAnywhere(backend, sessionId);
-  if (!session) throw new Error("会话已不存在，无法重做删除。");
-  if (!window.confirm(`再删除会话「${session.title}」？`)) return false;
+  if (!session) throw new Error(t("state.redoSessionGone"));
+  if (!window.confirm(t("state.confirmRedelete", { title: session.title }))) return false;
   await softDeleteSession(backend, sessionId);
   return true;
 }
@@ -2450,7 +2471,7 @@ async function confirmSoftDelete(backend: BackendId, sessionId: string): Promise
 export async function deleteSession(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
   if (state.running[sessionId]) {
-    state.actionError = "会话正在运行，先停止再删除。";
+    state.actionError = t("state.sessionRunningDelete");
     return;
   }
   if (state.trash.includes(sessionId)) return;
@@ -2461,9 +2482,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
   // neighbouring card reads as "collateral damage". Turn deletes confirm at
   // the call site; this is the only gate session deletes get, and it must
   // also carry the undo promise.
-  const ok = window.confirm(
-    `删除会话「${session.title}」？\n将删除这条会话的全部回合（不只是这张卡片），分出去的子分支保留。\n删除后可随时按 ⌘/Ctrl+Z 撤销，或在右下角历史面板回退。`,
-  );
+  const ok = window.confirm(t("state.confirmDeleteSession", { title: session.title }));
   if (!ok) return;
   state.actionError = null;
   try {
@@ -2475,7 +2494,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
   const entry = track({
     backend,
     kind: "deleteSession",
-    label: `删除会话「${titleOf(sessionId)}」`,
+    label: t("state.deleteSessionLabel", { title: titleOf(sessionId) }),
     undo: () => restoreTrashedSession(backend, sessionId),
     redo: () => confirmSoftDelete(backend, sessionId),
   });
@@ -2567,7 +2586,7 @@ export async function archiveSession(sessionId: string): Promise<void> {
   track({
     backend,
     kind: "archiveSession",
-    label: `归档会话「${titleOf(sessionId)}」`,
+    label: t("state.archiveSessionLabel", { title: titleOf(sessionId) }),
     undo: () => archiveRemoveOrThrow(backend, "session", sessionId),
     redo: () => archiveSessionFlow(backend, sessionId),
   });
@@ -2615,7 +2634,7 @@ export async function archiveDirectory(directory: string): Promise<void> {
   track({
     backend,
     kind: "archiveDirectory",
-    label: `归档目录「${shortPath(directory)}」`,
+    label: t("state.archiveDirectoryLabel", { path: shortPath(directory) }),
     undo: () => archiveRemoveOrThrow(backend, "directory", directory),
     redo: () => archiveDirectoryFlow(backend, directory),
   });
@@ -2633,7 +2652,7 @@ export async function restoreSession(sessionId: string): Promise<void> {
   track({
     backend,
     kind: "restoreSession",
-    label: `恢复会话「${titleOf(sessionId)}」`,
+    label: t("state.restoreSessionLabel", { title: titleOf(sessionId) }),
     undo: () => archiveSessionFlow(backend, sessionId),
     redo: () => archiveRemoveOrThrow(backend, "session", sessionId),
   });
@@ -2651,7 +2670,7 @@ export async function restoreDirectory(directory: string): Promise<void> {
   track({
     backend,
     kind: "restoreDirectory",
-    label: `恢复目录「${shortPath(directory)}」`,
+    label: t("state.restoreDirectoryLabel", { path: shortPath(directory) }),
     undo: () => archiveDirectoryFlow(backend, directory),
     redo: () => archiveRemoveOrThrow(backend, "directory", directory),
   });
@@ -2683,7 +2702,7 @@ export async function deleteTurn(node: TurnNode): Promise<void> {
   const backend = state.activeBackend;
   const sessionId = node.sessionId;
   if (state.running[sessionId]) {
-    state.actionError = "会话正在运行，先停止再删除。";
+    state.actionError = t("state.sessionRunningDelete");
     return;
   }
   const messages = state.messagesBySession[sessionId] ?? [];
@@ -2710,7 +2729,7 @@ export async function deleteTurn(node: TurnNode): Promise<void> {
     trackEvent({
       backend,
       kind: "deleteTurn",
-      label: `删除回合「${truncate(node.title ?? firstText)}」`,
+      label: t("state.deleteTurnLabel", { title: truncate(node.title ?? firstText) }),
     });
   }
   if (state.selectedTurnId === node.id) state.selectedTurnId = null;
@@ -2757,7 +2776,7 @@ function showUpdateToast(text: string): void {
 async function hardDeleteSession(backend: BackendId, sessionId: string): Promise<void> {
   const active = backend === state.activeBackend;
   if (isSessionRunning(backend, sessionId)) {
-    throw new Error("会话正在运行，先停止再删除。");
+    throw new Error(t("state.sessionRunningDelete"));
   }
   // Neighbor + same-story landing, computed while the session is still pooled.
   let landing: string | null = null;
@@ -2843,7 +2862,7 @@ export async function createSession(directory?: string): Promise<void> {
   track({
     backend,
     kind: "createSession",
-    label: `新建会话「${created.title}」`,
+    label: t("state.createSessionLabel", { title: created.title }),
     undo: async () => {
       await hardDeleteSession(backend, box.id);
       return true;
@@ -2918,7 +2937,7 @@ export async function addDirectory(): Promise<void> {
   track({
     backend: state.activeBackend,
     kind: "addDirectory",
-    label: `添加目录「${shortPath(picked)}」`,
+    label: t("state.addDirectoryLabel", { path: shortPath(picked) }),
     undo: () => dirsRemoveFlow(state.activeBackend, picked),
     redo: () => dirsAddOrThrow(state.activeBackend, picked),
   });
@@ -2944,7 +2963,7 @@ export async function removeDirectory(directory: string): Promise<void> {
   track({
     backend,
     kind: "removeDirectory",
-    label: `移除目录「${shortPath(directory)}」`,
+    label: t("state.removeDirectoryLabel", { path: shortPath(directory) }),
     undo: () => dirsAddOrThrow(backend, directory),
     redo: () => dirsRemoveFlow(backend, directory),
   });
@@ -2982,7 +3001,7 @@ export async function renameSession(sessionId: string, title: string): Promise<v
   track({
     backend,
     kind: "renameSession",
-    label: `重命名「${prev}」→「${trimmed}」`,
+    label: t("state.renameLabel", { from: prev, to: trimmed }),
     undo: () => renameOrThrow(backend, sessionId, prev),
     redo: () => renameOrThrow(backend, sessionId, trimmed),
   });
@@ -2998,7 +3017,7 @@ export async function openSessionTerminal(sessionId: string): Promise<void> {
   const result = await window.awefork
     .openSessionTerminal(state.activeBackend, sessionId)
     .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
-  if (!result.ok) state.actionError = result.error ?? "无法在终端中打开会话";
+  if (!result.ok) state.actionError = result.error ?? t("state.terminalOpenFailed");
 }
 
 /**
@@ -3160,7 +3179,7 @@ export async function exportSessionAt(
     track({
       backend,
       kind: "exportSession",
-      label: `导出独立会话「${titleOf(sessionId)}」`,
+      label: t("state.exportSessionLabel", { title: titleOf(sessionId) }),
       undo: async () => {
         await hardDeleteSession(backend, box.id);
         return true;
@@ -3174,7 +3193,9 @@ export async function exportSessionAt(
       },
     });
   } catch (error) {
-    state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
+    state.actionError = t("state.exportFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -3214,7 +3235,7 @@ export async function compressSession(sessionId: string): Promise<void> {
   const backend = state.activeBackend;
   if (!state.capabilities.compress) return;
   if (isSessionRunning(backend, sessionId)) {
-    state.actionError = "会话正在运行，等它结束后再压缩";
+    state.actionError = t("state.sessionRunningCompress");
     return;
   }
   // summarize takes no default: providerID/modelID are required, so the pick
@@ -3222,7 +3243,7 @@ export async function compressSession(sessionId: string): Promise<void> {
   await ensureModels();
   const catalogFirst = state.models[0];
   if (!catalogFirst) {
-    state.actionError = "暂时拿不到模型列表，无法压缩";
+    state.actionError = t("state.noModelsForCompress");
     return;
   }
   const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
@@ -3234,7 +3255,7 @@ export async function compressSession(sessionId: string): Promise<void> {
   const model = await askCompressModel(sessionId, preset);
   if (!model) return;
   if (isSessionRunning(backend, sessionId)) {
-    state.actionError = "会话正在运行，等它结束后再压缩";
+    state.actionError = t("state.sessionRunningCompress");
     return;
   }
   state.actionError = null;
@@ -3250,7 +3271,9 @@ export async function compressSession(sessionId: string): Promise<void> {
     watchCompletion(backend, sessionId, sentAt);
   } catch (error) {
     setRunning(backend, sessionId, false);
-    state.actionError = `压缩失败：${error instanceof Error ? error.message : String(error)}`;
+    state.actionError = t("state.compressFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -3269,7 +3292,7 @@ export async function exportBranchMarkdown(): Promise<boolean> {
     bySession.set(id, cached ?? (await loadSessionMessages(id, false)) ?? []);
   }
   const turns = chain.map((node) => markdownTurnOf(node, bySession.get(node.sessionId) ?? []));
-  const title = selectedSession.value?.title ?? "awefork 分支";
+  const title = selectedSession.value?.title ?? t("state.branchExportFallbackTitle");
   const markdown = buildBranchMarkdown({
     title,
     exportedAt: Date.now(),
@@ -3280,7 +3303,9 @@ export async function exportBranchMarkdown(): Promise<boolean> {
     const result = await window.awefork.saveTextFile(`${safeFileName(title)}.md`, markdown);
     return result.ok;
   } catch (error) {
-    state.actionError = `导出失败：${error instanceof Error ? error.message : String(error)}`;
+    state.actionError = t("state.exportFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }
@@ -3587,7 +3612,11 @@ export async function sendDraft(): Promise<void> {
     await window.awefork.prompt(backend, targetId, text, model, attachments);
     // The run is real (it streams through the parked runtime): record it as a
     // journal lock. One entry covers both the continue and fork branches.
-    trackEvent({ backend, kind: "sendPrompt", label: `发送消息「${truncate(text)}」` });
+    trackEvent({
+      backend,
+      kind: "sendPrompt",
+      label: t("state.sendPromptLabel", { text: truncate(text) }),
+    });
     watchCompletion(backend, targetId, sentAt);
     if (!stale()) {
       state.draft = null;
@@ -3674,7 +3703,11 @@ export async function sendPromptTo(
   try {
     await window.awefork.prompt(backend, sessionId, text, plainModel(model), attachments);
     // Irreversible: the run is out, so seal the journal with a lock entry.
-    trackEvent({ backend, kind: "sendPrompt", label: `发送消息「${truncate(text)}」` });
+    trackEvent({
+      backend,
+      kind: "sendPrompt",
+      label: t("state.sendPromptLabel", { text: truncate(text) }),
+    });
     watchCompletion(backend, sessionId, sentAt);
     return { sessionId, error: null };
   } catch (error) {
@@ -3781,7 +3814,11 @@ export async function abortRunFor(sessionId: string): Promise<string | null> {
     return error instanceof Error ? error.message : String(error);
   }
   // Irreversible (the run is gone); a lock entry seals the journal.
-  trackEvent({ backend, kind: "abortRun", label: `停止运行「${titleOf(sessionId)}」` });
+  trackEvent({
+    backend,
+    kind: "abortRun",
+    label: t("state.abortRunLabel", { title: titleOf(sessionId) }),
+  });
   return null;
 }
 
@@ -3873,12 +3910,12 @@ export async function startUpdateDownload(): Promise<void> {
     if (result.ok) {
       // Windows path: the NSIS installer is up and takes it from here.
       state.updateBannerDismissed = true;
-      showUpdateToast("更新安装器已启动，按提示完成安装");
+      showUpdateToast(t("state.updaterLaunched"));
     } else {
-      state.updateDownloadError = result.error ?? "下载失败";
+      state.updateDownloadError = result.error ?? t("state.downloadFailed");
     }
   } catch {
-    state.updateDownloadError = "下载失败，可重试或手动下载";
+    state.updateDownloadError = t("state.downloadFailedRetry");
   } finally {
     unsubscribe();
     state.downloadingUpdate = false;
@@ -4106,7 +4143,7 @@ export async function switchBackend(backend: BackendId): Promise<void> {
     await flushComposer(state.activeBackend);
     const result = await window.awefork.selectBackend(backend);
     if (!result.ok) {
-      state.actionError = result.error ?? `无法切换到 ${backend}。`;
+      state.actionError = result.error ?? t("state.switchBackendFailed", { backend });
       return;
     }
     // Flip the active flag BEFORE restoring: events landing in this window

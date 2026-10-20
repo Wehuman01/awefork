@@ -3,12 +3,12 @@
     <!-- ── ⇄ dual-pane comparison: aligned at a fork, or free side-by-side ── -->
     <template v-if="compare">
       <div class="cmp-head">
-        <span class="cmp-head-title">{{ compare.plan ? "⇄ 分支对比" : "⇄ 自由并排" }}</span>
+        <span class="cmp-head-title">{{ compare.plan ? t("branch.compareTitle") : t("branch.freeTitle") }}</span>
         <div v-if="compare.plan" class="cmp-pager">
           <button
             type="button"
             class="nav-btn"
-            title="上一对（←）"
+            :title="t('branch.prevPair')"
             :disabled="pagerPos === 0"
             @click="stepPager(-1)"
           >‹</button>
@@ -18,7 +18,7 @@
           <button
             type="button"
             class="nav-btn"
-            title="下一对（→）"
+            :title="t('branch.nextPair')"
             :disabled="pagerPos >= pairRows.length - 1"
             @click="stepPager(1)"
           >›</button>
@@ -26,7 +26,7 @@
         <button
           type="button"
           class="nav-btn"
-          title="退出对比（Esc）"
+          :title="t('branch.exitCompare')"
           @click="exitCompare()"
         >✕</button>
       </div>
@@ -34,14 +34,14 @@
       <div class="cmp-body" :class="{ free: !compare.plan }">
         <div class="cmp-cols">
           <div class="cmp-colcard left">
-            <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">当前</span>
+            <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">{{ t("branch.current") }}</span>
             <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">{{
               sideTitle(compare.pair.leftId)
             }}</span>
             <span class="cmp-colmeta">{{ colMeta(0) }}</span>
           </div>
           <div class="cmp-colcard right">
-            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">当前</span>
+            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">{{ t("branch.current") }}</span>
             <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">{{
               sideTitle(compare.pair.rightId)
             }}</span>
@@ -56,7 +56,7 @@
             type="button"
             class="cmp-prefix"
             @click="prefixOpen = !prefixOpen"
-          >{{ prefixOpen ? "▾" : "▸" }} 共同前缀 · {{ compare.plan.common.length }} 个回合</button>
+          >{{ prefixOpen ? "▾" : "▸" }} {{ t("branch.commonPrefix", { n: compare.plan.common.length }) }}</button>
           <div v-if="prefixOpen" class="cmp-prefix-list">
             <div v-for="node in compare.plan.common" :key="node.id" class="cmp-prefix-row">
               <span class="cmp-prefix-title" :title="node.title">{{ node.title }}</span>
@@ -65,16 +65,16 @@
 
           <div class="cmp-forkline">
             <span class="cmp-fork-glyph">⑂</span>
-            <span class="cmp-fork-text">此后分叉 · 『{{ compare.plan.anchor.title }}』</span>
+            <span class="cmp-fork-text">{{ t("branch.forkAt", { title: compare.plan.anchor.title }) }}</span>
             <span
               v-if="samePrompt"
               class="cmp-same"
-              title="两条分支分叉后的第一个提示词相同 — 看起来是同一步的重试"
-            >同题</span>
+              :title="t('branch.sameRetryTitle')"
+            >{{ t("branch.samePrompt") }}</span>
           </div>
 
           <div v-if="pairRows.length === 0" class="cmp-empty">
-            分叉点之后两条分支都还没有自己的回合。
+            {{ t("branch.emptyAfterFork") }}
           </div>
           <div v-else class="cmp-pairs">
             <div
@@ -97,12 +97,12 @@
         <template v-else>
           <div class="cmp-forkline">
             <span class="cmp-fork-glyph">⇄</span>
-            <span class="cmp-fork-text">两个会话不同源 · 各自按时间线并排</span>
+            <span class="cmp-fork-text">{{ t("branch.unrelated") }}</span>
             <span
               v-if="freeSamePrompt"
               class="cmp-same"
-              title="两个会话的第一个提示词相同 — 可能是同一件事的两种做法"
-            >同题</span>
+              :title="t('branch.sameApproachTitle')"
+            >{{ t("branch.samePrompt") }}</span>
           </div>
           <div class="cmp-free">
             <div
@@ -115,16 +115,16 @@
               <div class="cmp-fcol-head">
                 <button
                   type="button"
-                  :title="`选中「${col.title}」并退出对比`"
+                  :title="t('branch.selectColumn', { title: col.title })"
                   @click="selectColumn(col.id)"
-                >选中</button>
+                >{{ t("branch.select") }}</button>
                 <button
                   type="button"
-                  title="跳到这个会话的最新回合"
+                  :title="t('branch.jumpLatest')"
                   @click="scrollLatest(ci)"
-                >⤓ 最新</button>
+                >{{ t("branch.latest") }}</button>
               </div>
-              <div v-if="col.cells.length === 0" class="cmp-empty">这个会话还没有回合。</div>
+              <div v-if="col.cells.length === 0" class="cmp-empty">{{ t("branch.emptySession") }}</div>
               <CmpCell
                 v-for="cell in col.cells"
                 :key="cell.id"
@@ -153,9 +153,9 @@
       <div class="ctx-head">
         <span class="ctx-icon">💬</span>
         <div class="ctx-headings">
-          <div class="ctx-title">分支上下文</div>
+          <div class="ctx-title">{{ t("branch.contextTitle") }}</div>
           <div class="ctx-sub" :title="selectedSession?.title ?? ''">
-            <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || "在画布上选一个节点" }}
+            <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || t("branch.pickNode") }}
           </div>
           <div v-if="selectedTags.length > 0" class="ctx-tags">
             <span
@@ -171,36 +171,36 @@
             v-if="compareParentId"
             type="button"
             class="nav-cmp"
-            :title="`与母本分支「${sideTitle(compareParentId)}」并排对比`"
+            :title="t('branch.compareParent', { title: sideTitle(compareParentId) })"
             @click="openCompareParent"
-          >⇄ 对比母本</button>
+          >{{ t("branch.compareParentBtn") }}</button>
           <button
             v-if="paneTurnNode"
             type="button"
             class="nav-btn"
             :class="{ 'mark-on': isTurnMarked(paneTurnNode.id) }"
-            :title="isTurnMarked(paneTurnNode.id) ? '取消关键标记' : '标记为关键对话'"
+            :title="isTurnMarked(paneTurnNode.id) ? t('canvas.unmarkTitle') : t('canvas.markTitle')"
             @click="toggleMark"
           >{{ isTurnMarked(paneTurnNode.id) ? "★" : "☆" }}</button>
           <button
             v-if="pane?.turn.error"
             type="button"
             class="nav-btn"
-            title="重跑这个回合（预填原文，可先换模型/档位）"
+            :title="t('msg.retryTitle')"
             @click="retry"
           >↻</button>
           <button
             v-if="pane"
             type="button"
             class="nav-btn"
-            title="导出这条分支为 Markdown（含模型/耗时/token）"
+            :title="t('branch.exportTitle')"
             @click="exportMd"
           >⤓</button>
           <button
             v-if="store.capabilities.compress && pane"
             type="button"
             class="nav-btn"
-            title="压缩会话：把历史折叠成摘要（历史仍保留，之后的对话只携带摘要与最近几轮）"
+            :title="t('branch.compressTitle')"
             :disabled="isRunning"
             @click="compress"
           >🗜</button>
@@ -208,20 +208,20 @@
             <button
               type="button"
               class="nav-btn"
-              title="上一回合（←）"
+              :title="t('branch.prevTurn')"
               :disabled="pane.index === 0"
               @click="stepTurn(-1)"
             >‹</button>
             <button
               type="button"
               class="nav-btn"
-              title="下一回合（→）"
+              :title="t('branch.nextTurn')"
               :disabled="pane.index === pane.total - 1"
               @click="stepTurn(1)"
             >›</button>
           </template>
         </div>
-        <span v-if="isRunning" class="ctx-running">○ 运行中</span>
+        <span v-if="isRunning" class="ctx-running">{{ t("branch.running") }}</span>
       </div>
 
       <div v-if="store.messagesError" class="banner banner-error">{{ store.messagesError }}</div>
@@ -237,14 +237,14 @@
       >
         <template v-if="contextTurns.length > 0 || omittedCount > 0" #context>
           <div class="chain">
-            <div class="chain-label">上文链路</div>
-            <p v-if="omittedCount > 0" class="chain-omitted">…更早 {{ omittedCount }} 个回合</p>
+            <div class="chain-label">{{ t("branch.chainLabel") }}</div>
+            <p v-if="omittedCount > 0" class="chain-omitted">{{ t("branch.chainOmitted", { n: omittedCount }) }}</p>
             <button
               v-for="(node, i) in contextTurns"
               :key="node.id"
               type="button"
               class="chain-card"
-              title="跳到这个回合"
+              :title="t('branch.jumpToTurn')"
               @click="jumpTo(node)"
             >
               <span class="chain-step">{{ chainStart + i }}</span>
@@ -253,7 +253,7 @@
                   <span
                     v-if="node.sessionId !== store.selectedId"
                     class="chain-fork"
-                    title="来自上游分支"
+                    :title="t('branch.fromUpstream')"
                   >⎇</span>
                   {{ node.title }}
                 </span>
@@ -262,8 +262,8 @@
                     (node.error
                       ? `⚠ ${node.error}`
                       : node.toolNames.length > 0
-                        ? `(${node.toolNames.length} 个工具调用，无文本回复)`
-                        : "(无文本回复)")
+                        ? t("branch.toolOnlyPreview", { n: node.toolNames.length })
+                        : t("cmp.noText"))
                 }}</span>
               </span>
             </button>
@@ -273,7 +273,7 @@
       <InteractionInline v-if="inlineHostVisible" />
       <FileChangesCard v-if="selectedSession && store.capabilities.fileChanges" />
       <div v-if="!selectedSession" class="ctx-empty">
-        <p>左侧选会话，或在画布上点一张卡片。</p>
+        <p>{{ t("branch.emptyHint") }}</p>
       </div>
 
       <ChatInput
@@ -300,6 +300,7 @@ import type { TurnNode } from "../../../shared/canvas-graph";
 import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
+import { t } from "../i18n";
 import {
   abortRun,
   abortRunFor,
@@ -483,7 +484,9 @@ const freeColumns = computed<FreeColumn[] | null>(() => {
     const tokens = turns.reduce((sum, t) => sum + t.outputTokens, 0);
     const errors = turns.filter((t) => t.error !== null).length;
     const bits = [
-      inherited > 0 ? `${turns.length} 个回合 · 含 ${inherited} 继承` : `${turns.length} 个回合`,
+      inherited > 0
+        ? t("branch.turnsMeta", { n: turns.length, m: inherited })
+        : t("branch.turnsCount", { n: turns.length }),
     ];
     if (tokens > 0) bits.push(formatTokens(tokens));
     if (errors > 0) bits.push(`⚠ ${errors}`);
@@ -522,7 +525,7 @@ function sideMeta(id: string): string {
   const own = turnGraph.value.nodes.filter((n) => n.sessionId === id && n.kind === "turn");
   const tokens = own.reduce((sum, n) => sum + n.outputTokens, 0);
   const errors = own.filter((n) => n.error !== null).length;
-  const bits = [`${own.length} 个回合`];
+  const bits = [t("branch.turnsCount", { n: own.length })];
   if (tokens > 0) bits.push(formatTokens(tokens));
   if (errors > 0) bits.push(`⚠ ${errors}`);
   return bits.join(" · ");
@@ -620,7 +623,7 @@ const isRunning = computed(() => {
 const turnMeta = computed(() => {
   const current = pane.value;
   if (!current) return null;
-  const bits = [`回合 ${current.index + 1}/${current.total}`];
+  const bits = [t("branch.turnPos", { index: current.index + 1, total: current.total })];
   if (current.turn.durationMs !== null) bits.push(formatDuration(current.turn.durationMs));
   if (current.turn.outputTokens > 0) bits.push(formatTokens(current.turn.outputTokens));
   return bits.join(" · ");

@@ -2,15 +2,19 @@
   <div class="pv-shell">
     <header class="pv-top">
       <div class="pv-heading">
-        <strong>subagent 显示优化</strong>
-        <span>设计预览 · opencode 适配 · 加速回放（约 20 秒演完一回合，未接真实后端）</span>
+        <strong>{{ t("demo.heading") }}</strong>
+        <span>{{ t("demo.subheading") }}</span>
       </div>
       <div class="pv-actions">
         <div class="pv-seg">
-          <button type="button" :class="{ on: mode === 'new' }" @click="mode = 'new'">新版设计</button>
-          <button type="button" :class="{ on: mode === 'old' }" @click="mode = 'old'">旧版现状</button>
+          <button type="button" :class="{ on: mode === 'new' }" @click="mode = 'new'">{{
+            t("demo.newDesign")
+          }}</button>
+          <button type="button" :class="{ on: mode === 'old' }" @click="mode = 'old'">{{
+            t("demo.oldDesign")
+          }}</button>
         </div>
-        <button type="button" class="pv-replay" @click="replay">▶ 重播运行</button>
+        <button type="button" class="pv-replay" @click="replay">{{ t("demo.replay") }}</button>
       </div>
     </header>
 
@@ -19,7 +23,7 @@
         <article class="message">
           <div class="message-row user-row">
             <div class="user-body">
-              登录接口重构完了，做一次安全排查吧。三路并行：路由权限、密码哈希、session 管理。
+              {{ t("demo.userPrompt") }}
             </div>
             <span class="avatar user">🍑</span>
           </div>
@@ -33,8 +37,8 @@
               <details v-if="thinkingDone || phase === 'thinking'" class="thought" :open="phase === 'thinking'">
                 <summary class="thought-toggle">
                   <span v-if="phase === 'thinking'" class="spinner" aria-hidden="true"></span>
-                  <span>Thought · 拆解排查任务</span>
-                  <span v-if="thinkingDone" class="thought-meta">· 2.1秒</span>
+                  <span>{{ t("demo.thoughtTitle") }}</span>
+                  <span v-if="thinkingDone" class="thought-meta">{{ t("demo.thoughtMeta") }}</span>
                 </summary>
                 <div class="thought-body pre-wrap">{{ thinkingText }}</div>
               </details>
@@ -48,11 +52,11 @@
                   <span v-for="name in oldChips" :key="name" class="tool-chip lav">{{ name }}</span>
                 </p>
                 <div class="pv-note">
-                  <p><strong>旧版现状的问题（对照本回合：并行派了 3 个子代理）</strong></p>
-                  <p>· 3 次 <code>task</code> 调用，Set 去重后只剩一个 chip，看不出派了几个</p>
-                  <p>· 子代理一跑几分钟，父会话只有一行 running…，无状态、无进度、无当前动作</p>
-                  <p>· 没有结果摘要，想知道子代理做了什么只能翻日志</p>
-                  <p>· 子会话在侧边栏和画布里都被隐藏，没有任何入口能打开</p>
+                  <p><strong>{{ t("demo.oldNoteTitle") }}</strong></p>
+                  <p>{{ t("demo.oldNote1") }}</p>
+                  <p>{{ t("demo.oldNote2") }}</p>
+                  <p>{{ t("demo.oldNote3") }}</p>
+                  <p>{{ t("demo.oldNote4") }}</p>
                 </div>
               </template>
 
@@ -73,20 +77,25 @@
                   >
                     <span class="pv-dot" :class="task.status"></span>
                     <span class="pv-agent">{{ task.icon }} {{ task.agent }}</span>
-                    <span class="pv-task-title">{{ task.title }}</span>
+                    <span class="pv-task-title">{{ t(task.title) }}</span>
                     <span v-if="task.status === 'running'" class="pv-meta">
-                      已运行 {{ task.elapsed }}秒
+                      {{ t("demo.elapsed", { n: task.elapsed }) }}
                     </span>
                     <span v-else-if="task.status === 'done'" class="pv-meta">
-                      {{ formatDuration(task.duration) }} · {{ task.tools.length }} 次工具
+                      {{
+                        t("demo.doneMeta", {
+                          dur: formatDuration(task.duration),
+                          n: task.tools.length,
+                        })
+                      }}
                     </span>
                     <button
                       v-if="task.status === 'done'"
                       type="button"
                       class="pv-open"
-                      title="打开这个子代理的会话（只读）"
+                      :title="t('demo.openSubTitle')"
                       @click.stop="openDrill(task.id)"
-                      >打开子会话 ↗</button
+                      >{{ t("demo.openSub") }}</button
                     >
                   </div>
 
@@ -94,21 +103,19 @@
                   <template v-if="task.status === 'running'">
                     <p class="pv-feed">
                       <span class="spinner" aria-hidden="true"></span>
-                      <span class="pre-wrap">{{ task.feed[task.feedIndex % task.feed.length] }}</span>
+                      <span class="pre-wrap">{{ t(task.feed[task.feedIndex % task.feed.length] ?? "") }}</span>
                     </p>
                     <div class="pv-bar" aria-hidden="true"></div>
                   </template>
 
                   <div v-if="expanded[task.id] && task.status === 'done'" class="pv-task-body">
-                    <p class="pv-k">派发指令</p>
-                    <p class="pv-prompt pre-wrap">{{ task.prompt }}</p>
-                    <p class="pv-k">执行结果</p>
-                    <p class="pv-result pre-wrap">{{ task.result }}</p>
+                    <p class="pv-k">{{ t("demo.dispatchLabel") }}</p>
+                    <p class="pv-prompt pre-wrap">{{ t(task.prompt) }}</p>
+                    <p class="pv-k">{{ t("demo.resultLabel") }}</p>
+                    <p class="pv-result pre-wrap">{{ t(task.result) }}</p>
                   </div>
                 </div>
-                <p class="pv-hint">
-                  卡片点击展开指令与结果摘要 ·「打开子会话」进入只读子会话视图（试试）
-                </p>
+                <p class="pv-hint">{{ t("demo.hint") }}</p>
               </template>
 
               <!-- 最终汇总回复 -->
@@ -124,22 +131,24 @@
     <!-- 画布 / 侧边栏配套改动（静态示意） -->
     <section class="pv-strip">
       <div class="pv-mock">
-        <p class="pv-mock-title">画布：父节点挂子任务徽标</p>
+        <p class="pv-mock-title">{{ t("demo.canvasTitle") }}</p>
         <div class="pv-node">
-          <span class="pv-node-title">登录接口重构</span>
+          <span class="pv-node-title">{{ t("demo.parentNode") }}</span>
           <span class="pv-badge">🤖 3</span>
         </div>
-        <p class="pv-mock-note">不把子会话铺进图里；徽标点开就地展开子节点</p>
+        <p class="pv-mock-note">{{ t("demo.canvasNote") }}</p>
       </div>
       <div class="pv-mock">
-        <p class="pv-mock-title">侧边栏：子会话折叠在父会话下</p>
+        <p class="pv-mock-title">{{ t("demo.sideTitle") }}</p>
         <div class="pv-side">
-          <p class="pv-side-row">▾ <span>登录接口重构</span> <span class="pv-badge">3</span></p>
-          <p class="pv-side-child">🔍 排查路由权限</p>
-          <p class="pv-side-child">🧐 审查密码哈希</p>
-          <p class="pv-side-child">🧪 session 管理补测试</p>
+          <p class="pv-side-row"
+            >▾ <span>{{ t("demo.parentNode") }}</span> <span class="pv-badge">3</span></p
+          >
+          <p class="pv-side-child">🔍 {{ t("demo.t1Title") }}</p>
+          <p class="pv-side-child">🧐 {{ t("demo.t2Title") }}</p>
+          <p class="pv-side-child">🧪 {{ t("demo.t3Title") }}</p>
         </div>
-        <p class="pv-mock-note">默认折叠、样式弱化，不再一刀切隐藏</p>
+        <p class="pv-mock-note">{{ t("demo.sideNote") }}</p>
       </div>
     </section>
 
@@ -150,20 +159,24 @@
         <header class="pv-drill-head">
           <div class="pv-drill-title">
             <span class="pv-agent">{{ drillTask.icon }} {{ drillTask.agent }}</span>
-            <strong>{{ drillTask.title }}</strong>
+            <strong>{{ t(drillTask.title) }}</strong>
           </div>
-          <button type="button" class="pv-drill-close" title="返回父会话（Esc）" @click="closeDrill">
+          <button
+            type="button"
+            class="pv-drill-close"
+            :title="t('demo.drillClose')"
+            @click="closeDrill"
+          >
             ✕
           </button>
         </header>
         <p class="pv-drill-meta">
-          子会话 · 只读 · {{ drillTask.tools.length }} 次工具调用 · glm-5.3-flash · 由父会话 task
-          工具派生
+          {{ t("demo.drillMeta", { n: drillTask.tools.length }) }}
         </p>
         <div class="pv-drill-body">
           <article class="message">
             <div class="message-row user-row">
-              <div class="user-body pre-wrap">{{ drillTask.prompt }}</div>
+              <div class="user-body pre-wrap">{{ t(drillTask.prompt) }}</div>
               <span class="avatar user">🍑</span>
             </div>
           </article>
@@ -172,8 +185,8 @@
               <span class="avatar bot">✨</span>
               <div class="message-body">
                 <details class="thought">
-                  <summary class="thought-toggle">Thought · 制定排查计划</summary>
-                  <div class="thought-body pre-wrap">{{ drillTask.thought }}</div>
+                  <summary class="thought-toggle">{{ t("demo.drillThought") }}</summary>
+                  <div class="thought-body pre-wrap">{{ t(drillTask.thought) }}</div>
                 </details>
                 <p class="tool-row">
                   <span
@@ -184,13 +197,13 @@
                   >
                 </p>
                 <div class="md pv-report">
-                  <p>{{ drillTask.report.intro }}</p>
+                  <p>{{ t(drillTask.report.intro) }}</p>
                   <ul>
                     <li v-for="(item, index) in drillTask.report.items" :key="index">
-                      {{ item }}
+                      {{ t(item) }}
                     </li>
                   </ul>
-                  <p>{{ drillTask.report.outro }}</p>
+                  <p>{{ t(drillTask.report.outro) }}</p>
                 </div>
               </div>
             </div>
@@ -203,6 +216,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { t } from "../i18n";
 
 /** 一张卡片的静态定义 + 回放运行态。 */
 interface TaskView {
@@ -233,28 +247,21 @@ const TASKS: TaskView[] = [
     id: "t1",
     agent: "explore",
     icon: "🔍",
-    title: "排查路由权限",
-    prompt:
-      "扫描 auth 相关的所有路由注册，找出没有权限中间件保护的端点。只读不改，回报路径和风险等级。",
-    result:
-      "发现 3 个 /api/admin/* 路由未挂 requireRole 中间件，其中 /api/admin/users 普通用户可直接访问（高危），另 2 个为中危。",
-    thought:
-      "先从路由注册处入手，逐一核对每个端点的中间件链，再交叉比对 permissions.ts 里的角色声明。",
+    title: "demo.t1Title",
+    prompt: "demo.t1Prompt",
+    result: "demo.t1Result",
+    thought: "demo.t1Thought",
     report: {
-      intro: "扫描了 auth/router.go 注册的全部 12 个路由，逐条核对中间件链：",
-      items: [
-        "/api/admin/users — 未挂 requireRole，普通用户可直接访问，高危",
-        "/api/admin/stats、/api/admin/audit — 同样缺失，但仅泄露统计信息，中危",
-        "其余 9 个端点中间件齐全",
-      ],
-      outro: '修复建议：在路由组上统一注册 requireRole("admin")，一行改动覆盖全部缺口。',
+      intro: "demo.t1Intro",
+      items: ["demo.t1Item1", "demo.t1Item2", "demo.t1Item3"],
+      outro: "demo.t1Outro",
     },
     tools: ["read", "grep", "read", "grep", "read", "read"],
     feed: [
       "read auth/router.go",
       "grep 'middleware'",
       "read auth/permissions.ts",
-      "已扫描 12 个路由，3 个缺少权限中间件",
+      "demo.t1Feed4",
       "read middleware/role.go",
     ],
     runMs: 4800,
@@ -268,26 +275,21 @@ const TASKS: TaskView[] = [
     id: "t2",
     agent: "review",
     icon: "🧐",
-    title: "审查密码哈希迁移",
-    prompt:
-      "Review migration_007_argon2 和登录成功后的哈希回填逻辑，重点看事务边界和并发场景。只审不改。",
-    result:
-      "迁移脚本本身正确；但登录成功后的 argon2 回填没有事务保护，进程崩溃会留下半迁移用户，建议补成单事务 UPSERT。",
-    thought: "先读迁移脚本确认双写窗口设计，再顺着登录成功路径看回填发生在哪个事务里。",
+    title: "demo.t2Title",
+    prompt: "demo.t2Prompt",
+    result: "demo.t2Result",
+    thought: "demo.t2Thought",
     report: {
-      intro: "migration_007 的双写窗口设计正确，没有发现问题。风险在回填路径：",
-      items: [
-        "登录验证成功后回填 argon2_hash 的 UPDATE 与会话签发不在同一事务",
-        "崩溃窗口内会出现「已验证明文、未写入新哈希」的半迁移用户，下次登录会重复迁移（幂等，但浪费）",
-      ],
-      outro: "建议：回填改成单事务 UPSERT，失败时整单回滚，登录照常走旧哈希兜底。",
+      intro: "demo.t2Intro",
+      items: ["demo.t2Item1", "demo.t2Item2"],
+      outro: "demo.t2Outro",
     },
     tools: ["read", "read", "grep", "read"],
     feed: [
       "read migration_007_argon2.sql",
       "read auth/login.go",
       "grep 'argon2_hash'",
-      "比对双写窗口与回填事务边界",
+      "demo.t2Feed4",
     ],
     runMs: 5200,
     settledDuration: 58,
@@ -300,27 +302,21 @@ const TASKS: TaskView[] = [
     id: "t3",
     agent: "test-writer",
     icon: "🧪",
-    title: "session 管理补测试",
-    prompt: "给 session 管理补单测，覆盖：滑动过期、登出清缓存、记住我三条路径。跑绿为止。",
-    result:
-      "新增 session_test.go，3 个用例全绿。顺带发现登出没有清 redis 黑名单缓存（已在报告中标注，未改代码）。",
-    thought: "先看 session/store.go 的三条路径，按行为逐条写用例，最后 go test 收口。",
+    title: "demo.t3Title",
+    prompt: "demo.t3Prompt",
+    result: "demo.t3Result",
+    thought: "demo.t3Thought",
     report: {
-      intro: "新增 auth/session_test.go：",
-      items: [
-        "滑动过期 — 过期前访问续期 30 分钟 ✓",
-        "登出 — session 键立即删除 ✓",
-        "记住我 — 持久 cookie + 30 天 TTL ✓",
-      ],
-      outro:
-        "go test ./auth/... 全绿。顺带发现：登出未清 redis 黑名单缓存，留存到下个 TTL 窗口，已标注未改。",
+      intro: "demo.t3Intro",
+      items: ["demo.t3Item1", "demo.t3Item2", "demo.t3Item3"],
+      outro: "demo.t3Outro",
     },
     tools: ["read", "write", "bash"],
     feed: [
       "read session/store.go",
       "write session_test.go",
       "bash go test ./auth/...",
-      "3 个用例全部通过",
+      "demo.t3Feed4",
     ],
     runMs: 4200,
     settledDuration: 31,
@@ -331,15 +327,8 @@ const TASKS: TaskView[] = [
   },
 ];
 
-const THINKING_TEXT =
-  "用户要三路并行排查。拆成三个独立子任务：路由权限交给 explore（只读扫描），密码哈希交给 review（只审不改），session 管理交给 test-writer（补测试）。三个互不依赖，可以同时派发。";
-const FINAL_TEXT = `三路排查都完成了，汇总：
-
-· 路由权限（explore）：3 个 /api/admin/* 路由未挂 requireRole，其中 /api/admin/users 普通用户可直接访问 —— 高危
-· 密码哈希（review）：迁移脚本正确，但登录后的回填没有事务保护，崩溃会留下半迁移用户
-· session 管理（test-writer）：3 个用例全绿；顺带发现登出没清 redis 黑名单缓存
-
-建议先修第 1 项，路由组统一注册中间件，一行改动覆盖全部缺口。`;
+const THINKING_TEXT = computed(() => t("demo.thinkingText"));
+const FINAL_TEXT = computed(() => t("demo.finalText"));
 
 /** 旧版 chip 行：按现网逻辑对工具名 Set 去重。 */
 const OLD_CHIPS = ["task", "read", "grep", "write", "bash"];
@@ -416,7 +405,7 @@ function replay(): void {
   phase.value = "thinking";
 
   typewriter(
-    THINKING_TEXT,
+    THINKING_TEXT.value,
     38,
     (v) => {
       thinkingText.value = v;
@@ -458,7 +447,7 @@ function replay(): void {
   at(cursor + 400, () => {
     phase.value = "synthesis";
     typewriter(
-      FINAL_TEXT,
+      FINAL_TEXT.value,
       26,
       (v) => (finalText.value = v),
       () => settle(),
@@ -479,8 +468,8 @@ function closeDrill(): void {
 }
 
 function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}秒`;
-  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+  if (seconds < 60) return t("demo.sec", { n: seconds });
+  return t("demo.minSec", { m: Math.floor(seconds / 60), n: seconds % 60 });
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -491,8 +480,8 @@ onMounted(() => {
   // 先摆出落定态，让打开页面的人先看到终点，再自动重播讲一遍过程
   phase.value = "done";
   thinkingDone.value = true;
-  thinkingText.value = THINKING_TEXT;
-  finalText.value = FINAL_TEXT;
+  thinkingText.value = THINKING_TEXT.value;
+  finalText.value = FINAL_TEXT.value;
   for (const task of tasks.value) {
     task.status = "done";
     task.duration = task.settledDuration;

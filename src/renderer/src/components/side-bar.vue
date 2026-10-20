@@ -8,21 +8,21 @@
           v-model="query"
           type="text"
           :placeholder="searchPlaceholder"
-          aria-label="搜索会话"
+          :aria-label="t('sidebar.searchSessions')"
         />
         <button
           v-if="query.length > 0"
           type="button"
           class="search-clear"
-          title="清空搜索文本"
-          aria-label="清空搜索文本"
+          :title="t('sidebar.clearSearch')"
+          :aria-label="t('sidebar.clearSearch')"
           @click="clearQuery"
         >✕</button>
         <button
           type="button"
           class="search-boost"
           :class="{ on: boostActive }"
-          :title="boostOpen ? '收起增强搜索' : '增强搜索：范围、标签、状态筛选'"
+          :title="boostOpen ? t('sidebar.collapseBoost') : t('sidebar.boostTitle')"
           :aria-expanded="boostOpen"
           @mousedown.stop
           @click.stop="boostOpen = !boostOpen"
@@ -33,8 +33,8 @@
         class="search-refresh"
         :class="{ refreshing }"
         :disabled="refreshing"
-        title="刷新会话列表"
-        aria-label="刷新会话列表"
+        :title="t('sidebar.refreshList')"
+        :aria-label="t('sidebar.refreshList')"
         @click="emitRefresh"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -43,55 +43,62 @@
       </button>
     </div>
     <div v-if="boostOpen" class="boost-menu" @mousedown.stop>
-      <div class="boost-head">搜索范围</div>
+      <div class="boost-head">{{ t("sidebar.searchScopes") }}</div>
       <div class="boost-scopes">
-        <label class="boost-opt"><input v-model="searchScopes.title" type="checkbox" />标题</label>
-        <label class="boost-opt"><input v-model="searchScopes.tag" type="checkbox" />标签</label>
         <label class="boost-opt"
-          ><input v-model="searchScopes.body" type="checkbox" />正文·全文</label
+          ><input v-model="searchScopes.title" type="checkbox" />{{ t("sidebar.scopeTitleCap") }}</label
+        >
+        <label class="boost-opt"
+          ><input v-model="searchScopes.tag" type="checkbox" />{{ t("sidebar.scopeTagCap") }}</label
+        >
+        <label class="boost-opt"
+          ><input v-model="searchScopes.body" type="checkbox" />{{ t("sidebar.scopeBodyFull") }}</label
         >
       </div>
-      <div class="boost-head">项目</div>
+      <div class="boost-head">{{ t("sidebar.project") }}</div>
       <div class="boost-project">
-        <select v-model="projectScope" aria-label="把搜索限定到某个项目">
-          <option value="">全部项目</option>
+        <select v-model="projectScope" :aria-label="t('sidebar.limitToProject')">
+          <option value="">{{ t("sidebar.allProjects") }}</option>
           <option v-for="dir in projectOptions" :key="dir" :value="dir">
             {{ shortPath(dir) }}
           </option>
         </select>
       </div>
-      <div class="boost-head">搜索上限</div>
+      <div class="boost-head">{{ t("sidebar.searchLimit") }}</div>
       <div class="boost-scopes">
         <label class="boost-opt"><input v-model="searchLimit" type="radio" value="100" /> 100</label>
         <label class="boost-opt"><input v-model="searchLimit" type="radio" value="300" /> 300</label>
         <label class="boost-opt"><input v-model="searchLimit" type="radio" value="1000" /> 1000</label>
-        <label class="boost-opt"><input v-model="searchLimit" type="radio" value="all" /> 全部</label>
+        <label class="boost-opt"
+          ><input v-model="searchLimit" type="radio" value="all" /> {{ t("sidebar.all") }}</label
+        >
       </div>
-      <div class="boost-head">语法</div>
+      <div class="boost-head">{{ t("sidebar.syntax") }}</div>
       <dl class="boost-syntax">
         <dt><code>body:词</code></dt>
-        <dd>只搜会话正文</dd>
+        <dd>{{ t("sidebar.synBody") }}</dd>
         <dt><code>#标签</code></dt>
-        <dd>限定标签</dd>
+        <dd>{{ t("sidebar.synTag") }}</dd>
         <dt><code>title:词</code></dt>
-        <dd>限定标题</dd>
+        <dd>{{ t("sidebar.synTitle") }}</dd>
         <dt><code>dir:目录</code></dt>
-        <dd>限定目录</dd>
+        <dd>{{ t("sidebar.synDir") }}</dd>
         <dt><code>"精确短语"</code></dt>
-        <dd>整句匹配</dd>
+        <dd>{{ t("sidebar.synPhrase") }}</dd>
         <dt><code>-词</code></dt>
-        <dd>排除含它的结果</dd>
+        <dd>{{ t("sidebar.synExclude") }}</dd>
       </dl>
-      <p class="boost-note">勾选正文后：标题命中立即显示，正文命中扫描完成后补上。</p>
+      <p class="boost-note">{{ t("sidebar.bodyNote") }}</p>
       <button
         v-if="boostOffDefault"
         type="button"
         class="boost-reset"
-        title="范围、项目、上限全部还原成默认"
+        :title="t('sidebar.resetTitle')"
         @click="resetBoost"
-      >↺ 恢复默认搜索</button>
+        >{{ t("sidebar.resetSearch") }}</button
+      >
     </div>
-    <p v-if="bodyScanning" class="body-scan">⟳ 正在搜索正文…</p>
+    <p v-if="bodyScanning" class="body-scan">{{ t("sidebar.bodyScanning") }}</p>
     <div v-if="allTags.length > 0" class="tag-shelf-zone">
       <div id="tag-shelf" class="tag-shelf">
         <button
@@ -101,7 +108,11 @@
           class="tag-filter"
           :class="{ on: activeTagFilters.includes(tag) }"
           :style="{ '--tag-c': tagColor(tag) }"
-          :title="activeTagFilters.includes(tag) ? '点击取消这个筛选' : '只看带这个标签的会话'"
+          :title="
+            activeTagFilters.includes(tag)
+              ? t('sidebar.clearTagFilter')
+              : t('sidebar.filterByTag')
+          "
           @click="toggleTagFilter(tag)"
           @contextmenu.prevent="openShelfTagMenu(tag, $event)"
         >{{ activeTagFilters.includes(tag) ? "✓ " : "" }}{{ tag }}</button>
@@ -115,7 +126,9 @@
         @click="shelfExpanded = !shelfExpanded"
       >
         <span class="shelf-toggle-caret">{{ shelfShowAll ? "▾" : "▸" }}</span
-        >{{ shelfShowAll ? "收起标签" : `还有 ${allTags.length - SHELF_PREVIEW} 个标签` }}
+        >{{
+          shelfShowAll ? t("sidebar.collapseTags") : t("sidebar.moreTags", { n: allTags.length - SHELF_PREVIEW })
+        }}
       </button>
     </div>
     <div v-if="favoriteSessions.length > 0 && !searching" class="fav-zone">
@@ -127,7 +140,7 @@
         @click="favOpen = !favOpen"
       >
         <span class="archive-caret">{{ favOpen ? "▾" : "▸" }}</span>
-        <span>📌 置顶</span>
+        <span>{{ t("sidebar.pinned") }}</span>
         <span class="proj-count">{{ favoriteSessions.length }}</span>
       </button>
       <div v-if="favOpen" id="favorite-list" class="fav-list">
@@ -150,21 +163,22 @@
               :key="tag"
               class="tag-chip clickable"
               :style="{ color: tagColor(tag), background: tagBg(tag) }"
-              title="只看带这个标签的会话"
+              :title="t('sidebar.filterByTag')"
               @click.stop="filterByTag(tag)"
-            >{{ tag }}</span>
+              >{{ tag }}</span
+            >
             <span
               v-if="rowTags(sess.id, 1).more > 0"
               class="tag-chip tag-more"
-              :title="rowTags(sess.id, 1).hidden.join('、')"
+              :title="rowTags(sess.id, 1).hidden.join(listSep)"
             >+{{ rowTags(sess.id, 1).more }}</span>
             <span class="fav-time">{{ relTime(sess.updatedAt) }}</span>
           </button>
           <button
             type="button"
             class="fav-unpin"
-            title="取消置顶"
-            aria-label="取消置顶"
+            :title="t('sidebar.unpin')"
+            :aria-label="t('sidebar.unpin')"
             @click="unpinFavorite(sess.id)"
           >×</button>
         </div>
@@ -174,16 +188,18 @@
       <button
         type="button"
         class="head-caret"
-        :title="projectsOpen ? '收起项目列表' : '展开项目列表'"
+        :title="projectsOpen ? t('sidebar.collapseProjects') : t('sidebar.expandProjects')"
         :aria-expanded="projectsOpen"
         @click="projectsOpen = !projectsOpen"
-      >{{ projectsOpen ? "▾" : "▸" }}</button>
-      <button type="button" class="head-label" @click="projectsOpen = !projectsOpen">项目</button>
+        >{{ projectsOpen ? "▾" : "▸" }}</button>
+      <button type="button" class="head-label" @click="projectsOpen = !projectsOpen">{{
+        t("sidebar.projects")
+      }}</button>
       <span class="head-actions">
         <button
           type="button"
           class="head-icon"
-          title="选择一个项目目录加进侧栏，可在其中新建对话"
+          :title="t('sidebar.addDirTitle')"
           @click="emitAddDir"
         >＋</button>
       </span>
@@ -198,7 +214,7 @@
           <button
             type="button"
             class="proj-caret"
-            :title="isOpen(group) ? '收起这个目录' : '展开这个目录'"
+            :title="isOpen(group) ? t('sidebar.collapseDir') : t('sidebar.expandDir')"
             @click="toggleDir(group.directory)"
           >{{ isOpen(group) ? "▾" : "▸" }}</button>
           <button
@@ -215,7 +231,7 @@
           <button
             type="button"
             class="proj-add"
-            title="在这个项目里新建对话"
+            :title="t('sidebar.newChatHere')"
             @click="emitCreateIn(group.directory)"
           >＋</button>
         </div>
@@ -229,8 +245,8 @@
                 :disabled="queryActive"
                 :title="
                   isBranchCollapsed(row.session.id)
-                    ? `展开这个分支（折叠了 ${row.descendantCount} 个子会话）`
-                    : '收起这个分支的子会话'
+                    ? t('sidebar.expandBranch', { n: row.descendantCount })
+                    : t('sidebar.collapseBranch')
                 "
                 :aria-expanded="!isBranchCollapsed(row.session.id)"
                 @click.stop="toggleBranch(row.session.id)"
@@ -279,29 +295,35 @@
                   :key="tag"
                   class="tag-chip clickable"
                   :style="{ color: tagColor(tag), background: tagBg(tag) }"
-                  title="只看带这个标签的会话"
+                  :title="t('sidebar.filterByTag')"
                   @click.stop="filterByTag(tag)"
-                >{{ tag }}</span>
+                  >{{ tag }}</span
+                >
                 <span
                   v-if="rowTags(row.session.id, 2).more > 0"
                   class="tag-chip tag-more"
-                  :title="rowTags(row.session.id, 2).hidden.join('、')"
+                  :title="rowTags(row.session.id, 2).hidden.join(listSep)"
                 >+{{ rowTags(row.session.id, 2).more }}</span>
               </button>
               <button
                 v-if="pendingAction?.sessionId === row.session.id && pendingAction.kind === 'pin'"
                 type="button"
                 class="sess-confirm"
-                :title="store.pins.includes(row.session.id) ? '确认取消置顶' : '确认置顶'"
+                :title="
+                  store.pins.includes(row.session.id)
+                    ? t('sidebar.confirmUnpin')
+                    : t('sidebar.confirmPin')
+                "
                 @mousedown.stop
                 @click.stop="confirmRowAction(row.session.id, 'pin')"
-              >确认</button>
+                >{{ t("sidebar.confirm") }}</button
+              >
               <button
                 v-else
                 type="button"
                 class="pin-star"
                 :class="{ on: store.pins.includes(row.session.id) }"
-                :title="store.pins.includes(row.session.id) ? '取消置顶' : '置顶'"
+                :title="store.pins.includes(row.session.id) ? t('sidebar.unpin') : t('sidebar.pin')"
                 @mousedown.stop
                 @click.stop="armRowAction(row.session.id, 'pin')"
               >{{ store.pins.includes(row.session.id) ? "★" : "☆" }}</button>
@@ -309,15 +331,16 @@
                 v-if="pendingAction?.sessionId === row.session.id && pendingAction.kind === 'archive'"
                 type="button"
                 class="sess-confirm"
-                title="确认归档会话"
+                :title="t('sidebar.confirmArchive')"
                 @mousedown.stop
                 @click.stop="confirmRowAction(row.session.id, 'archive')"
-              >确认</button>
+                >{{ t("sidebar.confirm") }}</button
+              >
               <button
                 v-else
                 type="button"
                 class="sess-archive"
-                title="归档会话（在下方归档区可恢复）"
+                :title="t('sidebar.archiveTitle')"
                 @mousedown.stop
                 @click.stop="armRowAction(row.session.id, 'archive')"
               >📦</button>
@@ -329,7 +352,7 @@
                 type="button"
                 class="sess-snip"
                 :style="{ paddingLeft: `${22 + row.depth * 14 + 10}px` }"
-                title="定位到这条消息所在的回合"
+                :title="t('sidebar.locateMessage')"
                 @click="jumpToHit(hit)"
               >
                 <template v-for="(segment, index) in snippetSegments(hit)" :key="index">
@@ -341,7 +364,9 @@
           </template>
         </template>
       </template>
-      <p v-if="visibleGroups.length === 0 && !bodyScanning" class="group-empty">没有匹配的会话</p>
+      <p v-if="visibleGroups.length === 0 && !bodyScanning" class="group-empty">{{
+        t("sidebar.noMatches")
+      }}</p>
     </nav>
 
     <div class="archive-zone">
@@ -353,30 +378,34 @@
         @click="archiveOpen = !archiveOpen"
       >
         <span class="archive-caret">{{ archiveOpen ? "▾" : "▸" }}</span>
-        <span>📦 归档</span>
+        <span>{{ t("sidebar.archive") }}</span>
         <span v-if="archiveCount > 0" class="proj-count">{{ archiveCount }}</span>
       </button>
       <div v-if="archiveOpen" id="archive-list" class="archive-list">
         <div v-for="dir in archivedDirectoryViews" :key="`dir:${dir.path}`" class="arch-row">
           <span class="arch-name" :title="dir.path">📁 {{ shortPath(dir.path) }}</span>
-          <span class="arch-count" :title="`${dir.hiddenCount} 个会话被隐藏`">{{ dir.hiddenCount }}</span>
+          <span class="arch-count" :title="t('sidebar.hiddenSessions', { n: dir.hiddenCount })">{{
+            dir.hiddenCount
+          }}</span>
           <button
             type="button"
             class="arch-restore"
-            title="恢复这个目录（含以后新增的会话）"
+            :title="t('sidebar.restoreDir')"
             @click="onRestoreDirectory(dir.path)"
-          >↩</button>
+            >↩</button
+          >
         </div>
         <div v-for="sess in archivedSessionViews" :key="`sess:${sess.id}`" class="arch-row">
           <span class="arch-name" :title="sess.title">{{ sess.title }}</span>
           <button
             type="button"
             class="arch-restore"
-            title="恢复这个会话"
+            :title="t('sidebar.restoreSession')"
             @click="onRestoreSession(sess.id)"
-          >↩</button>
+            >↩</button
+          >
         </div>
-        <p v-if="archiveCount === 0" class="group-empty">归档区是空的</p>
+        <p v-if="archiveCount === 0" class="group-empty">{{ t("sidebar.archiveEmpty") }}</p>
       </div>
     </div>
 
@@ -396,7 +425,7 @@
         class="ctx-menu-item"
         @click="togglePinFromMenu"
       >
-        {{ menuPinned ? "★ 取消置顶" : "☆ 置顶" }}
+        {{ menuPinned ? t("sidebar.menuUnpin") : t("sidebar.menuPin") }}
       </button>
       <button
         v-if="menu.turnId"
@@ -405,37 +434,50 @@
         class="ctx-menu-item"
         @click="toggleMarkFromMenu"
       >
-        {{ menuMarked ? "★ 取消关键标记" : "☆ 标记为关键对话" }}
+        {{ menuMarked ? t("sidebar.menuUnmark") : t("sidebar.menuMark") }}
       </button>
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">✏️ 重命名</button>
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">🏷 设置标签…</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">{{
+        t("sidebar.rename")
+      }}</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">{{
+        t("sidebar.setTags")
+      }}</button>
       <button
         v-if="menuInDirectory"
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        title="点画布上的一张卡片，或在侧栏点一个会话，与它并排对比"
+        :title="t('sidebar.compareTitle')"
         @click="compareFromMenu"
-      >⇄ 与另一会话对比…</button>
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">📋 复制会话 ID</button>
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">↗ 在终端中打开</button>
+        >{{ t("sidebar.compare") }}</button
+      >
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="copySessionId">{{
+        t("sidebar.copyId")
+      }}</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInTerminal">{{
+        t("sidebar.openTerminal")
+      }}</button>
       <button
         v-if="store.capabilities.compress"
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        title="把历史折叠成一份摘要：历史仍保留，之后的对话只携带摘要与最近几轮"
+        :title="t('sidebar.compressTitle')"
         @click="compressFromMenu"
-      >🗜 压缩会话…</button>
+        >{{ t("sidebar.compress") }}</button
+      >
       <button
         v-if="store.capabilities.exportBranch"
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        :title="menuTurn ? '把这个分支截至当前回合复制成一份独立会话，可在任何 opencode 客户端继续' : '把这条分支复制成一份独立会话，可在任何 opencode 客户端继续'"
+        :title="menuTurn ? t('sidebar.exportTitleTurn') : t('sidebar.exportTitle')"
         @click="exportFromMenu"
-      >📤 导出为独立会话</button>
-      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginArchive">📦 归档会话</button>
+        >{{ t("sidebar.export") }}</button
+      >
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="beginArchive">{{
+        t("sidebar.archiveSession")
+      }}</button>
       <button
         v-if="store.capabilities.deleteSession"
         type="button"
@@ -443,7 +485,7 @@
         class="ctx-menu-item danger"
         @click="beginDelete"
       >
-        🗑 删除会话…
+        {{ t("sidebar.deleteSession") }}
       </button>
     </div>
 
@@ -456,7 +498,7 @@
       @keydown.tab="trapMenuTab"
     >
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginDirCreate">
-        ＋ 在此目录新建对话
+        {{ t("sidebar.dirNewChat") }}
       </button>
       <button
         v-if="dirSessionCount(dirMenu.directory) > 0"
@@ -465,17 +507,17 @@
         class="ctx-menu-item"
         @click="beginDirArchive"
       >
-        📦 归档这个目录…
+        {{ t("sidebar.dirArchive") }}
       </button>
       <button
         v-else
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        title="只从侧栏移除这个空目录，不动磁盘"
+        :title="t('sidebar.dirRemoveTitle')"
         @click="beginDirRemove"
       >
-        ✕ 移除这个目录
+        {{ t("sidebar.dirRemove") }}
       </button>
     </div>
 
@@ -489,16 +531,19 @@
     >
       <div class="tag-del-confirm flat">
         <span class="tdc-text"
-          >「{{ shelfTagMenu.tag }}」挂在 {{ tagCount(shelfTagMenu.tag) }} 个会话上</span
+          >{{ t("sidebar.tagOnSessions", { tag: shelfTagMenu.tag, n: tagCount(shelfTagMenu.tag) }) }}</span
         >
         <div class="tdc-btns">
           <button
             type="button"
             class="tdc-btn danger"
-            title="从所有会话删除这个标签（可撤销）"
+            :title="t('sidebar.deleteTagFromAll')"
             @click="confirmShelfDelete"
-          >全部删除</button>
-          <button type="button" class="tdc-btn" @click="shelfTagMenu = null">取消</button>
+            >{{ t("sidebar.deleteAll") }}</button
+          >
+          <button type="button" class="tdc-btn" @click="shelfTagMenu = null">{{
+            t("sidebar.cancel")
+          }}</button>
         </div>
       </div>
     </div>
@@ -511,18 +556,18 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
-      <div class="tag-menu-head">这个会话的标签</div>
+      <div class="tag-menu-head">{{ t("sidebar.sessionTags") }}</div>
       <div v-if="allTags.length > TAG_SEARCH_MIN" class="tag-menu-search">
         <span>⌕</span>
         <input
           v-model="tagSearch"
           type="text"
-          placeholder="搜索标签"
-          aria-label="搜索标签"
+          :placeholder="t('sidebar.searchTags')"
+          :aria-label="t('sidebar.searchTags')"
           @keydown.esc.stop="onTagMenuEsc"
         />
       </div>
-      <div class="tag-menu-list" role="group" aria-label="标签列表">
+      <div class="tag-menu-list" role="group" :aria-label="t('sidebar.tagList')">
         <template v-for="tag in menuTags" :key="tag">
           <label class="tag-opt">
             <input
@@ -539,35 +584,47 @@
               class="tag-dot"
               :class="{ picked: tagColorPicked(tag) }"
               :style="{ background: tagColor(tag) }"
-              :title="tagColorPicked(tag) ? '换个颜色（点 ✕ 恢复默认）' : '给这个标签选个颜色'"
-              :aria-label="tagColorPicked(tag) ? `修改「${tag}」的颜色` : `给「${tag}」选个颜色`"
+              :title="
+                tagColorPicked(tag) ? t('sidebar.changeColor') : t('sidebar.pickColor')
+              "
+              :aria-label="
+                tagColorPicked(tag)
+                  ? t('sidebar.editTagColor', { tag })
+                  : t('sidebar.chooseTagColor', { tag })
+              "
               @click.stop.prevent="toggleColorEdit(tag)"
             ></button>
             <button
               type="button"
               class="tag-del"
               :class="{ arming: delConfirm === tag }"
-              title="删除这个标签"
+              :title="t('sidebar.deleteTagTitle')"
               @click.stop.prevent="delConfirm = delConfirm === tag ? null : tag"
             >🗑</button>
           </label>
           <div v-if="delConfirm === tag" class="tag-del-confirm" @mousedown.stop>
-            <span class="tdc-text">「{{ tag }}」挂在 {{ tagCount(tag) }} 个会话上</span>
+            <span class="tdc-text"
+              >{{ t("sidebar.tagOnSessions", { tag, n: tagCount(tag) }) }}</span
+            >
             <div class="tdc-btns">
               <button
                 v-if="draftTags.includes(tag)"
                 type="button"
                 class="tdc-btn"
-                title="只从当前会话移除这个标签"
+                :title="t('sidebar.removeLocalTitle')"
                 @click="confirmDelLocal(tag)"
-              >仅本会话移除</button>
+                >{{ t("sidebar.removeLocal") }}</button
+              >
               <button
                 type="button"
                 class="tdc-btn danger"
-                title="从所有会话删除这个标签（可撤销）"
+                :title="t('sidebar.deleteTagFromAll')"
                 @click="confirmDelAll(tag)"
-              >全部删除</button>
-              <button type="button" class="tdc-btn" @click="delConfirm = null">取消</button>
+                >{{ t("sidebar.deleteAll") }}</button
+              >
+              <button type="button" class="tdc-btn" @click="delConfirm = null">{{
+                t("sidebar.cancel")
+              }}</button>
             </div>
           </div>
           <div v-if="colorEdit === tag" class="tag-palette" @mousedown.stop>
@@ -577,8 +634,8 @@
                 class="pal-swatch pal-auto"
                 :class="{ picked: !tagColorPicked(tag) }"
                 :style="{ '--auto-c': tagColor(tag) }"
-                title="按名字自动配色"
-                aria-label="按名字自动配色"
+                :title="t('sidebar.autoColor')"
+                :aria-label="t('sidebar.autoColor')"
                 @click="pickTagColor(tag, null)"
               ></button>
               <button
@@ -588,8 +645,8 @@
                 class="pal-swatch"
                 :class="{ picked: tagColorPicked(tag) && hueOf(tag) === hue }"
                 :style="{ background: `hsl(${hue} 55% 42%)` }"
-                :title="`色相 ${hue}`"
-                :aria-label="`色相 ${hue}`"
+                :title="t('sidebar.hue', { hue })"
+                :aria-label="t('sidebar.hue', { hue })"
                 @click="pickTagColor(tag, hue)"
               ></button>
             </div>
@@ -600,20 +657,20 @@
               max="359"
               :value="hueDrag ?? hueOf(tag)"
               :style="{ '--thumb-c': `hsl(${hueDrag ?? hueOf(tag)} 55% 42%)` }"
-              aria-label="自定义色相"
-              title="自定义色相"
+              :aria-label="t('sidebar.customHue')"
+              :title="t('sidebar.customHue')"
               @input="dragHue"
               @change="setEditTagHue(tag, $event)"
             />
           </div>
         </template>
-        <p v-if="menuTags.length === 0" class="tag-menu-empty">没有匹配的标签</p>
+        <p v-if="menuTags.length === 0" class="tag-menu-empty">{{ t("sidebar.noTagMatches") }}</p>
       </div>
       <form class="tag-new" @submit.prevent="addNewTag">
         <input
           v-model="newTagText"
           type="text"
-          placeholder="＋ 新建标签，回车添加"
+          :placeholder="t('sidebar.newTagPlaceholder')"
           @keydown.esc.stop="onTagMenuEsc"
         />
         <div class="tag-palette" @mousedown.stop>
@@ -623,8 +680,8 @@
               class="pal-swatch pal-auto"
               :class="{ picked: newTagHue === null }"
               :style="{ '--auto-c': tagColor(newTagText.trim() || '新标签') }"
-                title="按名字自动配色"
-                aria-label="按名字自动配色"
+              :title="t('sidebar.autoColor')"
+              :aria-label="t('sidebar.autoColor')"
               @click="newTagHue = null"
             ></button>
             <button
@@ -634,8 +691,8 @@
               class="pal-swatch"
               :class="{ picked: newTagHue === hue }"
               :style="{ background: `hsl(${hue} 55% 42%)` }"
-                :title="`色相 ${hue}`"
-                :aria-label="`色相 ${hue}`"
+              :title="t('sidebar.hue', { hue })"
+              :aria-label="t('sidebar.hue', { hue })"
               @click="newTagHue = newTagHue === hue ? null : hue"
             ></button>
           </div>
@@ -646,56 +703,58 @@
             max="359"
             :value="newTagHue ?? newTagAutoHue"
             :style="{ '--thumb-c': `hsl(${newTagHue ?? newTagAutoHue} 55% 42%)` }"
-            aria-label="新建标签的自定义色相"
-            title="自定义色相"
+            :aria-label="t('sidebar.newTagHue')"
+            :title="t('sidebar.customHue')"
             @input="setNewTagHue"
           />
         </div>
       </form>
       <div v-if="subtreeAsk" class="tag-menu-subtree" @mousedown.stop>
         <span class="subtree-text"
-          >也把「{{ subtreeAsk.tags.join("、") }}」应用到 {{ subtreeAsk.count }} 个子会话？</span
+          >{{
+            t("sidebar.subtreeAsk", { tags: subtreeAsk.tags.join(listSep), n: subtreeAsk.count })
+          }}</span
         >
         <div class="subtree-btns">
           <button
             type="button"
             class="subtree-btn apply"
-            title="把这些标签并集写入每个子孙会话（可撤销）"
+            :title="t('sidebar.subtreeApplyTitle')"
             @click="answerSubtreeApply"
-            >应用</button
+            >{{ t("sidebar.apply") }}</button
           >
           <button
             type="button"
             class="subtree-btn"
-            title="这些标签只留在当前会话上"
+            :title="t('sidebar.subtreeSkipTitle')"
             @click="answerSubtreeSkip"
-            >仅本会话</button
+            >{{ t("sidebar.thisSession") }}</button
           >
         </div>
       </div>
       <div v-if="draftTags.length > 0" class="tag-menu-pref" @mousedown.stop>
-        <span class="pref-label">分叉时继承标签</span>
-        <div class="pref-options" role="radiogroup" aria-label="分叉时继承标签">
+        <span class="pref-label">{{ t("sidebar.forkPrefLabel") }}</span>
+        <div class="pref-options" role="radiogroup" :aria-label="t('sidebar.forkPrefLabel')">
           <button
             type="button"
             :class="{ active: forkPref === null }"
-            title="每次分叉都询问是否继承"
+            :title="t('sidebar.prefAskTitle')"
             @click="setPref(null)"
-            >每次问</button
+            >{{ t("sidebar.prefAsk") }}</button
           >
           <button
             type="button"
             :class="{ active: forkPref === true }"
-            title="分叉出的新会话自动带上本会话的全部标签"
+            :title="t('sidebar.prefAlwaysTitle')"
             @click="setPref(true)"
-            >始终</button
+            >{{ t("sidebar.prefAlways") }}</button
           >
           <button
             type="button"
             :class="{ active: forkPref === false }"
-            title="分叉出的新会话不带标签，也不再询问"
+            :title="t('sidebar.prefNeverTitle')"
             @click="setPref(false)"
-            >从不</button
+            >{{ t("sidebar.prefNever") }}</button
           >
         </div>
       </div>
@@ -722,6 +781,7 @@ import {
 } from "../../../shared/session-tree";
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
+import { listSep, t } from "../i18n";
 import { panels, persistLayout } from "../layout";
 import {
   addDirectory,
@@ -826,11 +886,11 @@ const boostActive = computed(
 
 const searchPlaceholder = computed(() => {
   const parts = [
-    searchScopes.title && "标题",
-    searchScopes.tag && "标签",
-    searchScopes.body && "正文",
+    searchScopes.title && t("sidebar.scopeTitle"),
+    searchScopes.tag && t("sidebar.scopeTag"),
+    searchScopes.body && t("sidebar.scopeBody"),
   ].filter(Boolean);
-  return `搜索${parts.join("、")}…`;
+  return t("sidebar.searchPlaceholder", { parts: parts.join(listSep.value) });
 });
 
 /** Any boost option off its out-of-the-box value — the reset button's cue. */

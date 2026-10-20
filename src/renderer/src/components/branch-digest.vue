@@ -3,13 +3,13 @@
     v-if="!open"
     type="button"
     class="panel-pill"
-    title="这个故事里每条分支的摘要"
+    :title="t('branch.digestPillTitle')"
     @click="open = true"
-  >⑂ 分支摘要</button>
+  >{{ t("branch.digestTitle") }}</button>
   <div v-else class="digest-panel">
     <div class="digest-head">
-      <span>⑂ 分支摘要 · {{ digests.length }} 条</span>
-      <button type="button" title="收起" @click="open = false">✕</button>
+      <span>{{ t("branch.digestCount", { n: digests.length }) }}</span>
+      <button type="button" :title="t('branch.collapse')" @click="open = false">✕</button>
     </div>
     <div class="digest-list">
       <button
@@ -28,19 +28,32 @@
             v-if="canCompare(digest)"
             class="digest-cmp"
             role="button"
-            :title="`与「${selectedTitle}」并排对比`"
+            :title="t('branch.compareWith', { title: selectedTitle })"
             @click.stop="compareWith(digest)"
           >⇄</span>
         </span>
         <span v-if="digest.forkedFrom" class="digest-fork">
-          从「{{ digest.forkedFrom.sessionTitle }}」的『{{ digest.forkedFrom.turnTitle }}』分出
+          {{
+            t("branch.forkedFrom", {
+              session: digest.forkedFrom.sessionTitle,
+              turn: digest.forkedFrom.turnTitle,
+            })
+          }}
         </span>
-        <span v-if="digest.attempt !== null && digest.attempt > 1" class="digest-attempt" title="同一回合的重试分支，按创建先后编号">
-          第 {{ digest.attempt }} 次
+        <span
+          v-if="digest.attempt !== null && digest.attempt > 1"
+          class="digest-attempt"
+          :title="t('branch.attemptTitle')"
+        >
+          {{ t("branch.attempt", { n: digest.attempt }) }}
         </span>
         <span class="digest-meta">
-          {{ digest.turnCount }} 个回合 · {{ formatTokens(digest.outputTokens) }} · 最近：{{
-            digest.lastTurnTitle || "还没有回合"
+          {{
+            t("branch.rowMeta", {
+              n: digest.turnCount,
+              tokens: formatTokens(digest.outputTokens),
+              last: digest.lastTurnTitle || t("branch.noTurns"),
+            })
           }}<template v-if="digest.hasError"> ⚠</template>
         </span>
       </button>
@@ -53,6 +66,7 @@ import { computed, ref } from "vue";
 import { type BranchDigest, buildBranchDigests } from "../../../shared/branch-digest";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { formatTokens } from "../format";
+import { t } from "../i18n";
 import { canvasSessions, enterCompare, selectTurn, store, turnGraph } from "../state";
 
 const emit = defineEmits<{ jump: [node: TurnNode] }>();

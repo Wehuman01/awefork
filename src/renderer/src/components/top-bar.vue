@@ -3,7 +3,7 @@
     <div class="brand">
       <img class="logo" :src="logoUrl" alt="" />
       <span class="brand-name">awefork</span>
-      <span class="brand-sub">分支工作台</span>
+      <span class="brand-sub">{{ t("topbar.brandSub") }}</span>
     </div>
     <div v-if="backendList.length > 1" class="backend-wrap">
       <button
@@ -11,8 +11,8 @@
         class="backend-pill"
         :aria-expanded="backendOpen"
         aria-haspopup="menu"
-        aria-label="Agent 后端"
-        :title="`切换 Agent 后端（当前 ${activeLabel}）`"
+        :aria-label="t('topbar.backends')"
+        :title="t('topbar.switchBackend', { label: activeLabel })"
         @click.stop="toggleBackendMenu"
       >
         <span aria-hidden="true">🤖</span>
@@ -23,7 +23,7 @@
         <span v-if="activeVersionWarning" class="backend-warn" :title="activeVersionWarning" role="status">⚠</span>
         <span class="chev">{{ backendOpen ? "⌃" : "⌄" }}</span>
       </button>
-      <div v-if="backendOpen" class="backend-menu" role="menu" aria-label="Agent 后端">
+      <div v-if="backendOpen" class="backend-menu" role="menu" :aria-label="t('topbar.backends')">
         <button
           v-for="entry in backendList"
           :key="entry.id"
@@ -67,7 +67,7 @@
     </div>
     <div class="topbar-status" :class="connectionError ? 'bad' : 'ok'">
       <span class="status-dot"></span>
-      {{ connectionError ? `${activeLabel} 未连接` : `${activeLabel} 已连接` }}
+      {{ connectionError ? t("topbar.disconnected", { label: activeLabel }) : t("topbar.connected", { label: activeLabel }) }}
     </div>
     <button
       type="button"
@@ -84,7 +84,7 @@
     <button
       type="button"
       class="icon-btn cmdk-btn"
-      title="命令面板（⌘K / Ctrl+K）"
+      :title="t('topbar.commandPalette')"
       @click="togglePalette()"
     >⌘K</button>
     <div class="lang-switch" role="group" aria-label="Language">

@@ -9,31 +9,31 @@
       class="interaction-dialog compress-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label="压缩会话"
+      :aria-label="t('compress.ariaLabel')"
       @click.stop
     >
-      <p class="interaction-kicker">🧹 压缩会话</p>
-      <h2>把「{{ ask.title }}」的历史折叠成摘要</h2>
+      <p class="interaction-kicker">{{ t("compress.kicker") }}</p>
+      <h2>{{ t("compress.title", { title: ask.title }) }}</h2>
       <ul class="compress-points">
-        <li>历史消息仍完整保留，随时可以回看</li>
-        <li>之后的对话只携带摘要 + 最近几轮，不再带上全部历史</li>
-        <li>摘要由下面的模型生成，可以换成更便宜的</li>
+        <li>{{ t("compress.point1") }}</li>
+        <li>{{ t("compress.point2") }}</li>
+        <li>{{ t("compress.point3") }}</li>
       </ul>
       <div class="compress-model">
-        <span class="compress-model-label">摘要模型</span>
-        <ModelPicker v-model="model" :models="store.models" title="选一个写摘要的模型" />
+        <span class="compress-model-label">{{ t("compress.modelLabel") }}</span>
+        <ModelPicker v-model="model" :models="store.models" :title="t('compress.modelTitle')" />
       </div>
-      <p v-if="model === null" class="compress-model-hint">这个后端要求指定模型，请选一个</p>
+      <p v-if="model === null" class="compress-model-hint">{{ t("compress.modelHint") }}</p>
       <div class="interaction-actions">
-        <button type="button" class="interaction-deny" @click="cancel">取消</button>
+        <button type="button" class="interaction-deny" @click="cancel">{{ t("compress.cancel") }}</button>
         <button
           type="button"
           class="interaction-allow"
           :disabled="model === null"
           @click="confirm"
-        >🗜 开始压缩</button>
+        >{{ t("compress.confirm") }}</button>
       </div>
-      <p class="interaction-timeout">Esc 取消</p>
+      <p class="interaction-timeout">{{ t("compress.esc") }}</p>
     </section>
   </div>
 </template>
@@ -41,6 +41,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ModelChoice } from "../../../shared/types";
+import { t } from "../i18n";
 import { answerCompressAsk, store } from "../state";
 import ModelPicker from "./model-picker.vue";
 

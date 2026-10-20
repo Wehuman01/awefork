@@ -22,8 +22,8 @@
           :class="{ hl: highlighted === -1 }"
           @click="pick(null)"
         >
-          <span class="vp-name">默认</span>
-          <span class="vp-sub">模型自带的档位</span>
+          <span class="vp-name">{{ t("variant.default") }}</span>
+          <span class="vp-sub">{{ t("variant.defaultSub") }}</span>
         </button>
         <button
           v-for="(v, i) in variants"
@@ -43,6 +43,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { ModelChoice, ModelOption } from "../../../shared/types";
+import { t } from "../i18n";
 
 const props = defineProps<{
   /** Current model choice; its variant drives the label and highlight. */
@@ -80,14 +81,14 @@ const variants = computed(() => {
 const disabled = computed(() => variants.value.length === 0);
 
 const title = computed(() => {
-  if (!props.model) return "选择具体模型后可调思考强度";
-  if (disabled.value) return "该模型没有思考档位";
-  return props.title ?? "这次运行用多大思考强度";
+  if (!props.model) return t("variant.titleNoModel");
+  if (disabled.value) return t("variant.titleNone");
+  return props.title ?? t("variant.title");
 });
 
 const label = computed(() => {
   const variant = props.model?.variant;
-  return variant ? `思考 · ${variant}` : "思考";
+  return variant ? t("variant.labelWith", { variant }) : t("variant.label");
 });
 
 function toggle(): void {

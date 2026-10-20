@@ -15,6 +15,11 @@
  * is `"zh"` so the UI stays Chinese unless the user picks EN.
  */
 import { computed, ref } from "vue";
+import { dict as dictDialogs } from "./i18n-dialogs";
+import { dict as dictMessages } from "./i18n-messages";
+import { dict as dictPanels } from "./i18n-panels";
+import { dict as dictShell } from "./i18n-shell";
+import { dict as dictState } from "./i18n-state";
 
 export type Locale = "zh" | "en";
 
@@ -148,6 +153,12 @@ const DICT: Dict = {
   // ── app-level (actionError toast) ──────────────────────────────────────
   "app.clickToClose": { zh: "（点击关闭）", en: " (click to close)" },
 };
+
+// Per-surface dictionaries (state/shell/dialogs/messages/panels) live in
+// sibling i18n-*.ts modules and are merged in here so every call site uses
+// the single `t()` below. The fragments import nothing from this file, so
+// the merge stays cycle-free.
+Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels);
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 

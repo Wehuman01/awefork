@@ -39,15 +39,15 @@
       <SideBar :style="panelStyle('sidebar')" />
       <div
         class="col-handle"
-        title="拖拽调宽 · 双击折叠/展开"
+        :title="t('app.dragHandle')"
         @mousedown="startDrag('sidebar', $event)"
         @dblclick="togglePanel('sidebar')"
       >
         <button
           type="button"
           class="edge-toggle left-edge"
-          :title="panels.sidebar.collapsed ? '展开侧栏' : '折叠侧栏'"
-          :aria-label="panels.sidebar.collapsed ? '展开侧栏' : '折叠侧栏'"
+          :title="panels.sidebar.collapsed ? t('app.expandSidebar') : t('app.collapseSidebar')"
+          :aria-label="panels.sidebar.collapsed ? t('app.expandSidebar') : t('app.collapseSidebar')"
           @mousedown.stop
           @click.stop="togglePanel('sidebar')"
           @dblclick.stop
@@ -56,15 +56,15 @@
       <SessionCanvas />
       <div
         class="col-handle"
-        title="拖拽调宽 · 双击折叠/展开"
+        :title="t('app.dragHandle')"
         @mousedown="startDrag('context', $event)"
         @dblclick="togglePanel('context')"
       >
         <button
           type="button"
           class="edge-toggle right-edge"
-          :title="panels.context.collapsed ? '展开右栏' : '折叠右栏'"
-          :aria-label="panels.context.collapsed ? '展开右栏' : '折叠右栏'"
+          :title="panels.context.collapsed ? t('app.expandContext') : t('app.collapseContext')"
+          :aria-label="panels.context.collapsed ? t('app.expandContext') : t('app.collapseContext')"
           @mousedown.stop
           @click.stop="togglePanel('context')"
           @dblclick.stop
@@ -86,22 +86,22 @@
       {{ store.actionError }}{{ t("app.clickToClose") }}
     </div>
     <div v-if="store.deletedToast" class="toast banner-undo" role="status" aria-live="polite">
-      <span class="undo-text">已删除「{{ store.deletedToast.title }}」（⌘/Ctrl+Z 或历史面板可撤销）</span>
+      <span class="undo-text">{{ t("app.sessionDeleted", { title: store.deletedToast.title }) }}</span>
       <button
         type="button"
         class="undo-btn"
-        title="把会话放回来"
+        :title="t('app.undoDeleteSession')"
         @click="undoTo(store.deletedToast.entryId)"
-      >撤销</button>
+      >{{ t("app.undo") }}</button>
     </div>
     <div v-if="store.tagDeletedToast" class="toast banner-undo tag-undo" role="status" aria-live="polite">
-      <span class="undo-text">已删除标签「{{ store.tagDeletedToast.tag }}」</span>
+      <span class="undo-text">{{ t("app.tagDeleted", { tag: store.tagDeletedToast.tag }) }}</span>
       <button
         type="button"
         class="undo-btn"
-        title="把标签加回所有会话"
+        :title="t('app.undoTagDelete')"
         @click="undoTo(store.tagDeletedToast.entryId)"
-      >撤销</button>
+      >{{ t("app.undo") }}</button>
     </div>
     <div v-if="store.updateToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.updateToast }}

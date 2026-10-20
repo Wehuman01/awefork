@@ -8,7 +8,7 @@
     @drop.prevent="onDrop"
   >
     <div class="cmp-composer-head">
-      <span>⇄ 同题投递</span>
+      <span>{{ t("compare.title") }}</span>
       <input
         ref="fileInputEl"
         type="file"
@@ -21,16 +21,16 @@
         v-if="allowAttachments"
         type="button"
         class="attach"
-        title="添加附件（图片、文档、文本）"
+        :title="t('compare.addAttachment')"
         @click="fileInputEl?.click()"
       >📎</button>
       <button
         type="button"
         class="preview"
         :class="{ on: previewing }"
-        :title="previewing ? '回到编辑' : '预览发送后的 Markdown 效果'"
+        :title="previewing ? t('compare.backToEdit') : t('compare.previewTitle')"
         @click="previewing = !previewing"
-      >{{ previewing ? "✎ 编辑" : "👁 预览" }}</button>
+      >{{ previewing ? t("compare.edit") : t("compare.preview") }}</button>
     </div>
 
     <div class="cmp-targets">
@@ -39,28 +39,28 @@
           <input v-model="selected[target.id]" type="checkbox" />
           <span :title="target.title">{{ target.title }}</span>
         </label>
-        <span v-if="target.running" class="cmp-target-running">○ 运行中</span>
+        <span v-if="target.running" class="cmp-target-running">{{ t("compare.running") }}</span>
         <button
           v-if="target.running"
           type="button"
           class="cmp-target-stop"
           :disabled="stopping[target.id]"
           @click="stop(target.id)"
-        >■ 停止</button>
+          >{{ t("compare.stop") }}</button>
         <div v-else class="cmp-target-models">
           <ModelPicker
             :model-value="target.model"
             :models="models"
             :favorite-models="favoriteModels"
             :recent-models="recentModels"
-            :title="`选择「${target.title}」的模型`"
+            :title="t('compare.pickModel', { title: target.title })"
             @update:model-value="setModel(target.id, $event)"
             @toggle-favorite="$emit('toggle-favorite', $event)"
           />
           <VariantPicker
             :model="target.model"
             :models="models"
-            :title="`选择「${target.title}」的思考档位`"
+            :title="t('compare.pickVariant', { title: target.title })"
             @select="setVariant(target.id, $event)"
           />
         </div>
@@ -73,17 +73,17 @@
         <img v-if="attachment.mime.startsWith('image/')" :src="attachment.dataUrl" class="att-thumb" alt="" />
         <span v-else class="att-ico">📎</span>
         <span class="att-name" :title="attachment.name">{{ attachment.name }}</span>
-        <button type="button" class="att-x" title="移除" @click="removeAttachment(attachment.id)">✕</button>
+        <button type="button" class="att-x" :title="t('compare.remove')" @click="removeAttachment(attachment.id)">✕</button>
       </span>
       <span v-if="notice" class="att-notice">{{ notice }}</span>
-      <span v-if="unsupportedImageTargets.length > 0" class="att-notice">所选模型不支持图片：{{ unsupportedImageTargets.join("、") }}</span>
+      <span v-if="unsupportedImageTargets.length > 0" class="att-notice">{{ t("compare.noImageSupport", { list: unsupportedImageTargets.join(listSep) }) }}</span>
     </div>
 
     <textarea
       v-if="!previewing"
       ref="textareaEl"
       v-model="text"
-      placeholder="向选中的会话发送同一条消息…"
+      :placeholder="t('compare.placeholder')"
       rows="2"
       @keydown.enter.exact="onEnterKey"
       @keydown.tab.prevent="onTabKey"
@@ -91,11 +91,11 @@
     ></textarea>
     <div v-else class="chat-input-preview">
       <MarkdownView v-if="text.trim()" :source="text" user />
-      <p v-else class="chat-input-preview-empty">输入内容后，这里显示发送后的 Markdown 效果</p>
+      <p v-else class="chat-input-preview-empty">{{ t("compare.previewEmpty") }}</p>
     </div>
 
     <div class="cmp-composer-foot">
-      <span class="cmp-composer-hint">⌘↵ 发送 · 两侧模型可独立选择</span>
+      <span class="cmp-composer-hint">{{ t("compare.hint") }}</span>
       <button type="submit" class="send" :disabled="!canSend">{{ sendLabel }}</button>
     </div>
   </form>
@@ -106,6 +106,7 @@ import { computed, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
 import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
+import { listSep, t } from "../i18n";
 import {
   indentLines,
   looksLikeCode,
@@ -206,9 +207,12 @@ const canSend = computed(
 );
 const sendLabel = computed(() => {
   const count = readyTargets.value.length;
-  if (count === 2) return "发送到两边 ➤";
-  if (count === 1) return `发送到${readyTargets.value[0]?.side === "left" ? "左侧" : "右侧"} ➤`;
-  return "选择可发送会话";
+  if (count === 2) return t("compare.sendBoth");
+  if (count === 1)
+    return t("compare.sendSide", {
+      side: readyTargets.value[0]?.side === "left" ? t("compare.sideLeft") : t("compare.sideRight"),
+    });
+  return t("compare.noTargets");
 });
 
 function setModel(sessionId: string, model: ModelChoice | null): void {
@@ -242,7 +246,7 @@ function flashNotice(message: string): void {
 
 function addFiles(files: FileList | File[]): void {
   if (!props.allowAttachments) {
-    flashNotice("当前后端不支持附件");
+    flashNotice(t("compare.attachUnsupported"));
     return;
   }
   void readAttachments([...files]).then(({ staged, notes }) => {

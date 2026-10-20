@@ -1065,7 +1065,9 @@ describe("v2 event stream", () => {
         id: "evt_form_3",
         created: 2,
         type: "form.created",
-        data: { form: { id: "frm_3", sessionID: "ses_1", title: "Answered elsewhere", fields: [] } },
+        data: {
+          form: { id: "frm_3", sessionID: "ses_1", title: "Answered elsewhere", fields: [] },
+        },
       });
       fake.pushFrame({
         id: "evt_form_4",

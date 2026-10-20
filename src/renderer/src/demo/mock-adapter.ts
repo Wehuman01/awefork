@@ -27,6 +27,7 @@ import type {
   SessionSummary,
   TrashEntry,
 } from "../../../shared/types.js";
+import { t } from "../i18n.js";
 
 interface TurnDef {
   /** User message id; assistant rows append "-r". Inherited copies keep ids. */
@@ -322,7 +323,7 @@ const MODELS: ModelOption[] = [
   },
   {
     providerId: "oc-local",
-    providerName: "Ollama 本地",
+    providerName: t("demo.providerLocal"),
     modelId: "qwen3-coder",
     modelName: "Qwen3 Coder 30B",
     variants: [],
@@ -520,7 +521,7 @@ export function installMockAdapter(): void {
       const id = `demo-new-${promptSeq}`;
       defs.set(id, {
         id,
-        title: "新对话",
+        title: t("demo.newSessionTitle"),
         origin: "root",
         parent: null,
         atMessageId: null,
@@ -538,7 +539,7 @@ export function installMockAdapter(): void {
       const id = `demo-fork-${promptSeq}`;
       defs.set(id, {
         id,
-        title: `${parent?.title ?? "会话"} 的分支`,
+        title: t("demo.forkTitle", { title: parent?.title ?? t("demo.forkFallback") }),
         origin: "fork",
         parent: sessionId,
         atMessageId,
@@ -572,7 +573,7 @@ export function installMockAdapter(): void {
       const id = `demo-export-${promptSeq}`;
       defs.set(id, {
         id,
-        title: `${source.title}（导出）`,
+        title: t("demo.exportTitle", { title: source.title }),
         origin: "root",
         parent: null,
         atMessageId: null,
@@ -623,8 +624,8 @@ export function installMockAdapter(): void {
         outputTokens: null,
         error: null,
       };
-      const reply = `演示模式：这是一条模拟回复（真实环境里会走你的 opencode 后端）。你问的是「${text.slice(0, 40)}」——切到真的 npm run dev 就能拿到流式真回复。`;
-      const thinking = "**组织回答**\n我先梳理用户的问题，再组织一段清晰、可执行的回答。";
+      const reply = t("demo.reply", { text: text.slice(0, 40) });
+      const thinking = t("demo.thinking");
       const assistant: ChatMessage = {
         id: `p${promptSeq}-r`,
         role: "assistant",
@@ -722,8 +723,7 @@ export function installMockAdapter(): void {
     // completed summary land together and session.compressed announces it.
     compressSession: async (_backend, sessionId, model) => {
       promptSeq += 1;
-      const summaryText =
-        "（演示摘要）这条会话先梳理了登录接口的三个问题（明文 MD5、无限流、双查库），随后把密码哈希迁移到 argon2 并给出三步上线计划；对比了 JWT 与 session 两种方案并按 JWT 落地（HS256、access token 15 分钟过期）；压测 500 并发 P95 312ms，修复了限流器的内存泄漏，补齐忘记密码 e2e。历史消息完整保留，后续对话只携带本摘要与最近几轮。";
+      const summaryText = t("demo.summary");
       const marker: ChatMessage = {
         id: `cmp${promptSeq}`,
         role: "user",
@@ -957,10 +957,10 @@ export function installMockAdapter(): void {
     // The demo runs in a plain browser tab; there is no sidecar to keep.
     composer: async () => null,
     saveComposer: async () => undefined,
-    openPath: async (target) => ({ ok: false, error: `demo 无法打开本地路径：${target}` }),
+    openPath: async (target) => ({ ok: false, error: t("demo.openPathError", { target }) }),
     // No system terminal in a browser tab; the demo only declines politely.
-    openSessionTerminal: async () => ({ ok: false, error: "demo 无法打开系统终端" }),
-    convertDocument: async (filename) => `（demo：${filename} 提取出的文本内容）`,
+    openSessionTerminal: async () => ({ ok: false, error: t("demo.terminalError") }),
+    convertDocument: async (filename) => t("demo.convertStub", { filename }),
     // The demo app never has anything newer than itself: no banner, no skip.
     checkUpdates: async () => ({
       currentVersion: "0.1.6",
@@ -970,7 +970,7 @@ export function installMockAdapter(): void {
     skipUpdate: async () => ({ ok: true }),
     openRelease: async () => ({ ok: true }),
     // No install to swap from a browser tab; the demo can only decline.
-    downloadAndInstallUpdate: async () => ({ ok: false, error: "demo 不支持应用内更新" }),
+    downloadAndInstallUpdate: async () => ({ ok: false, error: t("demo.updateError") }),
     onUpdateProgress: () => () => {},
     onEvent: (handler) => {
       handlers.add(handler);
@@ -1037,7 +1037,12 @@ export function installMockAdapter(): void {
         minItems: 1,
       },
       { key: "remember", type: "boolean", title: "mock.fieldRemember", default: true },
-      { key: "docs", type: "external", title: "mock.fieldDocs", url: "https://example.com/oauth-docs" },
+      {
+        key: "docs",
+        type: "external",
+        title: "mock.fieldDocs",
+        url: "https://example.com/oauth-docs",
+      },
     ],
   };
   const demoPermission: DemoAsk = {

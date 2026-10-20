@@ -6,7 +6,7 @@
         <!-- 压缩标记行：不是对话内容，是"此前的历史已折叠为摘要"的分界线 -->
         <div v-if="message.compaction" class="compaction-banner" role="separator">
           <span class="compaction-glyph">🧹</span>
-          <span class="compaction-text">以上对话已压缩为摘要 — 历史仍保留，后续对话只携带摘要与最近几轮</span>
+          <span class="compaction-text">{{ t("msg.compactionBanner") }}</span>
         </div>
         <div v-else class="message-row user-row">
           <div class="user-body">
@@ -28,7 +28,7 @@
               v-if="message.text"
               type="button"
               class="msg-copy"
-              :title="copiedId === message.id ? '已复制' : '复制这条回复'"
+              :title="copiedId === message.id ? t('msg.copied') : t('msg.copyReply')"
               @click="copyMessage(message)"
             >{{ copiedId === message.id ? "✓" : "⧉" }}</button>
             <p v-if="message.toolNames.length > 0" class="tool-row">
@@ -42,15 +42,15 @@
             </details>
             <MarkdownView v-if="message.text" :source="message.text" />
             <p v-else-if="message.error" class="message-text run-error">
-              ⚠ 运行失败：{{ message.error }}
+              {{ t("msg.runFailed", { error: message.error }) }}
             </p>
             <button
               v-if="message.error"
               type="button"
               class="retry-now"
-              title="重跑这个回合（预填原文，可先换模型/档位）"
+              :title="t('msg.retryTitle')"
               @click="emit('retry')"
-            >↻ 换模型重跑</button>
+            >{{ t("msg.retryButton") }}</button>
           </div>
         </div>
       </template>
@@ -91,6 +91,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { SessionSummary } from "../../../shared/types";
+import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
 import type { LivePart, ReadonlyChatMessage } from "../state";
 import { thoughtSummary } from "../thought";
