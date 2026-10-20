@@ -362,6 +362,47 @@ textarea {
   box-shadow: 0 0 0 3px var(--mint-soft);
 }
 
+/* multi-window toggle: sits left of ⌘K, borrows .icon-btn pill sizing */
+.multiwindow-btn {
+  margin-left: 10px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft);
+}
+
+.multiwindow-track {
+  width: 22px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--ink-faint, #d8dee9);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.multiwindow-knob {
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.multiwindow-btn.on .multiwindow-track {
+  background: var(--mint);
+}
+
+.multiwindow-btn.on .multiwindow-knob {
+  transform: translateX(10px);
+}
+
 .cmdk-btn {
   margin-left: 10px;
   height: 28px;

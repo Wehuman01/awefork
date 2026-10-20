@@ -34,11 +34,10 @@
           :disabled="!entry.installed"
           :title="
             entry.installed
-              ? `切换到 ${entry.label}（右键：在新窗口打开）`
+              ? `切换到 ${entry.label}`
               : `未在 PATH 上找到 ${entry.label} CLI`
           "
           @click="pickBackend(entry.id)"
-          @contextmenu.prevent="openAgentWindow(entry.id)"
         >
           <span class="backend-check" aria-hidden="true">{{ entry.id === activeBackend ? "✓" : "" }}</span>
           <span class="backend-name">{{ entry.label }}</span>
@@ -70,6 +69,22 @@
       <span class="status-dot"></span>
       {{ connectionError ? `${activeLabel} 未连接` : `${activeLabel} 已连接` }}
     </div>
+    <button
+      type="button"
+      class="icon-btn multiwindow-btn"
+      :class="{ on: multiWindow }"
+      role="switch"
+      :aria-checked="multiWindow"
+      :title="
+        multiWindow
+          ? '多窗口已开：点 Agent 会在独立窗口打开（同一 Agent 只聚焦已有窗口）'
+          : '多窗口已关：点 Agent 在当前窗口内切换；打开后点击将新开独立窗口'
+      "
+      @click="toggleMultiWindow"
+    >
+      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
+      独立窗口
+    </button>
     <button
       type="button"
       class="icon-btn cmdk-btn"
@@ -109,6 +124,14 @@ import HistoryButton from "./history-button.vue";
 const open = ref(false);
 const versionOpen = ref(false);
 const backendOpen = ref(false);
+// Shared through localStorage so the preference survives restarts and applies
+// to every window — new agent windows open by the main process read it at
+// their own boot.
+const multiWindow = ref(localStorage.getItem("awefork:multiWindow") === "1");
+function toggleMultiWindow(): void {
+  multiWindow.value = !multiWindow.value;
+  localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
+}
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);
@@ -142,12 +165,12 @@ function toggleBackendMenu(): void {
 
 async function pickBackend(backend: BackendId): Promise<void> {
   backendOpen.value = false;
-  // Inside a dedicated agent window, the switcher never re-skins this window:
-  // every pick focuses (or opens) that agent's own window. The main window
-  // keeps the in-place switch this app has always had.
-  // A plain click always switches in place — in every window, exactly the
-  // behavior the app has always had. Dedicated windows come only from the
-  // contextmenu handler below, never from a click.
+  // One switch, two behaviors: off = the in-place switch the app has always
+  // had; on = every pick focuses (or opens) that agent's dedicated window.
+  if (multiWindow.value) {
+    await openAgentWindow(backend);
+    return;
+  }
   await switchBackend(backend);
 }
 
