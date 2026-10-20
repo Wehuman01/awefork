@@ -6,6 +6,7 @@ import {
   type BackendId,
   type BackendInfo,
   backendCapabilities,
+  isBackendId,
 } from "../../shared/backend";
 import { buildComparePlan, type ComparePlan } from "../../shared/branch-compare";
 import { type BranchMarkdownTurn, buildBranchMarkdown } from "../../shared/branch-markdown";
@@ -904,20 +905,73 @@ async function bootBackend(backend: BackendId): Promise<void> {
   void restoreComposer();
 }
 
+/**
+ * The agent a window was opened for, from its `#agent=<id>` marker (the main
+ * process sets it when opening a dedicated agent window). Null on the main
+ * window. Unknown ids read as null — a bad marker must not wedge startup.
+ */
+export function agentFromHash(hash: string): BackendId | null {
+  const match = /(?:^#|&)agent=([a-z]+)/.exec(hash);
+  return match && isBackendId(match[1]) ? match[1] : null;
+}
+
+/** The window's hash, empty outside a DOM (tests boot state in plain node). */
+function currentHash(): string {
+  return typeof location === "undefined" ? "" : location.hash;
+}
+
+/** True inside a dedicated agent window — the switcher routes to windows. */
+export const isAgentWindow = computed(() => agentFromHash(currentHash()) !== null);
+
+/**
+ * Focus (or open) the agent's own window. Called from the switcher: on a
+ * right-click "在新窗口打开", and for every pick inside an agent window — one
+ * window per agent, so a second ask for the same agent just focuses it.
+ */
+/**
+ * Focus the agent's window only when one is open — the main window's
+ * pick-when-a-window-exists path. False means "no window; switch in place".
+ */
+export async function focusAgentWindow(backend: BackendId): Promise<boolean> {
+  try {
+    return await window.awefork.focusAgentWindow(backend);
+  } catch {
+    return false;
+  }
+}
+
+export async function openAgentWindow(backend: BackendId): Promise<void> {
+  try {
+    const result = await window.awefork.openAgentWindow(backend);
+    if (!result.ok) state.actionError = result.error ?? `无法打开 ${backend} 窗口。`;
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : `无法打开 ${backend} 窗口。`;
+  }
+}
+
 export async function init(): Promise<void> {
   let backend: BackendId = "opencode";
   try {
     const { selected, backends } = await window.awefork.backends();
     state.backendList = backends;
     // A persisted selection whose CLI went missing falls back to opencode —
-    // the backend this app has always shipped with.
-    backend = backends.some((b) => b.id === selected && b.installed) ? selected : "opencode";
+    // the backend this app has always shipped with. An agent window's
+    // `#agent=` marker outranks both: that window belongs to its agent.
+    const agent = agentFromHash(currentHash());
+    if (agent && backends.some((b) => b.id === agent && b.installed)) {
+      backend = agent;
+    } else {
+      backend = backends.some((b) => b.id === selected && b.installed) ? selected : "opencode";
+    }
   } catch {
     state.backendList = [
       { id: "opencode", label: "opencode", installed: true, version: null, versionWarning: null },
     ];
   }
   state.activeBackend = backend;
+  // The page's <title> overrides the BrowserWindow title on load, so the
+  // agent window names its agent here rather than only at creation.
+  if (agentFromHash(currentHash())) document.title = `awefork — ${backend}`;
   try {
     state.capabilities = await window.awefork.capabilities(backend);
   } catch {

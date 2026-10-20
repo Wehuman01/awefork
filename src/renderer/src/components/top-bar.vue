@@ -33,9 +33,12 @@
           :class="{ active: entry.id === activeBackend }"
           :disabled="!entry.installed"
           :title="
-            entry.installed ? `切换到 ${entry.label}` : `未在 PATH 上找到 ${entry.label} CLI`
+            entry.installed
+              ? `切换到 ${entry.label}（右键：在新窗口打开）`
+              : `未在 PATH 上找到 ${entry.label} CLI`
           "
           @click="pickBackend(entry.id)"
+          @contextmenu.prevent="openAgentWindow(entry.id)"
         >
           <span class="backend-check" aria-hidden="true">{{ entry.id === activeBackend ? "✓" : "" }}</span>
           <span class="backend-name">{{ entry.label }}</span>
@@ -95,6 +98,9 @@ import { togglePalette } from "../layout";
 import {
   checkForUpdates,
   directories,
+  focusAgentWindow,
+  isAgentWindow,
+  openAgentWindow,
   refreshBackendList,
   store,
   switchBackend,
@@ -138,6 +144,16 @@ function toggleBackendMenu(): void {
 
 async function pickBackend(backend: BackendId): Promise<void> {
   backendOpen.value = false;
+  // Inside a dedicated agent window, the switcher never re-skins this window:
+  // every pick focuses (or opens) that agent's own window. The main window
+  // keeps the in-place switch this app has always had.
+  if (isAgentWindow.value && backend !== activeBackend.value) {
+    await openAgentWindow(backend);
+    return;
+  }
+  // The agent already owns a window → join it there instead of re-skinning
+  // this one; otherwise the in-place switch this app has always had.
+  if (backend !== activeBackend.value && (await focusAgentWindow(backend))) return;
   await switchBackend(backend);
 }
 

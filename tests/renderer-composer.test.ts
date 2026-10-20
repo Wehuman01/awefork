@@ -131,6 +131,8 @@ async function bootState(
       ],
     }),
     selectBackend: async () => ({ ok: true }),
+    openAgentWindow: async () => ({ ok: true }),
+    focusAgentWindow: async () => false,
     capabilities: async () => ({ deleteMessage: true, attachments: true }),
     openPath: async () => ({ ok: true }),
     openExternal: async () => {},

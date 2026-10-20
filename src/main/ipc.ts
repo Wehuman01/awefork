@@ -100,7 +100,11 @@ import { resolveZcodeCli } from "./zcode-server.js";
  * {downloaded,total}. Events are forwarded on channel "awefork:event" as
  * {backend, event}.
  */
-export function registerIpc(registry: BackendRegistry): void {
+export function registerIpc(
+  registry: BackendRegistry,
+  openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
+  focusAgentWindow?: (backend: BackendId) => boolean,
+): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
   // default rather than throwing so a stale renderer can't wedge the store.
@@ -601,6 +605,24 @@ export function registerIpc(registry: BackendRegistry): void {
       if (!isBackendId(backend)) return { ok: false, error: `未知后端：${String(backend)}` };
       return registry.select(backend);
     },
+  );
+
+  // Focus-or-open the agent's dedicated window. No installed probe here:
+  // the renderer only offers the entry on rows it already probed, and a
+  // missing CLI surfaces inside the new window like any boot failure.
+  ipcMain.handle(
+    "awefork:openAgentWindow",
+    async (_event: IpcMainInvokeEvent, backend: BackendId) => {
+      if (!isBackendId(backend)) return { ok: false, error: `未知后端：${String(backend)}` };
+      if (!openAgentWindow) return { ok: false, error: "多窗口未启用" };
+      return openAgentWindow(backend);
+    },
+  );
+
+  // Probe, not a command: true when an agent window is open and was focused,
+  // false when the caller should fall back to its own in-place switch.
+  ipcMain.handle("awefork:focusAgentWindow", (_event: IpcMainInvokeEvent, backend: BackendId) =>
+    isBackendId(backend) && focusAgentWindow ? focusAgentWindow(backend) : false,
   );
 
   ipcMain.handle("awefork:capabilities", (_event: IpcMainInvokeEvent, backend: BackendId) =>

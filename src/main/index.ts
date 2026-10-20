@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, nativeImage } from "electron";
+import type { BackendId } from "../shared/backend.js";
 import { createBackendRegistry } from "./backend-registry.js";
 import { registerIpc } from "./ipc.js";
 import { registerSaveFileIpc } from "./save-file.js";
@@ -8,7 +9,7 @@ import { readBackendSelection } from "./settings-store.js";
 import { setUpdaterExitHook } from "./update-install.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
-registerIpc(registry);
+registerIpc(registry, openAgentWindow, focusAgentWindow);
 registerSaveFileIpc();
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.
@@ -21,14 +22,20 @@ setUpdaterExitHook(() => registry.dispose());
 const demoMode = !app.isPackaged && process.env.AWEFORK_DEMO === "1";
 
 let mainWindow: BrowserWindow | null = null;
+/**
+ * One window per agent, when the user asks for one ("在新窗口打开"). Keyed by
+ * backend id so a second ask for the same agent focuses the existing window —
+ * the map's size is bounded by the agent count, never the click count.
+ */
+const agentWindows = new Map<BackendId, BrowserWindow>();
 
-async function createWindow(): Promise<void> {
-  mainWindow = new BrowserWindow({
+async function createWindow(agent?: BackendId): Promise<void> {
+  const window = new BrowserWindow({
     width: 1280,
     height: 840,
     minWidth: 900,
     minHeight: 560,
-    title: "awefork",
+    title: agent ? `awefork — ${agent}` : "awefork",
     webPreferences: {
       preload: demoMode ? undefined : join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -36,42 +43,80 @@ async function createWindow(): Promise<void> {
       // Load-bearing, not an oversight: the preload is built as ESM
       // (package.json has "type": "module"), and Electron only loads ESM
       // preload scripts with the sandbox disabled. The renderer still gets
-      // no Node access — contextIsolation on, nodeIntegration off, and the
-      // preload does nothing but bridge ipcRenderer.invoke channels.
+      // no Node access — contextIsolation on, nodeIntegration off, and
+      // the preload does nothing but bridge ipcRenderer.invoke channels.
       sandbox: false,
     },
   });
-  // macOS keeps the app alive after the window closes; a stale reference
-  // would throw "Object has been destroyed" on the next forwarded event.
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
+  if (agent) {
+    agentWindows.set(agent, window);
+    // macOS keeps the app alive after the window closes; a stale reference
+    // would throw "Object has been destroyed" on the next focus ask.
+    window.on("closed", () => {
+      if (agentWindows.get(agent) === window) agentWindows.delete(agent);
+    });
+  } else {
+    mainWindow = window;
+    window.on("closed", () => {
+      mainWindow = null;
+    });
+  }
 
   // The renderer is not a web browser: a compromised or confused page must
   // not be able to navigate the window to an arbitrary origin or pop one
   // open. Same-document moves (hash jumps, SPA history) stay allowed.
-  const contents = mainWindow.webContents;
+  const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", (event, url) => {
     if (url.split("#")[0] === contents.getURL().split("#")[0]) return;
     event.preventDefault();
   });
 
+  // The agent window's URL carries `#agent=<id>`: the renderer boots straight
+  // into that backend — no switcher hop, no persisted-selection rewrite.
+  const agentHash = agent ? `#agent=${agent}` : "";
   if (demoMode) {
-    await mainWindow.loadURL(process.env.AWEFORK_DEMO_URL ?? "http://127.0.0.1:5180");
+    await window.loadURL(process.env.AWEFORK_DEMO_URL ?? "http://127.0.0.1:5180");
   } else if (process.env.ELECTRON_RENDERER_URL) {
-    await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+    await window.loadURL(process.env.ELECTRON_RENDERER_URL + agentHash);
   } else {
-    await mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    await window.loadFile(join(__dirname, "../renderer/index.html"), {
+      hash: agent ? `agent=${agent}` : "",
+    });
   }
+}
+
+/** Focus the agent's window, or open one when none exists yet. */
+async function openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }> {
+  const existing = agentWindows.get(backend);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return { ok: true };
+  }
+  await createWindow(backend);
+  return { ok: true };
+}
+
+/** Focus the agent's window only when one is already open; never spawns. */
+function focusAgentWindow(backend: BackendId): boolean {
+  const existing = agentWindows.get(backend);
+  if (!existing || existing.isDestroyed()) return false;
+  if (existing.isMinimized()) existing.restore();
+  existing.focus();
+  return true;
 }
 
 // Subscribed exactly once, outside createWindow: a macOS Dock re-open runs
 // createWindow again, and a second subscribe would leave the first reconnect
 // loop alive — every event would then arrive twice and double the streams.
-// Every spawned backend's events arrive here as {backend, event} envelopes.
+// Every spawned backend's events arrive here as {backend, event} envelopes,
+// broadcast to every open window — each renderer keeps only its own agent's
+// share, so an agent window sees its backend and the main window sees its own.
 registry.forward((envelope) => {
-  mainWindow?.webContents.send("awefork:event", envelope);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send("awefork:event", envelope);
+  }
 });
 
 app.whenReady().then(() => {
