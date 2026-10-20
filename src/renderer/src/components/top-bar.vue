@@ -98,8 +98,6 @@ import { togglePalette } from "../layout";
 import {
   checkForUpdates,
   directories,
-  focusAgentWindow,
-  isAgentWindow,
   openAgentWindow,
   refreshBackendList,
   store,
@@ -147,13 +145,9 @@ async function pickBackend(backend: BackendId): Promise<void> {
   // Inside a dedicated agent window, the switcher never re-skins this window:
   // every pick focuses (or opens) that agent's own window. The main window
   // keeps the in-place switch this app has always had.
-  if (isAgentWindow.value && backend !== activeBackend.value) {
-    await openAgentWindow(backend);
-    return;
-  }
-  // The agent already owns a window → join it there instead of re-skinning
-  // this one; otherwise the in-place switch this app has always had.
-  if (backend !== activeBackend.value && (await focusAgentWindow(backend))) return;
+  // A plain click always switches in place — in every window, exactly the
+  // behavior the app has always had. Dedicated windows come only from the
+  // contextmenu handler below, never from a click.
   await switchBackend(backend);
 }
 

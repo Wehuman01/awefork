@@ -162,8 +162,6 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:selectBackend", backend),
   openAgentWindow: (backend: BackendId): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openAgentWindow", backend),
-  focusAgentWindow: (backend: BackendId): Promise<boolean> =>
-    ipcRenderer.invoke("awefork:focusAgentWindow", backend),
   capabilities: (backend: BackendId): Promise<BackendCapabilities> =>
     ipcRenderer.invoke("awefork:capabilities", backend),
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>

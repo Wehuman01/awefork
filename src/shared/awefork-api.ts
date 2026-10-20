@@ -229,11 +229,6 @@ export interface AweforkApi {
    * by the agent count — a second ask for the same agent never spawns a window.
    */
   openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
-  /**
-   * Focus the agent's window only if one is open. False = no window exists;
-   * the caller falls back to its in-place switch.
-   */
-  focusAgentWindow(backend: BackendId): Promise<boolean>;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /** Open a local drive path (reply references) with the OS handler. */

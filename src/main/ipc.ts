@@ -103,7 +103,6 @@ import { resolveZcodeCli } from "./zcode-server.js";
 export function registerIpc(
   registry: BackendRegistry,
   openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
-  focusAgentWindow?: (backend: BackendId) => boolean,
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
@@ -617,12 +616,6 @@ export function registerIpc(
       if (!openAgentWindow) return { ok: false, error: "多窗口未启用" };
       return openAgentWindow(backend);
     },
-  );
-
-  // Probe, not a command: true when an agent window is open and was focused,
-  // false when the caller should fall back to its own in-place switch.
-  ipcMain.handle("awefork:focusAgentWindow", (_event: IpcMainInvokeEvent, backend: BackendId) =>
-    isBackendId(backend) && focusAgentWindow ? focusAgentWindow(backend) : false,
   );
 
   ipcMain.handle("awefork:capabilities", (_event: IpcMainInvokeEvent, backend: BackendId) =>

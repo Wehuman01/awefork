@@ -106,7 +106,6 @@ async function bootState(options: { changes?: SessionFileChanges | null } = {}) 
     }),
     selectBackend: async () => ({ ok: true }),
     openAgentWindow: async () => ({ ok: true }),
-    focusAgentWindow: async () => false,
     capabilities: async () => ({ deleteMessage: true, attachments: true, fileChanges: true }),
     openPath: async () => ({ ok: true }),
     openExternal: async () => {},

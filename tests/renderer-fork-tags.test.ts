@@ -143,7 +143,6 @@ async function bootState(options: { tags?: TagStore } = {}) {
     }),
     selectBackend: async () => ({ ok: true }),
     openAgentWindow: async () => ({ ok: true }),
-    focusAgentWindow: async () => false,
     capabilities: async () => ({
       deleteMessage: true,
       attachments: true,

@@ -9,7 +9,7 @@ import { readBackendSelection } from "./settings-store.js";
 import { setUpdaterExitHook } from "./update-install.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
-registerIpc(registry, openAgentWindow, focusAgentWindow);
+registerIpc(registry, openAgentWindow);
 registerSaveFileIpc();
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.
@@ -96,15 +96,6 @@ async function openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error
   }
   await createWindow(backend);
   return { ok: true };
-}
-
-/** Focus the agent's window only when one is already open; never spawns. */
-function focusAgentWindow(backend: BackendId): boolean {
-  const existing = agentWindows.get(backend);
-  if (!existing || existing.isDestroyed()) return false;
-  if (existing.isMinimized()) existing.restore();
-  existing.focus();
-  return true;
 }
 
 // Subscribed exactly once, outside createWindow: a macOS Dock re-open runs

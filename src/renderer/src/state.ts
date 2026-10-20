@@ -920,26 +920,11 @@ function currentHash(): string {
   return typeof location === "undefined" ? "" : location.hash;
 }
 
-/** True inside a dedicated agent window — the switcher routes to windows. */
-export const isAgentWindow = computed(() => agentFromHash(currentHash()) !== null);
-
 /**
  * Focus (or open) the agent's own window. Called from the switcher: on a
  * right-click "在新窗口打开", and for every pick inside an agent window — one
  * window per agent, so a second ask for the same agent just focuses it.
  */
-/**
- * Focus the agent's window only when one is open — the main window's
- * pick-when-a-window-exists path. False means "no window; switch in place".
- */
-export async function focusAgentWindow(backend: BackendId): Promise<boolean> {
-  try {
-    return await window.awefork.focusAgentWindow(backend);
-  } catch {
-    return false;
-  }
-}
-
 export async function openAgentWindow(backend: BackendId): Promise<void> {
   try {
     const result = await window.awefork.openAgentWindow(backend);
