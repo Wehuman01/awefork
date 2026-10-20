@@ -1,11 +1,12 @@
 import type { BackendId } from "../../shared/backend";
 
 /**
- * Where one backend's queued interaction requests render. opencode permission
- * asks that belong to the session on screen live inline at the tail of that
- * session's message flow; everything else (codex approvals, asks for other
- * sessions) keeps the modal dialog. Pure and side-effect free so the split is
- * unit-testable without mounting a component or booting the store.
+ * Where one backend's queued interaction requests render. opencode asks
+ * (permission and form) that belong to the session on screen live inline at
+ * the tail of that session's message flow; everything else (codex approvals,
+ * asks with no correlatable session) keeps the modal dialog. Pure and
+ * side-effect free so the split is unit-testable without mounting a component
+ * or booting the store.
  *
  * Typed over a request shape so both the mutable store type and Vue's
  * DeepReadonly mirror (what components actually hold) flow through unchanged,
@@ -16,13 +17,23 @@ type Queue<R> = Readonly<Record<string, readonly R[]>>;
 /** The fields the split reads off a request; every variant carries both. */
 type Classifiable = { readonly kind: string; readonly sessionId: string | null };
 
+/** The opencode ask kinds that render inline when they match the selection. */
+const INLINE_KINDS = new Set(["opencode-permission", "opencode-form"]);
+
 /**
- * Whether an opencode permission ask belongs to the session currently on
- * screen. Only this kind is hoisted inline; a null `sessionId` (an ask with no
- * correlatable session) never matches, so it stays in the modal. `hostVisible`
- * folds in whether the inline card actually has a pane to render in (see
- * `inlineHostVisible` in state): when it does not, nothing is inline, so the
- * modal picks the ask up instead of it vanishing from both surfaces.
+ * opencode's placeholder session for a form with no real session (an MCP
+ * elicitation's hack id): it names nothing to attach a card to, so it must
+ * never match a selection that happens to equal it.
+ */
+const GLOBAL_SESSION = "global";
+
+/**
+ * Whether an opencode ask belongs to the session currently on screen. Only
+ * these kinds are hoisted inline; a null `sessionId` (an ask with no
+ * correlatable session) never matches, so it stays in the modal.
+ * `hostVisible` folds in whether the inline card actually has a pane to render
+ * in (see `inlineHostVisible` in state): when it does not, nothing is inline,
+ * so the modal picks the ask up instead of it vanishing from both surfaces.
  *
  * An empty-string sessionId counts as no session, like null: it names nothing
  * to attach a card to, so it must not match a selection that happens to be "".
@@ -34,9 +45,32 @@ function isInlineInteraction(
 ): boolean {
   return (
     hostVisible &&
-    request.kind === "opencode-permission" &&
+    INLINE_KINDS.has(request.kind) &&
     Boolean(selectedId) &&
+    Boolean(request.sessionId) &&
+    request.sessionId !== GLOBAL_SESSION &&
     request.sessionId === selectedId
+  );
+}
+
+/**
+ * Whether an opencode ask is parked on another session: it has a real session
+ * of its own, so it waits for that session's pane instead of hijacking the
+ * global modal. Multiple sessions' asks therefore never fight over one dialog
+ * — each renders inside its own context pane when selected.
+ */
+function isParkedInteraction(
+  request: Classifiable,
+  selectedId: string | null,
+  hostVisible: boolean,
+): boolean {
+  return (
+    hostVisible &&
+    Boolean(selectedId) &&
+    INLINE_KINDS.has(request.kind) &&
+    Boolean(request.sessionId) &&
+    request.sessionId !== GLOBAL_SESSION &&
+    request.sessionId !== selectedId
   );
 }
 
@@ -61,10 +95,11 @@ export function pickInlineInteraction<R extends Classifiable>(
 }
 
 /**
- * The request the modal dialog shows: the first queued ask that does NOT
- * belong inline. Falls back to the queue head when the first ask is inline but
- * a later one is not — the two functions read one predicate, so every queued
- * request renders in exactly one place.
+ * The request the modal dialog shows: the first queued ask that neither
+ * renders inline nor parks on another session's pane. Falls back to the queue
+ * head when the first ask is inline but a later one is not — the functions
+ * read the same predicates, so every non-parked request renders in exactly
+ * one place.
  */
 export function pickModalInteraction<R extends Classifiable>(
   backend: BackendId,
@@ -73,13 +108,19 @@ export function pickModalInteraction<R extends Classifiable>(
   hostVisible = true,
 ): R | null {
   const queue = interactions[backend] ?? [];
-  return queue.find((request) => !isInlineInteraction(request, selectedId, hostVisible)) ?? null;
+  return (
+    queue.find(
+      (request) =>
+        !isInlineInteraction(request, selectedId, hostVisible) &&
+        !isParkedInteraction(request, selectedId, hostVisible),
+    ) ?? null
+  );
 }
 
 /**
  * How many further inline asks wait behind the one on screen — same backend,
- * same kind, same session. The inline card's "还有 N 个" reads this so a codex
- * approval queued for the same session is not counted as an opencode ask
+ * inline-kind, same session. The inline card's "还有 N 个" reads this so a
+ * codex approval queued for the same session is not counted as an opencode ask
  * waiting inline. Zero when no session is selected or the host is off screen,
  * mirroring `pickInlineInteraction`.
  */

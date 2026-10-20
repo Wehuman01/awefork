@@ -17,6 +17,7 @@ import type { BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
 import type {
   AgentEvent,
+  AgentInteractionRequest,
   ArchiveState,
   ChatMessage,
   ForkRecord,
@@ -977,4 +978,86 @@ export function installMockAdapter(): void {
       return () => handlers.delete(handler);
     },
   };
+
+  // Demo interaction asks: the dataset has no backend to block on, so these
+  // hand-emit `interaction.requested` frames to show how the renderer splits
+  // them — a permission ask that belongs to the visible session renders as an
+  // inline card in the pane; everything else (forms, orphan asks) takes the
+  // modal. Fire from the console, or wait for the auto demo on load.
+  // Omit must distribute over the request union or every variant loses its
+  // own fields (Omit<A|B, k> collapses to the shared keys only).
+  type DemoAsk = AgentInteractionRequest extends infer T
+    ? T extends { requestId: string }
+      ? Omit<T, "requestId">
+      : never
+    : never;
+  let askSeq = 0;
+  const ask = (request: DemoAsk): void => {
+    emit({
+      type: "interaction.requested",
+      request: { ...request, requestId: `demo-ask-${++askSeq}` } as AgentInteractionRequest,
+    });
+  };
+  const demoForm: DemoAsk = {
+    sessionId: null,
+    kind: "opencode-form",
+    title: "连接 GitHub MCP",
+    detail: "opencode 需要完成一次 OAuth 授权才能继续本次运行。",
+    fields: [
+      {
+        key: "email",
+        type: "string",
+        title: "账号",
+        required: true,
+        format: "email",
+        placeholder: "you@example.com",
+      },
+      {
+        key: "scope",
+        type: "string",
+        title: "授权范围",
+        required: true,
+        options: [
+          { value: "repo", label: "仓库读写" },
+          { value: "read", label: "只读" },
+        ],
+        custom: true,
+      },
+      { key: "ttl", type: "integer", title: "有效期（天）", minimum: 1, maximum: 90, default: 30 },
+      {
+        key: "teams",
+        type: "multiselect",
+        title: "同步的团队",
+        options: [
+          { value: "core", label: "core" },
+          { value: "docs", label: "docs" },
+          { value: "ops", label: "ops" },
+        ],
+        minItems: 1,
+      },
+      { key: "remember", type: "boolean", title: "记住此授权", default: true },
+      { key: "docs", type: "external", title: "授权说明", url: "https://example.com/oauth-docs" },
+    ],
+  };
+  const demoPermission: DemoAsk = {
+    sessionId: null,
+    kind: "opencode-permission",
+    title: "opencode 请求执行命令",
+    detail: "运行 rm -rf node_modules 需要你的确认。",
+    permission: "bash",
+    patterns: ["rm *"],
+    command: "rm -rf node_modules",
+  };
+  // "w-root" (官网首页改版) is the session the demo boots with selected, so
+  // the auto-fired ask lands inline in the visible context pane right away.
+  const INLINE_SESSION = "w-root";
+  (window as unknown as Record<string, unknown>).__aweforkDemoAsk = {
+    // Inline in the context pane of the session on screen.
+    form: () => ask({ ...demoForm, sessionId: INLINE_SESSION }),
+    permission: () => ask({ ...demoPermission, sessionId: INLINE_SESSION }),
+    // Orphan asks (no correlatable session) still take the modal.
+    formModal: () => ask(demoForm),
+    permissionModal: () => ask({ ...demoPermission, sessionId: null }),
+  };
+  setTimeout(() => ask({ ...demoForm, sessionId: INLINE_SESSION }), 4000);
 }

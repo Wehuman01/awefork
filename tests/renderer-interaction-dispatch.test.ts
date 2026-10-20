@@ -131,10 +131,14 @@ describe("interaction dispatch — modal fallback", () => {
     expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("x");
   });
 
-  it("shows an ask for another session instead of the selected one's", () => {
+  it("parks an opencode ask for another session on neither surface", () => {
     const q = queue([permission("a", "s2")]);
 
-    expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("a");
+    // The ask waits for its own session's pane; it must not hijack the modal
+    // while another session is on screen.
+    expect(pickModalInteraction(BACKEND, q, "s1")).toBeNull();
+    // With the pane off screen nothing can render inline, so the modal takes it.
+    expect(pickModalInteraction(BACKEND, q, "s1", false)?.requestId).toBe("a");
   });
 
   it("yields nothing to the modal when every ask is inline for the selection", () => {
@@ -160,16 +164,22 @@ describe("interaction dispatch — one request, exactly one surface", () => {
     // The inline pick only ever names an ask that truly belongs inline.
     if (inline) {
       expect(visible).toBe(true);
-      expect(inline.kind).toBe("opencode-permission");
+      expect(["opencode-permission", "opencode-form"]).toContain(inline.kind);
       expect(inline.sessionId).toBe(selectedId);
     }
-    // Nothing vanishes: the head of the queue is always on one surface. When
-    // the head is inline the pane owns it; otherwise the modal does.
+    // Nothing vanishes: the head of the queue is always reachable — on one
+    // surface, or parked on another session's pane (renders when selected).
     const head = q.codex?.[0];
     if (!head) return;
     const headInline = inline?.requestId === head.requestId;
     const headModal = modal?.requestId === head.requestId;
-    expect(headInline || headModal).toBe(true);
+    const headParked =
+      visible &&
+      ["opencode-permission", "opencode-form"].includes(head.kind) &&
+      Boolean(head.sessionId) &&
+      head.sessionId !== "global" &&
+      head.sessionId !== selectedId;
+    expect(headInline || headModal || headParked).toBe(true);
   }
 
   const samples: Queue[] = [
@@ -237,14 +247,19 @@ describe("interaction dispatch — inline queue depth", () => {
   });
 });
 
-describe("interaction dispatch — forms always take the modal", () => {
-  it("never hoists a form inline, even for the selected session", () => {
+describe("interaction dispatch — forms render inline in the context pane", () => {
+  it("hoists a form for the selected session inline, not the modal", () => {
     const q = queue([form("f1", "s1")]);
 
-    // Forms carry typed fields the inline card cannot render; the modal owns
-    // them regardless of session match.
+    expect(pickInlineInteraction(BACKEND, q, "s1")?.requestId).toBe("f1");
+    expect(pickModalInteraction(BACKEND, q, "s1")).toBeNull();
+  });
+
+  it("parks a form for another session instead of showing it in the modal", () => {
+    const q = queue([form("f1", "s2")]);
+
     expect(pickInlineInteraction(BACKEND, q, "s1")).toBeNull();
-    expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("f1");
+    expect(pickModalInteraction(BACKEND, q, "s1")).toBeNull();
   });
 
   it("keeps a global-session form in the modal (MCP elicitation's hack session)", () => {
@@ -256,10 +271,17 @@ describe("interaction dispatch — forms always take the modal", () => {
     expect(pickModalInteraction(BACKEND, q, "global")?.requestId).toBe("f1");
   });
 
-  it("does not count a form toward the inline queue depth", () => {
+  it("keeps a null-session form in the modal", () => {
+    const q = queue([form("f1", null)]);
+
+    expect(pickInlineInteraction(BACKEND, q, "s1")).toBeNull();
+    expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("f1");
+  });
+
+  it("counts a same-session form toward the inline queue depth", () => {
     const q = queue([permission("a", "s1"), form("f1", "s1"), permission("b", "s1")]);
 
-    // The form is not an inline waiter, so only the second permission counts.
-    expect(countPendingInline(BACKEND, q, "s1")).toBe(1);
+    // Every inline-kind ask for the session queues behind the one on screen.
+    expect(countPendingInline(BACKEND, q, "s1")).toBe(2);
   });
 });

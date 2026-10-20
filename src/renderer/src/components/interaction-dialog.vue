@@ -81,7 +81,11 @@ import {
   respondInteraction,
   store,
 } from "../state";
-import type InteractionForm from "./interaction-form.vue";
+// A value import, not `import type`: the template renders this component, and
+// a type-only import erases the runtime binding (the dialog then emits an
+// unresolved <interactionform> element with no fields).
+// biome-ignore lint/style/useImportType: rendered in the template below
+import InteractionForm from "./interaction-form.vue";
 
 // The modal owns every ask the pane cannot show inline — including opencode
 // asks that would be inline while the pane is off screen (compare mode, no

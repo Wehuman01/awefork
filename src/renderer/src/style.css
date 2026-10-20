@@ -4514,6 +4514,15 @@ code.md-code {
   line-height: 1.55;
 }
 
+/* inline form ask — the form body already carries its own .interaction-form
+ * styles; this is the heading the card adds above it. */
+.inline-interaction-title {
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .inline-interaction-actions {
   display: flex;
   justify-content: flex-end;
