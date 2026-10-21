@@ -66,11 +66,18 @@
         <div class="message-body">
           <p class="tool-row"><span class="tool-chip running">running…</span></p>
           <template v-for="row in liveRows" :key="row.part.partId">
+            <!-- A live tool part streams as a chip while the turn runs; the
+                 settled row's full tool list lands via the idle reload. -->
+            <p v-if="row.part.kind === 'tool'" class="tool-row">
+              <span class="tool-chip" :class="row.part.endedAt === null ? 'running' : 'lav'">
+                {{ row.part.text }}{{ row.part.endedAt === null ? "…" : "" }}
+              </span>
+            </p>
             <!-- Reasoning with no readable text (codex encrypts its
                  chain-of-thought): a quiet one-liner that says it thought and
                  for how long, never a box the reader can open onto nothing. -->
             <p
-              v-if="row.blankThinking"
+              v-else-if="row.blankThinking"
               class="thought-bare"
               :class="{ done: row.part.endedAt !== null }"
             >

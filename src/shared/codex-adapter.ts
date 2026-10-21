@@ -503,29 +503,6 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return rows;
   }
 
-  /** Tool chip names for ChatMessage.toolNames, first-seen order. */
-  function toolNameOfItem(item: CodexItem): string | null {
-    switch (item.type) {
-      case "commandExecution":
-        return "shell";
-      case "fileChange":
-        return "patch";
-      case "mcpToolCall":
-        return item.server && item.tool ? `${item.server}/${item.tool}` : (item.tool ?? "mcp");
-      case "dynamicToolCall":
-      case "collabAgentToolCall":
-        return "tool";
-      case "webSearch":
-        return "web";
-      case "subAgentActivity":
-        return "subagent";
-      case "imageGeneration":
-        return "image";
-      default:
-        return null;
-    }
-  }
-
   /**
    * Read a thread's metadata WITHOUT taking its writer.
    *
@@ -1093,7 +1070,9 @@ function emitCodexNotification(
       const item = p.item;
       if (!threadId || !p.turnId || !item) break;
       // Full snapshots self-heal a dropped delta; other item kinds surface
-      // through the idle message reload (tool rows live on the assistant row).
+      // through the idle message reload (tool rows live on the assistant row)
+      // — but their start/end still stream as live chips, so a running
+      // command or patch is visible the moment codex begins it.
       if (item.type === "agentMessage") {
         emit({
           type: "message.part",
@@ -1136,6 +1115,24 @@ function emitCodexNotification(
             endedAt,
           });
         }
+      } else {
+        // Tool-like items (commandExecution, fileChange, mcpToolCall, …):
+        // stream the chip live so the pane shows what the turn is doing while
+        // it runs; the settled row's full tool list still lands via the idle
+        // reload. text is the same chip label mapTurn uses.
+        const tool = toolNameOfItem(item);
+        if (tool) {
+          emit({
+            type: "message.part",
+            sessionId: threadId,
+            messageId: p.turnId,
+            partId: item.id,
+            kind: "tool",
+            text: tool,
+            startedAt: method === "item/started" ? (p.startedAtMs ?? null) : null,
+            endedAt: method === "item/completed" ? (p.completedAtMs ?? null) : null,
+          });
+        }
       }
       break;
     }
@@ -1145,9 +1142,18 @@ function emitCodexNotification(
     case "thread/archived":
     case "thread/unarchived":
     case "thread/reverted":
-    case "thread/queue/changed":
-    case "thread/compacted": {
+    case "thread/queue/changed": {
       if (threadId) emit({ type: "session.updated", sessionId: threadId });
+      break;
+    }
+    case "thread/compacted": {
+      // codex folded the thread's history into a summary on its own (auto
+      // compaction — there is no manual primitive). Surface it like opencode's
+      // completed summarize: reload + 🗜 toast, instead of a silent refresh.
+      if (threadId) {
+        emit({ type: "session.updated", sessionId: threadId });
+        emit({ type: "session.compressed", sessionId: threadId });
+      }
       break;
     }
     default:
@@ -1156,11 +1162,36 @@ function emitCodexNotification(
 }
 
 /**
+ * Tool chip names for ChatMessage.toolNames (first-seen order) and for the
+ * live tool parts streamed while a turn runs.
+ */
+function toolNameOfItem(item: CodexItem): string | null {
+  switch (item.type) {
+    case "commandExecution":
+      return "shell";
+    case "fileChange":
+      return "patch";
+    case "mcpToolCall":
+      return item.server && item.tool ? `${item.server}/${item.tool}` : (item.tool ?? "mcp");
+    case "dynamicToolCall":
+    case "collabAgentToolCall":
+      return "tool";
+    case "webSearch":
+      return "web";
+    case "subAgentActivity":
+      return "subagent";
+    case "imageGeneration":
+      return "image";
+    default:
+      return null;
+  }
+}
+
+/**
  * Reasoning text helpers. Codex 0.154's `content` is string[] (older builds
  * sent {text}[] — both accepted); summaries are always string[]. The join for
  * the persisted thinking field keeps content and summary in that order.
- */
-function reasoningContentOf(item: CodexItem): string {
+ */ function reasoningContentOf(item: CodexItem): string {
   return (item.content ?? [])
     .map((part) => (typeof part === "string" ? part : (part.text ?? "")))
     .join("\n\n")

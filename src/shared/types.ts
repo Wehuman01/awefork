@@ -299,16 +299,18 @@ export type AgentEvent =
     }
   | {
       /**
-       * Full snapshot of a text/reasoning part (opencode's message.part.updated).
-       * `text` is the part's whole content so the renderer can reconcile dropped
-       * deltas; `endedAt !== null` marks the part finished (reasoning end flips
-       * the live "Thinking" block into its collapsed Thought summary).
+       * Full snapshot of a text/reasoning/tool part (opencode's
+       * message.part.updated; codex item snapshots). `text` is the part's whole
+       * content so the renderer can reconcile dropped deltas — for a `tool`
+       * part it is the chip label; `endedAt !== null` marks the part finished
+       * (reasoning end flips the live "Thinking" block into its collapsed
+       * Thought summary, tool end settles the chip).
        */
       type: "message.part";
       sessionId: string;
       messageId: string;
       partId: string;
-      kind: "text" | "thinking";
+      kind: "text" | "thinking" | "tool";
       text: string;
       startedAt: number | null;
       endedAt: number | null;

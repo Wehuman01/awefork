@@ -92,6 +92,10 @@ const DICT: Dict = {
     zh: "⏸ 等待你的确认 · {perm}",
     en: "⏸ Awaiting your confirmation · {perm}",
   },
+  "interaction.inlineWaitConfirmCodex": {
+    zh: "⏸ 等待你的确认",
+    en: "⏸ Awaiting your confirmation",
+  },
   "interaction.inlineWaitInput": { zh: "⏸ 等待你的输入", en: "⏸ Awaiting your input" },
   "interaction.inlineWaitDecision": {
     zh: "⏸ 等待你的决定",
