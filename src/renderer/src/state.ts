@@ -190,8 +190,6 @@ interface AppState {
   actionError: string | null;
   /** Pending Codex approvals/inputs, partitioned so background runs survive a switch. */
   interactions: Record<string, AgentInteractionRequest[]>;
-  /** interactionKey → epoch ms when that request auto-denies (drives the countdown). */
-  interactionDeadlines: Record<string, number>;
   draft: DraftState | null;
   /** True while the draft's fork+prompt round-trip is in flight. */
   draftSending: boolean;
@@ -316,7 +314,6 @@ const state = reactive<AppState>({
   },
   actionError: null,
   interactions: { opencode: [], codex: [] },
-  interactionDeadlines: {},
   composerFocusRequest: null,
   draft: null,
   draftSending: false,
@@ -796,9 +793,6 @@ interface CompletionWatch {
 }
 
 const completionWatches = new Map<string, CompletionWatch>();
-const interactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
-/** Mirrors main's JSON-RPC safe-reply deadline; exported for the countdown UI. */
-export const INTERACTION_TIMEOUT_MS = 30_000;
 const WATCH_INTERVAL_MS = 1500;
 // Give up after ~4 minutes with no completion AND no liveness sign — every
 // delta resets the ticks, and so does any poll that observes the message list
@@ -1537,10 +1531,6 @@ async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
   if (backend === state.activeBackend) void refreshSessions();
 }
 
-function interactionKey(backend: BackendId, requestId: string): string {
-  return `${backend}:${requestId}`;
-}
-
 /**
  * Where a queued interaction renders, re-exported so components read the split
  * through one module (state) without reaching into the pure dispatch helpers.
@@ -1562,13 +1552,8 @@ export {
  */
 export const inlineHostVisible = computed(() => selectedSession.value !== null && !state.compare);
 
-/** Remove one queued request (and its auto-deny timer) without replying. */
+/** Remove one queued request without replying. */
 function dropInteraction(backend: BackendId, requestId: string): void {
-  const key = interactionKey(backend, requestId);
-  const timer = interactionTimers.get(key);
-  if (timer) clearTimeout(timer);
-  interactionTimers.delete(key);
-  delete state.interactionDeadlines[key];
   state.interactions[backend] = (state.interactions[backend] ?? []).filter(
     (item) => item.requestId !== requestId,
   );
@@ -1576,9 +1561,9 @@ function dropInteraction(backend: BackendId, requestId: string): void {
 
 /**
  * A settled session (idle or failed run) or a dead server makes its queued
- * requests moot — the JSON-RPC layer already safe-replied them (30s guard) or
- * the connection is gone. Drop them so no dialog outlives its turn; the
- * adapter side resolves orphans as no-ops, so no stray reply is needed here.
+ * requests moot — the backend already settled them or the connection is gone.
+ * Drop them so no dialog outlives its turn; the adapter side resolves orphans
+ * as no-ops, so no stray reply is needed here.
  */
 function dropSessionInteractions(backend: BackendId, sessionId?: string): void {
   for (const item of state.interactions[backend] ?? []) {
@@ -1618,29 +1603,12 @@ export function respondInteraction(
 }
 
 function queueInteraction(backend: BackendId, request: AgentInteractionRequest): void {
-  const key = interactionKey(backend, request.requestId);
   const existing = state.interactions[backend] ?? [];
   if (existing.some((item) => item.requestId === request.requestId)) return;
   state.interactions[backend] = [...existing, request];
-  // opencode permission and form asks wait indefinitely: the server holds the
-  // run open until the user answers, and the card carries no countdown, so
-  // arming the 30s auto-deny here would silently kill a question the user can
-  // still see. Idle/error cleanup still drops them when the turn actually ends.
-  if (request.kind === "opencode-permission" || request.kind === "opencode-form") return;
-  state.interactionDeadlines[key] = Date.now() + INTERACTION_TIMEOUT_MS;
-  interactionTimers.set(
-    key,
-    setTimeout(() => {
-      // An explicit reply or cleanup already removed it; this timer is stale.
-      if (
-        !(state.interactions[backend] ?? []).some((item) => item.requestId === request.requestId)
-      ) {
-        return;
-      }
-      dropInteraction(backend, request.requestId);
-      void window.awefork.respondInteraction(backend, request.requestId, { decision: "deny" });
-    }, INTERACTION_TIMEOUT_MS),
-  );
+  // Every ask waits indefinitely — opencode and codex both hold the run open
+  // until the user answers, so nothing here auto-denies on a timer. Idle/error
+  // cleanup drops them when the turn actually ends.
 }
 
 /**

@@ -27,8 +27,6 @@ export interface CodexJsonRpcOptions {
   onDisconnect?: () => void;
   /** Handles server→client requests after the adapter has subscribed. */
   onRequest?: CodexRequestHandler;
-  /** Safe-reply deadline for a server request. */
-  requestTimeoutMs?: number;
 }
 
 export interface CodexJsonRpc {
@@ -59,14 +57,6 @@ const SAFE_REPLIES: Record<string, unknown> = {
 };
 
 const KNOWN_REQUESTS = new Set([...Object.keys(SAFE_REPLIES), "item/tool/requestUserInput"]);
-/**
- * Backstop only: the renderer arms its own (30s) auto-decline when the event
- * arrives — strictly after this timer would start at equal timeouts, so the
- * backstop would decline first and silently swallow a user "allow" clicked in
- * that gap. Staying well above the renderer's deadline lets its visible
- * decline always land; this guard fires only when the renderer is gone.
- */
-const REQUEST_TIMEOUT_MS = 60_000;
 
 export function createCodexJsonRpc(
   stdin: { write(chunk: string | Uint8Array): boolean },
@@ -81,7 +71,6 @@ export function createCodexJsonRpc(
   let disconnected = false;
   let notify = options.onNotification;
   let handleRequest = options.onRequest;
-  const requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
 
   const notifyDisconnect = () => {
     if (disconnected) return;
@@ -133,17 +122,12 @@ export function createCodexJsonRpc(
       if (settled) return;
       settled = true;
       openServerRequests.delete(cancel);
-      clearTimeout(timer);
       if (error) replyError(id, -32000, error instanceof Error ? error.message : String(error));
       else replyResult(id, result);
     };
-    const timer = setTimeout(() => {
-      const fallback = safeReply(method);
-      if (fallback === undefined) finish(null, "awefork 未获得用户输入，请求已超时");
-      else finish(fallback);
-    }, requestTimeoutMs);
-    // Disconnect settles the request here (the reply write is a guarded
-    // no-op), so neither the timer above nor a late handler resolution can
+    // The ask waits for the user indefinitely — codex holds the turn open,
+    // same contract as opencode's asks. Only a disconnect settles it here (the
+    // reply write is a guarded no-op), so a late handler resolution can never
     // reach the dead stdin.
     const cancel = () => finish(null, "codex app-server connection lost");
     openServerRequests.add(cancel);

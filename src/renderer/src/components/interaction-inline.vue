@@ -70,9 +70,6 @@
       </div>
     </template>
 
-    <p v-if="hasDeadline" class="inline-interaction-timeout">
-      {{ t("interaction.autoDeny", { seconds: secondsLeft }) }}
-    </p>
     <p v-if="queueDepth > 0" class="inline-interaction-queue">
       {{ t("interaction.inlineQueueDepth", { n: queueDepth }) }}
     </p>
@@ -80,12 +77,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, type DeepReadonly, reactive, ref, watch } from "vue";
 import type { AgentInteractionRequest } from "../../../shared/types";
 import { listSep, t } from "../i18n";
 import {
   countPendingInline,
-  INTERACTION_TIMEOUT_MS,
   inlineHostVisible,
   pickInlineInteraction,
   respondInteraction,
@@ -146,41 +142,6 @@ watch(request, (value) => {
   for (const question of value?.kind === "user-input" ? value.questions : []) {
     answers[question.id] = "";
   }
-});
-
-// Codex asks auto-deny after the JSON-RPC safe-reply window; the countdown
-// reads live. opencode asks wait indefinitely (no deadline key).
-const now = ref(Date.now());
-let ticker: ReturnType<typeof setInterval> | null = null;
-
-function stopTicker(): void {
-  if (ticker) clearInterval(ticker);
-  ticker = null;
-}
-
-watch(
-  () => request.value?.requestId ?? null,
-  (id) => {
-    stopTicker();
-    if (id) ticker = setInterval(() => (now.value = Date.now()), 1000);
-  },
-  { immediate: true },
-);
-
-onUnmounted(stopTicker);
-
-const hasDeadline = computed(() => {
-  if (!request.value) return false;
-  return (
-    store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`] !== undefined
-  );
-});
-
-const secondsLeft = computed(() => {
-  if (!request.value) return INTERACTION_TIMEOUT_MS / 1000;
-  const deadline = store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`];
-  if (!deadline) return 0;
-  return Math.max(0, Math.ceil((deadline - now.value) / 1000));
 });
 
 function deny(): void {

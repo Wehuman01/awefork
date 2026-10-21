@@ -60,10 +60,6 @@ const DICT: Dict = {
   "interaction.allowOnce": { zh: "允许本次", en: "Allow once" },
   "interaction.allowAlways": { zh: "总是允许", en: "Always allow" },
   "interaction.allowAlwaysWith": { zh: "总是允许 {rule}", en: "Always allow {rule}" },
-  "interaction.autoDeny": {
-    zh: "{seconds} 秒内未响应将自动拒绝",
-    en: "Auto-denies in {seconds}s without a response",
-  },
   "interaction.queueDepth": { zh: "还有 {n} 个待确认", en: "{n} more pending" },
   "interaction.inlineQueueDepth": {
     zh: "同会话还有 {n} 个待确认",

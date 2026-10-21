@@ -284,7 +284,7 @@ describe("createCodexJsonRpc", () => {
     rpc.dispose();
   });
 
-  it("safe-replies an approval once the 60s backstop deadline lapses (renderer's 30s decline lands first)", async () => {
+  it("waits indefinitely for an approval — no backstop deadline to guess with", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
@@ -299,19 +299,14 @@ describe("createCodexJsonRpc", () => {
       })}\n`,
     );
     expect(written).toHaveLength(0);
-    vi.advanceTimersByTime(59_999);
+    // Well past the old 60s backstop: the ask stays open, like opencode's.
+    vi.advanceTimersByTime(600_000);
     expect(written).toHaveLength(0);
-    vi.advanceTimersByTime(1);
-    expect(JSON.parse(written[0] ?? "{}")).toEqual({
-      jsonrpc: "2.0",
-      id: 31,
-      result: { decision: "decline" },
-    });
     rpc.dispose();
     vi.useRealTimers();
   });
 
-  it("cancels a user-input request that outlives the deadline instead of guessing an answer", async () => {
+  it("keeps a user-input request open past the old deadline instead of guessing an answer", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
@@ -325,17 +320,13 @@ describe("createCodexJsonRpc", () => {
         params: { questions: [{ id: "q1", question: "？" }] },
       })}\n`,
     );
-    vi.advanceTimersByTime(60_000);
-    expect(JSON.parse(written[0] ?? "{}")).toEqual({
-      jsonrpc: "2.0",
-      id: 32,
-      error: { code: -32000, message: "awefork 未获得用户输入，请求已超时" },
-    });
+    vi.advanceTimersByTime(600_000);
+    expect(written).toHaveLength(0);
     rpc.dispose();
     vi.useRealTimers();
   });
 
-  it("keeps exactly one reply when the handler resolves after the deadline", async () => {
+  it("keeps exactly one reply when the handler resolves after a long wait", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
@@ -350,17 +341,17 @@ describe("createCodexJsonRpc", () => {
         params: {},
       })}\n`,
     );
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(600_000);
     resolveHandler({ decision: "accept" });
     await Promise.resolve();
     await Promise.resolve();
     expect(written).toHaveLength(1);
-    expect(JSON.parse(written[0] ?? "{}").result).toEqual({ decision: "decline" });
+    expect(JSON.parse(written[0] ?? "{}").result).toEqual({ decision: "accept" });
     rpc.dispose();
     vi.useRealTimers();
   });
 
-  it("settles an in-flight server request on disconnect — its deadline timer and a late reply never write to the dead stdin", async () => {
+  it("settles an in-flight server request on disconnect — a late reply never writes to the dead stdin", async () => {
     // Regression: a reply written after the stream ended hit a destroyed
     // pipe, whose 'error' event had no listener and crashed the main process.
     vi.useFakeTimers();

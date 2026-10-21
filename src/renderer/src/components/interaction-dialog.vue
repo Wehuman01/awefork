@@ -64,7 +64,6 @@
           @click="allowAlways"
         >{{ alwaysButtonLabel }}</button>
       </div>
-      <p v-if="hasDeadline" class="interaction-timeout">{{ t("interaction.autoDeny", { seconds: secondsLeft }) }}</p>
       <p v-if="queueDepth > 0" class="interaction-queue">{{ t("interaction.queueDepth", { n: queueDepth }) }}</p>
     </section>
   </div>
@@ -75,13 +74,7 @@ import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { AgentInteractionRequest } from "../../../shared/types";
 import { listSep, t } from "../i18n";
-import {
-  INTERACTION_TIMEOUT_MS,
-  inlineHostVisible,
-  pickModalInteraction,
-  respondInteraction,
-  store,
-} from "../state";
+import { inlineHostVisible, pickModalInteraction, respondInteraction, store } from "../state";
 // A value import, not `import type`: the template renders this component, and
 // a type-only import erases the runtime binding (the dialog then emits an
 // unresolved <interactionform> element with no fields).
@@ -129,15 +122,6 @@ const ruleLabel = computed(() =>
     : "",
 );
 
-// Ticks only while a dialog is up, so the auto-deny countdown reads live.
-const now = ref(Date.now());
-let ticker: ReturnType<typeof setInterval> | null = null;
-
-function stopTicker(): void {
-  if (ticker) clearInterval(ticker);
-  ticker = null;
-}
-
 watch(
   request,
   (value) => {
@@ -145,32 +129,12 @@ watch(
     for (const question of value?.kind === "user-input" ? value.questions : []) {
       answers[question.id] = "";
     }
-    stopTicker();
     if (value) {
-      ticker = setInterval(() => (now.value = Date.now()), 1000);
       dialogRoot.value?.focus();
     }
   },
   { immediate: true },
 );
-
-onUnmounted(stopTicker);
-
-const secondsLeft = computed(() => {
-  if (!request.value) return INTERACTION_TIMEOUT_MS / 1000;
-  const deadline = store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`];
-  if (!deadline) return 0;
-  return Math.max(0, Math.ceil((deadline - now.value) / 1000));
-});
-
-// Only requests with an auto-deny timer show the countdown; the inline-only
-// opencode asks carry none, and the modal would otherwise read "0s".
-const hasDeadline = computed(() => {
-  if (!request.value) return false;
-  return (
-    store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`] !== undefined
-  );
-});
 
 function deny(): void {
   // An abandoned form is cancelled (opencode has no deny for forms); every
