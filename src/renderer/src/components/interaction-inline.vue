@@ -1,6 +1,6 @@
 <template>
   <section v-if="request" class="inline-interaction" role="group" aria-live="polite">
-    <!-- ── permission ask: allow / deny / always ── -->
+    <!-- ── opencode permission ask: allow / deny / always ── -->
     <template v-if="request.kind === 'opencode-permission'">
       <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitConfirm", { perm: request.permission }) }}</p>
       <pre v-if="request.command" class="inline-interaction-command">{{ request.command }}</pre>
@@ -11,6 +11,50 @@
         <button type="button" class="interaction-always" @click="allowAlways">
           {{ alwaysButtonLabel }}
         </button>
+      </div>
+    </template>
+
+    <!-- ── codex approvals / input: same bodies as the modal, inline ── -->
+    <template v-else-if="request.kind !== 'opencode-form'">
+      <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitConfirmCodex") }}</p>
+      <p class="inline-interaction-title">{{ t(request.title) }}</p>
+      <p v-if="request.detail" class="inline-interaction-meta">{{ t(request.detail, request.vars) }}</p>
+      <pre v-if="request.kind === 'command-approval'" class="inline-interaction-command">{{ request.command }}</pre>
+      <p v-if="request.kind === 'command-approval' && request.cwd" class="inline-interaction-meta">
+        {{ t("interaction.workingDir", { cwd: request.cwd }) }}
+      </p>
+      <p v-if="request.kind === 'file-approval' && request.grantRoot" class="inline-interaction-meta">
+        {{ t("interaction.requestWrite", { root: request.grantRoot }) }}
+      </p>
+      <ul v-if="request.kind === 'permission-approval'" class="interaction-list">
+        <li v-for="item in request.requested" :key="item">{{ item }}</li>
+      </ul>
+      <p v-if="request.kind === 'mcp-elicitation'" class="inline-interaction-meta">
+        {{ t("interaction.server", { name: request.serverName }) }}
+      </p>
+      <label
+        v-if="request.kind === 'user-input'"
+        v-for="question in request.questions"
+        :key="question.id"
+        class="interaction-question"
+      >
+        <b>{{ question.header }}</b>
+        <span>{{ question.question }}</span>
+        <select v-if="question.options?.length" v-model="answers[question.id]">
+          <option disabled value="">{{ t("interaction.selectPlaceholder") }}</option>
+          <option v-for="option in question.options" :key="option.label" :value="option.label">{{ option.label }}</option>
+        </select>
+        <input v-else v-model="answers[question.id]" :type="question.isSecret ? 'password' : 'text'" />
+      </label>
+      <div class="inline-interaction-actions">
+        <button type="button" class="interaction-deny" @click="deny">{{ t("interaction.deny") }}</button>
+        <button
+          v-if="request.kind === 'user-input'"
+          type="button"
+          class="interaction-allow"
+          @click="submitAnswers"
+        >{{ t("interaction.submit") }}</button>
+        <button v-else type="button" class="interaction-allow" @click="allow">{{ t("interaction.allowOnce") }}</button>
       </div>
     </template>
 
@@ -26,6 +70,9 @@
       </div>
     </template>
 
+    <p v-if="hasDeadline" class="inline-interaction-timeout">
+      {{ t("interaction.autoDeny", { seconds: secondsLeft }) }}
+    </p>
     <p v-if="queueDepth > 0" class="inline-interaction-queue">
       {{ t("interaction.inlineQueueDepth", { n: queueDepth }) }}
     </p>
@@ -33,11 +80,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type DeepReadonly, ref } from "vue";
+import { computed, type DeepReadonly, onUnmounted, reactive, ref, watch } from "vue";
 import type { AgentInteractionRequest } from "../../../shared/types";
 import { listSep, t } from "../i18n";
 import {
   countPendingInline,
+  INTERACTION_TIMEOUT_MS,
   inlineHostVisible,
   pickInlineInteraction,
   respondInteraction,
@@ -47,26 +95,21 @@ import {
 import InteractionForm from "./interaction-form.vue";
 
 /**
- * The opencode ask (permission or form) for the session on screen, rendered at
- * the tail of the message flow instead of as a modal. It reads the same queue
- * the modal does through the shared dispatch split, so the two never both show
- * the same request. Deliberately registers no global key handler — the modal's
- * own listener owns Esc/Enter while it is up, and a second one here would
- * fight it.
+ * The queued ask for the session on screen, rendered at the tail of the
+ * message flow instead of as a modal — opencode permission/form asks and every
+ * codex approval/input kind. It reads the same queue the modal does through
+ * the shared dispatch split, so the two never both show the same request.
+ * Deliberately registers no global key handler — the modal's own listener owns
+ * Esc/Enter while it is up, and a second one here would fight it.
  */
-const request = computed<DeepReadonly<
-  Extract<AgentInteractionRequest, { kind: "opencode-permission" | "opencode-form" }>
-> | null>(() => {
-  const picked = pickInlineInteraction(
+const request = computed<DeepReadonly<AgentInteractionRequest> | null>(() =>
+  pickInlineInteraction(
     store.activeBackend,
     store.interactions,
     store.selectedId,
     inlineHostVisible.value,
-  );
-  return picked && (picked.kind === "opencode-permission" || picked.kind === "opencode-form")
-    ? picked
-    : null;
-});
+  ),
+);
 
 /** The rule "always" would save — patterns when present, else the permission class. */
 const ruleLabel = computed(() =>
@@ -94,29 +137,74 @@ const queueDepth = computed(() =>
 
 /** The form component, whose `collect` validates + builds the answer map. */
 const formRef = ref<InstanceType<typeof InteractionForm> | null>(null);
+/** Free-text/select answers for a codex user-input ask, keyed by question id. */
+const answers = reactive<Record<string, string>>({});
+
+// Reset the answer map whenever a different ask takes the card.
+watch(request, (value) => {
+  for (const key of Object.keys(answers)) delete answers[key];
+  for (const question of value?.kind === "user-input" ? value.questions : []) {
+    answers[question.id] = "";
+  }
+});
+
+// Codex asks auto-deny after the JSON-RPC safe-reply window; the countdown
+// reads live. opencode asks wait indefinitely (no deadline key).
+const now = ref(Date.now());
+let ticker: ReturnType<typeof setInterval> | null = null;
+
+function stopTicker(): void {
+  if (ticker) clearInterval(ticker);
+  ticker = null;
+}
+
+watch(
+  () => request.value?.requestId ?? null,
+  (id) => {
+    stopTicker();
+    if (id) ticker = setInterval(() => (now.value = Date.now()), 1000);
+  },
+  { immediate: true },
+);
+
+onUnmounted(stopTicker);
+
+const hasDeadline = computed(() => {
+  if (!request.value) return false;
+  return (
+    store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`] !== undefined
+  );
+});
+
+const secondsLeft = computed(() => {
+  if (!request.value) return INTERACTION_TIMEOUT_MS / 1000;
+  const deadline = store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`];
+  if (!deadline) return 0;
+  return Math.max(0, Math.ceil((deadline - now.value) / 1000));
+});
 
 function deny(): void {
   if (request.value) respondInteraction(request.value, { decision: "deny" });
 }
-
 function allow(): void {
   if (request.value) respondInteraction(request.value, { decision: "allow" });
 }
-
 function allowAlways(): void {
   if (request.value) respondInteraction(request.value, { decision: "always" });
 }
-
 function cancel(): void {
   // An abandoned form is cancelled (opencode has no deny for forms).
   if (request.value) respondInteraction(request.value, { decision: "cancel" });
 }
-
 function submit(): void {
   if (request.value?.kind !== "opencode-form") return;
   // collect() validates and narrows each field's type; null = blocked (the
   // component shows why) so a doomed POST never goes out.
   const collected = formRef.value?.collect();
   if (collected) respondInteraction(request.value, { decision: "answers", answers: collected });
+}
+function submitAnswers(): void {
+  if (request.value?.kind !== "user-input") return;
+  respondInteraction(request.value, { decision: "answers", answers: { ...answers } });
 }
 </script>

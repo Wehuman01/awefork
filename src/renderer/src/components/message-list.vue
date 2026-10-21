@@ -61,8 +61,13 @@
         <div class="message-body">
           <p class="tool-row"><span class="tool-chip running">running…</span></p>
           <template v-for="row in liveRows" :key="row.part.partId">
+            <p v-if="row.part.kind === 'tool'" class="tool-row">
+              <span class="tool-chip" :class="row.part.endedAt === null ? 'running' : 'lav'">
+                {{ row.part.text }}{{ row.part.endedAt === null ? "…" : "" }}
+              </span>
+            </p>
             <details
-              v-if="row.part.kind === 'thinking'"
+              v-else-if="row.part.kind === 'thinking'"
               class="thought streaming-thought"
               :class="{ done: row.part.endedAt !== null }"
               :open="row.part.endedAt === null"

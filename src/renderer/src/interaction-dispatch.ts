@@ -1,12 +1,12 @@
 import type { BackendId } from "../../shared/backend";
 
 /**
- * Where one backend's queued interaction requests render. opencode asks
- * (permission and form) that belong to the session on screen live inline at
- * the tail of that session's message flow; everything else (codex approvals,
- * asks with no correlatable session) keeps the modal dialog. Pure and
- * side-effect free so the split is unit-testable without mounting a component
- * or booting the store.
+ * Where one backend's queued interaction requests render. Session-scoped asks
+ * — opencode permission/form and every codex approval/input — that belong to
+ * the session on screen live inline at the tail of that session's message
+ * flow; everything else (asks with no correlatable session) keeps the modal
+ * dialog. Pure and side-effect free so the split is unit-testable without
+ * mounting a component or booting the store.
  *
  * Typed over a request shape so both the mutable store type and Vue's
  * DeepReadonly mirror (what components actually hold) flow through unchanged,
@@ -17,8 +17,20 @@ type Queue<R> = Readonly<Record<string, readonly R[]>>;
 /** The fields the split reads off a request; every variant carries both. */
 type Classifiable = { readonly kind: string; readonly sessionId: string | null };
 
-/** The opencode ask kinds that render inline when they match the selection. */
-const INLINE_KINDS = new Set(["opencode-permission", "opencode-form"]);
+/**
+ * The ask kinds that render inline when they match the selection: both
+ * opencode ask kinds and every codex interaction kind (command/file/permission
+ * approvals, user input, MCP elicitation) — all carry a real session.
+ */
+const INLINE_KINDS = new Set([
+  "opencode-permission",
+  "opencode-form",
+  "command-approval",
+  "file-approval",
+  "permission-approval",
+  "user-input",
+  "mcp-elicitation",
+]);
 
 /**
  * opencode's placeholder session for a form with no real session (an MCP
@@ -28,9 +40,9 @@ const INLINE_KINDS = new Set(["opencode-permission", "opencode-form"]);
 const GLOBAL_SESSION = "global";
 
 /**
- * Whether an opencode ask belongs to the session currently on screen. Only
- * these kinds are hoisted inline; a null `sessionId` (an ask with no
- * correlatable session) never matches, so it stays in the modal.
+ * Whether an ask belongs to the session currently on screen. Only these kinds
+ * are hoisted inline; a null `sessionId` (an ask with no correlatable session)
+ * never matches, so it stays in the modal.
  * `hostVisible` folds in whether the inline card actually has a pane to render
  * in (see `inlineHostVisible` in state): when it does not, nothing is inline,
  * so the modal picks the ask up instead of it vanishing from both surfaces.
@@ -54,10 +66,11 @@ function isInlineInteraction(
 }
 
 /**
- * Whether an opencode ask is parked on another session: it has a real session
- * of its own, so it waits for that session's pane instead of hijacking the
- * global modal. Multiple sessions' asks therefore never fight over one dialog
- * — each renders inside its own context pane when selected.
+ * Whether an ask is parked on another session: it has a real session of its
+ * own, so it waits for that session's pane instead of hijacking the global
+ * modal. Multiple sessions' asks therefore never fight over one dialog — each
+ * renders inside its own context pane when selected. Codex asks keep their
+ * auto-deny countdown while parked, same as in the modal.
  */
 function isParkedInteraction(
   request: Classifiable,
@@ -119,10 +132,10 @@ export function pickModalInteraction<R extends Classifiable>(
 
 /**
  * How many further inline asks wait behind the one on screen — same backend,
- * inline-kind, same session. The inline card's "N more" line reads this so a
- * codex approval queued for the same session is not counted as an opencode ask
- * waiting inline. Zero when no session is selected or the host is off screen,
- * mirroring `pickInlineInteraction`.
+ * inline-kind, same session. The inline card's "N more" line reads this so an
+ * ask queued for another session is not counted as one waiting inline here.
+ * Zero when no session is selected or the host is off screen, mirroring
+ * `pickInlineInteraction`.
  */
 export function countPendingInline<R extends Classifiable>(
   backend: BackendId,

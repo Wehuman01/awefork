@@ -4614,6 +4614,15 @@ code.md-code {
   font-size: 12px;
 }
 
+/* codex asks auto-deny after the safe-reply window; same copy as the modal's
+ * countdown, hung off the inline card. */
+.inline-interaction-timeout {
+  margin-top: 6px;
+  text-align: right;
+  color: var(--warn-ink, var(--ink-soft));
+  font-size: 12px;
+}
+
 /* fork tag-inheritance ask — reuses the interaction dialog frame */
 .fork-tag-chips {
   display: flex;

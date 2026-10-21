@@ -8,11 +8,12 @@ import type { BackendId } from "../src/shared/backend";
 import type { AgentFormField, AgentInteractionRequest } from "../src/shared/types";
 
 /**
- * The dispatch split decides where a queued interaction renders: opencode
- * permission asks for the session on screen go inline at the tail of that
- * session's message flow, everything else keeps the modal. These are the
- * invariants the two components rely on — one request, exactly one surface.
- * Pure helpers, so no store or component mounting is needed.
+ * The dispatch split decides where a queued interaction renders: session-
+ * scoped asks (opencode permission/form and every codex approval/input) for
+ * the session on screen go inline at the tail of that session's message flow,
+ * everything else keeps the modal. These are the invariants the two
+ * components rely on — one request, exactly one surface. Pure helpers, so no
+ * store or component mounting is needed.
  */
 
 type Queue = Record<string, AgentInteractionRequest[]>;
@@ -77,10 +78,11 @@ describe("interaction dispatch — inline pick", () => {
     expect(pickInlineInteraction(BACKEND, q, "s1")?.requestId).toBe("b");
   });
 
-  it("ignores codex approvals and asks for other sessions", () => {
+  it("picks a codex approval for the selected session like an opencode ask", () => {
     const q = queue([commandApproval("x", "s1"), permission("b", "s2")]);
 
-    expect(pickInlineInteraction(BACKEND, q, "s1")).toBeNull();
+    expect(pickInlineInteraction(BACKEND, q, "s1")?.requestId).toBe("x");
+    expect(pickModalInteraction(BACKEND, q, "s1")).toBeNull();
   });
 
   it("never picks an ask whose sessionId is null (nothing to attach it to)", () => {
@@ -120,18 +122,18 @@ describe("interaction dispatch — inline pick", () => {
 
 describe("interaction dispatch — modal fallback", () => {
   it("shows the queue head when the first ask does not belong inline", () => {
-    const q = queue([commandApproval("x", "s1"), permission("a", "s1")]);
+    const q = queue([commandApproval("x", null), permission("a", "s1")]);
 
     expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("x");
   });
 
   it("skips inline asks and shows the first non-inline one behind them", () => {
-    const q = queue([permission("a", "s1"), permission("b", "s1"), commandApproval("x", "s1")]);
+    const q = queue([permission("a", "s1"), permission("b", "s1"), commandApproval("x", null)]);
 
     expect(pickModalInteraction(BACKEND, q, "s1")?.requestId).toBe("x");
   });
 
-  it("parks an opencode ask for another session on neither surface", () => {
+  it("parks an ask for another session on neither surface", () => {
     const q = queue([permission("a", "s2")]);
 
     // The ask waits for its own session's pane; it must not hijack the modal
@@ -162,9 +164,18 @@ describe("interaction dispatch — one request, exactly one surface", () => {
     // Never both surfaces at once.
     if (inline && modal) expect(inline.requestId).not.toBe(modal.requestId);
     // The inline pick only ever names an ask that truly belongs inline.
+    const INLINE_KINDS = [
+      "opencode-permission",
+      "opencode-form",
+      "command-approval",
+      "file-approval",
+      "permission-approval",
+      "user-input",
+      "mcp-elicitation",
+    ];
     if (inline) {
       expect(visible).toBe(true);
-      expect(["opencode-permission", "opencode-form"]).toContain(inline.kind);
+      expect(INLINE_KINDS).toContain(inline.kind);
       expect(inline.sessionId).toBe(selectedId);
     }
     // Nothing vanishes: the head of the queue is always reachable — on one
@@ -175,7 +186,7 @@ describe("interaction dispatch — one request, exactly one surface", () => {
     const headModal = modal?.requestId === head.requestId;
     const headParked =
       visible &&
-      ["opencode-permission", "opencode-form"].includes(head.kind) &&
+      INLINE_KINDS.includes(head.kind) &&
       Boolean(head.sessionId) &&
       head.sessionId !== "global" &&
       head.sessionId !== selectedId;
@@ -218,7 +229,7 @@ describe("interaction dispatch — one request, exactly one surface", () => {
 });
 
 describe("interaction dispatch — inline queue depth", () => {
-  it("counts only further opencode asks for the same session", () => {
+  it("counts only further inline asks for the same session", () => {
     const q = queue([
       permission("a", "s1"),
       commandApproval("x", "s1"),
@@ -226,9 +237,9 @@ describe("interaction dispatch — inline queue depth", () => {
       permission("c", "s2"),
     ]);
 
-    // One shown + one behind = 1; the codex ask and the other session's ask
-    // are not inline waiters.
-    expect(countPendingInline(BACKEND, q, "s1")).toBe(1);
+    // One shown + one opencode and one codex ask behind = 2; the other
+    // session's ask is not an inline waiter here.
+    expect(countPendingInline(BACKEND, q, "s1")).toBe(2);
     expect(countPendingInline(BACKEND, q, "s2")).toBe(0);
   });
 
@@ -241,7 +252,7 @@ describe("interaction dispatch — inline queue depth", () => {
   });
 
   it("is zero when nothing in the queue is an inline ask", () => {
-    const q = queue([commandApproval("x", "s1"), permission("a", null)]);
+    const q = queue([commandApproval("x", null), permission("a", "s2")]);
 
     expect(countPendingInline(BACKEND, q, "s1")).toBe(0);
   });
