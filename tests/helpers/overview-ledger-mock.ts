@@ -95,7 +95,7 @@ export function createOverviewLedgerMock(): Pick<
         return true;
       }
       if (current === undefined) return false;
-      if (runId && current && current !== runId) return true;
+      if (runId !== undefined && current !== runId) return true;
       unknown.delete(key);
       broadcast(key, undefined, null);
       return false;

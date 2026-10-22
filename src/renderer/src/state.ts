@@ -336,8 +336,6 @@ interface AppState {
    * cleared the moment new evidence arrives.
    */
   overviewUnknown: Record<string, string>;
-  /** Idle status explicitly observed in this app run; restart invalidates it. */
-  overviewIdle: Record<string, boolean>;
 }
 
 const state = reactive<AppState>({
@@ -413,7 +411,6 @@ const state = reactive<AppState>({
   overviewRead: {},
   overviewRemote: {},
   overviewUnknown: {},
-  overviewIdle: {},
 });
 
 export const store = readonly(state);
@@ -1165,13 +1162,16 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
         if (alive.has(entry.id)) continue;
         if (generation !== workspaceGeneration) return;
         try {
-          state.archive = await window.awefork.archiveRemove(backend, "session", entry.id);
+          const archive = await window.awefork.archiveRemove(backend, "session", entry.id);
+          if (generation !== workspaceGeneration || backend !== state.activeBackend) return;
+          state.archive = archive;
         } catch {
           // Left for the next refresh.
         }
       }
     }
 
+    if (generation !== workspaceGeneration || backend !== state.activeBackend) return;
     if (!state.selectedDirectory && sessions.length > 0) {
       state.selectedDirectory = sessions.reduce((a, b) =>
         a.updatedAt > b.updatedAt ? a : b,
@@ -1185,6 +1185,7 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
     ) {
       await selectSession(latestSessionId(directorySessions.value), { markSeen: options.markSeen });
     }
+    if (generation !== workspaceGeneration || backend !== state.activeBackend) return;
     await ensureCanvasMessages();
   } catch (error) {
     // A failure from a parked world must not flag the active one offline.
@@ -1874,7 +1875,16 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       break;
     }
     case "session.idle": {
-      if (!isRunning(backend, event.sessionId)) markOverviewIdle(backend, event.sessionId);
+      // An explicit idle also resolves an unfinished run restored after a
+      // restart, without inventing a result for a run we did not watch end.
+      if (!isRunning(backend, event.sessionId)) {
+        setOverviewUnknown(
+          backend,
+          event.sessionId,
+          false,
+          state.overviewUnknown[overviewKey(backend, event.sessionId)],
+        );
+      }
       const settleId = overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
       stopWatch(backend, event.sessionId);
       // The turn finished, so any queued approval/input it blocked on is gone
@@ -3051,7 +3061,6 @@ export async function createSession(directory?: string): Promise<void> {
     },
   });
   await refreshSessions();
-  markOverviewIdle(backend, created.id);
   await selectSession(created.id, { focus: true });
   state.composerFocusRequest = Date.now();
 }
@@ -3634,12 +3643,23 @@ watch(
  * vanished session drops it entirely.
  */
 async function restoreComposer(): Promise<void> {
+  const backend = state.activeBackend;
+  const generation = workspaceGeneration;
   let persisted: PersistedComposer | null = null;
   try {
-    persisted = await window.awefork.composer(state.activeBackend);
+    persisted = await window.awefork.composer(backend);
   } catch {
     return;
   }
+  if (backend !== state.activeBackend || generation !== workspaceGeneration) return;
+  const draft = persisted?.draft ?? null;
+  const anchor =
+    draft?.text.trim() && state.sessions.some((s) => s.id === draft.sessionId)
+      ? await draftAnchor(draft.sessionId, draft.atMessageId, backend)
+      : null;
+  if (backend !== state.activeBackend || generation !== workspaceGeneration) return;
+  // Resolve every asynchronous input before applying the restored composer,
+  // so an old backend cannot overwrite a newer workspace or its saved draft.
   restoringComposer = true;
   try {
     // Same existence filter as the write path: picks for sessions that
@@ -3652,24 +3672,18 @@ async function restoreComposer(): Promise<void> {
     state.lastModel = persisted?.lastModel ?? null;
     state.favoriteModels = persisted?.favoriteModels ?? [];
     state.recentModels = persisted?.recentModels ?? [];
-    const draft = persisted?.draft ?? null;
     // An empty draft is nothing to hand back; a fresh openDraft is better.
-    if (draft && draft.text.trim() !== "") {
-      if (state.sessions.some((s) => s.id === draft.sessionId)) {
-        const anchor = await draftAnchor(draft.sessionId, draft.atMessageId);
-        if (anchor) {
-          state.draft = {
-            nodeId: anchor.nodeId,
-            sessionId: draft.sessionId,
-            atMessageId: anchor.atMessageId,
-            contextMode: draft.contextMode ?? "inherit",
-            text: draft.text,
-            model: draft.model,
-            attachments: draft.attachments.map((a) => ({ ...a })),
-          };
-          void ensureModels();
-        }
-      }
+    if (draft && anchor) {
+      state.draft = {
+        nodeId: anchor.nodeId,
+        sessionId: draft.sessionId,
+        atMessageId: anchor.atMessageId,
+        contextMode: draft.contextMode ?? "inherit",
+        text: draft.text,
+        model: draft.model,
+        attachments: draft.attachments.map((a) => ({ ...a })),
+      };
+      void ensureModels();
     }
   } finally {
     restoringComposer = false;
@@ -3682,10 +3696,11 @@ async function restoreComposer(): Promise<void> {
 async function draftAnchor(
   sessionId: string,
   atMessageId: string | null,
+  backend: BackendId,
 ): Promise<{ nodeId: string; atMessageId: string | null } | null> {
   let messages: ChatMessage[] = [];
   try {
-    messages = await window.awefork.messages(state.activeBackend, sessionId);
+    messages = await window.awefork.messages(backend, sessionId);
   } catch {
     return null;
   }
@@ -4262,14 +4277,26 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
  * server only marks connectionError — the cached view stays readable, and
  * the registry re-spawns the backend on the next call anyway.
  */
-async function revalidateBackend(backend: BackendId): Promise<void> {
-  const ready = await window.awefork.ready(backend);
-  if (!ready.ok) {
-    state.connectionError = ready.error ?? `Failed to start the ${backend} server.`;
-    return;
+async function revalidateBackend(
+  backend: BackendId,
+  options: { markSeen?: boolean } = {},
+): Promise<void> {
+  const generation = workspaceGeneration;
+  try {
+    const ready = await window.awefork.ready(backend);
+    if (backend !== state.activeBackend || generation !== workspaceGeneration) return;
+    if (!ready.ok) {
+      state.connectionError = ready.error ?? `Failed to start the ${backend} server.`;
+      return;
+    }
+    await refreshSessions(options);
+    if (backend !== state.activeBackend || generation !== workspaceGeneration) return;
+    void restoreComposer();
+  } catch (error) {
+    if (backend === state.activeBackend && generation === workspaceGeneration) {
+      state.connectionError = error instanceof Error ? error.message : String(error);
+    }
   }
-  await refreshSessions();
-  void restoreComposer();
 }
 
 /** Bumped on every workspace reset for a backend switch; async flows capture
@@ -4356,7 +4383,7 @@ export async function switchBackend(
       // nothing on a path whose whole point is painting without waiting.
       state.capabilities = localCapabilities(backend);
       restoreWorkspace(parked);
-      void revalidateBackend(backend);
+      void revalidateBackend(backend, options);
     } else {
       resetWorkspace();
       try {
@@ -4532,12 +4559,9 @@ export const overviewRows = computed<OverviewRow[]>(() => {
         waiting: asks.length > 0,
         running: isRunningObserved(backend, session.id) || session.runtimeStatus === "running",
         result,
-        unknown:
-          state.overviewUnknown[key] !== undefined ||
-          session.runtimeStatus === "unknown" ||
-          (session.runtimeStatus !== "idle" &&
-            state.overviewIdle[key] !== true &&
-            !isRunningObserved(backend, session.id)),
+        // No evidence is the historical baseline. Only an unfinished observed
+        // run or an explicit backend status makes a session unknown.
+        unknown: state.overviewUnknown[key] !== undefined || session.runtimeStatus === "unknown",
       }),
       activityAt: Math.max(session.updatedAt, result?.settledAt ?? 0),
     });
@@ -4797,7 +4821,6 @@ function applyOverviewUpdate(update: OverviewReadUpdate): void {
     state.overviewUnknown = { ...state.overviewUnknown, [update.key]: update.unknown };
   } else if (update.unknown === null) {
     clearOverviewUnknownByKey(update.key);
-    if (update.entry) markOverviewIdleByKey(update.key);
   }
 }
 
@@ -4829,11 +4852,6 @@ function forgetOverviewSession(backend: BackendId, sessionId: string): void {
     void _read;
     state.overviewRead = keptRead;
   }
-  if (key in state.overviewIdle) {
-    const { [key]: _idle, ...keptIdle } = state.overviewIdle;
-    void _idle;
-    state.overviewIdle = keptIdle;
-  }
   // The main copy removes both the result and persisted unknown marker.
   void window.awefork.overviewForget(backend, sessionId).catch(() => {});
 }
@@ -4855,15 +4873,6 @@ function clearOverviewUnknownByKey(key: string): void {
   state.overviewUnknown = kept;
 }
 
-function markOverviewIdle(backend: BackendId, sessionId: string): void {
-  markOverviewIdleByKey(overviewKey(backend, sessionId));
-}
-
-function markOverviewIdleByKey(key: string): void {
-  if (state.overviewUnknown[key] !== undefined || state.overviewIdle[key]) return;
-  state.overviewIdle = { ...state.overviewIdle, [key]: true };
-}
-
 function setOverviewUnknown(
   backend: BackendId,
   sessionId: string,
@@ -4875,17 +4884,11 @@ function setOverviewUnknown(
     const current = state.overviewUnknown[key];
     const nextRunId = runId ?? current ?? "";
     if (current === nextRunId) return;
-    if (key in state.overviewIdle) {
-      const { [key]: _idle, ...kept } = state.overviewIdle;
-      void _idle;
-      state.overviewIdle = kept;
-    }
     state.overviewUnknown = { ...state.overviewUnknown, [key]: nextRunId };
   } else {
     const current = state.overviewUnknown[key];
-    if (current === undefined || (runId && current !== runId)) return;
+    if (current === undefined || (runId !== undefined && current !== runId)) return;
     clearOverviewUnknownByKey(key);
-    markOverviewIdle(backend, sessionId);
   }
   void window.awefork.overviewSetUnknown(backend, sessionId, unknown, runId).catch(() => {});
 }
@@ -4930,7 +4933,6 @@ function recordOverviewOutcome(
   state.overviewRead = nextLedger;
   if (nextLedger !== previousLedger) {
     clearOverviewUnknown(backend, sessionId, settleId);
-    markOverviewIdle(backend, sessionId);
   }
   void window.awefork
     .overviewRecordSettle(backend, sessionId, failed, settleId)
@@ -4966,21 +4968,44 @@ export function overviewPendingAsk(
  * instead of throwing), re-confirm the session is visible, then select. The
  * panel closes and the result is marked seen only once the selection and its
  * messages are actually in place; otherwise it stays open with a retryable
- * error and the unread watermark untouched.
+ * error and the unread watermark untouched. A failed cross-agent jump returns
+ * to its original workspace unless a newer navigation has taken over.
  */
 export async function jumpToOverviewSession(
   backend: BackendId,
   sessionId: string,
 ): Promise<boolean> {
   // One navigation at a time: a second click must not race the first switch.
-  if (state.overview.jumpingKey !== null) return false;
+  if (state.overview.jumpingKey !== null || switchingBackend) return false;
+  const previousBackend = state.activeBackend;
+  let targetGeneration = workspaceGeneration;
+  let switched = false;
+  let landed = false;
+  const isTargetWorkspace = (): boolean =>
+    !switchingBackend &&
+    state.activeBackend === backend &&
+    workspaceGeneration === targetGeneration;
+  const navigationStillCurrent = (): boolean => {
+    if (isTargetWorkspace()) return true;
+    state.overview.error = t("overview.jumpInterrupted");
+    return false;
+  };
   const key = overviewKey(backend, sessionId);
   state.overview.jumpingKey = key;
   const label = BACKEND_LABELS[backend];
   try {
     state.overview.error = null;
     if (backend !== state.activeBackend) {
-      await switchBackend(backend, { markSeen: false });
+      try {
+        await switchBackend(backend, { markSeen: false });
+      } finally {
+        // The switch can throw after changing the active backend. It still
+        // belongs to this jump and needs a rollback in that case.
+        if (state.activeBackend === backend) {
+          switched = true;
+          targetGeneration = workspaceGeneration;
+        }
+      }
       if (state.activeBackend !== backend) {
         state.overview.error = t("overview.jumpSwitchFailed", { backend: label });
         return false;
@@ -4991,7 +5016,8 @@ export async function jumpToOverviewSession(
       // A TUI-side create or a rename may not have reached this window yet; one
       // refresh is the documented retry. Deleted and archived sessions stay
       // missing — the overview never un-archives anything on the user's behalf.
-      await refreshSessions();
+      await refreshSessions({ markSeen: false });
+      if (!navigationStillCurrent()) return false;
       target = visibleSessions.value.find((session) => session.id === sessionId);
     }
     if (!target) {
@@ -5003,6 +5029,7 @@ export async function jumpToOverviewSession(
     // advance the watermark on its own: a result that landed while the
     // messages were loading has to stay unread.
     await selectSession(sessionId, { markSeen: false });
+    if (!navigationStillCurrent()) return false;
     if (state.selectedId !== sessionId) {
       state.overview.error = t("overview.jumpMissing");
       return false;
@@ -5014,6 +5041,7 @@ export async function jumpToOverviewSession(
     // Select only after messages and the graph are ready. The earlier focus
     // request could center a cached old node before a newer turn arrived.
     await nextTick();
+    if (!navigationStillCurrent()) return false;
     const latestTurn = turnGraph.value.nodes
       .filter((node): node is TurnNode => node.kind === "turn" && node.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt || a.row - b.row)
@@ -5021,6 +5049,7 @@ export async function jumpToOverviewSession(
     if (latestTurn) {
       await selectTurn(latestTurn, { focusCanvas: true });
       await nextTick();
+      if (!navigationStillCurrent()) return false;
       if (state.selectedTurnId !== latestTurn.id) {
         state.overview.error = t("overview.jumpLoadFailed", { error: "turn focus failed" });
         return false;
@@ -5030,15 +5059,42 @@ export async function jumpToOverviewSession(
       // empty canvas only after the session's graph has loaded.
       state.focusRequest = { sessionId, nonce: Date.now() };
       await nextTick();
+      if (!navigationStillCurrent()) return false;
     }
     // Fire-and-forget on purpose: the panel closes on the navigation landing,
     // and the watermark follows the IPC round-trip (the local mirror already
     // shows the badge cleared).
     void markOverviewSeen(backend, sessionId, revision);
+    landed = true;
     state.overview.open = false;
     state.overview.selectedKey = null;
     return true;
+  } catch (error) {
+    state.overview.error = t("overview.jumpLoadFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   } finally {
+    if (!landed && switched && isTargetWorkspace()) {
+      const failure = state.overview.error ?? t("overview.jumpMissing");
+      let rollbackError: string | null = null;
+      try {
+        await switchBackend(previousBackend, { markSeen: false });
+      } catch (error) {
+        rollbackError = error instanceof Error ? error.message : String(error);
+      }
+      state.overview.error =
+        state.activeBackend === previousBackend
+          ? failure
+          : t("overview.jumpRollbackFailed", {
+              error: failure,
+              backend: BACKEND_LABELS[previousBackend],
+              reason:
+                rollbackError ??
+                state.actionError ??
+                t("overview.jumpSwitchFailed", { backend: BACKEND_LABELS[previousBackend] }),
+            });
+    }
     state.overview.jumpingKey = null;
   }
 }

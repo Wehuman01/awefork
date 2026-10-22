@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
-import type { AgentEvent, ChatMessage, SessionSummary } from "../src/shared/types";
+import type {
+  AgentEvent,
+  ChatMessage,
+  PersistedComposer,
+  SessionSummary,
+} from "../src/shared/types";
 import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -50,7 +55,12 @@ function assistantRow(error: string | null = null): ChatMessage {
   return { ...USER_ROW, id: "m2", role: "assistant", text: "修好了", error };
 }
 
-async function bootState(options: { runError?: string | null } = {}) {
+async function bootState(
+  options: {
+    runError?: string | null;
+    beforeInit?: (api: AweforkApi) => void | Promise<void>;
+  } = {},
+) {
   vi.resetModules();
   const rows = [USER_ROW, assistantRow(options.runError ?? null)];
   let onEnvelope: ((envelope: BackendEventEnvelope) => void) | null = null;
@@ -122,10 +132,12 @@ async function bootState(options: { runError?: string | null } = {}) {
     },
     ...createOverviewLedgerMock(),
   };
+  await options.beforeInit?.(api);
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");
   await state.init();
   return {
+    api,
     state,
     store: state.store,
     send: (backend: BackendId, event: AgentEvent) => onEnvelope?.({ backend, event }),
@@ -156,6 +168,41 @@ function rowOf(h: Awaited<ReturnType<typeof bootState>>, backend: BackendId, id:
   return h.state.overviewRows.value.find((row) => row.backend === backend && row.session.id === id);
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((fulfill) => {
+    resolve = fulfill;
+  });
+  return { promise, resolve };
+}
+
+async function prepareNavigation(h: Awaited<ReturnType<typeof bootState>>, target = "c1") {
+  const turn = h.state.turnGraph.value.nodes.find((node) => node.kind === "turn");
+  if (turn?.kind !== "turn") throw new Error("missing original turn");
+  await h.state.selectTurn(turn);
+  h.state.openOverviewPanel();
+  await vi.advanceTimersByTimeAsync(0);
+  await h.api.overviewRecordSettle("codex", target, false, "unseen-result");
+  const ledger = { ...h.store.overviewRead };
+  const markSeen = vi.fn(h.api.overviewMarkSeen);
+  h.api.overviewMarkSeen = markSeen;
+  return { turnId: turn.id, ledger, markSeen };
+}
+
+function expectFailedNavigation(
+  h: Awaited<ReturnType<typeof bootState>>,
+  original: Awaited<ReturnType<typeof prepareNavigation>>,
+) {
+  expect(h.store.activeBackend).toBe("opencode");
+  expect(h.store.selectedId).toBe("s1");
+  expect(h.store.selectedTurnId).toBe(original.turnId);
+  expect(h.store.overview.open).toBe(true);
+  expect(h.store.overview.error).toBeTruthy();
+  expect(h.store.overview.jumpingKey).toBeNull();
+  expect(h.store.overviewRead).toEqual(original.ledger);
+  expect(original.markSeen).not.toHaveBeenCalled();
+}
+
 /** started → idle, flushing the async finishRun chain. */
 async function runAndSettle(
   h: Awaited<ReturnType<typeof bootState>>,
@@ -170,8 +217,8 @@ async function runAndSettle(
 describe("overview rows over the store", () => {
   it("lists the visible backend's sessions and projects them from live state", async () => {
     const h = await bootState();
-    expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
-    expect(h.state.overviewStats.value.unknown).toBe(1);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("idle");
+    expect(h.state.overviewStats.value.unknown).toBe(0);
   });
 
   it("hides agent-spawned subagent sessions from the overview", async () => {
@@ -199,7 +246,7 @@ describe("overview rows over the store", () => {
     // Its parent stays; the subagent is gone from every overview surface.
     expect(rowOf(h, "opencode", "s1")).toBeDefined();
     expect(rowOf(h, "opencode", "sub-1")).toBeUndefined();
-    expect(h.state.overviewStats.value.unknown).toBe(1);
+    expect(h.state.overviewStats.value.unknown).toBe(0);
     // ...and the run it observed is not attributed to it either.
     h.send("opencode", { type: "message.started", sessionId: "sub-1", messageId: "m2" });
     expect(rowOf(h, "opencode", "sub-1")).toBeUndefined();
@@ -309,7 +356,8 @@ describe("overview rows over the store", () => {
     h.state.openOverviewPanel();
     await vi.advanceTimersByTimeAsync(0);
     expect(h.store.overview.open).toBe(true);
-    expect(rowOf(h, "codex", "c1")?.status).toBe("unknown");
+    expect(rowOf(h, "codex", "c1")?.status).toBe("idle");
+    expect(h.state.overviewStats.value.unknown).toBe(0);
     expect(h.state.overviewAgents.value).toEqual(["opencode", "codex"]);
   });
 
@@ -319,17 +367,43 @@ describe("overview rows over the store", () => {
 
     await vi.advanceTimersByTimeAsync(3_000);
 
+    expect(rowOf(h, "codex", "c1")?.status).toBe("idle");
+    expect(h.state.overviewStats.value.unknown).toBe(0);
+  });
+
+  it("keeps a backend's explicit unknown status", async () => {
+    const h = await bootState({
+      beforeInit: (api) => {
+        api.sessions = async (backend) => ({
+          sessions: [
+            { ...(backend === "codex" ? CODEX_C1 : OPENCODE_S1), runtimeStatus: "unknown" },
+          ],
+          lineage: {},
+        });
+      },
+    });
+    await h.state.refreshOverviewSessions();
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
     expect(rowOf(h, "codex", "c1")?.status).toBe("unknown");
     expect(h.state.overviewStats.value.unknown).toBe(2);
   });
 
-  it("uses an explicit idle event to resolve a session's unknown status", async () => {
-    const h = await bootState();
+  it("restores a persisted unknown marker until an explicit idle event resolves it", async () => {
+    const h = await bootState({
+      beforeInit: async (api) => {
+        await api.overviewSetUnknown("opencode", "s1", true, "previous-launch-run");
+      },
+    });
     expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
-
+    expect(h.state.overviewStats.value.unknown).toBe(1);
     h.send("opencode", { type: "session.idle", sessionId: "s1" });
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(rowOf(h, "opencode", "s1")?.status).toBe("idle");
+    expect(h.state.overviewStats.value.unknown).toBe(0);
+    expect(h.store.overviewUnknown["opencode:s1"]).toBeUndefined();
+    expect((await h.api.overviewLedger()).unknown["opencode:s1"]).toBeUndefined();
+    expect(h.store.overviewRead["opencode:s1"]).toBeUndefined();
   });
 
   it("keeps one agent's listing failure from blanking the others", async () => {
@@ -389,17 +463,174 @@ describe("overview navigation", () => {
 
   it("keeps the panel and the unread badge when the session is gone", async () => {
     const h = await bootState();
-    h.state.openOverviewPanel();
-    await vi.advanceTimersByTimeAsync(0);
+    const original = await prepareNavigation(h, "deleted-in-tui");
 
     const landed = await h.state.jumpToOverviewSession("codex", "deleted-in-tui");
     expect(landed).toBe(false);
-    expect(h.store.overview.open).toBe(true);
-    expect(h.store.overview.error).toBeTruthy();
-    // The switch already landed (it precedes the existence check), so the
-    // session is simply not selected — the panel never claims it arrived.
-    expect(h.store.selectedId).not.toBe("deleted-in-tui");
+    expectFailedNavigation(h, original);
   });
+
+  it("returns to the original selection when the target's messages cannot load", async () => {
+    const h = await bootState();
+    const original = await prepareNavigation(h);
+    const messages = h.api.messages;
+    h.api.messages = async (backend, sessionId) => {
+      if (backend === "codex") throw new Error("message reader unavailable");
+      return messages(backend, sessionId);
+    };
+
+    expect(await h.state.jumpToOverviewSession("codex", "c1")).toBe(false);
+
+    expectFailedNavigation(h, original);
+    expect(h.store.overview.error).toContain("message reader unavailable");
+  });
+
+  it.each(["selectBackend", "ready"] as const)(
+    "restores the original selection when %s throws an IPC error",
+    async (method) => {
+      const h = await bootState();
+      const original = await prepareNavigation(h);
+      h.api[method] = async (backend) => {
+        if (backend === "codex") throw new Error("IPC disconnected");
+        return { ok: true };
+      };
+
+      expect(await h.state.jumpToOverviewSession("codex", "c1")).toBe(false);
+
+      expectFailedNavigation(h, original);
+      expect(h.store.overview.error).toContain("IPC disconnected");
+    },
+  );
+
+  it.each(["refuses", "throws"] as const)(
+    "reports when returning to the original backend %s",
+    async (failure) => {
+      const h = await bootState();
+      const original = await prepareNavigation(h, "deleted-in-tui");
+      h.api.selectBackend = async (backend) => {
+        if (backend === "opencode") {
+          if (failure === "throws") throw new Error("return unavailable");
+          return { ok: false, error: "return unavailable" };
+        }
+        return { ok: true };
+      };
+
+      expect(await h.state.jumpToOverviewSession("codex", "deleted-in-tui")).toBe(false);
+
+      expect(h.store.activeBackend).toBe("codex");
+      expect(h.store.overview.open).toBe(true);
+      expect(h.store.overview.error).toMatch(/未能返回|couldn't return/i);
+      expect(h.store.overview.error).toMatch(/找不到这条会话|That session is gone/);
+      expect(h.store.overview.error).toContain("opencode");
+      expect(h.store.overview.error).toContain("return unavailable");
+      expect(h.store.overviewRead).toEqual(original.ledger);
+      expect(original.markSeen).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an unrelated result unread when a cached backend revalidates during a failed jump", async () => {
+    const h = await bootState();
+    await h.state.switchBackend("codex");
+    await h.state.switchBackend("opencode");
+    await vi.advanceTimersByTimeAsync(0);
+    const original = await prepareNavigation(h, "c2");
+    const sessions = h.api.sessions;
+    const refresh = vi.fn(async (backend: BackendId) =>
+      backend === "codex"
+        ? { sessions: [{ ...CODEX_C1, id: "c2" }], lineage: {} }
+        : sessions(backend),
+    );
+    h.api.sessions = refresh;
+
+    expect(await h.state.jumpToOverviewSession("codex", "deleted-in-tui")).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expectFailedNavigation(h, original);
+    expect(h.store.overviewRead["codex:c2"]?.seen).toBe(0);
+    expect(refresh.mock.calls.filter(([backend]) => backend === "codex").length).toBeGreaterThan(1);
+  });
+
+  it.each([true, false])(
+    "ignores a cached backend's delayed ready result after returning (ok=%s)",
+    async (ok) => {
+      const h = await bootState();
+      await h.state.switchBackend("codex");
+      await h.state.switchBackend("opencode");
+      await vi.advanceTimersByTimeAsync(0);
+      const original = await prepareNavigation(h, "deleted-in-tui");
+      const ready = deferred<Awaited<ReturnType<AweforkApi["ready"]>>>();
+      h.api.ready = async (backend) => (backend === "codex" ? ready.promise : { ok: true });
+      const sessions = vi.fn(h.api.sessions);
+      h.api.sessions = sessions;
+
+      expect(await h.state.jumpToOverviewSession("codex", "deleted-in-tui")).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      const callsBeforeOldReady = sessions.mock.calls.length;
+      ready.resolve({ ok, error: "stale codex ready" });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expectFailedNavigation(h, original);
+      expect(sessions).toHaveBeenCalledTimes(callsBeforeOldReady);
+      expect(h.store.connectionError).toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    "preserves a backend the user selects while a jump is loading (switch pending=%s)",
+    async (switchPending) => {
+      const h = await bootState();
+      await h.state.switchBackend("codex");
+      await h.state.switchBackend("opencode");
+      await vi.advanceTimersByTimeAsync(0);
+      const original = await prepareNavigation(h);
+      const sessions = h.api.sessions;
+      h.api.sessions = async (backend) =>
+        backend === "pi"
+          ? { sessions: [{ ...OPENCODE_S1, id: "p1" }], lineage: {} }
+          : sessions(backend);
+      const messages = h.api.messages;
+      const loading = deferred<void>();
+      const pending = deferred<ChatMessage[]>();
+      h.api.messages = async (backend, sessionId) => {
+        if (backend === "codex" && sessionId === "c1") {
+          loading.resolve();
+          return pending.promise;
+        }
+        return messages(backend, sessionId);
+      };
+      const select = h.api.selectBackend;
+      const switching = deferred<void>();
+      const selected = deferred<Awaited<ReturnType<AweforkApi["selectBackend"]>>>();
+      const selectBackend = vi.fn(async (backend: BackendId) => {
+        if (backend === "pi" && switchPending) {
+          switching.resolve();
+          return selected.promise;
+        }
+        return select(backend);
+      });
+      h.api.selectBackend = selectBackend;
+
+      const jump = h.state.jumpToOverviewSession("codex", "c1");
+      await loading.promise;
+      const manualSwitch = h.state.switchBackend("pi");
+      if (switchPending) await switching.promise;
+      else await manualSwitch;
+      pending.resolve([{ ...USER_ROW, id: "c1m1" }]);
+
+      expect(await jump).toBe(false);
+      if (switchPending) {
+        selected.resolve({ ok: true });
+        await manualSwitch;
+      }
+      expect(h.store.activeBackend).toBe("pi");
+      expect(h.store.selectedId).toBe("p1");
+      expect(h.store.overview.open).toBe(true);
+      expect(h.store.overview.error).toBeTruthy();
+      expect(h.store.overviewRead).toEqual(original.ledger);
+      expect(original.markSeen.mock.calls.map(([backend]) => backend)).toEqual(["pi"]);
+      expect(selectBackend.mock.calls.map(([backend]) => backend)).toEqual(["codex", "pi"]);
+    },
+  );
 
   it("keeps the panel open when the target backend refuses the switch", async () => {
     const h = await bootState();
@@ -440,4 +671,144 @@ describe("overview navigation", () => {
     expect(h.store.overviewRead["opencode:s1"]?.seen).toBe(1);
     expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
   });
+});
+
+describe("workspace work left pending by a return", () => {
+  it("discards an archive prune that finishes after returning to another backend", async () => {
+    const opencodeArchive = {
+      sessions: [],
+      directories: [{ path: "/opencode-archive", archivedAt: 1 }],
+    };
+    const h = await bootState({
+      beforeInit: (api) => {
+        api.archive = async (backend) =>
+          backend === "codex"
+            ? { sessions: [{ id: "c1", archivedAt: 1 }], directories: [] }
+            : opencodeArchive;
+      },
+    });
+    await h.state.switchBackend("codex");
+    await h.state.switchBackend("opencode");
+    await vi.advanceTimersByTimeAsync(0);
+    const sessions = h.api.sessions;
+    h.api.sessions = async (backend) =>
+      backend === "codex"
+        ? { sessions: [{ ...CODEX_C1, id: "c2" }], lineage: {} }
+        : sessions(backend);
+    const pruning = deferred<void>();
+    const pruned = deferred<Awaited<ReturnType<AweforkApi["archiveRemove"]>>>();
+    h.api.archiveRemove = async (backend) => {
+      if (backend === "codex") {
+        pruning.resolve();
+        return pruned.promise;
+      }
+      return opencodeArchive;
+    };
+    const messages = vi.fn(h.api.messages);
+    h.api.messages = messages;
+
+    await h.state.switchBackend("codex");
+    await pruning.promise;
+    await h.state.switchBackend("opencode");
+    await vi.advanceTimersByTimeAsync(0);
+    pruned.resolve({
+      sessions: [],
+      directories: [{ path: "/codex-archive", archivedAt: 2 }],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.store.activeBackend).toBe("opencode");
+    expect(h.store.archive).toEqual(opencodeArchive);
+    expect(h.store.selectedId).toBe("s1");
+    expect(messages.mock.calls.some(([backend, id]) => backend === "opencode" && id === "c2")).toBe(
+      false,
+    );
+  });
+
+  it.each(["composer", "anchor"] as const)(
+    "discards a stale %s restore after returning to another backend",
+    async (phase) => {
+      const ownModel = { providerId: "opencode", modelId: "own-model" };
+      const targetModel = { providerId: "codex", modelId: "target-model" };
+      const originalComposer: PersistedComposer = {
+        draft: {
+          sessionId: "s1",
+          atMessageId: null,
+          text: "opencode draft",
+          model: ownModel,
+          attachments: [],
+        },
+        paneModels: { s1: ownModel },
+        lastModel: ownModel,
+        favoriteModels: [ownModel],
+        recentModels: [ownModel],
+      };
+      const targetComposer: PersistedComposer = {
+        draft: {
+          sessionId: "c1",
+          atMessageId: null,
+          text: "codex draft",
+          model: targetModel,
+          attachments: [],
+        },
+        paneModels: { c1: targetModel },
+        lastModel: targetModel,
+        favoriteModels: [targetModel],
+        recentModels: [targetModel],
+      };
+      const h = await bootState({
+        beforeInit: (api) => {
+          api.composer = async (backend) => (backend === "opencode" ? originalComposer : null);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await h.state.switchBackend("codex");
+      await vi.advanceTimersByTimeAsync(0);
+      await h.state.switchBackend("opencode");
+      await vi.advanceTimersByTimeAsync(0);
+      const started = deferred<void>();
+      const composer = deferred<PersistedComposer>();
+      const anchor = deferred<ChatMessage[]>();
+      h.api.composer = async (backend) => {
+        if (backend === "opencode") return originalComposer;
+        if (phase === "composer") {
+          started.resolve();
+          return composer.promise;
+        }
+        return targetComposer;
+      };
+      const originalMessages = h.api.messages;
+      const messages = vi.fn(async (backend: BackendId, sessionId: string) => {
+        if (phase === "anchor" && backend === "codex" && sessionId === "c1") {
+          started.resolve();
+          return anchor.promise;
+        }
+        return originalMessages(backend, sessionId);
+      });
+      h.api.messages = messages;
+
+      await h.state.switchBackend("codex");
+      await started.promise;
+      await h.state.switchBackend("opencode");
+      await vi.advanceTimersByTimeAsync(0);
+      composer.resolve(targetComposer);
+      anchor.resolve([{ ...USER_ROW, id: "c1m1" }]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(h.store.activeBackend).toBe("opencode");
+      expect(h.store.selectedId).toBe("s1");
+      expect(h.store.draft).toMatchObject({
+        sessionId: "s1",
+        text: "opencode draft",
+        model: ownModel,
+      });
+      expect(h.store.paneModels).toEqual({ s1: ownModel });
+      expect(h.store.lastModel).toEqual(ownModel);
+      expect(h.store.favoriteModels).toEqual([ownModel]);
+      expect(h.store.recentModels).toEqual([ownModel]);
+      expect(
+        messages.mock.calls.some(([backend, id]) => backend === "opencode" && id === "c1"),
+      ).toBe(false);
+    },
+  );
 });

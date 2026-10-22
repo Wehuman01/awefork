@@ -137,7 +137,7 @@ export class OverviewLedgerStore {
       this.unknown.set(key, nextRunId);
     } else {
       if (current === undefined) return { unknown: false, runId: null, changed: false };
-      if (runId && current && current !== runId) {
+      if (runId !== undefined && current !== runId) {
         return { unknown: true, runId: current, changed: false };
       }
       this.unknown.delete(key);

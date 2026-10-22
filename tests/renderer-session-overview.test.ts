@@ -383,6 +383,35 @@ describe("unread ledger persistence (main-owned sidecar)", () => {
     }
   });
 
+  it.each(["", "event-previous"])(
+    "keeps the next run's unknown marker when an old clear arrives (runId=%j)",
+    async (previousRunId) => {
+      const path = sidecarPath("stale-unknown-clear");
+      const key = overviewKey("codex", "s1");
+      try {
+        const store = new OverviewLedgerStore(path);
+        await store.setUnknown(key, true, previousRunId);
+        await store.setUnknown(key, true, "event-next");
+
+        expect(await store.setUnknown(key, false, previousRunId)).toEqual({
+          unknown: true,
+          runId: "event-next",
+          changed: false,
+        });
+        expect((await new OverviewLedgerStore(path).snapshot()).unknown[key]).toBe("event-next");
+
+        expect(await store.setUnknown(key, false, "event-next")).toEqual({
+          unknown: false,
+          runId: null,
+          changed: true,
+        });
+        expect((await new OverviewLedgerStore(path).snapshot()).unknown[key]).toBeUndefined();
+      } finally {
+        await rm(path, { force: true });
+      }
+    },
+  );
+
   it("mints a revision for the next launch's first run even after an id restarts", async () => {
     // Regression: main stamps every event with a per-launch counter, so without
     // a launch-scoped prefix the ids read "event-1" again on the next launch.

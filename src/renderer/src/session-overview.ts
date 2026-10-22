@@ -44,6 +44,8 @@ export {
  *   from a quiet session.
  * - "unread" needs an explicit ending plus an unseen revision. A lost
  *   connection or a silent timeout is "unknown", never a completed result.
+ * - "idle" is the baseline when no run was observed. It does not confirm
+ *   that an external terminal is inactive.
  * - The revision is awefork's own observation counter. It is NOT the agent's
  *   turn id or the run's exact completion time, and is never shown as either.
  */

@@ -64,6 +64,12 @@ renderer ── window.awefork (preload) ── ipc ── AgentAdapter ── a
 5. **Server lifecycle.** Port 4096 is probed at startup; a running `opencode serve` is reused, otherwise one is spawned as a child and killed on quit. Never kill a server you didn't spawn.
 6. **Known limitation:** the message list is flat. Sessions where the user reverted and re-asked inside the same session show every attempt in order; dead-branch filtering is future work.
 
+### Session overview
+
+The overview uses idle as the baseline for history with no observed run. Unknown requires an explicit backend status or a persisted marker for a run whose ending was never confirmed. An idle event clears that marker without creating a result for a run this app did not watch end. Idle does not establish whether an external terminal is active; external event coverage depends on the backend.
+
+The main process owns `overview-read.json`, including result revisions, seen watermarks, and unfinished-run markers. Only an observed ending creates a result. A successful jump marks only the revision shown when the target starts loading. A failed cross-agent jump restores the original workspace and keeps the panel and unread results; a newer workspace navigation takes precedence. A failed return is shown in the panel.
+
 ### Adding an agent backend
 
 Implement `AgentAdapter` in `src/shared/`, add an entry in main-process wiring for its lifecycle, and extend the fake server in tests. The protocol doc-comment in `types.ts` is the contract; do not fork the protocol per backend.
@@ -73,7 +79,8 @@ Implement `AgentAdapter` in `src/shared/`, add an entry in main-process wiring f
 - One test file per shared module under `tests/`.
 - Real I/O: temp dirs on disk (`mkdtemp`), real HTTP via a fake opencode server (`node:http`) that mirrors verified endpoint semantics. No module-level mocks.
 - Adapter semantics worth re-verifying against a real opencode release when upgrading: exclusive-cut fork, `prompt_async` fire-and-forget, SSE frame shape on `/event`.
-- Renderer has no dedicated tests yet; keep logic that matters in `shared/`.
+- Overview projection and ledger tests live in `tests/renderer-session-overview.test.ts`; store and navigation regressions live in `tests/renderer-session-overview-state.test.ts`.
+- Run `npm run verify` for types, formatting, and unit tests. Run `npm run test:gui` separately for the real-window smoke test; it builds the app before launching the demo backend.
 
 ## Release
 
