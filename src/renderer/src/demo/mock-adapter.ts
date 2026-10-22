@@ -954,6 +954,8 @@ export function installMockAdapter(): void {
     openExternal: async (url) => {
       window.open(url, "_blank", "noopener");
     },
+    // No native chrome to mirror in a plain browser tab.
+    setTheme: async () => undefined,
     // The demo runs in a plain browser tab; there is no sidecar to keep.
     composer: async () => null,
     saveComposer: async () => undefined,

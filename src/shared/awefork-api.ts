@@ -244,6 +244,8 @@ export interface AweforkApi {
     content: string,
   ): Promise<{ ok: boolean; path?: string; error?: string }>;
   openExternal(url: string): Promise<void>;
+  /** Mirror the renderer palette into native window chrome (title bar). */
+  setTheme(theme: "light" | "dark"): Promise<void>;
   convertDocument(filename: string, bytes: Uint8Array): Promise<string>;
   checkUpdates(respectSkip: boolean): Promise<CheckUpdatesResult>;
   skipUpdate(version: string): Promise<{ ok: boolean; error?: string }>;

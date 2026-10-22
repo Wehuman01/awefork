@@ -76,4 +76,6 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "topbar.connected": { zh: "{label} 已连接", en: "{label} connected" },
   "topbar.disconnected": { zh: "{label} 未连接", en: "{label} not connected" },
   "topbar.commandPalette": { zh: "命令面板（⌘K / Ctrl+K）", en: "Command palette (⌘K / Ctrl+K)" },
+  "topbar.themeOn": { zh: "切换到深色模式", en: "Switch to dark mode" },
+  "topbar.themeOff": { zh: "切换到明亮模式", en: "Switch to light mode" },
 };

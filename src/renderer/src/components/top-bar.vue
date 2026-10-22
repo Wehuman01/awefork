@@ -87,6 +87,12 @@
       :title="t('topbar.commandPalette')"
       @click="togglePalette()"
     >⌘K</button>
+    <button
+      type="button"
+      class="icon-btn cmdk-btn"
+      :title="theme === 'dark' ? t('topbar.themeOff') : t('topbar.themeOn')"
+      @click="toggleTheme"
+    >{{ theme === "dark" ? "☀" : "☾" }}</button>
     <div class="lang-switch" role="group" aria-label="Language">
       <button
         type="button"
@@ -134,6 +140,7 @@ import {
   switchBackend,
   switchDirectory,
 } from "../state";
+import { theme, toggleTheme } from "../theme";
 import HistoryButton from "./history-button.vue";
 
 const open = ref(false);

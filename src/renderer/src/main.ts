@@ -4,8 +4,12 @@ import App from "./app.vue";
 // math glyphs; Vite bundles the fonts as assets served from our own origin.
 import "katex/dist/katex.min.css";
 import "./style.css";
+import { initTheme } from "./theme";
 
 async function bootstrap(): Promise<void> {
+  // Paint the saved palette before the first frame so a dark-preference user
+  // never sees a light flash at boot.
+  initTheme();
   // Browser demo (`npm run demo`): no Electron preload ran, so serve an
   // in-memory adapter instead. Electron dev/prod always has window.awefork
   // defined by the preload first, and prod builds cut this branch entirely.

@@ -1,4 +1,11 @@
-import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
+import {
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  nativeTheme,
+  shell,
+} from "electron";
 import { canonicalizeStoredArchive, setArchived } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 import {
@@ -108,6 +115,11 @@ export function registerIpc(
   // Store channels take the backend from the invoke; unknown ids route to the
   // default rather than throwing so a stale renderer can't wedge the store.
   const storeBackend = (value: unknown): BackendId => (isBackendId(value) ? value : "opencode");
+
+  ipcMain.handle("awefork:setTheme", (_event: IpcMainInvokeEvent, value: unknown) => {
+    // Mirror the renderer's palette choice into native window chrome.
+    nativeTheme.themeSource = value === "dark" ? "dark" : "light";
+  });
 
   ipcMain.handle("awefork:ready", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
     try {

@@ -11,8 +11,10 @@
   --butter: #ffd166;
   --lavender: #b8a7f5;
   --lavender-soft: #efeafd;
+  --lavender-deep: #7a66d6;
   --mint: #7bc96f;
   --mint-soft: #e4f5e0;
+  --mint-deep: #4e8f45;
   --mint-rgb: 123, 201, 111;
   /* running: sky, never shared with mint (settled/recent) or butter (hits) */
   --sky: #6d9df2;
@@ -29,6 +31,8 @@
   --ink-faint: #c4b6ac;
   --line: #f3e4da;
   --danger: #e05d4b;
+  --danger-soft: #fdeceb;
+  --danger-deep: #c4544a;
   --radius: 18px;
   --shadow-card: 0 6px 18px rgba(196, 138, 92, 0.12);
   --shadow-lift: 0 10px 24px rgba(196, 138, 92, 0.18);
@@ -38,6 +42,93 @@
   --mark-soft: #ffe4e6;
   --mark-border: #fb7185;
   --mark-deep: #be123c;
+
+  /* theme-dependent surfaces that used to be hardcoded per-rule; the dark
+     palette re-points each at a warm dark counterpart */
+  --topbar-bg: rgba(255, 248, 243, 0.92);
+  --row-hover: #fdf3ec;
+  --row-active: #fff1e8;
+  --canvas-dot: #f2dfd2;
+  --edge: #ffb08a;
+  --edge-fork: #c9b8f0;
+  --edge-fork-deep: #7a66d6;
+  --fork-chip-border: #d9ccf7;
+  --fork-chip-hover: #e2d9fb;
+  --glass: rgba(255, 255, 255, 0.85);
+  --glass-soft: rgba(255, 255, 255, 0.75);
+  --glass-strong: rgba(255, 255, 255, 0.95);
+  --warn-text: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.08);
+  --toolfield-soft: #fff3d6;
+  --toolfield-text: #8a6d1a;
+  --code-bg: #f8ece3;
+  --cb-bg: #fffaf6;
+  --cb-bar: #f9efe6;
+  --th-bg: #fbf3ec;
+}
+
+/* 深色模式 · "night soda" — same peach-soda hues on a warm dark base.
+   Selected via <html data-theme="dark"> (see theme.ts); every soft wash
+   becomes a tinted dark so brand chips, rings and edges still read. */
+html[data-theme="dark"] {
+  --bg: #201915;
+  --card: #2a221d;
+  --panel: #261f1a;
+  --primary: #ff8a5c;
+  --primary-deep: #ffb08c;
+  --primary-soft: #452a1d;
+  --primary-border: #71432c;
+  --butter: #ffd166;
+  --lavender: #b8a7f5;
+  --lavender-soft: #362f4c;
+  --lavender-deep: #cdc2fa;
+  --mint: #7bc96f;
+  --mint-soft: #26361f;
+  --mint-deep: #a5d99b;
+  --mint-rgb: 123, 201, 111;
+  --sky: #6d9df2;
+  --sky-soft: #222f4a;
+  --sky-deep: #aac4f8;
+  --ask: #d97706;
+  --ask-soft: #3d2c14;
+  --ask-border: #7a5a1e;
+  --ask-deep: #f2c063;
+  --ink: #ece3db;
+  --ink-soft: #b5a89d;
+  --ink-faint: #82766c;
+  --line: #453629;
+  --danger: #ef7d6c;
+  --danger-soft: #4a2721;
+  --danger-deep: #f2a094;
+  --radius: 18px;
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 10px 24px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 4px 10px rgba(255, 138, 92, 0.25);
+  --mark: #e11d48;
+  --mark-soft: #471f2a;
+  --mark-border: #9f3750;
+  --mark-deep: #fda4af;
+
+  --topbar-bg: rgba(32, 25, 21, 0.92);
+  --row-hover: #322820;
+  --row-active: #46301f;
+  --canvas-dot: #35291f;
+  --edge: #a05f38;
+  --edge-fork: #6f5fae;
+  --edge-fork-deep: #b8a7f5;
+  --fork-chip-border: #4c4270;
+  --fork-chip-hover: #443b63;
+  --glass: rgba(38, 30, 25, 0.88);
+  --glass-soft: rgba(38, 30, 25, 0.8);
+  --glass-strong: rgba(42, 34, 29, 0.96);
+  --warn-text: #f0b45c;
+  --warn-soft: rgba(240, 180, 92, 0.12);
+  --toolfield-soft: #453a1c;
+  --toolfield-text: #e5c86e;
+  --code-bg: #372b23;
+  --cb-bg: #241d18;
+  --cb-bar: #2d241e;
+  --th-bg: #322820;
 }
 
 * {
@@ -161,7 +252,7 @@ textarea {
   align-items: center;
   gap: 12px;
   padding: 0 14px;
-  background: rgba(255, 248, 243, 0.92);
+  background: var(--topbar-bg);
   border-bottom: 1px solid var(--line);
   position: relative;
   z-index: 40;
@@ -228,7 +319,7 @@ textarea {
 .backend-warn {
   font-size: 12px;
   line-height: 1;
-  color: #b45309;
+  color: var(--warn-text);
   cursor: help;
   user-select: none;
 }
@@ -1039,11 +1130,11 @@ mark.hl {
 }
 
 .sess:hover {
-  background: #fdf3ec;
+  background: var(--row-hover);
 }
 
 .sess.active {
-  background: #fff1e8;
+  background: var(--row-active);
   color: var(--ink);
 }
 
@@ -1116,7 +1207,7 @@ mark.hl {
 }
 
 .sess-row.active {
-  background: #fff1e8;
+  background: var(--row-active);
 }
 
 .sess-row .sess {
@@ -1307,7 +1398,7 @@ mark.hl {
 }
 
 .fav-row.active {
-  background: #fff1e8;
+  background: var(--row-active);
   color: var(--ink);
 }
 
@@ -1861,7 +1952,7 @@ mark.hl {
   position: relative;
   overflow: hidden;
   background: var(--bg);
-  background-image: radial-gradient(#f2dfd2 1.6px, transparent 1.6px);
+  background-image: radial-gradient(var(--canvas-dot) 1.6px, transparent 1.6px);
   background-size: 24px 24px;
   cursor: grab;
   min-width: 0;
@@ -1889,13 +1980,13 @@ mark.hl {
 
 .edge {
   fill: none;
-  stroke: #ffb08a;
+  stroke: var(--edge);
   stroke-width: 2.5;
   transition: stroke-opacity 0.15s;
 }
 
 .edge.fork {
-  stroke: #c9b8f0;
+  stroke: var(--edge-fork);
   stroke-dasharray: 7 7;
 }
 
@@ -1905,7 +1996,7 @@ mark.hl {
 }
 
 .edge.fork.active {
-  stroke: #7a66d6;
+  stroke: var(--edge-fork-deep);
 }
 
 .edge.dim {
@@ -1924,7 +2015,7 @@ mark.hl {
 }
 
 .edge-dot {
-  fill: #ffb08a;
+  fill: var(--edge);
   transition: fill-opacity 0.15s;
 }
 
@@ -2128,8 +2219,8 @@ mark.hl {
    never looks like "somewhere else" */
 .turn.descendant {
   opacity: 0.72;
-  border-color: #c9b8f0;
-  box-shadow: 0 0 0 3px rgba(201, 184, 240, 0.16);
+  border-color: var(--edge-fork);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--edge-fork) 16%, transparent);
 }
 
 /* a search hit's butter ring wins over the subtree tint on shared cards */
@@ -2224,8 +2315,8 @@ mark.hl {
   padding: 1.5px 8px;
   border-radius: 999px;
   background: var(--lavender-soft);
-  border: 1px solid #d9ccf7;
-  color: #7a66d6;
+  border: 1px solid var(--fork-chip-border);
+  color: var(--lavender-deep);
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
@@ -2233,7 +2324,7 @@ mark.hl {
 }
 
 .fork-chip:hover {
-  background: #e2d9fb;
+  background: var(--fork-chip-hover);
 }
 
 .turn-body {
@@ -2286,12 +2377,12 @@ mark.hl {
   padding: 2.5px 9px;
   border-radius: 999px;
   background: var(--mint-soft);
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .chip.lav {
   background: var(--lavender-soft);
-  color: #7a66d6;
+  color: var(--lavender-deep);
 }
 
 .turn-foot {
@@ -2382,8 +2473,8 @@ mark.hl {
 
 .del-chip:hover {
   opacity: 1;
-  background: #fdeceb;
-  color: #c4544a;
+  background: var(--danger-soft);
+  color: var(--danger-deep);
 }
 
 /* hover-reveal key-turn mark; left of the delete chip */
@@ -2480,9 +2571,9 @@ mark.hl {
 }
 
 .draft-ctx.on {
-  color: #b45309;
-  border-color: #b45309;
-  background: rgba(180, 83, 9, 0.08);
+  color: var(--warn-text);
+  border-color: var(--warn-text);
+  background: var(--warn-soft);
 }
 
 .draft-head .close {
@@ -2610,7 +2701,7 @@ mark.hl {
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--glass);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -2627,7 +2718,7 @@ mark.hl {
   font-size: 11.5px;
   font-weight: 700;
   color: var(--ink-faint);
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--glass-soft);
   backdrop-filter: blur(4px);
   border-radius: 999px;
   padding: 5px 14px;
@@ -2647,7 +2738,7 @@ mark.hl {
   display: flex;
   align-items: center;
   gap: 2px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--glass);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px;
@@ -2679,7 +2770,7 @@ mark.hl {
   width: 32px;
   height: 32px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--glass);
   border: 1px solid var(--line);
   color: var(--ink-soft);
   font-size: 14px;
@@ -2699,7 +2790,7 @@ mark.hl {
   bottom: 46px;
   width: 176px;
   height: 110px;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--glass);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -3013,7 +3104,7 @@ mark.hl {
   align-self: flex-start;
   font-size: 9.5px;
   font-weight: 800;
-  color: #4e8f45;
+  color: var(--mint-deep);
   background: #fff;
   border-radius: 999px;
   padding: 1px 7px;
@@ -3192,7 +3283,7 @@ mark.hl {
 
 .cell-chip.model {
   background: var(--lavender-soft);
-  color: #6a58c9;
+  color: var(--lavender-deep);
 }
 
 .cell-chip.err {
@@ -3417,7 +3508,7 @@ mark.hl {
   margin-top: 5px;
   padding: 2px 7px;
   border-radius: 6px;
-  background: #fdeceb;
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: 10px;
   font-weight: 800;
@@ -3650,7 +3741,7 @@ mark.hl {
 
 .msg-copy.ok {
   opacity: 1;
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .tool-row {
@@ -3670,7 +3761,7 @@ mark.hl {
   padding: 2.5px 9px;
   border-radius: 999px;
   background: var(--mint-soft);
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .tool-chip.running {
@@ -3680,7 +3771,7 @@ mark.hl {
 
 .tool-chip.lav {
   background: var(--lavender-soft);
-  color: #7a66d6;
+  color: var(--lavender-deep);
 }
 
 .tool-chip.model {
@@ -3703,7 +3794,7 @@ mark.hl {
 .thought-toggle {
   cursor: pointer;
   padding: 6px 9px;
-  color: #7a66d6;
+  color: var(--lavender-deep);
   font-size: 11px;
   font-weight: 800;
   list-style: none;
@@ -3842,7 +3933,7 @@ mark.hl {
 code.md-code {
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.92em;
-  background: #f8ece3;
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.5px 5px;
@@ -3875,7 +3966,7 @@ code.md-code {
   margin: 8px 0;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fffaf6;
+  background: var(--cb-bg);
   overflow: hidden;
 }
 
@@ -3884,7 +3975,7 @@ code.md-code {
   align-items: center;
   justify-content: space-between;
   padding: 4px 6px 4px 12px;
-  background: #f9efe6;
+  background: var(--cb-bar);
   border-bottom: 1px solid var(--line);
 }
 
@@ -3909,7 +4000,7 @@ code.md-code {
 }
 
 .md-cb-copy.ok {
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .md-codeblock pre {
@@ -3972,12 +4063,12 @@ code.md-code {
 }
 
 .md-table th {
-  background: #fbf3ec;
+  background: var(--th-bg);
   font-weight: 800;
 }
 
 .md-table tbody tr:nth-child(even) {
-  background: #fffaf6;
+  background: var(--cb-bg);
 }
 
 /* the user bubble renders prompts through the same markdown renderer as
@@ -4771,7 +4862,7 @@ code.md-code {
   font-size: 12px;
   font-weight: 800;
   color: var(--ink-soft);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--glass);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -4814,7 +4905,7 @@ code.md-code {
   max-height: 340px;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 253, 251, 0.96);
+  background: var(--glass-strong);
   backdrop-filter: blur(4px);
   border: 1px solid var(--mark-border);
   border-radius: 14px;
@@ -4920,7 +5011,7 @@ code.md-code {
   align-items: center;
   gap: 8px;
   width: 100%;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--glass-strong);
   backdrop-filter: blur(4px);
   border: 1.5px solid var(--primary-border);
   border-radius: 14px;
@@ -4961,7 +5052,7 @@ code.md-code {
 
 .ss-results {
   width: 100%;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--glass-strong);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -5028,18 +5119,18 @@ code.md-code {
   padding: 1.5px 7px;
   border-radius: 999px;
   background: var(--mint-soft);
-  color: #4e8f45;
+  color: var(--mint-deep);
   flex: 0 0 auto;
 }
 
 .ss-field.preview {
   background: var(--lavender-soft);
-  color: #7a66d6;
+  color: var(--lavender-deep);
 }
 
 .ss-field.tool {
-  background: #fff3d6;
-  color: #8a6d1a;
+  background: var(--toolfield-soft);
+  color: var(--toolfield-text);
 }
 
 .ss-hit-title {
@@ -5080,7 +5171,7 @@ code.md-code {
 
 .digest-panel {
   width: 100%;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--glass-strong);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -5253,8 +5344,8 @@ code.md-code {
 }
 
 .att-x:hover {
-  background: #fdeceb;
-  color: #c4544a;
+  background: var(--danger-soft);
+  color: var(--danger-deep);
 }
 
 .att-notice {
@@ -5319,7 +5410,7 @@ code.md-code {
   height: 24px;
   border-radius: 8px;
   background: transparent;
-  color: #c4544a;
+  color: var(--danger-deep);
   display: grid;
   place-items: center;
   font-size: 13px;
@@ -5336,7 +5427,7 @@ code.md-code {
 
 .retry-chip:hover {
   opacity: 1;
-  background: #fdeceb;
+  background: var(--danger-soft);
 }
 
 /* ── always-visible retry entry on failed turns ────────────────────────── */
@@ -5367,8 +5458,8 @@ code.md-code {
 }
 
 .retry-now:hover {
-  background: #fdeceb;
-  border-color: #c4544a;
+  background: var(--danger-soft);
+  border-color: var(--danger-deep);
 }
 
 /* pane: the same pill under a failed reply row */
@@ -5427,17 +5518,17 @@ code.md-code {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--lavender-soft);
-  color: #7a66d6;
+  color: var(--lavender-deep);
 }
 
 .fchange-status.is-created {
   background: var(--mint-soft);
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .fchange-status.is-deleted {
-  background: #fdeceb;
-  color: #c4544a;
+  background: var(--danger-soft);
+  color: var(--danger-deep);
 }
 
 .fchange-status.is-unknown {
@@ -5464,11 +5555,11 @@ code.md-code {
 }
 
 .fc-add {
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .fc-del {
-  color: #c4544a;
+  color: var(--danger-deep);
   margin-left: 6px;
 }
 
@@ -5498,7 +5589,7 @@ code.md-code {
   border-radius: 6px;
   border: 1px solid #e3ddf0;
   background: #fff;
-  color: #7a66d6;
+  color: var(--lavender-deep);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s;
@@ -5547,7 +5638,7 @@ code.md-code {
 }
 
 .fc-line.add .fc-sign {
-  color: #4e8f45;
+  color: var(--mint-deep);
 }
 
 .fc-line.del {
@@ -5555,7 +5646,7 @@ code.md-code {
 }
 
 .fc-line.del .fc-sign {
-  color: #c4544a;
+  color: var(--danger-deep);
 }
 
 .fc-line.ctx .fc-text {
@@ -5809,4 +5900,120 @@ code.md-code {
   font-weight: 700;
   color: var(--ink-faint);
   text-align: center;
+}
+
+/* ── dark-mode touch-ups ─────────────────────────────────────────────
+   Surfaces whose light values were too bespoke to hoist into a variable
+   (minimap node fills, banner/danger washes, the file-changes card's
+   lavender-tinted paper) get explicit dark counterparts here. */
+
+html[data-theme="dark"] .topbar-status.bad .status-dot {
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+html[data-theme="dark"] .ctx-menu-item.danger:hover,
+html[data-theme="dark"] .banner-error {
+  background: var(--danger-soft);
+  color: var(--danger-deep);
+  border-color: var(--danger-deep);
+}
+
+html[data-theme="dark"] .banner-error {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+html[data-theme="dark"] .panel-pill.marks {
+  background: color-mix(in srgb, var(--mark-soft) 92%, transparent);
+}
+
+html[data-theme="dark"] .mm-node {
+  background: #5a3c2b;
+  border-color: #71432c;
+}
+
+html[data-theme="dark"] .mm-node.stub {
+  background: #4c4270;
+  border-color: #6f5fae;
+}
+
+html[data-theme="dark"] .mm-node.desc {
+  background: #55496f;
+  border-color: #6f5fae;
+}
+
+html[data-theme="dark"] .mm-hint {
+  background: linear-gradient(to top, rgba(38, 30, 25, 0.95), rgba(38, 30, 25, 0));
+}
+
+html[data-theme="dark"] .cmp-now {
+  background: var(--card);
+}
+
+/* file-changes card: lavender-tinted paper becomes a dark violet slate */
+html[data-theme="dark"] .fchanges {
+  border-color: #3c3550;
+  background: #292437;
+}
+
+html[data-theme="dark"] .fchanges-head,
+html[data-theme="dark"] .fchange-note,
+html[data-theme="dark"] .fchange-caret,
+html[data-theme="dark"] .fchange-status.is-unknown {
+  color: #a29ab8;
+  background: none;
+}
+
+html[data-theme="dark"] .fchange-status.is-unknown {
+  background: #3c3550;
+}
+
+html[data-theme="dark"] .fchange {
+  border-top-color: #343048;
+}
+
+html[data-theme="dark"] .fchange-row:hover {
+  background: #322c45;
+}
+
+html[data-theme="dark"] .fchange-path {
+  color: #c4bdd6;
+}
+
+html[data-theme="dark"] .fchange-open {
+  border-color: #4c4270;
+  background: var(--card);
+  color: var(--lavender-deep);
+}
+
+html[data-theme="dark"] .fchange-diff {
+  border-top-color: #343048;
+  background: var(--card);
+}
+
+html[data-theme="dark"] .fchange-hunk + .fchange-hunk {
+  border-top-color: #343048;
+}
+
+html[data-theme="dark"] .fc-sign {
+  color: #7d7694;
+}
+
+html[data-theme="dark"] .fc-line.add {
+  background: #24371f;
+}
+
+html[data-theme="dark"] .fc-line.del {
+  background: #47231d;
+}
+
+html[data-theme="dark"] .fc-line.ctx .fc-text {
+  color: #a29ab8;
+}
+
+html[data-theme="dark"] .brand .logo {
+  filter: none;
+}
+
+html[data-theme="dark"] ::selection {
+  background: color-mix(in srgb, var(--primary) 35%, transparent);
 }

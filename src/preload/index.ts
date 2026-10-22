@@ -173,6 +173,8 @@ const api: AweforkApi = {
   ): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke("awefork:saveTextFile", defaultName, content),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("awefork:openExternal", url),
+  setTheme: (theme: "light" | "dark"): Promise<void> =>
+    ipcRenderer.invoke("awefork:setTheme", theme),
   convertDocument: (filename: string, bytes: Uint8Array): Promise<string> =>
     ipcRenderer.invoke("awefork:convertDocument", filename, bytes),
   checkUpdates: (respectSkip: boolean): Promise<CheckUpdatesResult> =>
