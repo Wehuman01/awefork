@@ -105,7 +105,7 @@ npm run dev
 
 ## 兼容性
 
-awefork 支持 **opencode**（同时驱动它诞生时的 1.18–1.19 API 和 v2 的 `/api` 服务——按探测到的 CLI 版本选择协议；v2 服务器从 CLI 的后台服务（其注册密码）复用，或由 awefork 带上自选密码启动；v2 已移除单条消息删除端点，该入口随之隐藏）、**Codex**（通过 app-server 协议驱动）、**pi**（`npm install -g @mariozechner/pi-coding-agent`；通过 `pi --session <jsonl>` 恢复会话）和 **ZCode**。macOS 会自动从 `/Applications` 或 `~/Applications` 定位 ZCode 捆绑的 `zcode.cjs`；Windows 需设置 `AWEFORK_ZCODE_CLI`，除非 `zcode` 已在 PATH 中。pi 和 ZCode 暂不支持删除会话、导出独立会话或重命名；ZCode 的模型目录读自其 v2 配置。各 CLI 的安装探针会检查 PATH；缺失的二进制会以提示返回，而不是静默失败。CLI 版本不在已测试区间（opencode ≥1.18.0 <1.19.0，或 ≥2.0.0 <2.1.0）时，切换器上会显示 ⚠ 警告——可见，但不拦截。
+awefork 支持 **opencode**（同时驱动它诞生时的 1.18–1.19 API 和 v2 的 `/api` 服务——按探测到的 CLI 版本选择协议；v2 服务器从 CLI 的后台服务（其注册密码）复用，或由 awefork 带上自选密码启动；v2 已移除单条消息删除端点，该入口随之隐藏）、**Codex**（通过 app-server 协议驱动）、**pi**（`npm install -g @mariozechner/pi-coding-agent`；通过 `pi --session <jsonl>` 恢复会话）和 **ZCode**。macOS 会自动从 `/Applications` 或 `~/Applications` 定位 ZCode 捆绑的 `zcode.cjs`；Windows 需设置 `AWEFORK_ZCODE_CLI`，除非 `zcode` 已在 PATH 中。pi 和 ZCode 暂不支持删除会话、导出独立会话或重命名；ZCode 的模型目录读自其 v2 配置。各 CLI 的安装探针会检查 PATH；缺失的二进制会以提示返回，而不是静默失败。CLI 版本不在已测试区间（opencode ≥1.18.0 <1.19.0，或 ≥2.0.0 <2.2.0）时，切换器上会显示 ⚠ 警告——可见，但不拦截。
 
 ## 多 Agent 路线
 

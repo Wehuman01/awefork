@@ -3,7 +3,7 @@
   "protocol": "v2",
   "compat": {
     "min": "2.0.0",
-    "max": "2.1.0"
+    "max": "2.2.0"
   },
   "capabilities": {
     "deleteMessage": false,

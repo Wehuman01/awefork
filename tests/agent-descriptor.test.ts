@@ -307,7 +307,7 @@ describe("bundled v2 descriptor", () => {
   it("parses and carries the /api protocol's facts", () => {
     const descriptor = opencodeV2Descriptor();
     expect(descriptor.protocol).toBe("v2");
-    expect(descriptor.compat).toEqual({ min: "2.0.0", max: "2.1.0" });
+    expect(descriptor.compat).toEqual({ min: "2.0.0", max: "2.2.0" });
     // v2 dropped single-message delete; the renderer must not offer it.
     expect(descriptor.capabilities.deleteMessage).toBe(false);
     expect(descriptor.auth).toEqual({ scheme: "basic", username: "opencode" });
@@ -420,7 +420,7 @@ describe("version warning", () => {
     const warning = opencodeVersionWarning("2.5.0");
     expect(warning).toContain("2.5.0");
     expect(warning).toContain("≥1.18.0，<1.19.0");
-    expect(warning).toContain("≥2.0.0，<2.1.0");
+    expect(warning).toContain("≥2.0.0，<2.2.0");
   });
 
   it("stays silent when the probe could not read a version", () => {
