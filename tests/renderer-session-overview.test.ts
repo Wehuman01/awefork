@@ -383,6 +383,52 @@ describe("unread ledger persistence (main-owned sidecar)", () => {
     }
   });
 
+  it("mints a revision for the next launch's first run even after an id restarts", async () => {
+    // Regression: main stamps every event with a per-launch counter, so without
+    // a launch-scoped prefix the ids read "event-1" again on the next launch.
+    // The ledger dedupes a settle id it has already recorded, so the first new
+    // run after a restart was swallowed as an already-settled duplicate — its
+    // unread result vanished for every window and every restart after it.
+    const path = sidecarPath("launch-id-collision");
+    const key = overviewKey("codex", "s1");
+    try {
+      const firstLaunch = new OverviewLedgerStore(path);
+      const { entry: launch1 } = await firstLaunch.recordSettle(key, {
+        settledAt: 100,
+        failed: false,
+        settleId: "event-1",
+      });
+      expect(launch1.revision).toBe(1);
+
+      // Same sidecar, same session, the next launch's first id: it must land
+      // as its own revision instead of deduping against the previous launch.
+      const secondLaunch = new OverviewLedgerStore(path);
+      const { entry: launch2, changed } = await secondLaunch.recordSettle(key, {
+        settledAt: 200,
+        failed: false,
+        settleId: "e7f3c1a9b204-1",
+      });
+      expect(changed).toBe(true);
+      expect(launch2.revision).toBe(2);
+      expect(launch2.settledAt).toBe(200);
+      // The seen watermark carries over: the new run is unread again.
+      expect(launch2.seen).toBe(launch1.seen);
+
+      // The dedupe still does its job: the same settle id arriving twice
+      // (a duplicate broadcast of one ending) must not mint a second revision.
+      const { entry: duplicate, changed: duplicateChanged } = await secondLaunch.recordSettle(key, {
+        settledAt: 300,
+        failed: false,
+        settleId: "e7f3c1a9b204-1",
+      });
+      expect(duplicateChanged).toBe(false);
+      expect(duplicate.revision).toBe(2);
+      expect((await secondLaunch.snapshot()).ledger[key]?.settledAt).toBe(200);
+    } finally {
+      await rm(path, { force: true });
+    }
+  });
+
   it("drops malformed entries instead of trusting them", async () => {
     const path = sidecarPath("malformed");
     try {

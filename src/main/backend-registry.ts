@@ -258,6 +258,17 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const adapters = new Map<BackendId, Promise<AgentAdapter>>();
   const unsubscribers: Array<() => void> = [];
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
+  /**
+   * Event ids double as the overview's run-settle ids, which the ledger
+   * dedupes on forever (a duplicate must never mint a second revision). A
+   * per-launch prefix keeps that dedupe working across restarts: a bare
+   * counter would restart at "event-1" on every launch and collide with the
+   * first run the previous launch recorded — silently swallowing the new
+   * result's revision. One prefix per launch makes the ids unique in both
+   * dimensions at once: all windows see the same id for one event, and no
+   * launch ever reuses another's.
+   */
+  const eventPrefix = `e${randomBytes(6).toString("hex")}-`;
   let eventSequence = 0;
   /**
    * `opencode --version` decides which protocol awefork speaks, so it gates
@@ -300,7 +311,11 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const subscribeAdapter = (backend: BackendId, adapter: AgentAdapter): void => {
     void adapter
       .subscribe((event) => {
-        forwardEvent?.({ backend, event, eventId: `event-${++eventSequence}` });
+        forwardEvent?.({
+          backend,
+          event,
+          eventId: `${eventPrefix}${++eventSequence}`,
+        });
       })
       .then((unsubscribe) => {
         unsubscribers.push(unsubscribe);

@@ -174,6 +174,38 @@ describe("overview rows over the store", () => {
     expect(h.state.overviewStats.value.unknown).toBe(1);
   });
 
+  it("hides agent-spawned subagent sessions from the overview", async () => {
+    // Regression: the overview used visibleSessions raw, which drops trash and
+    // archive but keeps subagents (buildSessionTree is what hides those). A
+    // subagent's run therefore reappeared in the overview as a row the user
+    // never saw anywhere else, and its result counted in the trigger's numbers.
+    const h = await bootState();
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    api.sessions = async () => ({
+      sessions: [
+        { ...OPENCODE_S1 },
+        {
+          ...OPENCODE_S1,
+          id: "sub-1",
+          title: "子 agent",
+          parentSessionId: "s1",
+          origin: "subagent" as const,
+        },
+      ],
+      lineage: {},
+    });
+    await h.state.refreshSessions();
+
+    // Its parent stays; the subagent is gone from every overview surface.
+    expect(rowOf(h, "opencode", "s1")).toBeDefined();
+    expect(rowOf(h, "opencode", "sub-1")).toBeUndefined();
+    expect(h.state.overviewStats.value.unknown).toBe(1);
+    // ...and the run it observed is not attributed to it either.
+    h.send("opencode", { type: "message.started", sessionId: "sub-1", messageId: "m2" });
+    expect(rowOf(h, "opencode", "sub-1")).toBeUndefined();
+    expect(h.state.overviewStats.value.running).toBe(0);
+  });
+
   it("turns a settled run into an unread row, and viewing it into read", async () => {
     const h = await bootState();
     await runAndSettle(h, "opencode", "s1");

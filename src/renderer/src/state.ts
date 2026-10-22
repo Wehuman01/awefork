@@ -4484,6 +4484,12 @@ function clearLegacyLocalLedger(): void {
  * A backend's listable sessions: its delete grace window and its archive
  * removed, exactly like the sidebar. Hiding rules stay per backend, so a
  * session tucked away in codex cannot reappear through the overview.
+ *
+ * Agent-spawned subagents are hidden here too, mirroring buildSessionTree's
+ * `hideSubagents` default: the overview shows the conversations the user can
+ * act on, and a subagent is the agent's own internal work rather than one of
+ * them. Hiding it here (rather than in the caller) keeps the rule next to the
+ * other visibility filters, so a new listing path cannot forget it.
  */
 function overviewPool(
   sessions: readonly SessionSummary[],
@@ -4492,7 +4498,7 @@ function overviewPool(
 ): SessionSummary[] {
   const trashed = new Set(trash);
   return withoutArchived(
-    sessions.filter((session) => !trashed.has(session.id)),
+    sessions.filter((session) => !trashed.has(session.id) && session.origin !== "subagent"),
     archive,
   );
 }
@@ -4537,7 +4543,14 @@ export const overviewRows = computed<OverviewRow[]>(() => {
     });
   };
 
-  for (const session of visibleSessions.value) push(state.activeBackend, session);
+  for (const session of visibleSessions.value) {
+    // The active backend's live list, filtered by the same visibility rule
+    // the sidebar uses. visibleSessions already drops trash and archive but
+    // keeps subagents (the tree hides them), so the overview applies that
+    // last rule itself rather than reopening the subagent back door.
+    if (session.origin === "subagent") continue;
+    push(state.activeBackend, session);
+  }
 
   // Another agent: a listing fetched for this window is refreshed on demand, so
   // it wins over the snapshot a switch parked earlier (frozen at switch time).

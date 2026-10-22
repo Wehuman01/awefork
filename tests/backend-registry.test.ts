@@ -367,10 +367,13 @@ describe("event envelopes", () => {
     expect(envelopes).toEqual([]); // no crash yet → no reconnect noise
 
     onExit?.();
+    // Event ids carry a per-launch prefix, so they are matched by shape rather
+    // than by a fixed value — the prefix is what keeps them from colliding with
+    // the previous launch's ids (see createBackendRegistry).
     expect(envelopes).toEqual([
       {
         backend: "codex",
-        eventId: "event-1",
+        eventId: expect.stringMatching(/^e[0-9a-f]{12}-1$/),
         event: { type: "server.error", message: expect.stringContaining("连接中断") },
       },
     ]);
@@ -379,7 +382,7 @@ describe("event envelopes", () => {
     expect(mocks.ensureCodexServer).toHaveBeenCalledTimes(2);
     expect(envelopes.at(-1)).toEqual({
       backend: "codex",
-      eventId: "event-2",
+      eventId: expect.stringMatching(/^e[0-9a-f]{12}-2$/),
       event: { type: "server.reconnected" },
     });
 
