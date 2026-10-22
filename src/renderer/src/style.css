@@ -18,6 +18,12 @@
   --sky: #6d9df2;
   --sky-soft: #e5edfd;
   --sky-deep: #3a6fd8;
+  /* awaiting the user's decision: amber, never shared with butter (hits,
+   * pale yellow) or primary (coral controls) so an ask reads at a glance */
+  --ask: #d97706;
+  --ask-soft: #fdf1dc;
+  --ask-border: #f2c063;
+  --ask-deep: #92400e;
   --ink: #4a3f3a;
   --ink-soft: #9a8b82;
   --ink-faint: #c4b6ac;
@@ -4560,9 +4566,9 @@ code.md-code {
 .inline-interaction {
   margin: 0 16px 10px;
   padding: 12px 14px;
-  border: 1px solid var(--primary-border);
+  border: 1px solid var(--ask-border);
   border-radius: 12px;
-  background: var(--primary-soft);
+  background: var(--ask-soft);
   /* The card is pinned between the message list and the composer, so an
    * unbounded form would crowd the conversation out of the pane. The body
    * scrolls inside this cap; kicker and action buttons stay pinned, keeping
@@ -4581,7 +4587,7 @@ code.md-code {
 }
 
 .inline-interaction-kicker {
-  color: var(--primary-deep);
+  color: var(--ask-deep);
   font-size: 12px;
   font-weight: 800;
 }

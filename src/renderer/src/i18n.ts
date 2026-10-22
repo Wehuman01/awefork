@@ -74,6 +74,10 @@ const DICT: Dict = {
     en: "⏸ Awaiting your confirmation · {perm}",
   },
   "interaction.inlineWaitInput": { zh: "⏸ 等待你的输入", en: "⏸ Awaiting your input" },
+  "interaction.inlineWaitDecision": {
+    zh: "⏸ 等待你的决定",
+    en: "⏸ Awaiting your decision",
+  },
 
   // ── interaction form (validation + placeholders) ──────────────────────
   "form.selectAtLeastOne": {

@@ -73,7 +73,6 @@
       <BranchContext :style="panelStyle('context')" />
     </div>
     <CommandPalette />
-    <InteractionDialog />
     <ForkTagDialog />
     <CompressDialog />
     <HistoryPanel />
@@ -122,7 +121,6 @@ import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
-import InteractionDialog from "./components/interaction-dialog.vue";
 import SessionCanvas from "./components/session-canvas.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
