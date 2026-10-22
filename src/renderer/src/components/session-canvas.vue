@@ -398,6 +398,8 @@ const scale = ref(1);
 const tx = ref(0);
 const ty = ref(0);
 const panning = ref(false);
+let loadingAnchorId: string | null = null;
+let loadingAnchorFrame: number | null = null;
 
 const graph = computed(() => turnGraph.value);
 const selectedTurnId = computed(() => store.selectedTurnId);
@@ -673,6 +675,7 @@ let activeDrag: { move: (event: MouseEvent) => void; up: () => void } | null = n
 
 function onMouseDown(event: MouseEvent): void {
   if (event.button !== 0) return;
+  loadingAnchorId = null;
   panning.value = true;
   const startX = event.clientX - tx.value;
   const startY = event.clientY - ty.value;
@@ -704,6 +707,7 @@ function zoomBy(factor: number): void {
 }
 
 function zoomAt(px: number, py: number, factor: number): void {
+  loadingAnchorId = null;
   const next = Math.min(1.8, Math.max(0.45, scale.value * factor));
   const applied = next / scale.value;
   tx.value = px - (px - tx.value) * applied;
@@ -713,6 +717,7 @@ function zoomAt(px: number, py: number, factor: number): void {
 
 /** Frame exactly these nodes; the shared math behind 全图适配 and subtree focus. */
 function fitTo(nodes: TurnNode[]): void {
+  loadingAnchorId = null;
   const rect = viewportEl.value?.getBoundingClientRect();
   if (!rect || nodes.length === 0) return;
   const minX = Math.min(...nodes.map((n) => n.x));
@@ -746,9 +751,15 @@ function centerOnSession(sessionId: string): void {
 
 /** Search hits and digest rows land here: put one node in the middle of view. */
 function centerOnNode(node: TurnNode): void {
+  scale.value = Math.max(scale.value, 0.85);
+  alignNode(node);
+  loadingAnchorId = store.loadingCanvas ? node.id : null;
+}
+
+/** Keep a requested focus in place while sibling cards change row-band heights. */
+function alignNode(node: TurnNode): void {
   const rect = viewportEl.value?.getBoundingClientRect();
   if (!rect) return;
-  scale.value = Math.max(scale.value, 0.85);
   tx.value = rect.width / 2 - (node.x + NODE_WIDTH / 2) * scale.value;
   ty.value = rect.height / 2 - (node.y + node.height / 2) * scale.value;
 }
@@ -803,8 +814,7 @@ function resolvePendingJump(): boolean {
 }
 
 watch(graph, () => {
-  // Wait for the directory's message batch to finish — every merge re-lays
-  // out the whole graph, so centering mid-load lands on a stale position.
+  // The selected branch and ancestors establish its identity and fork point.
   if (store.loadingMessages) return;
   if (pendingJump) {
     resolvePendingJump();
@@ -813,6 +823,10 @@ watch(graph, () => {
   if (pendingFocus) {
     if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
     return;
+  }
+  if (loadingAnchorId) {
+    const anchor = nodeById.value.get(loadingAnchorId);
+    if (anchor) alignNode(anchor);
   }
   if (centeredFor === null && !overviewShown) openInitialView();
 });
@@ -823,6 +837,10 @@ watch(
     // The last merge's graph pass ran while still loading — finish a pending
     // chain jump here, or the view would wait on a graph change that never comes.
     if (!resolvePendingJump()) return;
+    if (pendingFocus) {
+      if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+      return;
+    }
     if (centeredFor === null && pendingFocus === null && !overviewShown) {
       openInitialView();
     }
@@ -833,7 +851,26 @@ watch(
   (request) => {
     if (!request) return;
     pendingFocus = request.sessionId;
-    if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+    if (!store.loadingMessages && nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+  },
+);
+
+watch(
+  () => store.loadingCanvas,
+  (loading) => {
+    if (loadingAnchorFrame !== null) cancelAnimationFrame(loadingAnchorFrame);
+    loadingAnchorFrame = null;
+    if (loading) return;
+    // ResizeObserver supplies final row heights after the last DOM patch.
+    loadingAnchorFrame = requestAnimationFrame(() => {
+      loadingAnchorFrame = requestAnimationFrame(() => {
+        loadingAnchorFrame = null;
+        if (store.loadingCanvas) return;
+        const anchor = loadingAnchorId ? nodeById.value.get(loadingAnchorId) : null;
+        if (anchor) alignNode(anchor);
+        loadingAnchorId = null;
+      });
+    });
   },
 );
 
@@ -923,6 +960,7 @@ onMounted(() => {
   if (viewportEl.value) resizeObserver.observe(viewportEl.value);
 });
 onUnmounted(() => {
+  if (loadingAnchorFrame !== null) cancelAnimationFrame(loadingAnchorFrame);
   resizeObserver?.disconnect();
   cardObserver.disconnect();
   observedCards.clear();
@@ -1138,6 +1176,7 @@ function followViewportInMinimap(): boolean {
 }
 
 function onMinimapDown(event: MouseEvent): void {
+  loadingAnchorId = null;
   if (event.button !== 0) return;
   const point = minimapWorldPoint(event.clientX, event.clientY);
   camTarget = point ? { ...point } : null;

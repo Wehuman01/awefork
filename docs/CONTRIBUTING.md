@@ -68,12 +68,19 @@ renderer ── window.awefork (preload) ── ipc ── AgentAdapter ── a
 
 Implement `AgentAdapter` in `src/shared/`, add an entry in main-process wiring for its lifecycle, and extend the fake server in tests. The protocol doc-comment in `types.ts` is the contract; do not fork the protocol per backend.
 
+### Renderer message updates
+
+Update `messagesBySession` by session key and preserve arrays whose complete message state is unchanged. Reads are serialized by backend and session; completion and explicit reloads request a snapshot taken after any older read. Local sends and deletions invalidate older snapshots. Changed replies publish together at the next animation frame, with a timer fallback for hidden windows, and reads resolve after publication.
+
+Canvas loading prioritizes the selected session and its ancestors, with at most four canvas reads active across workspaces. `loadingMessages` tracks the missing data needed to position that branch; `loadingCanvas` tracks the remaining batch. Old queued jobs stop after a selection, directory or backend switch. Background responses may populate their session caches, but cannot clear a newer batch's loading state. While sibling heights settle, requested focus follows its card; manual pan, zoom or fit ends that tracking.
+
 ## Testing
 
 - One test file per shared module under `tests/`.
 - Real I/O: temp dirs on disk (`mkdtemp`), real HTTP via a fake opencode server (`node:http`) that mirrors verified endpoint semantics. No module-level mocks.
 - Adapter semantics worth re-verifying against a real opencode release when upgrading: exclusive-cut fork, `prompt_async` fire-and-forget, SSE frame shape on `/event`.
-- Renderer has no dedicated tests yet; keep logic that matters in `shared/`.
+- Renderer state regressions use a scripted preload bridge and fake timers. Message tests cover unchanged reloads, same-id edits, slow requests, run completion, late frames and workspace switches.
+- Run `rtk npm run test:gui` for real Electron interaction checks. For repeatable production-renderer measurements and their limits, see [the many-branch performance report](performance/2026-10-22-many-branches.md).
 
 ## Release
 

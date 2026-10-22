@@ -1,4 +1,4 @@
-import { computed, reactive, readonly, ref, watch } from "vue";
+import { type ComputedRef, computed, reactive, readonly, ref, watch } from "vue";
 import type { TagStore } from "../../shared/awefork-api";
 import {
   type BackendCapabilities,
@@ -50,6 +50,7 @@ import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
 import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
+import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -164,7 +165,10 @@ interface AppState {
    * the map survives switches without parking.
    */
   fileChangesBySession: Record<string, SessionFileChanges | null>;
+  /** Selected branch or its ancestors are not ready for canvas positioning yet. */
   loadingMessages: boolean;
+  /** Sibling branches are still loading; the selected branch can already be ready. */
+  loadingCanvas: boolean;
   messagesError: string | null;
   /** Model catalog from the agent's provider config; loaded on first draft. */
   models: ModelOption[];
@@ -304,6 +308,7 @@ const state = reactive<AppState>({
   messagesBySession: {},
   fileChangesBySession: {},
   loadingMessages: false,
+  loadingCanvas: false,
   messagesError: null,
   models: [],
   running: {},
@@ -666,11 +671,9 @@ function isRunning(backend: BackendId, sessionId: string): boolean {
 function setStreamTail(backend: BackendId, sessionId: string, tail: string | null): void {
   const slot = runSlot(backend);
   if (tail === null) {
-    const { [sessionId]: gone, ...kept } = slot.streams;
-    void gone;
-    slot.streams = kept;
-  } else {
-    slot.streams = { ...slot.streams, [sessionId]: tail };
+    if (sessionId in slot.streams) delete slot.streams[sessionId];
+  } else if (slot.streams[sessionId] !== tail) {
+    slot.streams[sessionId] = tail;
   }
 }
 
@@ -771,6 +774,27 @@ function pruneSettledParts(backend: BackendId, sessionId: string, messages: Chat
 /** Sessions whose messages have been requested (or are already cached). */
 const attemptedMessages = new Set<string>();
 
+const publishMessages = createMessagePublisher({
+  generation: (backend, sessionId) => messageLoads.generation(backend, sessionId),
+  apply(backend, sessionId, messages) {
+    state.messagesBySession[sessionId] = messages;
+    pruneSettledParts(backend, sessionId, messages);
+  },
+});
+
+const messageLoads = createMessageLoader({
+  fetch: (backend, sessionId) => window.awefork.messages(backend, sessionId),
+  publish(backend, sessionId, messages) {
+    const cached = state.messagesBySession[sessionId];
+    if (cached && sameMessages(cached, messages)) {
+      // Even an unchanged snapshot can take over a completed stream part.
+      pruneSettledParts(backend, sessionId, messages);
+      return;
+    }
+    return publishMessages(backend, sessionId, messages);
+  },
+});
+
 /**
  * Poll-based watchdogs for prompts awefork sent, keyed by backend-scoped
  * session. Run-finish signals ride the event stream (session.idle / status
@@ -785,8 +809,8 @@ interface CompletionWatch {
   sentAt: number;
   /** Polls since the last liveness sign (delta or observable message growth). */
   ticks: number;
-  /** Last observed message-list fingerprint; a change is liveness. */
-  signature: string;
+  /** Last observed cached snapshot; unchanged reloads keep this reference. */
+  messages: ChatMessage[] | null;
   /** Consecutive polls whose fetch itself failed (backend unreachable). */
   misses: number;
 }
@@ -1148,8 +1172,7 @@ export async function selectSession(
   void ensureModels();
   // Reload unconditionally: clicking a card is also the user's healing path
   // for a stale card (e.g. a lost SSE finish signal).
-  await loadSessionMessages(sessionId);
-  await ensureCanvasMessages();
+  await ensureCanvasMessages(true);
 }
 
 /**
@@ -1327,34 +1350,149 @@ function clearCompareOf(sessionId: string): void {
   if (state.comparePickFrom === sessionId) state.comparePickFrom = null;
 }
 
-/** Load messages for every session currently on the canvas that lacks them. */
-async function ensureCanvasMessages(): Promise<void> {
-  const pending = canvasSessions.value.filter((s) => !attemptedMessages.has(s.id)).map((s) => s.id);
-  if (pending.length === 0) return;
-  state.loadingMessages = true;
-  await Promise.allSettled(pending.map((id) => loadSessionMessages(id)));
-  state.loadingMessages = false;
+interface CanvasMessageLoad {
+  backend: BackendId;
+  generation: number;
+  selectedId: string | null;
+  directory: string | null;
+  promise: Promise<void>;
+}
+
+let canvasMessageLoad: CanvasMessageLoad | null = null;
+const canvasMessageQueue: Array<{
+  backend: BackendId;
+  sessionId: string;
+  fresh: boolean;
+  current: () => boolean;
+  resolve: () => void;
+}> = [];
+let activeCanvasRequests = 0;
+const CANVAS_LOAD_CONCURRENCY = 4;
+
+function pumpCanvasMessages(): void {
+  while (activeCanvasRequests < CANVAS_LOAD_CONCURRENCY && canvasMessageQueue.length > 0) {
+    const job = canvasMessageQueue.shift();
+    if (!job) return;
+    if (!job.current()) {
+      job.resolve();
+      continue;
+    }
+    activeCanvasRequests += 1;
+    void loadSessionMessages(job.sessionId, true, job.backend, job.fresh).finally(() => {
+      activeCanvasRequests -= 1;
+      job.resolve();
+      pumpCanvasMessages();
+    });
+  }
+}
+
+/** Load the selected branch and its ancestors first, then bounded batches of siblings. */
+function ensureCanvasMessages(reloadSelected = false): Promise<void> {
+  const backend = state.activeBackend;
+  const generation = workspaceGeneration;
+  const selectedId = state.selectedId;
+  const directory = state.selectedDirectory;
+  const previous = canvasMessageLoad;
+  if (
+    !reloadSelected &&
+    previous?.backend === backend &&
+    previous.generation === generation &&
+    previous.selectedId === selectedId &&
+    previous.directory === directory
+  )
+    return previous.promise;
+
+  const sessions = canvasSessions.value;
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let id = selectedId;
+  while (id && byId.has(id) && !seen.has(id)) {
+    seen.add(id);
+    ancestors.push(id);
+    id = state.lineage[id]?.parentId ?? byId.get(id)?.parentSessionId ?? null;
+  }
+  const priority = ancestors.filter(
+    (id) => (reloadSelected && id === selectedId) || state.messagesBySession[id] === undefined,
+  );
+  const rest = sessions
+    .filter((s) => !seen.has(s.id) && !attemptedMessages.has(s.id))
+    .map((s) => s.id);
+  if (priority.length === 0 && rest.length === 0) {
+    canvasMessageLoad = null;
+    state.loadingMessages = false;
+    state.loadingCanvas = false;
+    return Promise.resolve();
+  }
+  const batch: CanvasMessageLoad = {
+    backend,
+    generation,
+    selectedId,
+    directory,
+    promise: Promise.resolve(),
+  };
+  canvasMessageLoad = batch;
+  const current = () =>
+    canvasMessageLoad === batch &&
+    generation === workspaceGeneration &&
+    backend === state.activeBackend &&
+    selectedId === state.selectedId &&
+    directory === state.selectedDirectory;
+  const load = (ids: string[]) => {
+    const jobs = ids.map(
+      (sessionId) =>
+        new Promise<void>((resolve) => {
+          canvasMessageQueue.push({
+            backend,
+            sessionId,
+            fresh: reloadSelected && sessionId === selectedId,
+            current,
+            resolve,
+          });
+        }),
+    );
+    pumpCanvasMessages();
+    return Promise.all(jobs);
+  };
+  state.loadingMessages = priority.some((id) => state.messagesBySession[id] === undefined);
+  state.loadingCanvas = true;
+  batch.promise = (async () => {
+    await load(priority);
+    if (!current()) return;
+    state.loadingMessages = false;
+    await load(rest);
+  })().finally(() => {
+    if (canvasMessageLoad === batch) {
+      state.loadingMessages = false;
+      state.loadingCanvas = false;
+      canvasMessageLoad = null;
+    }
+  });
+  return batch.promise;
 }
 
 async function loadSessionMessages(
   sessionId: string,
   reportError = true,
   backend: BackendId = state.activeBackend,
+  fresh = true,
 ): Promise<ChatMessage[] | null> {
   // First load only: the watchdog polls this function every interval while a
   // run streams, and the index refresh rides the run-settle path instead.
   const firstLoad = !attemptedMessages.has(sessionId);
+  const generation = workspaceGeneration;
   attemptedMessages.add(sessionId);
   try {
-    // Await first, THEN merge: spreading before the await would snapshot the
-    // pre-await state, and concurrent loads would overwrite each other.
-    const messages = await window.awefork.messages(backend, sessionId);
-    state.messagesBySession = { ...state.messagesBySession, [sessionId]: messages };
-    pruneSettledParts(backend, sessionId, messages);
+    const messages = await messageLoads.load(backend, sessionId, fresh);
     if (firstLoad) refreshFileChanges(sessionId, backend);
     return messages;
   } catch (error) {
-    if (reportError && backend === state.activeBackend && state.selectedId === sessionId) {
+    if (
+      reportError &&
+      generation === workspaceGeneration &&
+      backend === state.activeBackend &&
+      state.selectedId === sessionId
+    ) {
       state.messagesError = error instanceof Error ? error.message : String(error);
     }
     return null;
@@ -1386,7 +1524,7 @@ function watchCompletion(backend: BackendId, sessionId: string, sentAt: number):
     backend,
     sentAt,
     ticks: 0,
-    signature: "",
+    messages: null,
     misses: 0,
   });
   startWatchTicker();
@@ -1396,17 +1534,29 @@ function stopWatch(backend: BackendId, sessionId: string): void {
   if (completionWatches.delete(streamKey(backend, sessionId))) stopWatchTickerIfIdle();
 }
 
+const pendingPolls = new Set<string>();
+
 async function pollForCompletion(key: string): Promise<void> {
+  if (pendingPolls.has(key)) return;
   const watch = completionWatches.get(key);
   if (!watch) return;
+  pendingPolls.add(key);
+  try {
+    await checkForCompletion(key, watch);
+  } finally {
+    pendingPolls.delete(key);
+  }
+}
+
+async function checkForCompletion(key: string, watch: CompletionWatch): Promise<void> {
   const sessionId = sessionOfKey(key);
-  const messages = await loadSessionMessages(sessionId, false, watch.backend);
+  const messages = await loadSessionMessages(sessionId, false, watch.backend, false);
   // Re-read the live entry: idle may have stopped the watch while the fetch
   // was in flight, and a quick resend may have replaced it — judging by the
   // entry captured before the await would settle the new run against the old
   // prompt's completion rows.
   const live = completionWatches.get(key);
-  if (!live) return;
+  if (live !== watch) return;
   // The fetch itself failed: the backend is unreachable (crashed mid-run),
   // so this poll carries no evidence either way. Count the streak and settle
   // as failed once it's long enough to rule out a blip — see
@@ -1422,11 +1572,10 @@ async function pollForCompletion(key: string): Promise<void> {
   live.misses = 0;
   // Message rows still appearing is liveness too — on opencode builds that
   // stream no deltas, this is the only progress signal the watchdog sees.
-  const last = messages[messages.length - 1];
-  const signature = `${messages.length}:${last?.id ?? ""}:${last?.completedAt ?? ""}`;
-  if (signature !== live.signature) {
+  const snapshot = state.messagesBySession[sessionId] ?? null;
+  if (snapshot !== live.messages) {
     live.ticks = 0;
-    live.signature = signature;
+    live.messages = snapshot;
   }
   // A multi-step run completes one assistant row per step; a step that ended
   // in "tool-calls" is mid-run, not done. Treating it as finished settled the
@@ -1521,7 +1670,9 @@ async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
   // Replace the live bubble only after its persisted counterpart is in state.
   // Both mutations occur before Vue renders, avoiding an empty or duplicated
   // assistant slot at the end of a streamed response.
+  const generation = messageLoads.generation(backend, sessionId);
   const messages = await loadSessionMessages(sessionId, false, backend);
+  if (generation !== messageLoads.generation(backend, sessionId)) return;
   // The run's file changes settle with it; the card appears without the user
   // reselecting anything.
   refreshFileChanges(sessionId, backend);
@@ -1672,15 +1823,18 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // Existing watches keep their sentAt; a prompt awefork just sent armed
       // one already, and restarting it here would lose the pre-prompt stamp.
       if (!completionWatches.has(streamKey(backend, event.sessionId))) {
+        messageLoads.invalidate(backend, event.sessionId);
         watchCompletion(backend, event.sessionId, Date.now());
       }
       break;
     }
     case "message.delta": {
+      if (rowCompleted(event.sessionId, event.messageId)) break;
       // A delta is proof the run is alive. It re-lights a session whose busy
       // frame never arrived (or that a silent stretch let the watchdog settle)
       // and resets the watchdog so streaming runs cannot time out mid-flight.
       if (!isRunning(backend, event.sessionId)) {
+        messageLoads.invalidate(backend, event.sessionId);
         setRunning(backend, event.sessionId, true);
       }
       const watch = completionWatches.get(streamKey(backend, event.sessionId));
@@ -2685,8 +2839,8 @@ export function isTurnDelete(node: TurnNode): boolean {
   if (!state.capabilities.deleteMessage) return false;
   if (node.kind !== "turn" || !isSessionTip(node)) return false;
   const messages = state.messagesBySession[node.sessionId] ?? [];
-  const start = messages.findIndex((m) => m.id === node.messageId);
-  return start > 0;
+  // The tip's user row exists. Earlier rows survive exactly when it isn't first.
+  return messages[0]?.id !== node.messageId;
 }
 
 /**
@@ -2783,6 +2937,7 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
     landing = landingAfterHide(sessionId);
   }
   const pins = await window.awefork.deleteSession(backend, sessionId);
+  messageLoads.invalidate(backend, sessionId);
   applyPins(backend, pins);
   if (active) {
     stopWatch(backend, sessionId);
@@ -2799,9 +2954,8 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
       backend,
       state.marks.filter((k) => !k.startsWith(`${sessionId}:`)),
     );
-    const { [sessionId]: goneMessages, ...keptMessages } = state.messagesBySession;
-    void goneMessages;
-    state.messagesBySession = keptMessages;
+    delete state.messagesBySession[sessionId];
+    sessionTipIds.delete(sessionId);
     attemptedMessages.delete(sessionId);
     const { [sessionId]: goneLineage, ...keptLineage } = state.lineage;
     void goneLineage;
@@ -3017,15 +3171,31 @@ export async function openSessionTerminal(sessionId: string): Promise<void> {
   if (!result.ok) state.actionError = result.error ?? t("state.terminalOpenFailed");
 }
 
-/**
- * True when the node sits at the tip of its session (stubs always do): the ＋
- * composer then continues that session in place instead of forking it.
- */
+const sessionTipIds = new Map<string, ComputedRef<string | null>>();
+
+function sessionTipId(sessionId: string): string | null {
+  let tip = sessionTipIds.get(sessionId);
+  if (!tip) {
+    // Vue tracks this session's array and the scanned roles/ids. Reloads, local
+    // sends and deletion invalidate it; camera and reply-text updates do not.
+    tip = computed(() => {
+      const messages = state.messagesBySession[sessionId] ?? [];
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message?.role === "user") return message.id;
+      }
+      return null;
+    });
+    sessionTipIds.set(sessionId, tip);
+  }
+  return tip.value;
+}
+
+/** True at the last user row (or a stub), where ＋ continues without forking. */
 export function isSessionTip(node: TurnNode): boolean {
   if (node.kind !== "turn") return true;
-  const turns = buildTurns(node.sessionId, state.messagesBySession[node.sessionId] ?? []);
-  const last = turns[turns.length - 1];
-  return last != null && last.messageId === node.messageId;
+  const last = sessionTipId(node.sessionId);
+  return last !== null && last === node.messageId;
 }
 
 /** Shared seed of a draft composer: openDraft and the retry paths fill it. */
@@ -3648,28 +3818,28 @@ function appendLocalMessage(
   model: ModelChoice | null = null,
   attachments: PromptAttachment[] = [],
 ): void {
-  state.messagesBySession = {
-    ...state.messagesBySession,
-    [sessionId]: [
-      ...(state.messagesBySession[sessionId] ?? []),
-      {
-        id: `local_${Date.now()}`,
-        role: "user",
-        text,
-        thinking: "",
-        toolNames: [],
-        modelId: model?.modelId ?? null,
-        providerId: model?.providerId ?? null,
-        variant: model?.variant ?? null,
-        attachmentNames: attachments.map((a) => a.filename),
-        createdAt: Date.now(),
-        completedAt: null,
-        finish: null,
-        outputTokens: null,
-        error: null,
-      },
-    ],
-  };
+  // A resend supersedes the previous watch before prompt() has acknowledged it.
+  stopWatch(state.activeBackend, sessionId);
+  messageLoads.invalidate(state.activeBackend, sessionId);
+  state.messagesBySession[sessionId] = [
+    ...(state.messagesBySession[sessionId] ?? []),
+    {
+      id: `local_${Date.now()}`,
+      role: "user",
+      text,
+      thinking: "",
+      toolNames: [],
+      modelId: model?.modelId ?? null,
+      providerId: model?.providerId ?? null,
+      variant: model?.variant ?? null,
+      attachmentNames: attachments.map((a) => a.filename),
+      createdAt: Date.now(),
+      completedAt: null,
+      finish: null,
+      outputTokens: null,
+      error: null,
+    },
+  ];
 }
 
 /**
@@ -4043,6 +4213,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   modelsRequested = snapshot.modelsRequested;
   state.messagesError = null;
   state.loadingMessages = false;
+  state.loadingCanvas = false;
   state.deletedToast = null;
   state.tagDeletedToast = null;
   state.draft = null;
@@ -4103,6 +4274,7 @@ function resetWorkspace(): void {
   state.selectedTurnId = null;
   state.messagesError = null;
   state.loadingMessages = false;
+  state.loadingCanvas = false;
   state.models = [];
   modelsRequested = false;
   state.draft = null;
