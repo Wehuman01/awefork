@@ -291,6 +291,15 @@
       {{ t("canvas.status", { nodes: graph.nodes.length, sessions: sequenceCount, forks: forkCount }) }}
     </div>
 
+    <!-- Session overview (画布会话总览): a status pill pinned above the canvas
+         plus its floating panel. Both sit outside .world, so panning and
+         zooming the canvas never move them; mousedown/wheel stop here so
+         working the panel never starts a pan. -->
+    <div class="canvas-overview" @mousedown.stop @wheel.stop>
+      <SessionOverviewTrigger />
+      <SessionOverviewPanel />
+    </div>
+
     <div v-if="pickArmed" class="pick-banner">
       <span>{{ t("canvas.pickBanner", { title: pickFromTitle }) }}</span>
       <button type="button" :title="t('canvas.cancelEsc')" @click="cancelComparePick()">✕</button>
@@ -390,6 +399,8 @@ import {
 import BranchDigest from "./branch-digest.vue";
 import MarksPanel from "./marks-panel.vue";
 import ModelPicker from "./model-picker.vue";
+import SessionOverviewPanel from "./session-overview-panel.vue";
+import SessionOverviewTrigger from "./session-overview-trigger.vue";
 import StorySearch from "./story-search.vue";
 import VariantPicker from "./variant-picker.vue";
 

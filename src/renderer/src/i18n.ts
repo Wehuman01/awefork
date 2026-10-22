@@ -17,6 +17,7 @@
 import { computed, ref } from "vue";
 import { dict as dictDialogs } from "./i18n-dialogs";
 import { dict as dictMessages } from "./i18n-messages";
+import { dict as dictOverview } from "./i18n-overview";
 import { dict as dictPanels } from "./i18n-panels";
 import { dict as dictShell } from "./i18n-shell";
 import { dict as dictState } from "./i18n-state";
@@ -158,7 +159,7 @@ const DICT: Dict = {
 // sibling i18n-*.ts modules and are merged in here so every call site uses
 // the single `t()` below. The fragments import nothing from this file, so
 // the merge stays cycle-free.
-Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels);
+Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels, dictOverview);
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 

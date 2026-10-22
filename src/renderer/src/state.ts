@@ -1,6 +1,7 @@
 import { computed, reactive, readonly, ref, watch } from "vue";
 import type { TagStore } from "../../shared/awefork-api";
 import {
+  BACKEND_LABELS,
   type BackendCapabilities,
   type BackendEventEnvelope,
   type BackendId,
@@ -50,6 +51,19 @@ import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
 import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
+import {
+  compareOverviewRows,
+  loadOverviewLedger,
+  markOverviewSeen as markSeenInLedger,
+  type OverviewFilter,
+  type OverviewReadLedger,
+  type OverviewRow,
+  overviewCounts,
+  overviewKey,
+  projectOverviewStatus,
+  recordOverviewSettle,
+  saveOverviewLedger,
+} from "./session-overview";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -88,6 +102,35 @@ interface BackendRunState {
 function localCapabilities(backend: BackendId): BackendCapabilities {
   const entry = state.backendList.find((b) => b.id === backend);
   return backendCapabilities(backend, entry?.version ?? null);
+}
+
+/**
+ * Session metadata for a backend this window has not switched to. The overview
+ * lists every connected agent, but a parked workspace snapshot only exists for
+ * backends the user already visited — so unvisited ones are listed on demand
+ * (and refreshed while the panel is open).
+ */
+interface OverviewRemoteEntry {
+  sessions: SessionSummary[];
+  /** The backend's own delete grace window (overlay sidecar). */
+  trash: string[];
+  /** The backend's own archive (overlay sidecar). */
+  archive: ArchiveState;
+  fetchedAt: number;
+  /** Why the last list attempt failed; null after a success. */
+  error: string | null;
+}
+
+/** The overview panel's own UI state; never touches the canvas selection. */
+interface OverviewUiState {
+  open: boolean;
+  filter: OverviewFilter;
+  /** `${backend}:${sessionId}` whose summary is expanded; null = no summary. */
+  selectedKey: string | null;
+  /** Key currently being navigated to; blocks a second concurrent jump. */
+  jumpingKey: string | null;
+  /** Why the last jump failed. The panel stays open and shows this. */
+  error: string | null;
 }
 
 interface AppState {
@@ -269,6 +312,26 @@ interface AppState {
   updateDownloadProgress: { downloaded: number; total: number } | null;
   /** Why the in-app update failed; shown in the banner until cleared. */
   updateDownloadError: string | null;
+  /** The canvas session overview (画布会话总览): panel UI state. */
+  overview: OverviewUiState;
+  /**
+   * Unread ledger shared by every row of the overview: per session, the last
+   * run awefork watched settle and how much of it the user has seen. Persisted
+   * to localStorage so a result outlives the 5-minute `recent` tint and a
+   * restart — see session-overview.ts for the revision semantics.
+   */
+  overviewRead: OverviewReadLedger;
+  /**
+   * Sessions listed for backends this window never switched to (keyed by
+   * backend). A visited backend is read from its parked workspace instead.
+   */
+  overviewRemote: Partial<Record<BackendId, OverviewRemoteEntry>>;
+  /**
+   * Sessions whose run was observed but never confirmed to end (silent poll
+   * timeout, transport loss). Projected as 状态未知, never as a result, and
+   * cleared the moment new evidence arrives.
+   */
+  overviewUnknown: Record<string, boolean>;
 }
 
 const state = reactive<AppState>({
@@ -338,6 +401,10 @@ const state = reactive<AppState>({
   downloadingUpdate: false,
   updateDownloadProgress: null,
   updateDownloadError: null,
+  overview: { open: false, filter: "all", selectedKey: null, jumpingKey: null, error: null },
+  overviewRead: loadOverviewLedger(),
+  overviewRemote: {},
+  overviewUnknown: {},
 });
 
 export const store = readonly(state);
@@ -662,6 +729,16 @@ function setRunning(backend: BackendId, sessionId: string, running: boolean): vo
 
 function isRunning(backend: BackendId, sessionId: string): boolean {
   return Boolean(runSlot(backend).running[sessionId]);
+}
+
+/**
+ * Read-only twin of `isRunning`: `runSlot` creates a parked slot on demand, and
+ * a computed (the overview's rows) must never write reactive state while it
+ * evaluates. Absent slot simply means no parked run.
+ */
+function isRunningObserved(backend: BackendId, sessionId: string): boolean {
+  if (backend === state.activeBackend) return Boolean(state.running[sessionId]);
+  return Boolean(state.backgroundRuns[backend]?.running[sessionId]);
 }
 
 function setStreamTail(backend: BackendId, sessionId: string, tail: string | null): void {
@@ -1127,7 +1204,7 @@ async function leaveEmptiedDirectory(): Promise<void> {
 
 export async function selectSession(
   sessionId: string | null,
-  options: { focus?: boolean } = {},
+  options: { focus?: boolean; markSeen?: boolean } = {},
 ): Promise<void> {
   if (!sessionId) return;
   const session = visibleSessions.value.find((item) => item.id === sessionId);
@@ -1147,6 +1224,13 @@ export async function selectSession(
   // Reload unconditionally: clicking a card is also the user's healing path
   // for a stale card (e.g. a lost SSE finish signal).
   await loadSessionMessages(sessionId);
+  // A session on screen counts as a viewed result, so the overview stops
+  // calling it 新结果 — unless the read failed (nothing was actually shown).
+  // The overview's own jump pins the revision it was showing instead.
+  if (options.markSeen !== false && state.messagesError === null) {
+    markOverviewSeen(state.activeBackend, sessionId);
+    clearOverviewUnknown(state.activeBackend, sessionId);
+  }
   await ensureCanvasMessages();
 }
 
@@ -1413,7 +1497,9 @@ async function pollForCompletion(key: string): Promise<void> {
     live.misses += 1;
     if (live.misses >= WATCH_UNREACHABLE_TICKS) {
       stopWatch(live.backend, sessionId);
-      settleRun(live.backend, sessionId, true);
+      // The backend went unreachable mid-run: we know the run is no longer
+      // observable, not that it ended. Release the spinner as "unknown".
+      settleRun(live.backend, sessionId, "unknown");
     }
     return;
   }
@@ -1440,7 +1526,9 @@ async function pollForCompletion(key: string): Promise<void> {
   );
   if (done || live.ticks >= WATCH_MAX_TICKS) {
     stopWatch(live.backend, sessionId);
-    settleRun(live.backend, sessionId);
+    // A completion row is evidence the run ended; running out of patience is
+    // not. The silent case only frees the spinner — it must not mint a result.
+    settleRun(live.backend, sessionId, done ? "settled" : "unknown");
   }
 }
 
@@ -1475,9 +1563,23 @@ function clearRecent(backend: BackendId, sessionId: string): void {
   }
 }
 
+/**
+ * Why a run stopped being watched. The distinction is the whole point: only
+ * "settled" and "failed" are evidence of how a run ended, so only they mint an
+ * overview result. "unknown" (a silent poll timeout, a lost connection) stops
+ * the spinner and frees the local wait but must never read as a finished run;
+ * "aborted" means the run never really started (the prompt was rejected).
+ */
+type SettleReason = "settled" | "failed" | "unknown" | "aborted";
+
 /** Shared run-finished cleanup, driven by event-stream idle, the poll
  * watchdog, or a failed run (transport/prompt error). */
-function settleRun(backend: BackendId, sessionId: string, failed = false): void {
+function settleRun(backend: BackendId, sessionId: string, reason: SettleReason = "settled"): void {
+  // Was there a run to end? A late idle for a run that already settled, or a
+  // startup/idle frame for a session awefork never watched, must not mint a
+  // second result — the first, known ending stands (a failed run is not
+  // overwritten by an idle that follows it).
+  const observed = isRunning(backend, sessionId);
   stopWatch(backend, sessionId);
   streamBuffers.delete(streamKey(backend, sessionId));
   setStreamTail(backend, sessionId, null);
@@ -1485,9 +1587,7 @@ function settleRun(backend: BackendId, sessionId: string, failed = false): void 
   // A failed run carries no tint — mint reads as success, and its card already
   // shows ⚠ + retry. A prior run's tint goes with it, so a visible tint always
   // means "the last run completed".
-  if (failed) {
-    clearRecent(backend, sessionId);
-  } else {
+  if (reason === "settled") {
     const settledAt = Date.now();
     setRecent(backend, sessionId, settledAt);
     startRecentTicker();
@@ -1495,7 +1595,14 @@ function settleRun(backend: BackendId, sessionId: string, failed = false): void 
       // A newer settle overwrote the entry; the older timer must not clear it.
       if (getRecent(backend, sessionId) === settledAt) clearRecent(backend, sessionId);
     }, RECENT_MS);
+  } else {
+    clearRecent(backend, sessionId);
   }
+  // Only a run we actually watched can end here; a late idle for a run that
+  // already settled, or a startup idle for a session awefork never watched,
+  // must not mint a second result. An explicit failure is the exception — the
+  // error itself is the evidence, even for a run started outside awefork.
+  if (observed || reason === "failed") recordOverviewOutcome(backend, sessionId, reason);
   if (backend === state.activeBackend && state.selectedId === sessionId) {
     state.streamParts = [];
   }
@@ -1527,7 +1634,7 @@ async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
   // without the tint (its card carries ⚠ + retry instead).
   const assistants = (messages ?? []).filter((m) => m.role === "assistant");
   const lastRun = assistants[assistants.length - 1];
-  settleRun(backend, sessionId, Boolean(lastRun?.error));
+  settleRun(backend, sessionId, lastRun?.error ? "failed" : "settled");
   if (backend === state.activeBackend) void refreshSessions();
 }
 
@@ -1576,8 +1683,11 @@ export function respondInteraction(
   // renderer-local (deep-readonly straight out of the store).
   request: { readonly requestId: string },
   response: AgentInteractionResponse,
+  // The ask's own backend. Defaults to the visible one — the inline card and
+  // the modal only ever show the active backend's queue — while the overview
+  // answers asks parked in a background backend and must route by that backend.
+  backend: BackendId = state.activeBackend,
 ): void {
-  const backend = state.activeBackend;
   dropInteraction(backend, request.requestId);
   // Irreversible: the reply already went out, so record it as a journal lock.
   const label =
@@ -1733,7 +1843,9 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // connection-level errors carry no sessionId and only toast.
       if (event.sessionId) {
         stopWatch(backend, event.sessionId);
-        settleRun(backend, event.sessionId, true);
+        // An explicit server-side error is a failed run, not an unobserved one:
+        // it mints a 失败 result the later idle frame cannot overwrite.
+        settleRun(backend, event.sessionId, "failed");
         dropSessionInteractions(backend, event.sessionId);
         if (backend === state.activeBackend) {
           // Reload so the optimistic local prompt row disappears if the
@@ -1781,7 +1893,10 @@ function applyArchive(backend: BackendId, archive: ArchiveState): void {
     return;
   }
   const snap = workspaceCache.get(backend);
-  if (snap) snap.archive = archive;
+  if (snap) {
+    snap.archive = archive;
+    touchParkedWorkspace();
+  }
 }
 
 function applyKnownDirs(backend: BackendId, dirs: string[]): void {
@@ -1799,7 +1914,10 @@ function applyTrash(backend: BackendId, ids: string[]): void {
     return;
   }
   const snap = workspaceCache.get(backend);
-  if (snap) snap.trash = ids;
+  if (snap) {
+    snap.trash = ids;
+    touchParkedWorkspace();
+  }
 }
 
 /** The session's current title, falling back to its id (undo after switch). */
@@ -2759,6 +2877,7 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
   }
   const pins = await window.awefork.deleteSession(backend, sessionId);
   applyPins(backend, pins);
+  forgetOverviewSession(backend, sessionId);
   if (active) {
     stopWatch(backend, sessionId);
     streamBuffers.delete(streamKey(backend, sessionId));
@@ -2798,6 +2917,7 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
       const { [sessionId]: goneLineage, ...keptLineage } = snap.lineage;
       void goneLineage;
       snap.lineage = keptLineage;
+      touchParkedWorkspace();
     }
   }
   try {
@@ -2952,8 +3072,10 @@ async function renameOrThrow(
     state.sessions = state.sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
   } else {
     const snap = workspaceCache.get(backend);
-    if (snap)
+    if (snap) {
       snap.sessions = snap.sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
+      touchParkedWorkspace();
+    }
   }
   return true;
 }
@@ -3602,9 +3724,9 @@ export async function sendDraft(): Promise<void> {
       void window.awefork.saveComposer(backend, null).catch(() => {});
     }
   } catch (error) {
-    // The prompt never reached a run; settle as failed so no success tint
-    // lands on a turn that never happened.
-    if (targetId) settleRun(backend, targetId, true);
+    // The prompt never reached a run; settle as aborted so no success tint
+    // lands on a turn that never happened, and no overview result either.
+    if (targetId) settleRun(backend, targetId, "aborted");
     state.actionError = error instanceof Error ? error.message : String(error);
   } finally {
     state.draftSending = false;
@@ -3965,6 +4087,18 @@ interface WorkspaceSnapshot {
 
 const workspaceCache = new Map<BackendId, WorkspaceSnapshot>();
 
+/**
+ * Bumped whenever a parked workspace's session/trash/archive changes. The cache
+ * itself is a plain Map (deliberately: it holds no UI state), so the overview's
+ * computed reads this counter to hear about edits made while a backend is off
+ * screen — a rename or delete in an undo/redo closure, for example.
+ */
+const workspaceRevision = ref(0);
+
+function touchParkedWorkspace(): void {
+  workspaceRevision.value += 1;
+}
+
 /** Snapshot the visible workspace into the outgoing backend's slot. */
 function parkWorkspace(backend: BackendId): void {
   workspaceCache.set(backend, {
@@ -3988,6 +4122,10 @@ function parkWorkspace(backend: BackendId): void {
     modelsRequested,
     cardHeights: { ...cardHeights },
   });
+  // This snapshot is newer than any listing fetched while the backend was off
+  // screen; the listing must not outrank it when the panel next opens.
+  dropOverviewRemote(backend);
+  touchParkedWorkspace();
 }
 
 /**
@@ -4143,5 +4281,371 @@ export async function switchBackend(backend: BackendId): Promise<void> {
     }
   } finally {
     switchingBackend = false;
+  }
+}
+
+// ── canvas session overview (画布会话总览) ──────────────────────────────
+// One list of every session the connected agents can see, projected into the
+// states the user actually cares about. It reads the run maps, ask queues and
+// session lists the canvas already keeps; it opens no stream, no poller and no
+// watchdog of its own, and it never parks or restarts a run.
+
+/**
+ * A backend's listable sessions: its delete grace window and its archive
+ * removed, exactly like the sidebar. Hiding rules stay per backend, so a
+ * session tucked away in codex cannot reappear through the overview.
+ */
+function overviewPool(
+  sessions: readonly SessionSummary[],
+  trash: readonly string[],
+  archive: ArchiveState,
+): SessionSummary[] {
+  const trashed = new Set(trash);
+  return withoutArchived(
+    sessions.filter((session) => !trashed.has(session.id)),
+    archive,
+  );
+}
+
+/**
+ * Every overview row: the active backend's live list, each parked workspace,
+ * and any agent listed for this window without a switch. A backend's parked
+ * snapshot wins over an earlier listing — that is what a switch would show —
+ * and a backend listed only remotely still appears.
+ */
+export const overviewRows = computed<OverviewRow[]>(() => {
+  // A parked workspace lives in a plain Map, so edits made while its backend is
+  // off screen (rename, delete, trash/archive change) are only audible through
+  // this counter. Read it first: it is the dependency that keeps the rows fresh.
+  void workspaceRevision.value;
+  const rows: OverviewRow[] = [];
+  const seen = new Set<string>();
+  const push = (backend: BackendId, session: SessionSummary): void => {
+    const key = overviewKey(backend, session.id);
+    if (seen.has(key)) return;
+    seen.add(key);
+    const asks = (state.interactions[backend] ?? []).filter(
+      (request) => request.sessionId === session.id,
+    );
+    const result = state.overviewRead[key] ?? null;
+    rows.push({
+      backend,
+      session,
+      pending: asks.length,
+      status: projectOverviewStatus({
+        waiting: asks.length > 0,
+        running: isRunningObserved(backend, session.id),
+        result,
+        unknown: state.overviewUnknown[key] === true,
+      }),
+      activityAt: Math.max(session.updatedAt, result?.settledAt ?? 0),
+    });
+  };
+
+  for (const session of visibleSessions.value) push(state.activeBackend, session);
+
+  // Another agent: a listing fetched for this window is refreshed on demand, so
+  // it wins over the snapshot a switch parked earlier (frozen at switch time).
+  // The snapshot is the fallback whenever no listing exists.
+  for (const [backend, entry] of Object.entries(state.overviewRemote)) {
+    if (!entry) continue;
+    const id = backend as BackendId;
+    if (id === state.activeBackend) continue;
+    for (const session of overviewPool(entry.sessions, entry.trash, entry.archive)) {
+      push(id, session);
+    }
+  }
+
+  for (const [backend, snapshot] of workspaceCache) {
+    if (backend === state.activeBackend) continue;
+    if (state.overviewRemote[backend]) continue;
+    for (const session of overviewPool(snapshot.sessions, snapshot.trash, snapshot.archive)) {
+      push(backend, session);
+    }
+  }
+
+  return rows.sort(compareOverviewRows);
+});
+
+/** Trigger and tab counts over every row; zero states still open the panel. */
+export const overviewStats = computed(() => overviewCounts(overviewRows.value));
+
+/** Agents with at least one listed session, in backend-list order. */
+export const overviewAgents = computed<BackendId[]>(() => {
+  const present = new Set(overviewRows.value.map((row) => row.backend));
+  const ordered = state.backendList.map((info) => info.id).filter((id) => present.has(id));
+  const extra = [...present].filter((id) => !ordered.includes(id));
+  return [...ordered, ...extra];
+});
+
+/** Why the last listing attempt for an agent failed; null after a success. */
+export function overviewRemoteError(backend: BackendId): string | null {
+  return state.overviewRemote[backend]?.error ?? null;
+}
+
+/**
+ * Drop a cached listing. Called when a backend's live workspace or its parked
+ * snapshot becomes the authoritative view: from then on the listing is either
+ * redundant (live) or older than the snapshot (parked).
+ */
+function dropOverviewRemote(backend: BackendId): void {
+  if (!state.overviewRemote[backend]) return;
+  const { [backend]: _dropped, ...kept } = state.overviewRemote;
+  void _dropped;
+  state.overviewRemote = kept;
+}
+
+let overviewSweeping = false;
+
+/** Re-list an agent at most this often; a warm server makes repeats cheap. */
+const OVERVIEW_SWEEP_MS = 30_000;
+
+/**
+ * Refresh the session lists of the agents this window is not showing. Cheap by
+ * design: their servers already run (a visited backend keeps its process), and
+ * this is the same `sessions` call a switch makes — one round-trip per agent,
+ * no new event subscription and no per-row polling. A failure only blanks that
+ * one agent; the others keep listing.
+ */
+export async function refreshOverviewSessions(): Promise<void> {
+  if (overviewSweeping) return;
+  overviewSweeping = true;
+  const now = Date.now();
+  const targets = state.backendList.filter(
+    (info) => info.installed && info.id !== state.activeBackend,
+  );
+  try {
+    await Promise.allSettled(
+      targets.map(async (info) => {
+        const previous = state.overviewRemote[info.id];
+        if (previous && previous.error === null && now - previous.fetchedAt < OVERVIEW_SWEEP_MS) {
+          return;
+        }
+        try {
+          const [{ sessions }, trash, archive] = await Promise.all([
+            window.awefork.sessions(info.id),
+            window.awefork.trash(info.id),
+            window.awefork.archive(info.id),
+          ]);
+          state.overviewRemote = {
+            ...state.overviewRemote,
+            [info.id]: {
+              sessions,
+              trash: trash.map((entry) => entry.id),
+              archive,
+              fetchedAt: Date.now(),
+              error: null,
+            },
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          // A parked snapshot outranks this failed sweep; drop the listing so
+          // the snapshot is the fallback rather than an older listing painted
+          // over it.
+          if (workspaceCache.has(info.id)) {
+            dropOverviewRemote(info.id);
+            return;
+          }
+          state.overviewRemote = {
+            ...state.overviewRemote,
+            [info.id]: {
+              sessions: previous?.sessions ?? [],
+              trash: previous?.trash ?? [],
+              archive: previous?.archive ?? { sessions: [], directories: [] },
+              fetchedAt: previous?.fetchedAt ?? 0,
+              error: message,
+            },
+          };
+        }
+      }),
+    );
+  } finally {
+    overviewSweeping = false;
+  }
+}
+
+/** Open the panel on one tab (default: everything) and refresh the other agents. */
+export function openOverviewPanel(filter: OverviewFilter = "all"): void {
+  state.overview.open = true;
+  state.overview.filter = filter;
+  state.overview.error = null;
+  void refreshOverviewSessions();
+}
+
+export function closeOverviewPanel(): void {
+  state.overview.open = false;
+  state.overview.error = null;
+  state.overview.selectedKey = null;
+}
+
+/** The trigger's name/chevron: open the full list, or collapse it again. */
+export function toggleOverview(): void {
+  if (state.overview.open) closeOverviewPanel();
+  else openOverviewPanel("all");
+}
+
+/**
+ * A status button on the trigger: open on that tab, or switch an open panel to
+ * it. Clicking the same status twice does not close — the panel is a list, and
+ * a second click is a re-filter, not a dismissal.
+ */
+export function showOverviewStatus(filter: OverviewFilter): void {
+  if (state.overview.open) {
+    state.overview.filter = filter;
+    return;
+  }
+  openOverviewPanel(filter);
+}
+
+export function setOverviewFilter(filter: OverviewFilter): void {
+  state.overview.filter = filter;
+}
+
+/** Single click: expand one row's summary. Changes no selection, no unread. */
+export function selectOverviewRow(backend: BackendId, sessionId: string): void {
+  state.overview.selectedKey = overviewKey(backend, sessionId);
+}
+
+export function clearOverviewSelection(): void {
+  state.overview.selectedKey = null;
+}
+
+/**
+ * Advance one session's seen watermark. `upTo` pins the revision the user was
+ * actually shown, so a result that landed while the messages were loading stays
+ * unread instead of being cleared by the same click.
+ */
+export function markOverviewSeen(backend: BackendId, sessionId: string, upTo?: number): void {
+  const key = overviewKey(backend, sessionId);
+  const next = markSeenInLedger(state.overviewRead, key, upTo);
+  if (next === state.overviewRead) return;
+  state.overviewRead = next;
+  saveOverviewLedger(next);
+}
+
+/** Drop one session's overview records (delete): nothing left to project. */
+function forgetOverviewSession(backend: BackendId, sessionId: string): void {
+  const key = overviewKey(backend, sessionId);
+  if (state.overview.selectedKey === key) state.overview.selectedKey = null;
+  clearOverviewUnknown(backend, sessionId);
+  if (!(key in state.overviewRead)) return;
+  const { [key]: _read, ...keptRead } = state.overviewRead;
+  void _read;
+  state.overviewRead = keptRead;
+  saveOverviewLedger(keptRead);
+}
+
+/**
+ * Stop flagging a session as 状态未知. Called when the user actually opens it:
+ * awefork still cannot confirm how that run ended, but a question mark the user
+ * has already looked at is noise, not honesty. Any later evidence re-projects
+ * the row normally.
+ */
+function clearOverviewUnknown(backend: BackendId, sessionId: string): void {
+  const key = overviewKey(backend, sessionId);
+  if (!(key in state.overviewUnknown)) return;
+  const { [key]: _gone, ...kept } = state.overviewUnknown;
+  void _gone;
+  state.overviewUnknown = kept;
+}
+
+/**
+ * Fold one run ending into the overview. Only an observed ending mints a
+ * result: "unknown" (silent timeout, lost connection) and "aborted" (a prompt
+ * that never became a run) leave the ledger alone, so the panel can never claim
+ * a finished run it did not see finish.
+ */
+function recordOverviewOutcome(backend: BackendId, sessionId: string, reason: SettleReason): void {
+  const key = overviewKey(backend, sessionId);
+  if (reason === "unknown") {
+    state.overviewUnknown = { ...state.overviewUnknown, [key]: true };
+    return;
+  }
+  if (reason === "aborted") return;
+  const next = recordOverviewSettle(state.overviewRead, key, {
+    settledAt: Date.now(),
+    failed: reason === "failed",
+  });
+  state.overviewRead = next;
+  saveOverviewLedger(next);
+  clearOverviewUnknown(backend, sessionId);
+}
+
+/** Most recent streamed tail of a session's run, for the row's activity line. */
+export function overviewStreamTail(backend: BackendId, sessionId: string): string | null {
+  const tail =
+    backend === state.activeBackend
+      ? state.streams[sessionId]
+      : state.backgroundRuns[backend]?.streams[sessionId];
+  return tail?.trim() ? tail : null;
+}
+/** The queued ask that puts a session in 等你处理, if any. */
+export function overviewPendingAsk(
+  backend: BackendId,
+  sessionId: string,
+): AgentInteractionRequest | null {
+  return (
+    (state.interactions[backend] ?? []).find((request) => request.sessionId === sessionId) ?? null
+  );
+}
+
+/**
+ * Navigate to one overview row: its agent's workspace, the session, and the
+ * latest turn. Follows the documented order — fix the target, switch and verify
+ * the switch really landed (switchBackend reports failures through actionError
+ * instead of throwing), re-confirm the session is visible, then select. The
+ * panel closes and the result is marked seen only once the selection and its
+ * messages are actually in place; otherwise it stays open with a retryable
+ * error and the unread watermark untouched.
+ */
+export async function jumpToOverviewSession(
+  backend: BackendId,
+  sessionId: string,
+): Promise<boolean> {
+  // One navigation at a time: a second click must not race the first switch.
+  if (state.overview.jumpingKey !== null) return false;
+  const key = overviewKey(backend, sessionId);
+  state.overview.jumpingKey = key;
+  const label = BACKEND_LABELS[backend];
+  try {
+    state.overview.error = null;
+    if (backend !== state.activeBackend) {
+      await switchBackend(backend);
+      if (state.activeBackend !== backend) {
+        state.overview.error = t("overview.jumpSwitchFailed", { backend: label });
+        return false;
+      }
+    }
+    let target = visibleSessions.value.find((session) => session.id === sessionId);
+    if (!target) {
+      // A TUI-side create or a rename may not have reached this window yet; one
+      // refresh is the documented retry. Deleted and archived sessions stay
+      // missing — the overview never un-archives anything on the user's behalf.
+      await refreshSessions();
+      target = visibleSessions.value.find((session) => session.id === sessionId);
+    }
+    if (!target) {
+      state.overview.error = t("overview.jumpMissing");
+      return false;
+    }
+    const revision = state.overviewRead[overviewKey(backend, sessionId)]?.revision ?? 0;
+    // The overview pins the revision it was showing, so selectSession must not
+    // advance the watermark on its own: a result that landed while the
+    // messages were loading has to stay unread.
+    await selectSession(sessionId, { focus: true, markSeen: false });
+    if (state.selectedId !== sessionId) {
+      state.overview.error = t("overview.jumpMissing");
+      return false;
+    }
+    if (state.messagesError) {
+      state.overview.error = t("overview.jumpLoadFailed", { error: state.messagesError });
+      return false;
+    }
+    markOverviewSeen(backend, sessionId, revision);
+    state.overview.open = false;
+    state.overview.selectedKey = null;
+    return true;
+  } finally {
+    state.overview.jumpingKey = null;
   }
 }

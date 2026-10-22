@@ -203,7 +203,60 @@ try {
   }, 30_000, "streamed reply");
   check("mock run streams thinking + text into the transcript", true);
 
-  // 4. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
+  // 4. Canvas session overview: the trigger pill sits above the canvas, opens
+  //    a non-modal floating panel, a single click expands a row's summary
+  //    without moving the canvas, and Esc collapses it again.
+  const overviewTrigger = await cdp.evaluate(`Boolean(document.querySelector(".viewport .overview-trigger"))`);
+  check("overview trigger renders above the canvas", overviewTrigger === true);
+
+  await cdp.evaluate(`document.querySelector(".overview-trigger .trigger-name").click()`);
+  await retry(
+    () => cdp.evaluate(`Boolean(document.querySelector(".overview-float"))`),
+    5000,
+    "overview panel open",
+  );
+  check("trigger click opens the floating panel", true);
+
+  const modal = await cdp.evaluate(`({
+    backdrop: Boolean(document.querySelector(".overview-float + .interaction-backdrop")),
+    rows: document.querySelectorAll(".overview-float .float-session-row").length,
+    insideCanvas: Boolean(document.querySelector(".viewport .overview-float")),
+  })`);
+  check("panel lists sessions with no backdrop", modal.rows > 0 && !modal.backdrop, JSON.stringify(modal));
+  check("panel floats inside the canvas viewport", modal.insideCanvas === true);
+
+  // A single click is a summary, never a navigation: the canvas selection and
+  // the sidebar's active row must both stay put.
+  const before = await cdp.evaluate(`({
+    selected: document.querySelector(".turn.selected")?.dataset.nodeId ?? null,
+    title: document.querySelector(".ctx-title")?.textContent ?? "",
+  })`);
+  await cdp.evaluate(`document.querySelector(".overview-float .float-session-row").click()`);
+  await retry(
+    () => cdp.evaluate(`Boolean(document.querySelector(".overview-float .float-summary"))`),
+    5000,
+    "row summary",
+  );
+  const after = await cdp.evaluate(`({
+    selected: document.querySelector(".turn.selected")?.dataset.nodeId ?? null,
+    title: document.querySelector(".ctx-title")?.textContent ?? "",
+    panel: Boolean(document.querySelector(".overview-float")),
+  })`);
+  check(
+    "single click expands a summary without navigating",
+    after.panel && after.selected === before.selected && after.title === before.title,
+    JSON.stringify({ before, after }),
+  );
+
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(
+    () => cdp.evaluate(`!document.querySelector(".overview-float")`),
+    5000,
+    "overview panel closed by Esc",
+  );
+  check("Esc collapses the panel", true);
+  // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(
     () => cdp.evaluate(`Boolean(document.querySelector(".draft textarea"))`),
@@ -226,11 +279,11 @@ try {
   }, 15_000, "fork grown");
   check("draft send forks a new branch onto the canvas", true);
 
-  // 5. No error toast survived the whole run.
+  // 6. No error toast survived the whole run.
   const errorToast = await cdp.evaluate(`document.querySelector(".toast.banner-error")?.textContent ?? ""`);
   check("no error toast raised", errorToast === "", errorToast);
 
-  // 6. Sidebar panel layout: drag-resize clamps to min/max, the width
+  // 7. Sidebar panel layout: drag-resize clamps to min/max, the width
   //    survives a reload, and double-click collapse hands the freed pixels
   //    to the canvas then gives them back on the next double-click. This
   //    runs on a live desktop, so every drag re-targets from the measured
@@ -323,6 +376,7 @@ try {
     const back = await panelWidth(".viewport");
     if (!near(back, canvasBefore, 4)) throw new Error(`canvas did not return the pixels: ${back}px`);
   }, 5000, "canvas returns the pixels on expand");
+
 } catch (error) {
   failures += 1;
   console.error(`  ✗ ${error.message}`);
