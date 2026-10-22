@@ -12,3 +12,4 @@ dist/
 # useIgnoreFile skips them, so their biome.json can't trip the nested-root check
 .worktrees/
 /.zcode
+/todo
