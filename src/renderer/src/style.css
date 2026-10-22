@@ -14,6 +14,10 @@
   --mint: #7bc96f;
   --mint-soft: #e4f5e0;
   --mint-rgb: 123, 201, 111;
+  /* running: sky, never shared with mint (settled/recent) or butter (hits) */
+  --sky: #6d9df2;
+  --sky-soft: #e5edfd;
+  --sky-deep: #3a6fd8;
   --ink: #4a3f3a;
   --ink-soft: #9a8b82;
   --ink-faint: #c4b6ac;
@@ -1050,8 +1054,8 @@ mark.hl {
 }
 
 .sess.running .dot {
-  background: var(--mint);
-  box-shadow: 0 0 0 3px var(--mint-soft);
+  background: var(--sky);
+  box-shadow: 0 0 0 3px var(--sky-soft);
 }
 
 /* same "刚跑完" signal as the canvas tip card, faded by --recent-alpha */
@@ -1310,8 +1314,8 @@ mark.hl {
 }
 
 .fav-row.running .fav-dot {
-  background: var(--mint);
-  box-shadow: 0 0 0 3px var(--mint-soft);
+  background: var(--sky);
+  box-shadow: 0 0 0 3px var(--sky-soft);
 }
 
 .fav-name {
@@ -2097,7 +2101,7 @@ mark.hl {
 }
 
 .turn.running {
-  border-color: var(--mint);
+  border-color: var(--sky);
 }
 
 /* search hits: butter ring on every matching card while a query is live */
@@ -2301,7 +2305,7 @@ mark.hl {
 }
 
 .running-flag {
-  color: #4e8f45;
+  color: var(--sky-deep);
 }
 
 .add-chip {
@@ -2749,8 +2753,8 @@ mark.hl {
 
 /* last so a running node stays visible even when on the active path */
 .mm-node.running {
-  background: var(--mint);
-  border-color: #4e8f45;
+  background: var(--sky);
+  border-color: var(--sky-deep);
 }
 
 .mm-view {
@@ -2848,8 +2852,8 @@ mark.hl {
 .ctx-running {
   font-size: 11px;
   font-weight: 800;
-  color: #4e8f45;
-  background: var(--mint-soft);
+  color: var(--sky-deep);
+  background: var(--sky-soft);
   border-radius: 999px;
   padding: 3px 10px;
   flex: 0 0 auto;
@@ -3400,7 +3404,7 @@ mark.hl {
 }
 
 .cmp-target-running {
-  color: #4e8f45;
+  color: var(--sky-deep);
 }
 
 .cmp-target-stop {
@@ -3661,6 +3665,11 @@ mark.hl {
   border-radius: 999px;
   background: var(--mint-soft);
   color: #4e8f45;
+}
+
+.tool-chip.running {
+  background: var(--sky-soft);
+  color: var(--sky-deep);
 }
 
 .tool-chip.lav {
@@ -4120,8 +4129,8 @@ code.md-code {
 
 .chat-input .abort {
   margin-left: auto;
-  background: var(--mint-soft);
-  color: #4e8f45;
+  background: var(--sky-soft);
+  color: var(--sky-deep);
   font-size: 12.5px;
   font-weight: 800;
   border-radius: 999px;
