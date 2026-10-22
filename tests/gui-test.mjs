@@ -216,10 +216,15 @@ try {
   await retry(async () => {
     // The forked session inherits the cut prefix, so its canvas node is a
     // turn (not a stub) under the demo-fork id the mock adapter hands out.
-    const forked = await cdp.evaluate(`({
+    const forked = await cdp.evaluate(`(() => {
+      // The demo parent has tags; answer its inheritance prompt before the
+      // fork request can proceed. Keep asserting the resulting node below.
+      document.querySelector('.fork-tag-dialog .interaction-allow')?.click();
+      return {
       node: Boolean(document.querySelector('.turn[data-node-id^="demo-fork-"]')),
       draftGone: !document.querySelector(".draft"),
-    })`);
+      };
+    })()`);
     if (!forked.node || !forked.draftGone) {
       throw new Error(`fork not grown: ${JSON.stringify(forked)}`);
     }
@@ -246,7 +251,8 @@ try {
   const sidebarHandleCenter = () =>
     cdp.evaluate(`(() => {
       const r = document.querySelectorAll(".shell .col-handle")[0].getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      // The fold button occupies the handle's middle and stops mousedown.
+      return { x: r.x + r.width / 2, y: r.y + r.height / 3 };
     })()`);
   const mouse = (type, params) => cdp.send("Input.dispatchMouseEvent", { type, ...params });
   async function dragSidebarHandle(dx) {

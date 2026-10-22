@@ -1,0 +1,1521 @@
+{
+  "measuredAt": "2026-10-22T08:10:01.421Z",
+  "commit": "0728ba9923c5c2b13c4c77683c17697b4a851b00",
+  "changes": " M docs/CONTRIBUTING.md\n M src/renderer/src/components/session-canvas.vue\n M src/renderer/src/state.ts\n M tests/gui-test.mjs\n M tests/renderer-run-settle.test.ts\n?? docs/performance/\n?? scripts/canvas-benchmark.mjs\n?? src/renderer/src/message-loader.ts\n?? tests/message-loader.test.ts\n",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M4",
+  "node": "v22.22.0",
+  "version": "0.3.6",
+  "config": {
+    "branches": [100],
+    "samples": 30,
+    "assistantSteps": 20,
+    "deleteMessage": true,
+    "fullApp": true,
+    "coldLoadOnly": false,
+    "panDuringLoad": false,
+    "width": 1440,
+    "height": 900
+  },
+  "sourceRef": null,
+  "sourceHashes": {
+    "src/renderer/src/state.ts": "5171a3f5e9ae58be034b10bc2f9b9d4d210d227b85691b61181476ceacb858c7",
+    "src/renderer/src/components/session-canvas.vue": "e133b31f2e5e8b8009bc99e03a60fd45c270d78f223af014a25778b572bccd08",
+    "src/shared/turns.ts": "f6a333f82f5209f33d3252032157a7b7718f4e14f70daadf166edd693a4342d0",
+    "src/shared/canvas-graph.ts": "eef92f59da564c782a950969092c2110d86d951c5b6378006c54a6b04b8a9807",
+    "src/renderer/src/message-loader.ts": "6c836cdf5dc45f1d730ef69e153f9ed87d2961f9fb0c025b69cb986455f44a62"
+  },
+  "note": "Synthetic canvas only; event to Vue nextTick, not FPS or input-to-paint latency. Raw timings include instrumentation.",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.76 Electron/44.2.0 Safari/537.36",
+  "results": [
+    {
+      "branches": 100,
+      "cards": 530,
+      "visibleCards": 6,
+      "domElements": 12330,
+      "drag": {
+        "medianMs": 8.799999997019768,
+        "p95Ms": 21.099999994039536,
+        "maxMs": 24.900000005960464,
+        "raw": [
+          {
+            "vueMs": 21.099999994039536,
+            "toAnimationFrameMs": 26.19999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 19.200000002980232,
+            "toAnimationFrameMs": 22,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 17,
+            "toAnimationFrameMs": 19.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 24.900000005960464,
+            "toAnimationFrameMs": 29.100000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 11.599999994039536,
+            "toAnimationFrameMs": 14.699999988079071,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 11.200000002980232,
+            "toAnimationFrameMs": 13.800000011920929,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 11.299999997019768,
+            "toAnimationFrameMs": 22.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.400000005960464,
+            "toAnimationFrameMs": 10.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.799999997019768,
+            "toAnimationFrameMs": 14.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.600000008940697,
+            "toAnimationFrameMs": 15.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.299999997019768,
+            "toAnimationFrameMs": 16.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.600000008940697,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 15.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.299999997019768,
+            "toAnimationFrameMs": 17.399999991059303,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.700000002980232,
+            "toAnimationFrameMs": 17,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.9000000059604645,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 16.400000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.700000002980232,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.399999991059303,
+            "toAnimationFrameMs": 20.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.400000005960464,
+            "toAnimationFrameMs": 12.400000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.799999997019768,
+            "toAnimationFrameMs": 17.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.5999999940395355,
+            "toAnimationFrameMs": 16.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 17.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.5,
+            "toAnimationFrameMs": 17,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.299999997019768,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.200000002980232,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.200000002980232,
+            "toAnimationFrameMs": 16.80000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.799999997019768,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.700000002980232,
+            "toAnimationFrameMs": 15.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          }
+        ]
+      },
+      "zoom": {
+        "medianMs": 8.300000011920929,
+        "p95Ms": 11,
+        "maxMs": 12.200000002980232,
+        "raw": [
+          {
+            "vueMs": 8.699999988079071,
+            "toAnimationFrameMs": 17.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.299999997019768,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.899999991059303,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 12.200000002980232,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 11,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.9000000059604645,
+            "toAnimationFrameMs": 17.30000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.199999988079071,
+            "toAnimationFrameMs": 18.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 9.700000002980232,
+            "toAnimationFrameMs": 15.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 15.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 11,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.5,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.600000008940697,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.5,
+            "toAnimationFrameMs": 17.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.600000008940697,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.200000002980232,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.400000005960464,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.400000005960464,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.799999997019768,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.300000011920929,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.9000000059604645,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.299999997019768,
+            "toAnimationFrameMs": 16.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.5,
+            "toAnimationFrameMs": 16.80000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.4000000059604645,
+            "toAnimationFrameMs": 16.80000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.399999991059303,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 8.099999994039536,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.700000002980232,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          },
+          {
+            "vueMs": 7.800000011920929,
+            "toAnimationFrameMs": 17.30000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 1
+          }
+        ]
+      },
+      "reload": {
+        "medianMs": 1.6000000089406967,
+        "p95Ms": 1.9000000059604645,
+        "maxMs": 2,
+        "raw": [
+          {
+            "vueMs": 1.9000000059604645,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 2,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7999999970197678,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.699999988079071,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 17.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16.100000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 17.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 17.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 15.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 17,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5,
+            "toAnimationFrameMs": 17,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5,
+            "toAnimationFrameMs": 17.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 16.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7000000029802322,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.7999999970197678,
+            "toAnimationFrameMs": 17.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.699999988079071,
+            "toAnimationFrameMs": 16,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.5999999940395355,
+            "toAnimationFrameMs": 16.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 1.6000000089406967,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          }
+        ]
+      },
+      "outsideReload": {
+        "medianMs": 0.10000000894069672,
+        "p95Ms": 0.20000000298023224,
+        "maxMs": 0.20000000298023224,
+        "raw": [
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 15.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.80000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.19999998807907104,
+            "toAnimationFrameMs": 16.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 17.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.100000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.19999998807907104,
+            "toAnimationFrameMs": 16.899999991059303,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.20000000298023224,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.10000000894069672,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          }
+        ]
+      },
+      "stream": {
+        "medianMs": 9.200000002980232,
+        "p95Ms": 9.899999991059303,
+        "maxMs": 10.200000002980232,
+        "raw": [
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 15.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.299999997019768,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.899999991059303,
+            "toAnimationFrameMs": 17.69999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.800000011920929,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 10.200000002980232,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.5,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.5,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.599999994039536,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.700000002980232,
+            "toAnimationFrameMs": 17.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 15.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.199999988079071,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.099999994039536,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.899999991059303,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.799999997019768,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9,
+            "toAnimationFrameMs": 16.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.600000008940697,
+            "toAnimationFrameMs": 17.100000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.299999997019768,
+            "toAnimationFrameMs": 17.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.899999991059303,
+            "toAnimationFrameMs": 15.399999991059303,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.400000005960464,
+            "toAnimationFrameMs": 16.30000001192093,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9,
+            "toAnimationFrameMs": 17.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.200000002980232,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.5,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.299999997019768,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.099999994039536,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.900000005960464,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.5,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 9.5,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          },
+          {
+            "vueMs": 8.799999997019768,
+            "toAnimationFrameMs": 15.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 4
+          }
+        ]
+      },
+      "repeatedTail": {
+        "medianMs": 0,
+        "p95Ms": 0.09999999403953552,
+        "maxMs": 0.09999999403953552,
+        "raw": [
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.600000008940697,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.799999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.099999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.19999998807907,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 17.200000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 15.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.599999994039536,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.900000005960464,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 17.399999991059303,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 15.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 15.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 16.700000002980232,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0.09999999403953552,
+            "toAnimationFrameMs": 17.5,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          },
+          {
+            "vueMs": 0,
+            "toAnimationFrameMs": 16.299999997019768,
+            "turns": 0,
+            "scanned": 0,
+            "graphs": 0,
+            "updates": 0
+          }
+        ]
+      }
+    }
+  ]
+}
