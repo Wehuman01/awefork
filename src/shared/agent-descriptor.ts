@@ -109,6 +109,9 @@ export interface AgentEndpoints {
   readonly sessionFormReply?: string;
   /** DELETE — cancels a `form.created` ask ({formId} interpolated). */
   readonly sessionFormCancel?: string;
+  /** GET — lists form asks still awaiting a reply; a fresh client rehydrates
+   * its pending panels from it after a restart or an event-stream outage. */
+  readonly forms?: string;
   readonly projects: string;
   readonly providers: string;
   readonly events: string;
@@ -705,6 +708,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
     "sessionPermissions",
     "sessionFormReply",
     "sessionFormCancel",
+    "forms",
     "projects",
     "providers",
     "events",

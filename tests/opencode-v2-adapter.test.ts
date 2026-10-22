@@ -69,6 +69,8 @@ interface FakeV2 {
   /** Server-side session rows, mutable so tests can set up forks. */
   sessions: Record<string, unknown>[];
   messages: Record<string, Record<string, unknown>[]>;
+  /** Forms still pending server-side — what GET /api/form lists. */
+  forms: Record<string, unknown>[];
 }
 
 function startFakeV2(
@@ -76,12 +78,14 @@ function startFakeV2(
     sessions?: Record<string, unknown>[];
     messages?: Record<string, Record<string, unknown>[]>;
     projects?: Record<string, unknown>[];
+    forms?: Record<string, unknown>[];
   } = {},
 ): Promise<FakeV2> {
   const calls: FakeV2["calls"] = [];
   const sessions = options.sessions ?? [session()];
   const messages = options.messages ?? { ses_1: [userRow(), assistantRow()] };
   const projects = options.projects ?? [{ id: "p1", canonical: "/tmp/project" }];
+  const forms = options.forms ?? [];
   const sseResponses: import("node:http").ServerResponse[] = [];
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -213,6 +217,7 @@ function startFakeV2(
       if (formCancelMatch && method === "DELETE") {
         return json({ data: true });
       }
+      if (method === "GET" && path === "/api/form") return json({ data: forms });
       const interruptMatch = path.match(/^\/api\/session\/([^/]+)\/interrupt$/);
       if (interruptMatch && method === "POST") return json({ data: { interrupted: true } });
       res.writeHead(404, { "content-type": "application/json" });
@@ -238,6 +243,7 @@ function startFakeV2(
         },
         sessions,
         messages,
+        forms,
       });
     });
   });
@@ -1026,6 +1032,50 @@ describe("v2 event stream", () => {
         method: "POST",
         body: { answer: { method: "api", remember: true, scopes: ["read"] } },
       });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("rehydrates forms still pending after a restart from GET /api/form", async () => {
+    // A restart misses the form.created frame, and the server never re-emits
+    // it; the pending list is the only way the panel comes back.
+    const fake = await startFakeV2({
+      forms: [
+        {
+          id: "frm_pending",
+          sessionID: "ses_1",
+          title: "Still waiting",
+          fields: [{ key: "token", type: "string", title: "Token", required: true }],
+        },
+      ],
+    });
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    try {
+      for (let i = 0; i < 40 && !events.some((e) => e.type === "interaction.requested"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const ask = events.find((e) => e.type === "interaction.requested");
+      expect(ask).toMatchObject({
+        request: {
+          requestId: "frm_pending",
+          sessionId: "ses_1",
+          kind: "opencode-form",
+          title: "Still waiting",
+        },
+      });
+      // The rehydrated ask answers through the same reply route as a live one.
+      await adapter.respondInteraction("frm_pending", {
+        decision: "answers",
+        answers: { token: "t" },
+      });
+      expect(fake.calls.some((c) => c.path === "/api/session/ses_1/form/frm_pending/reply")).toBe(
+        true,
+      );
     } finally {
       unsubscribe();
     }

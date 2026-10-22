@@ -199,6 +199,13 @@ export interface OpencodeClient {
    * chose not to fill. Same 404-means-settled contract as `formReply`.
    */
   formCancel(sessionId: string, formId: string): Promise<void>;
+  /**
+   * GET /api/form — every form ask still awaiting a reply. A fresh client
+   * rehydrates its pending panels from this list: the `form.created` frames it
+   * missed (app restart, dropped event stream) never re-emit. A form absent
+   * from the list has already settled.
+   */
+  forms(): Promise<unknown[]>;
 }
 
 /**
@@ -666,5 +673,6 @@ export function createOpencodeClient(
         undefined,
         "sessionFormCancel",
       ),
+    forms: () => request(endpoint("forms"), undefined, undefined, undefined, "forms"),
   };
 }

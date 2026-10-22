@@ -125,6 +125,7 @@
     "sessionPermissions": "/api/session/{id}/permission/{permissionId}/reply",
     "sessionFormReply": "/api/session/{id}/form/{formId}/reply",
     "sessionFormCancel": "/api/session/{id}/form/{formId}",
+    "forms": "/api/form",
     "projects": "/api/project",
     "providers": "/api/model",
     "events": "/api/event"
