@@ -7,6 +7,7 @@ import type {
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
+import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Composer-persistence × backend-switch regression harness: the state module
@@ -146,6 +147,7 @@ async function bootState(
     fileChanges: async () => null,
     fileChangeDiff: async () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
+    ...createOverviewLedgerMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");
@@ -463,7 +465,6 @@ describe("model quick access (常用 / 最近)", () => {
     for (let i = 3; i <= 8; i += 1) {
       h.mod.setPaneModel("s1", { providerId: "oc", modelId: `m${i}` });
     }
-
     expect(h.store.recentModels).toEqual([
       { providerId: "oc", modelId: "m8" },
       { providerId: "oc", modelId: "m7" },

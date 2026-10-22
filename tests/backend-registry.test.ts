@@ -370,13 +370,18 @@ describe("event envelopes", () => {
     expect(envelopes).toEqual([
       {
         backend: "codex",
+        eventId: "event-1",
         event: { type: "server.error", message: expect.stringContaining("连接中断") },
       },
     ]);
 
     await adapter.listSessions(); // lazy re-spawn
     expect(mocks.ensureCodexServer).toHaveBeenCalledTimes(2);
-    expect(envelopes.at(-1)).toEqual({ backend: "codex", event: { type: "server.reconnected" } });
+    expect(envelopes.at(-1)).toEqual({
+      backend: "codex",
+      eventId: "event-2",
+      event: { type: "server.reconnected" },
+    });
 
     await adapter.listSessions(); // cached again: no third spawn, no second banner
     expect(mocks.ensureCodexServer).toHaveBeenCalledTimes(2);

@@ -258,6 +258,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const adapters = new Map<BackendId, Promise<AgentAdapter>>();
   const unsubscribers: Array<() => void> = [];
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
+  let eventSequence = 0;
   /**
    * `opencode --version` decides which protocol awefork speaks, so it gates
    * the switcher warning, the capabilities and the adapter itself. One probe
@@ -299,7 +300,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const subscribeAdapter = (backend: BackendId, adapter: AgentAdapter): void => {
     void adapter
       .subscribe((event) => {
-        forwardEvent?.({ backend, event });
+        forwardEvent?.({ backend, event, eventId: `event-${++eventSequence}` });
       })
       .then((unsubscribe) => {
         unsubscribers.push(unsubscribe);

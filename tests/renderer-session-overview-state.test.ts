@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { AgentEvent, ChatMessage, SessionSummary } from "../src/shared/types";
+import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * The session overview over the real store: which status a row projects after
@@ -119,6 +120,7 @@ async function bootState(options: { runError?: string | null } = {}) {
       onEnvelope = handler;
       return () => {};
     },
+    ...createOverviewLedgerMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");
@@ -168,8 +170,8 @@ async function runAndSettle(
 describe("overview rows over the store", () => {
   it("lists the visible backend's sessions and projects them from live state", async () => {
     const h = await bootState();
-    expect(rowOf(h, "opencode", "s1")?.status).toBe("idle");
-    expect(h.state.overviewStats.value.idle).toBe(1);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
+    expect(h.state.overviewStats.value.unknown).toBe(1);
   });
 
   it("turns a settled run into an unread row, and viewing it into read", async () => {
@@ -210,6 +212,19 @@ describe("overview rows over the store", () => {
     expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(1);
   });
 
+  it("counts a run once across repeated errors and the following idle", async () => {
+    const h = await bootState();
+    h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.send("opencode", { type: "server.error", message: "boom", sessionId: "s1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    h.send("opencode", { type: "server.error", message: "boom", sessionId: "s1" });
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(1);
+    expect(h.store.overviewRead["opencode:s1"]?.failed).toBe(true);
+  });
+
   it("calls a silent watchdog timeout unknown instead of minting a result", async () => {
     const h = await bootState();
     h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });
@@ -232,6 +247,9 @@ describe("overview rows over the store", () => {
     expect(h.state.overviewRows.value.find((row) => row.session.id === "s1")?.status).toBe(
       "unknown",
     );
+    h.failMessages(false);
+    await h.state.selectSession("s1");
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
   });
 
   it("counts a queued ask as 等你处理 above everything else", async () => {
@@ -259,8 +277,27 @@ describe("overview rows over the store", () => {
     h.state.openOverviewPanel();
     await vi.advanceTimersByTimeAsync(0);
     expect(h.store.overview.open).toBe(true);
-    expect(rowOf(h, "codex", "c1")?.status).toBe("idle");
+    expect(rowOf(h, "codex", "c1")?.status).toBe("unknown");
     expect(h.state.overviewAgents.value).toEqual(["opencode", "codex"]);
+  });
+
+  it("fills the trigger counts with one delayed boot sweep", async () => {
+    const h = await bootState();
+    expect(rowOf(h, "codex", "c1")).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(rowOf(h, "codex", "c1")?.status).toBe("unknown");
+    expect(h.state.overviewStats.value.unknown).toBe(2);
+  });
+
+  it("uses an explicit idle event to resolve a session's unknown status", async () => {
+    const h = await bootState();
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unknown");
+
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("idle");
   });
 
   it("keeps one agent's listing failure from blanking the others", async () => {
@@ -275,6 +312,24 @@ describe("overview rows over the store", () => {
     await sessions();
     expect(h.state.overviewRemoteError("codex")).toBe("codex server down");
     expect(rowOf(h, "opencode", "s1")).toBeDefined();
+  });
+
+  it("keeps the parked session list and reports when its refresh is stale", async () => {
+    const h = await bootState();
+    h.state.openOverviewPanel();
+    await vi.advanceTimersByTimeAsync(0);
+    await h.state.switchBackend("codex");
+    await h.state.switchBackend("opencode");
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    api.sessions = async (backend: BackendId) => {
+      if (backend === "codex") throw new Error("codex server down");
+      return { sessions: [OPENCODE_S1], lineage: {} };
+    };
+
+    await h.state.refreshOverviewSessions();
+
+    expect(rowOf(h, "codex", "c1")?.session.title).toBe(CODEX_C1.title);
+    expect(h.state.overviewRemoteError("codex")).toBe("codex server down");
   });
 });
 
@@ -294,6 +349,8 @@ describe("overview navigation", () => {
     expect(landed).toBe(true);
     expect(h.store.activeBackend).toBe("codex");
     expect(h.store.selectedId).toBe("c1");
+    expect(h.store.selectedTurnId).toBeTruthy();
+    expect(h.store.turnJumpRequest?.nodeId).toBe(h.store.selectedTurnId);
     expect(h.store.overview.open).toBe(false);
     expect(rowOf(h, "codex", "c1")?.status).toBe("read");
   });

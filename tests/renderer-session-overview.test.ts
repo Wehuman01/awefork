@@ -1,11 +1,15 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   compareOverviewRows,
-  loadOverviewLedger,
   markOverviewSeen,
   matchesOverviewAgent,
   matchesOverviewFilter,
   matchesOverviewQuery,
+  mergeOverviewLedger,
   type OverviewReadLedger,
   type OverviewRow,
   overviewCounts,
@@ -14,10 +18,10 @@ import {
   projectOverviewStatus,
   pruneOverviewLedger,
   recordOverviewSettle,
-  saveOverviewLedger,
   summarizeMessages,
 } from "../src/renderer/src/session-overview";
 import type { BackendId } from "../src/shared/backend";
+import { OverviewLedgerStore, readOverviewLedger } from "../src/shared/overview-ledger";
 import type { SessionSummary } from "../src/shared/types";
 
 /**
@@ -279,63 +283,205 @@ describe("unread ledger", () => {
     expect(pruned["codex:s0"]).toBeUndefined();
     expect(pruned["codex:s319"]).toBeDefined();
   });
+
+  it("merges two windows' copies into the same union, whichever lands second", () => {
+    const a = overviewKey("opencode", "a");
+    const b = overviewKey("opencode", "b");
+    // Window 1 settled a (revision 1) and saw it; window 2 settled a again
+    // (revision 2) and b (revision 1) while 1 was offline.
+    const left = recordOverviewSettle(
+      markOverviewSeen(recordOverviewSettle({}, a, { settledAt: 10, failed: false }), a),
+      a,
+      {
+        settledAt: 30,
+        failed: false,
+      },
+    );
+    const right = recordOverviewSettle(
+      recordOverviewSettle({}, b, { settledAt: 20, failed: false }),
+      a,
+      { settledAt: 20, failed: false },
+    );
+    const forward = mergeOverviewLedger(left, right);
+    const backward = mergeOverviewLedger(right, left);
+    // Commutative: the union does not depend on which window wrote first.
+    expect(forward).toEqual(backward);
+    expect(forward[a]).toEqual({ revision: 2, seen: 1, settledAt: 30, failed: false });
+    expect(forward[b]).toEqual({ revision: 1, seen: 0, settledAt: 20, failed: false });
+  });
+
+  it("lets the newest settle carry the failure flag, in both directions", () => {
+    const key = overviewKey("codex", "s1");
+    const failedFirst = { [key]: { revision: 2, seen: 0, settledAt: 30, failed: true } };
+    const succeededLater = { [key]: { revision: 1, seen: 0, settledAt: 10, failed: false } };
+    expect(mergeOverviewLedger(failedFirst, succeededLater)[key]).toEqual({
+      revision: 2,
+      seen: 0,
+      settledAt: 30,
+      failed: true,
+    });
+    expect(mergeOverviewLedger(succeededLater, failedFirst)[key]).toEqual({
+      revision: 2,
+      seen: 0,
+      settledAt: 30,
+      failed: true,
+    });
+  });
 });
 
-describe("unread persistence", () => {
-  function memoryStorage(seed: Record<string, string> = {}) {
-    const map = new Map(Object.entries(seed));
-    return {
-      getItem: (key: string) => map.get(key) ?? null,
-      setItem: (key: string, value: string) => void map.set(key, value),
-      removeItem: (key: string) => void map.delete(key),
-      map,
-    };
+describe("unread ledger persistence (main-owned sidecar)", () => {
+  /** A fresh temp file per test; the store owns the path end to end. */
+  function sidecarPath(name: string): string {
+    return join(tmpdir(), `overview-read-test-${name}-${randomUUID()}.json`);
   }
 
-  it("round-trips a ledger through storage", () => {
-    const storage = memoryStorage();
-    (globalThis as unknown as { localStorage: unknown }).localStorage = storage;
+  it("round-trips a ledger through the sidecar file", async () => {
+    const path = sidecarPath("roundtrip");
     try {
-      const ledger = recordOverviewSettle({}, overviewKey("codex", "s1"), {
-        settledAt: 42,
-        failed: false,
-      });
-      saveOverviewLedger(ledger);
-      expect(loadOverviewLedger()).toEqual(ledger);
+      const store = new OverviewLedgerStore(path);
+      const key = overviewKey("codex", "s1");
+      const { entry } = await store.recordSettle(key, { settledAt: 42, failed: false });
+      expect(entry).toEqual({ revision: 1, seen: 0, settledAt: 42, failed: false });
+      // A second store over the same file reads what the first wrote: this is
+      // what a restart (and a second window) actually sees.
+      const reopened = new OverviewLedgerStore(path);
+      expect((await reopened.snapshot()).ledger).toEqual({ [key]: entry });
     } finally {
-      delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+      await rm(path, { force: true });
     }
   });
 
-  it("drops malformed entries instead of trusting them", () => {
-    const storage = memoryStorage({
-      "awefork:overview-read": JSON.stringify({
-        "codex:good": { revision: 2, seen: 1, settledAt: 5, failed: false },
-        "codex:junk": { revision: "many", seen: 1, settledAt: 5 },
-        "codex:negative": { revision: -1, seen: 0, settledAt: 5 },
-        "codex:seenAhead": { revision: 2, seen: 9, settledAt: 5, failed: true },
-        "codex:notAnObject": 7,
-      }),
-    });
-    (globalThis as unknown as { localStorage: unknown }).localStorage = storage;
+  it("keeps an interrupted run unknown after restart and deduplicates a shared settle id", async () => {
+    const path = sidecarPath("unknown-and-dedupe");
+    const key = overviewKey("codex", "s1");
     try {
-      const ledger = loadOverviewLedger();
+      const beforeRestart = new OverviewLedgerStore(path);
+      await beforeRestart.setUnknown(key, true, "event-running");
+      const afterRestart = new OverviewLedgerStore(path);
+      expect((await afterRestart.snapshot()).unknown[key]).toBe("event-running");
+
+      const { entry: first } = await afterRestart.recordSettle(key, {
+        settledAt: 42,
+        failed: false,
+        settleId: "event-running",
+      });
+      expect((await afterRestart.snapshot()).unknown[key]).toBeUndefined();
+
+      await afterRestart.setUnknown(key, true, "event-next");
+      const secondWindow = new OverviewLedgerStore(path);
+      const { entry: duplicate, changed } = await secondWindow.recordSettle(key, {
+        settledAt: 43,
+        failed: false,
+        settleId: "event-running",
+      });
+      expect(changed).toBe(false);
+      expect(duplicate.revision).toBe(first.revision);
+      expect((await secondWindow.snapshot()).unknown[key]).toBe("event-next");
+      expect((await secondWindow.snapshot()).ledger[key]?.settledAt).toBe(42);
+    } finally {
+      await rm(path, { force: true });
+    }
+  });
+
+  it("drops malformed entries instead of trusting them", async () => {
+    const path = sidecarPath("malformed");
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(
+        path,
+        JSON.stringify({
+          "codex:good": { revision: 2, seen: 1, settledAt: 5, failed: false },
+          "codex:junk": { revision: "many", seen: 1, settledAt: 5 },
+          "codex:negative": { revision: -1, seen: 0, settledAt: 5 },
+          "codex:seenAhead": { revision: 2, seen: 9, settledAt: 5, failed: true },
+          "codex:notAnObject": 7,
+        }),
+      );
+      const ledger = await readOverviewLedger(path);
       expect(Object.keys(ledger).sort()).toEqual(["codex:good", "codex:seenAhead"]);
       // A seen watermark past the revision is clamped, never left impossible.
       expect(ledger["codex:seenAhead"]?.seen).toBe(2);
       expect(ledger["codex:seenAhead"]?.failed).toBe(true);
     } finally {
-      delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+      await rm(path, { force: true });
     }
   });
 
-  it("survives an unreadable store", () => {
-    const storage = memoryStorage({ "awefork:overview-read": "{not json" });
-    (globalThis as unknown as { localStorage: unknown }).localStorage = storage;
+  it("survives an unreadable sidecar", async () => {
+    const path = sidecarPath("corrupt");
     try {
-      expect(loadOverviewLedger()).toEqual({});
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, "{not json");
+      expect(await readOverviewLedger(path)).toEqual({});
+      // And the store keeps working over it: the next write replaces the junk.
+      const store = new OverviewLedgerStore(path);
+      await store.recordSettle("codex:s1", { settledAt: 7, failed: false });
+      expect((await store.snapshot()).ledger).toEqual({
+        "codex:s1": { revision: 1, seen: 0, settledAt: 7, failed: false },
+      });
     } finally {
-      delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+      await rm(path, { force: true });
+    }
+  });
+
+  it("merges a window's copy per entry, never wholesale", async () => {
+    const path = sidecarPath("merge");
+    try {
+      const store = new OverviewLedgerStore(path);
+      const a = overviewKey("opencode", "a");
+      const b = overviewKey("opencode", "b");
+      await store.recordSettle(a, { settledAt: 10, failed: false });
+      await store.recordSettle(b, { settledAt: 20, failed: false });
+
+      // The window ran ahead offline: a newer revision on a, a brand-new
+      // session c, and a seen watermark on b. Nothing may be rolled back.
+      const merged = await store.merge({
+        [a]: { revision: 3, seen: 3, settledAt: 30, failed: false },
+        [overviewKey("opencode", "c")]: { revision: 1, seen: 0, settledAt: 40, failed: true },
+        [b]: { revision: 1, seen: 1, settledAt: 15, failed: false },
+      });
+      expect(merged[a]).toEqual({ revision: 3, seen: 3, settledAt: 30, failed: false });
+      expect(merged[b]).toEqual({ revision: 1, seen: 1, settledAt: 20, failed: false });
+      expect(merged[overviewKey("opencode", "c")]).toEqual({
+        revision: 1,
+        seen: 0,
+        settledAt: 40,
+        failed: true,
+      });
+    } finally {
+      await rm(path, { force: true });
+    }
+  });
+
+  it("keeps a window's mark-seen from being erased by a stale replay", async () => {
+    const path = sidecarPath("seen");
+    try {
+      const store = new OverviewLedgerStore(path);
+      const key = overviewKey("codex", "s1");
+      await store.recordSettle(key, { settledAt: 10, failed: false });
+      await store.markSeen(key);
+      // A window that was offline when the watermark moved replays its older
+      // copy: the merge takes the max seen, so the badge stays cleared.
+      const merged = await store.merge({
+        [key]: { revision: 1, seen: 0, settledAt: 10, failed: false },
+      });
+      expect(merged[key]?.seen).toBe(1);
+    } finally {
+      await rm(path, { force: true });
+    }
+  });
+
+  it("reports whether a forgotten session existed", async () => {
+    const path = sidecarPath("forget");
+    try {
+      const store = new OverviewLedgerStore(path);
+      const key = overviewKey("codex", "s1");
+      await store.recordSettle(key, { settledAt: 10, failed: false });
+      expect(await store.forget(key)).toBe(true);
+      expect(await store.forget(key)).toBe(false);
+      expect((await store.snapshot()).ledger).toEqual({});
+    } finally {
+      await rm(path, { force: true });
     }
   });
 });

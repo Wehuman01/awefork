@@ -20,6 +20,7 @@
     "src/renderer/src/**/*.vue",
     "src/shared/types.ts",
     "src/shared/backend.ts",
+    "src/shared/overview-ledger-types.ts",
     "src/shared/attachment-kinds.ts",
     "src/shared/session-tree.ts",
     "src/shared/turns.ts",

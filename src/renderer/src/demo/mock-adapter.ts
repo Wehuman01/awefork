@@ -15,6 +15,13 @@
 
 import type { BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
+import {
+  mergeOverviewLedger,
+  type OverviewReadEntry,
+  type OverviewReadLedger,
+  overviewKey,
+  recordOverviewSettle,
+} from "../../../shared/overview-ledger-types.js";
 import type {
   AgentEvent,
   AgentInteractionRequest,
@@ -462,6 +469,32 @@ export function installMockAdapter(): void {
     return store;
   };
   const handlers = new Set<(envelope: BackendEventEnvelope) => void>();
+  // Demo-only stand-in for the main-owned overview ledger: an in-memory map
+  // with the same per-entry merge rule as OverviewLedgerStore.merge.
+  const demoLedger: OverviewReadLedger = {};
+  const demoUnknown = new Map<string, string>();
+  const ledgerHandlers = new Set<
+    (update: {
+      sequence: number;
+      key: string;
+      entry?: OverviewReadEntry | null;
+      unknown?: string | null;
+    }) => void
+  >();
+  let ledgerSequence = 0;
+  const broadcastLedger = (
+    key: string,
+    entry?: OverviewReadEntry | null,
+    unknown?: string | null,
+  ): void => {
+    const update = {
+      sequence: ++ledgerSequence,
+      key,
+      ...(entry !== undefined ? { entry } : {}),
+      ...(unknown !== undefined ? { unknown } : {}),
+    };
+    for (const handler of ledgerHandlers) handler(update);
+  };
   const emit = (event: AgentEvent): void => {
     for (const handler of handlers) handler({ backend: "opencode", event });
   };
@@ -975,6 +1008,82 @@ export function installMockAdapter(): void {
     onEvent: (handler) => {
       handlers.add(handler);
       return () => handlers.delete(handler);
+    },
+    // The demo has no main process, so the overview's unread ledger is a
+    // plain in-memory map: the folds are the shared pure ones, the persistence
+    // (and the multi-window broadcast) is what a real install adds.
+    overviewLedger: async () => ({
+      sequence: ledgerSequence,
+      ledger: { ...demoLedger },
+      unknown: Object.fromEntries([...demoUnknown].map((key) => [key, ""])),
+    }),
+    overviewRecordSettle: async (backend, sessionId, failed, settleId) => {
+      const key = overviewKey(backend, sessionId);
+      const next = recordOverviewSettle(demoLedger, key, {
+        settledAt: Date.now(),
+        failed,
+        settleId,
+      });
+      if (next !== demoLedger) {
+        for (const oldKey of Object.keys(demoLedger)) delete demoLedger[oldKey];
+        Object.assign(demoLedger, next);
+        const marker = demoUnknown.get(key);
+        const unknownCleared =
+          marker !== undefined && (!marker || !settleId || marker === settleId);
+        if (unknownCleared) demoUnknown.delete(key);
+        broadcastLedger(key, demoLedger[key] ?? null, unknownCleared ? null : undefined);
+      }
+      const entry = demoLedger[key];
+      if (!entry) throw new Error(`missing demo ledger entry ${key}`);
+      return entry;
+    },
+    overviewSetUnknown: async (backend, sessionId, unknown, runId) => {
+      const key = overviewKey(backend, sessionId);
+      const current = demoUnknown.get(key);
+      if (unknown) {
+        const next = runId ?? current ?? "";
+        if (current === next) return true;
+        demoUnknown.set(key, next);
+        broadcastLedger(key, undefined, next);
+        return true;
+      }
+      if (current === undefined) return false;
+      if (runId && current !== runId) return true;
+      demoUnknown.delete(key);
+      broadcastLedger(key, undefined, null);
+      return false;
+    },
+    overviewMarkSeen: async (backend, sessionId, upTo) => {
+      const key = overviewKey(backend, sessionId);
+      const prev = demoLedger[key];
+      if (!prev) return null;
+      const target = Math.min(upTo ?? prev.revision, prev.revision);
+      if (prev.seen >= target) return prev;
+      const entry = { ...prev, seen: target };
+      demoLedger[key] = entry;
+      broadcastLedger(key, entry);
+      return entry;
+    },
+    overviewForget: async (backend, sessionId) => {
+      const key = overviewKey(backend, sessionId);
+      const forgotten = delete demoLedger[key];
+      const forgotUnknown = demoUnknown.delete(key);
+      if (forgotten || forgotUnknown) broadcastLedger(key, null, null);
+      return forgotten;
+    },
+    overviewMergeLedger: async (incoming) => {
+      const merged = mergeOverviewLedger(demoLedger, incoming);
+      const changed = Object.entries(merged).filter(
+        ([key, entry]) => JSON.stringify(demoLedger[key]) !== JSON.stringify(entry),
+      );
+      for (const oldKey of Object.keys(demoLedger)) delete demoLedger[oldKey];
+      Object.assign(demoLedger, merged);
+      for (const [key, entry] of changed) broadcastLedger(key, entry);
+      return { ...demoLedger };
+    },
+    onOverviewRead: (handler) => {
+      ledgerHandlers.add(handler);
+      return () => ledgerHandlers.delete(handler);
     },
   };
 

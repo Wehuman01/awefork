@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { ChatMessage, SessionFileChanges, SessionSummary } from "../src/shared/types";
+import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * File-change loading × the renderer state module: the pane's card data
@@ -119,6 +120,7 @@ async function bootState(options: { changes?: SessionFileChanges | null } = {}) 
         emitEvent = null;
       };
     },
+    ...createOverviewLedgerMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

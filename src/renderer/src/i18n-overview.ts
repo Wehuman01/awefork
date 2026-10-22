@@ -44,8 +44,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "overview.activity.unread": { zh: "本轮结束 · 结果未查看", en: "Run ended · result unseen" },
   "overview.activity.read": { zh: "本轮结束 · 已查看", en: "Run ended · seen" },
   "overview.activity.unknown": {
-    zh: "连接中断 · 状态未知",
-    en: "Connection lost · status unknown",
+    zh: "没有可靠的运行状态",
+    en: "Runtime state not confirmed",
   },
   "overview.activity.failed": { zh: "上一轮失败", en: "Last run failed" },
   "overview.activity.readFailed": { zh: "上一轮失败 · 已查看", en: "Last run failed · seen" },
@@ -58,6 +58,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "overview.remoteFailed": {
     zh: "{agents} 的会话列表暂时读不到",
     en: "Couldn't list sessions for {agents}",
+  },
+  "overview.remoteUpdated": {
+    zh: "其他 Agent 列表更新于 {agents}",
+    en: "Other agent lists updated {agents}",
   },
 
   // ── summary ─────────────────────────────────────────────────────────────

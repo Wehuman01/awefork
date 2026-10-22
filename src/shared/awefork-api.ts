@@ -6,6 +6,12 @@ import type {
 } from "./backend.js";
 import type { LineDiffResult } from "./diff.js";
 import type {
+  OverviewLedgerSnapshot,
+  OverviewReadEntry,
+  OverviewReadLedger,
+  OverviewReadUpdate,
+} from "./overview-ledger-types.js";
+import type {
   AgentInteractionResponse,
   ArchiveKind,
   ArchiveState,
@@ -257,4 +263,48 @@ export interface AweforkApi {
   /** Subscribe to update download progress; returns an unsubscribe function. */
   onUpdateProgress(handler: (progress: UpdateDownloadProgress) => void): () => void;
   onEvent(handler: (envelope: BackendEventEnvelope) => void): () => void;
+  /**
+   * Canvas session overview: the unread ledger is owned by the main process
+   * (one file, every window shares it), so a result marked seen in one window
+   * stops being a badge in all of them. `overviewLedger` returns a snapshot
+   * that a fresh window merges with broadcasts received while loading it.
+   * `onOverviewRead` delivers sequence-stamped updates. Backend-first like
+   * every adapter method.
+   */
+  overviewLedger(): Promise<OverviewLedgerSnapshot>;
+  /** Fold one observed run ending in; returns the entry it produced. */
+  overviewRecordSettle(
+    backend: BackendId,
+    sessionId: string,
+    failed: boolean,
+    settleId?: string,
+  ): Promise<OverviewReadEntry>;
+  /** Persist that a previously observed run has no confirmed ending yet. */
+  overviewSetUnknown(
+    backend: BackendId,
+    sessionId: string,
+    unknown: boolean,
+    runId?: string,
+  ): Promise<boolean>;
+  /**
+   * Advance a session's seen watermark. `upTo` pins the revision the user was
+   * actually shown, so a result that landed while messages were loading stays
+   * unread. Returns the entry when it moved, null otherwise.
+   */
+  overviewMarkSeen(
+    backend: BackendId,
+    sessionId: string,
+    upTo?: number,
+  ): Promise<OverviewReadEntry | null>;
+  /** Forget a deleted session's record; false when it had none. */
+  overviewForget(backend: BackendId, sessionId: string): Promise<boolean>;
+  /**
+   * Fold this window's copy of the ledger into the authoritative one (a window
+   * that ran ahead — offline, or migrating from the old per-window storage —
+   * must contribute its revisions instead of dropping them). Returns the
+   * merged ledger, which the caller applies in place of its snapshot.
+   */
+  overviewMergeLedger(incoming: OverviewReadLedger): Promise<OverviewReadLedger>;
+  /** Every applied entry, from any window; subscribe after the snapshot. */
+  onOverviewRead(handler: (update: OverviewReadUpdate) => void): () => void;
 }

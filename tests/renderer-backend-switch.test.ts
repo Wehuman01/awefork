@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi, TagStore } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { ChatMessage, SessionSummary } from "../src/shared/types";
+import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Backend-switch cache regression harness: the state module is a singleton,
@@ -129,6 +130,7 @@ async function bootState(
     fileChanges: async () => null,
     fileChangeDiff: async () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
+    ...createOverviewLedgerMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

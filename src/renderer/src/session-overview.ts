@@ -1,5 +1,27 @@
 import { BACKEND_LABELS, type BackendId } from "../../shared/backend";
+import {
+  markOverviewSeen,
+  mergeOverviewLedger,
+  type OverviewReadEntry,
+  type OverviewReadLedger,
+  overviewKey,
+  pruneOverviewLedger,
+  recordOverviewSettle,
+} from "../../shared/overview-ledger-types";
 import type { SessionSummary } from "../../shared/types";
+
+// The ledger's types and pure folds are shared with the main process (the one
+// writer) — re-exported so components and tests keep importing them from the
+// renderer's overview module.
+export {
+  markOverviewSeen,
+  mergeOverviewLedger,
+  type OverviewReadEntry,
+  type OverviewReadLedger,
+  overviewKey,
+  pruneOverviewLedger,
+  recordOverviewSettle,
+};
 
 /**
  * Pure projection behind the canvas session overview (画布会话总览).
@@ -9,6 +31,13 @@ import type { SessionSummary } from "../../shared/types";
  * of observable facts — a queued ask, a run in flight, awefork's own record of
  * a settled run, and how much of that record the user has actually seen — so
  * the projection is testable without a store, a server or a DOM.
+ *
+ * The unread ledger itself is NOT owned here: the main process keeps the one
+ * authoritative copy (shared/overview-ledger.ts) so every window agrees on
+ * which results are new. This module holds only the pure folds —
+ * recordOverviewSettle, markOverviewSeen, pruneOverviewLedger — which the
+ * renderer applies to its in-memory copy after main confirms the write, and
+ * which main mirrors for its own file.
  *
  * Honesty rules this module exists to enforce:
  * - "running" needs positive evidence (a run awefork watches), never a guess
@@ -82,34 +111,6 @@ export function summarizeMessages(
     else reply = message.text;
   }
   return { prompt, reply };
-}
-
-/** Awefork's own record of the last run it observed settle for a session. */
-export interface OverviewResult {
-  /** Observation counter, bumped once per settled run awefork watched. */
-  revision: number;
-  /** When awefork observed the settle — never the agent's own completion time. */
-  settledAt: number;
-  /** The run ended with an explicit error (a lost connection does not count). */
-  failed: boolean;
-}
-
-/** One ledger entry: the last observed result plus the seen watermark. */
-export interface OverviewReadEntry extends OverviewResult {
-  /** Highest revision the user has actually been shown. */
-  seen: number;
-}
-
-/**
- * Persisted unread ledger, keyed by `backend:sessionId`. Session ids never
- * collide across backends, but the backend stays in the key so a reused id
- * after a backend's storage reset cannot inherit another agent's watermark.
- */
-export type OverviewReadLedger = Record<string, OverviewReadEntry>;
-
-/** Ledger key for one session: backend + native session id, never a title. */
-export function overviewKey(backend: BackendId, sessionId: string): string {
-  return `${backend}:${sessionId}`;
 }
 
 /** The facts a status is projected from; everything absent means "no evidence". */
@@ -212,103 +213,4 @@ export function overviewCounts(rows: readonly OverviewRow[]): Record<OverviewSta
   };
   for (const row of rows) counts[row.status] += 1;
   return counts;
-}
-
-/**
- * Fold one observed settle into the ledger: bump the revision, keep the seen
- * watermark (a new result after viewing is unread again) and record how the
- * run ended. Repeated settles keep bumping — callers gate on having actually
- * watched the run, so a duplicate idle frame never reaches this twice.
- */
-export function recordOverviewSettle(
-  ledger: OverviewReadLedger,
-  key: string,
-  input: { settledAt: number; failed: boolean },
-): OverviewReadLedger {
-  const prev = ledger[key];
-  const revision = (prev?.revision ?? 0) + 1;
-  return {
-    ...ledger,
-    [key]: {
-      revision,
-      seen: prev?.seen ?? 0,
-      settledAt: input.settledAt,
-      failed: input.failed,
-    },
-  };
-}
-
-/**
- * Advance the seen watermark to the revision the user was actually shown.
- * `upTo` pins that revision: a result that landed while the session was still
- * loading stays unread instead of being cleared by the same click. Returns the
- * same object when nothing changed, so callers can skip the write.
- */
-export function markOverviewSeen(
-  ledger: OverviewReadLedger,
-  key: string,
-  upTo?: number,
-): OverviewReadLedger {
-  const prev = ledger[key];
-  if (!prev) return ledger;
-  const target = Math.min(upTo ?? prev.revision, prev.revision);
-  if (prev.seen >= target) return ledger;
-  return { ...ledger, [key]: { ...prev, seen: target } };
-}
-
-/** How many settled sessions the persisted ledger keeps (oldest dropped). */
-const LEDGER_LIMIT = 300;
-
-/** Keep the newest `LEDGER_LIMIT` entries so the sidecar cannot grow forever. */
-export function pruneOverviewLedger(ledger: OverviewReadLedger): OverviewReadLedger {
-  const entries = Object.entries(ledger);
-  if (entries.length <= LEDGER_LIMIT) return ledger;
-  const kept = entries.sort(([, a], [, b]) => b.settledAt - a.settledAt).slice(0, LEDGER_LIMIT);
-  return Object.fromEntries(kept);
-}
-
-const STORAGE_KEY = "awefork:overview-read";
-
-/**
- * Read the persisted ledger. Any malformed row is dropped instead of trusted:
- * a corrupt record must cost at worst a missing unread badge, never a crash or
- * a fabricated "seen".
- */
-export function loadOverviewLedger(): OverviewReadLedger {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const ledger: OverviewReadLedger = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!value || typeof value !== "object") continue;
-      const entry = value as Partial<Record<keyof OverviewReadEntry, unknown>>;
-      const revision = Number(entry.revision);
-      const seen = Number(entry.seen);
-      if (!Number.isFinite(revision) || !Number.isFinite(seen)) continue;
-      if (revision < 0 || seen < 0) continue;
-      const settledAt = Number(entry.settledAt);
-      ledger[key] = {
-        revision,
-        seen: Math.min(seen, revision),
-        settledAt: Number.isFinite(settledAt) ? settledAt : 0,
-        failed: entry.failed === true,
-      };
-    }
-    return ledger;
-  } catch {
-    return {};
-  }
-}
-
-/** Persist the ledger. Losing the write only costs unread badges after restart. */
-export function saveOverviewLedger(ledger: OverviewReadLedger): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pruneOverviewLedger(ledger)));
-  } catch {
-    // Quota or private mode: the in-memory ledger keeps working this session.
-  }
 }

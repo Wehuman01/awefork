@@ -26,6 +26,8 @@ export interface SessionSummary {
   origin: SessionOrigin;
   createdAt: number;
   updatedAt: number;
+  /** Live state only when the backend's session listing reports it explicitly. */
+  runtimeStatus?: "running" | "idle" | "unknown";
 }
 
 export interface ChatMessage {

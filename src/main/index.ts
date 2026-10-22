@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, nativeImage } from "electron";
 import type { BackendId } from "../shared/backend.js";
+import { OverviewLedgerStore } from "../shared/overview-ledger.js";
 import { createBackendRegistry } from "./backend-registry.js";
 import { registerIpc } from "./ipc.js";
 import { registerSaveFileIpc } from "./save-file.js";
@@ -9,7 +10,13 @@ import { readBackendSelection } from "./settings-store.js";
 import { setUpdaterExitHook } from "./update-install.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
-registerIpc(registry, openAgentWindow);
+// The overview's unread ledger lives in the main process so every window
+// shares one record: a window that marks a result seen (or that settles a
+// run while off screen) updates the same file the others read. The IPC
+// channels and the "awefork:overview-read" broadcast are registered by
+// registerIpc whenever this store is passed in.
+const overviewLedger = new OverviewLedgerStore(join(app.getPath("userData"), "overview-read.json"));
+registerIpc(registry, openAgentWindow, overviewLedger);
 registerSaveFileIpc();
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.

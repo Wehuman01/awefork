@@ -149,6 +149,30 @@ describe("zcode adapter", () => {
     expect(sessions[2].directory).toBe("/repo");
   });
 
+  it("preserves only explicit session runtime states", async () => {
+    const { client } = fakeClient({
+      replies: {
+        "session/list": {
+          sessions: [
+            { sessionId: "idle", status: "idle" },
+            { sessionId: "active", status: "active" },
+            { sessionId: "other", status: "paused" },
+            { sessionId: "old-build" },
+          ],
+        },
+      },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+
+    const sessions = await createZcodeAdapter(options).listSessions();
+
+    expect(sessions.find((session) => session.id === "idle")?.runtimeStatus).toBe("idle");
+    expect(sessions.find((session) => session.id === "active")?.runtimeStatus).toBe("running");
+    expect(sessions.find((session) => session.id === "other")?.runtimeStatus).toBe("unknown");
+    expect(sessions.find((session) => session.id === "old-build")?.runtimeStatus).toBeUndefined();
+  });
+
   it("maps messages from resume: user rows, assistant rows, tools, tokens, finish", async () => {
     const { client } = fakeClient({
       requests: [

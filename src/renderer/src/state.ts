@@ -1,4 +1,4 @@
-import { computed, reactive, readonly, ref, watch } from "vue";
+import { computed, nextTick, reactive, readonly, ref, watch } from "vue";
 import type { TagStore } from "../../shared/awefork-api";
 import {
   BACKEND_LABELS,
@@ -18,6 +18,7 @@ import {
   type TurnNode,
 } from "../../shared/canvas-graph";
 import { selectCanvasSessions } from "../../shared/canvas-scope";
+import type { OverviewReadUpdate } from "../../shared/overview-ledger-types";
 import {
   buildSessionTree,
   descendantSessionIds,
@@ -53,16 +54,16 @@ import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
 import {
   compareOverviewRows,
-  loadOverviewLedger,
   markOverviewSeen as markSeenInLedger,
+  mergeOverviewLedger,
   type OverviewFilter,
+  type OverviewReadEntry,
   type OverviewReadLedger,
   type OverviewRow,
   overviewCounts,
   overviewKey,
   projectOverviewStatus,
   recordOverviewSettle,
-  saveOverviewLedger,
 } from "./session-overview";
 
 interface DraftState {
@@ -316,9 +317,12 @@ interface AppState {
   overview: OverviewUiState;
   /**
    * Unread ledger shared by every row of the overview: per session, the last
-   * run awefork watched settle and how much of it the user has seen. Persisted
-   * to localStorage so a result outlives the 5-minute `recent` tint and a
-   * restart — see session-overview.ts for the revision semantics.
+   * run awefork watched settle and how much of it the user has seen. The
+   * authoritative copy lives in the main process (one file, every window
+   * reads it), so a result marked seen in one window stops being a badge in
+   * all of them; this is the local mirror, replaced by the boot snapshot and
+   * kept in step by the "awefork:overview-read" broadcast. See
+   * session-overview.ts for the revision semantics.
    */
   overviewRead: OverviewReadLedger;
   /**
@@ -331,7 +335,9 @@ interface AppState {
    * timeout, transport loss). Projected as 状态未知, never as a result, and
    * cleared the moment new evidence arrives.
    */
-  overviewUnknown: Record<string, boolean>;
+  overviewUnknown: Record<string, string>;
+  /** Idle status explicitly observed in this app run; restart invalidates it. */
+  overviewIdle: Record<string, boolean>;
 }
 
 const state = reactive<AppState>({
@@ -402,9 +408,12 @@ const state = reactive<AppState>({
   updateDownloadProgress: null,
   updateDownloadError: null,
   overview: { open: false, filter: "all", selectedKey: null, jumpingKey: null, error: null },
-  overviewRead: loadOverviewLedger(),
+  // Filled by the boot snapshot (or the migration merge below); the rows read
+  // it reactively, so an empty start just means "nothing unread yet".
+  overviewRead: {},
   overviewRemote: {},
   overviewUnknown: {},
+  overviewIdle: {},
 });
 
 export const store = readonly(state);
@@ -693,6 +702,8 @@ function streamKey(backend: BackendId, sessionId: string): string {
 }
 
 const streamBuffers = new Map<string, LivePart[]>();
+/** The first shared event observed for each currently relevant run. */
+const overviewRunIds = new Map<string, string>();
 /** True once the assistant row for these parts has landed complete in state. */
 function rowCompleted(sessionId: string, messageId: string): boolean {
   return (state.messagesBySession[sessionId] ?? []).some(
@@ -931,7 +942,10 @@ function scheduleRefresh(delay = 400): void {
  * stores, trash flush, first session load. Shared by app start and every
  * backend switch so both paths behave identically.
  */
-async function bootBackend(backend: BackendId): Promise<void> {
+async function bootBackend(
+  backend: BackendId,
+  options: { markSeen?: boolean } = {},
+): Promise<void> {
   const ready = await window.awefork.ready(backend);
   if (!ready.ok) {
     state.connectionError = ready.error ?? `Failed to start the ${backend} server.`;
@@ -973,7 +987,7 @@ async function bootBackend(backend: BackendId): Promise<void> {
     state.trash = [];
   }
   await flushTrash();
-  await initialSessionLoad();
+  await initialSessionLoad(options);
   state.booted = true;
   // Needs the session list in place; never blocks first paint. Runs after
   // every boot — startup and backend switch alike — so each backend hands
@@ -1041,10 +1055,19 @@ export async function init(): Promise<void> {
     state.capabilities = localCapabilities(backend);
   }
   // Subscribe before the first fetch: a cold-started agent announces its
-  // session scan right as it comes up, and those frames would be dropped by
-  // a listener attached only after the initial load.
+  // session scan right as it comes up, and those frames would be dropped by a
+  // listener attached only after the initial load.
   window.awefork.onEvent(handleEnvelope);
+  // The overview's unread record is main-owned: take the shared snapshot, fold
+  // this window's legacy per-window copy in (a one-time migration), then keep
+  // the mirror in step from the broadcast. Order matters — subscribe before
+  // the snapshot resolves so nothing that lands in between is missed.
+  window.awefork.onOverviewRead(applyOverviewUpdate);
+  void loadOverviewLedgerFromMain();
   await bootBackend(backend);
+  // Fill the trigger's cross-agent counts after first paint. The adapters are
+  // lazy by design; this one paced sweep is the deliberate startup cost.
+  setTimeout(() => void refreshOverviewSessions(), OVERVIEW_BOOT_SWEEP_DELAY_MS);
   // New-version check once startup settles: the agent server has just come up,
   // so give the handshake a beat. Fire-and-forget — never blocks first paint,
   // and every failure path stays silent.
@@ -1076,10 +1099,10 @@ export async function refreshBackendList(): Promise<void> {
  */
 const INITIAL_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 
-async function initialSessionLoad(): Promise<void> {
+async function initialSessionLoad(options: { markSeen?: boolean } = {}): Promise<void> {
   const generation = workspaceGeneration;
   for (let attempt = 0; ; attempt++) {
-    await refreshSessions();
+    await refreshSessions(options);
     // The user switched backends mid-boot: this loop now belongs to a parked
     // workspace, and its retries would fetch whatever backend is active now.
     if (generation !== workspaceGeneration) return;
@@ -1114,7 +1137,7 @@ async function flushTrash(): Promise<void> {
   }
 }
 
-export async function refreshSessions(): Promise<void> {
+export async function refreshSessions(options: { markSeen?: boolean } = {}): Promise<void> {
   const backend = state.activeBackend;
   const generation = workspaceGeneration;
   try {
@@ -1160,7 +1183,7 @@ export async function refreshSessions(): Promise<void> {
       state.selectedDirectory &&
       (!state.selectedId || !directorySessions.value.some((s) => s.id === state.selectedId))
     ) {
-      await selectSession(latestSessionId(directorySessions.value));
+      await selectSession(latestSessionId(directorySessions.value), { markSeen: options.markSeen });
     }
     await ensureCanvasMessages();
   } catch (error) {
@@ -1228,8 +1251,7 @@ export async function selectSession(
   // calling it 新结果 — unless the read failed (nothing was actually shown).
   // The overview's own jump pins the revision it was showing instead.
   if (options.markSeen !== false && state.messagesError === null) {
-    markOverviewSeen(state.activeBackend, sessionId);
-    clearOverviewUnknown(state.activeBackend, sessionId);
+    void markOverviewSeen(state.activeBackend, sessionId);
   }
   await ensureCanvasMessages();
 }
@@ -1478,6 +1500,12 @@ function stopWatch(backend: BackendId, sessionId: string): void {
   if (completionWatches.delete(streamKey(backend, sessionId))) stopWatchTickerIfIdle();
 }
 
+function beginLocalOverviewRun(backend: BackendId, sessionId: string): void {
+  // The next shared start event supplies the same run id to every window.
+  overviewRunIds.delete(streamKey(backend, sessionId));
+  setOverviewUnknown(backend, sessionId, true, "");
+}
+
 async function pollForCompletion(key: string): Promise<void> {
   const watch = completionWatches.get(key);
   if (!watch) return;
@@ -1538,6 +1566,9 @@ const RECENT_TICK_MS = 30_000;
 
 const recentNow = ref(Date.now());
 let recentTicker: ReturnType<typeof setInterval> | null = null;
+let overviewSequence = 0;
+let overviewSnapshotReady = false;
+let pendingOverviewUpdates: OverviewReadUpdate[] = [];
 
 function startRecentTicker(): void {
   if (recentTicker !== null) return;
@@ -1574,7 +1605,12 @@ type SettleReason = "settled" | "failed" | "unknown" | "aborted";
 
 /** Shared run-finished cleanup, driven by event-stream idle, the poll
  * watchdog, or a failed run (transport/prompt error). */
-function settleRun(backend: BackendId, sessionId: string, reason: SettleReason = "settled"): void {
+function settleRun(
+  backend: BackendId,
+  sessionId: string,
+  reason: SettleReason = "settled",
+  settleId?: string,
+): void {
   // Was there a run to end? A late idle for a run that already settled, or a
   // startup/idle frame for a session awefork never watched, must not mint a
   // second result — the first, known ending stands (a failed run is not
@@ -1602,7 +1638,14 @@ function settleRun(backend: BackendId, sessionId: string, reason: SettleReason =
   // already settled, or a startup idle for a session awefork never watched,
   // must not mint a second result. An explicit failure is the exception — the
   // error itself is the evidence, even for a run started outside awefork.
-  if (observed || reason === "failed") recordOverviewOutcome(backend, sessionId, reason);
+  if (observed || reason === "failed") {
+    recordOverviewOutcome(
+      backend,
+      sessionId,
+      reason,
+      settleId ?? overviewRunIds.get(streamKey(backend, sessionId)),
+    );
+  }
   if (backend === state.activeBackend && state.selectedId === sessionId) {
     state.streamParts = [];
   }
@@ -1622,11 +1665,13 @@ export function recentAlphaFor(sessionId: string): number {
   return 1 - age / RECENT_MS;
 }
 
-async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
+async function finishRun(backend: BackendId, sessionId: string, settleId?: string): Promise<void> {
   // Replace the live bubble only after its persisted counterpart is in state.
   // Both mutations occur before Vue renders, avoiding an empty or duplicated
   // assistant slot at the end of a streamed response.
   const messages = await loadSessionMessages(sessionId, false, backend);
+  const currentRunId = overviewRunIds.get(streamKey(backend, sessionId));
+  if (settleId && currentRunId && currentRunId !== settleId) return;
   // The run's file changes settle with it; the card appears without the user
   // reselecting anything.
   refreshFileChanges(sessionId, backend);
@@ -1634,7 +1679,7 @@ async function finishRun(backend: BackendId, sessionId: string): Promise<void> {
   // without the tint (its card carries ⚠ + retry instead).
   const assistants = (messages ?? []).filter((m) => m.role === "assistant");
   const lastRun = assistants[assistants.length - 1];
-  settleRun(backend, sessionId, lastRun?.error ? "failed" : "settled");
+  settleRun(backend, sessionId, lastRun?.error ? "failed" : "settled", settleId ?? currentRunId);
   if (backend === state.activeBackend) void refreshSessions();
 }
 
@@ -1728,10 +1773,10 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
  * visible workspace.
  */
 function handleEnvelope(envelope: BackendEventEnvelope): void {
-  handleEvent(envelope.backend, envelope.event);
+  handleEvent(envelope.backend, envelope.event, envelope.eventId);
 }
 
-function handleEvent(backend: BackendId, event: AgentEvent): void {
+function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): void {
   switch (event.type) {
     case "interaction.requested": {
       queueInteraction(backend, event.request);
@@ -1746,9 +1791,18 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
     case "session.updated": {
       // A single run emits several of these; coalesce into one refresh.
       if (backend === state.activeBackend) scheduleRefresh();
+      else void refreshOverviewSessions();
       break;
     }
     case "message.started": {
+      const key = streamKey(backend, event.sessionId);
+      if (!isRunning(backend, event.sessionId) || !overviewRunIds.has(key)) {
+        const runId =
+          eventId ??
+          (event.messageId ? `${backend}:${event.sessionId}:${event.messageId}` : undefined);
+        if (runId) overviewRunIds.set(key, runId);
+      }
+      setOverviewUnknown(backend, event.sessionId, true, overviewRunIds.get(key));
       setRunning(backend, event.sessionId, true);
       // Runs started outside awefork (the agent's own TUI) need the poll
       // backstop too: on builds that stream no deltas, this busy frame is
@@ -1766,7 +1820,26 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // frame never arrived (or that a silent stretch let the watchdog settle)
       // and resets the watchdog so streaming runs cannot time out mid-flight.
       if (!isRunning(backend, event.sessionId)) {
+        const runId = eventId ?? `${backend}:${event.sessionId}:${event.messageId}`;
+        overviewRunIds.set(streamKey(backend, event.sessionId), runId);
+        setOverviewUnknown(
+          backend,
+          event.sessionId,
+          true,
+          overviewRunIds.get(streamKey(backend, event.sessionId)),
+        );
         setRunning(backend, event.sessionId, true);
+      } else if (!overviewRunIds.has(streamKey(backend, event.sessionId))) {
+        overviewRunIds.set(
+          streamKey(backend, event.sessionId),
+          eventId ?? `${backend}:${event.sessionId}:${event.messageId}`,
+        );
+        setOverviewUnknown(
+          backend,
+          event.sessionId,
+          true,
+          overviewRunIds.get(streamKey(backend, event.sessionId)),
+        );
       }
       const watch = completionWatches.get(streamKey(backend, event.sessionId));
       if (watch) watch.ticks = 0;
@@ -1801,11 +1874,13 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       break;
     }
     case "session.idle": {
+      if (!isRunning(backend, event.sessionId)) markOverviewIdle(backend, event.sessionId);
+      const settleId = overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
       stopWatch(backend, event.sessionId);
       // The turn finished, so any queued approval/input it blocked on is gone
       // (codex only ends a turn after its server requests resolve or time out).
       dropSessionInteractions(backend, event.sessionId);
-      void finishRun(backend, event.sessionId);
+      void finishRun(backend, event.sessionId, settleId);
       break;
     }
     case "session.compressed": {
@@ -1826,11 +1901,14 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       break;
     }
     case "server.reconnected": {
-      if (backend !== state.activeBackend) break;
-      // The stream is back after an outage: drop the outage toast and rebuild
-      // the list — every event fired while disconnected was missed.
-      state.actionError = null;
-      void refreshSessions();
+      if (backend === state.activeBackend) {
+        // The stream is back after an outage: drop the outage toast and rebuild
+        // the list — every event fired while disconnected was missed.
+        state.actionError = null;
+        void refreshSessions();
+      } else {
+        void refreshOverviewSessions();
+      }
       break;
     }
     case "server.error": {
@@ -1842,10 +1920,12 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // "running" for its whole timeout. Settle the named session up front;
       // connection-level errors carry no sessionId and only toast.
       if (event.sessionId) {
+        const settleId = overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
+        if (settleId) overviewRunIds.set(streamKey(backend, event.sessionId), settleId);
         stopWatch(backend, event.sessionId);
         // An explicit server-side error is a failed run, not an unobserved one:
         // it mints a 失败 result the later idle frame cannot overwrite.
-        settleRun(backend, event.sessionId, "failed");
+        settleRun(backend, event.sessionId, "failed", settleId);
         dropSessionInteractions(backend, event.sessionId);
         if (backend === state.activeBackend) {
           // Reload so the optimistic local prompt row disappears if the
@@ -2971,6 +3051,7 @@ export async function createSession(directory?: string): Promise<void> {
     },
   });
   await refreshSessions();
+  markOverviewIdle(backend, created.id);
   await selectSession(created.id, { focus: true });
   state.composerFocusRequest = Date.now();
 }
@@ -3358,13 +3439,14 @@ export async function compressSession(sessionId: string): Promise<void> {
   // without this the session stays actionable until the server's first stream
   // frame lands (and forever on a build that publishes none) — leaving a
   // window where a second compress races the first.
+  beginLocalOverviewRun(backend, sessionId);
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
   try {
     await window.awefork.compressSession(backend, sessionId, plainModel(model) ?? preset);
     watchCompletion(backend, sessionId, sentAt);
   } catch (error) {
-    setRunning(backend, sessionId, false);
+    settleRun(backend, sessionId, "aborted");
     state.actionError = t("state.compressFailed", {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -3698,6 +3780,7 @@ export async function sendDraft(): Promise<void> {
     // Mark the target running before the request goes out, like sendPrompt
     // does — continuing and forking must share the same waiting UI, and the
     // canvas card and delete guard must not wait on the first SSE busy frame.
+    beginLocalOverviewRun(backend, targetId);
     setRunning(backend, targetId, true);
     // Surface the prompt as the target's newest own turn right away; the
     // idle refresh swaps it for the server's row.
@@ -3791,6 +3874,7 @@ export async function sendPromptTo(
 ): Promise<PromptSendResult> {
   const backend = state.activeBackend;
   if (!text.trim()) return { sessionId, error: null };
+  beginLocalOverviewRun(backend, sessionId);
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
   appendLocalMessage(sessionId, text, model, attachments);
@@ -3805,7 +3889,7 @@ export async function sendPromptTo(
     watchCompletion(backend, sessionId, sentAt);
     return { sessionId, error: null };
   } catch (error) {
-    setRunning(backend, sessionId, false);
+    settleRun(backend, sessionId, "aborted");
     return { sessionId, error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -4242,7 +4326,10 @@ let switchingBackend = false;
  * backend visited before repaints from its parked workspace at once (with a
  * background refresh catching up) while a first visit boots from scratch.
  */
-export async function switchBackend(backend: BackendId): Promise<void> {
+export async function switchBackend(
+  backend: BackendId,
+  options: { markSeen?: boolean } = {},
+): Promise<void> {
   if (backend === state.activeBackend || switchingBackend) return;
   switchingBackend = true;
   try {
@@ -4277,7 +4364,7 @@ export async function switchBackend(backend: BackendId): Promise<void> {
       } catch {
         state.capabilities = localCapabilities(backend);
       }
-      await bootBackend(backend);
+      await bootBackend(backend, options);
     }
   } finally {
     switchingBackend = false;
@@ -4289,6 +4376,109 @@ export async function switchBackend(backend: BackendId): Promise<void> {
 // states the user actually cares about. It reads the run maps, ask queues and
 // session lists the canvas already keeps; it opens no stream, no poller and no
 // watchdog of its own, and it never parks or restarts a run.
+
+/**
+ * Take the shared unread ledger from the main process, plus a one-time
+ * migration: builds before the main-owned ledger kept it in localStorage, so a
+ * window with a legacy local copy folds its revisions in (main's merge takes
+ * the max per entry — the local copy can only add, never roll back). The
+ * migrated key is then cleared so the fold happens once.
+ */
+async function loadOverviewLedgerFromMain(): Promise<void> {
+  const legacy = readLegacyLocalLedger();
+  try {
+    const snapshot = await window.awefork.overviewLedger();
+    const ledger =
+      Object.keys(legacy).length > 0 ? await mergeLegacy(snapshot.ledger, legacy) : snapshot.ledger;
+    // Keep optimistic rows already received in this window, then apply any
+    // broadcasts that arrived while the snapshot or migration was in flight.
+    state.overviewRead = mergeOverviewLedgerLocal(ledger, state.overviewRead);
+    state.overviewUnknown = { ...snapshot.unknown, ...state.overviewUnknown };
+    overviewSequence = snapshot.sequence;
+  } catch {
+    // No main process (a test boot, a preload that predates the channel): the
+    // legacy copy still works for this window, and the next boot re-merges.
+    state.overviewRead = mergeOverviewLedgerLocal(state.overviewRead, legacy);
+  } finally {
+    overviewSnapshotReady = true;
+    const updates = pendingOverviewUpdates.sort((a, b) => a.sequence - b.sequence);
+    pendingOverviewUpdates = [];
+    for (const update of updates) applyOverviewUpdate(update);
+  }
+}
+
+async function mergeLegacy(
+  shared: OverviewReadLedger,
+  legacy: OverviewReadLedger,
+): Promise<OverviewReadLedger> {
+  try {
+    const merged = await window.awefork.overviewMergeLedger(legacy);
+    clearLegacyLocalLedger();
+    return merged;
+  } catch {
+    // Merge failed: fold locally so the badge is still right this session.
+    return mergeOverviewLedgerLocal(shared, legacy);
+  }
+}
+
+/** Per-entry max merge, mirroring the main-process rule (used on fallback). */
+function mergeOverviewLedgerLocal(
+  base: OverviewReadLedger,
+  incoming: OverviewReadLedger,
+): OverviewReadLedger {
+  return mergeOverviewLedger(base, incoming);
+}
+
+const LEGACY_LEDGER_KEY = "awefork:overview-read";
+
+/** Preserve a local spool only when the main-process write failed. */
+function saveLegacyLocalLedger(ledger: OverviewReadLedger): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(LEGACY_LEDGER_KEY, JSON.stringify(ledger));
+  } catch {
+    // The main-process copy remains authoritative whenever it is reachable.
+  }
+}
+
+/** The pre-main-ledger localStorage copy, validated like any untrusted input. */
+function readLegacyLocalLedger(): OverviewReadLedger {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(LEGACY_LEDGER_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const ledger: OverviewReadLedger = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as Partial<Record<keyof OverviewReadEntry, unknown>>;
+      const revision = Number(entry.revision);
+      const seen = Number(entry.seen);
+      if (!Number.isFinite(revision) || !Number.isFinite(seen)) continue;
+      if (revision < 0 || seen < 0) continue;
+      const settledAt = Number(entry.settledAt);
+      ledger[key] = {
+        revision,
+        seen: Math.min(seen, revision),
+        settledAt: Number.isFinite(settledAt) ? settledAt : 0,
+        failed: entry.failed === true,
+      };
+    }
+    return ledger;
+  } catch {
+    return {};
+  }
+}
+
+function clearLegacyLocalLedger(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(LEGACY_LEDGER_KEY);
+  } catch {
+    // Nothing to clear; the merge is idempotent either way.
+  }
+}
 
 /**
  * A backend's listable sessions: its delete grace window and its archive
@@ -4334,9 +4524,14 @@ export const overviewRows = computed<OverviewRow[]>(() => {
       pending: asks.length,
       status: projectOverviewStatus({
         waiting: asks.length > 0,
-        running: isRunningObserved(backend, session.id),
+        running: isRunningObserved(backend, session.id) || session.runtimeStatus === "running",
         result,
-        unknown: state.overviewUnknown[key] === true,
+        unknown:
+          state.overviewUnknown[key] !== undefined ||
+          session.runtimeStatus === "unknown" ||
+          (session.runtimeStatus !== "idle" &&
+            state.overviewIdle[key] !== true &&
+            !isRunningObserved(backend, session.id)),
       }),
       activityAt: Math.max(session.updatedAt, result?.settledAt ?? 0),
     });
@@ -4348,7 +4543,7 @@ export const overviewRows = computed<OverviewRow[]>(() => {
   // it wins over the snapshot a switch parked earlier (frozen at switch time).
   // The snapshot is the fallback whenever no listing exists.
   for (const [backend, entry] of Object.entries(state.overviewRemote)) {
-    if (!entry) continue;
+    if (!entry || entry.error) continue;
     const id = backend as BackendId;
     if (id === state.activeBackend) continue;
     for (const session of overviewPool(entry.sessions, entry.trash, entry.archive)) {
@@ -4358,7 +4553,7 @@ export const overviewRows = computed<OverviewRow[]>(() => {
 
   for (const [backend, snapshot] of workspaceCache) {
     if (backend === state.activeBackend) continue;
-    if (state.overviewRemote[backend]) continue;
+    if (state.overviewRemote[backend]?.error === null) continue;
     for (const session of overviewPool(snapshot.sessions, snapshot.trash, snapshot.archive)) {
       push(backend, session);
     }
@@ -4383,6 +4578,12 @@ export function overviewRemoteError(backend: BackendId): string | null {
   return state.overviewRemote[backend]?.error ?? null;
 }
 
+/** Last completed metadata sweep for one non-active backend. */
+export function overviewRemoteFetchedAt(backend: BackendId): number | null {
+  const entry = state.overviewRemote[backend];
+  return entry && entry.fetchedAt > 0 ? entry.fetchedAt : null;
+}
+
 /**
  * Drop a cached listing. Called when a backend's live workspace or its parked
  * snapshot becomes the authoritative view: from then on the listing is either
@@ -4395,10 +4596,12 @@ function dropOverviewRemote(backend: BackendId): void {
   state.overviewRemote = kept;
 }
 
-let overviewSweeping = false;
+let overviewSweepPending = false;
+let overviewSweepPromise: Promise<void> | null = null;
 
 /** Re-list an agent at most this often; a warm server makes repeats cheap. */
 const OVERVIEW_SWEEP_MS = 30_000;
+const OVERVIEW_BOOT_SWEEP_DELAY_MS = 3_000;
 
 /**
  * Refresh the session lists of the agents this window is not showing. Cheap by
@@ -4407,18 +4610,30 @@ const OVERVIEW_SWEEP_MS = 30_000;
  * no new event subscription and no per-row polling. A failure only blanks that
  * one agent; the others keep listing.
  */
-export async function refreshOverviewSessions(): Promise<void> {
-  if (overviewSweeping) return;
-  overviewSweeping = true;
+export async function refreshOverviewSessions(force = false): Promise<void> {
+  if (overviewSweepPromise) {
+    overviewSweepPending = true;
+    return overviewSweepPromise.then(() => {
+      if (!overviewSweepPending) return;
+      overviewSweepPending = false;
+      return refreshOverviewSessions(true);
+    });
+  }
+  overviewSweepPending = false;
   const now = Date.now();
   const targets = state.backendList.filter(
     (info) => info.installed && info.id !== state.activeBackend,
   );
-  try {
+  const sweep = (async () => {
     await Promise.allSettled(
       targets.map(async (info) => {
         const previous = state.overviewRemote[info.id];
-        if (previous && previous.error === null && now - previous.fetchedAt < OVERVIEW_SWEEP_MS) {
+        if (
+          !force &&
+          previous &&
+          previous.error === null &&
+          now - previous.fetchedAt < OVERVIEW_SWEEP_MS
+        ) {
           return;
         }
         try {
@@ -4439,11 +4654,19 @@ export async function refreshOverviewSessions(): Promise<void> {
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          // A parked snapshot outranks this failed sweep; drop the listing so
-          // the snapshot is the fallback rather than an older listing painted
-          // over it.
+          // A parked snapshot outranks this failed sweep; retain the error so
+          // the UI can disclose that the fallback may be stale.
           if (workspaceCache.has(info.id)) {
-            dropOverviewRemote(info.id);
+            state.overviewRemote = {
+              ...state.overviewRemote,
+              [info.id]: {
+                sessions: previous?.sessions ?? [],
+                trash: previous?.trash ?? [],
+                archive: previous?.archive ?? { sessions: [], directories: [] },
+                fetchedAt: previous?.fetchedAt ?? 0,
+                error: message,
+              },
+            };
             return;
           }
           state.overviewRemote = {
@@ -4459,9 +4682,11 @@ export async function refreshOverviewSessions(): Promise<void> {
         }
       }),
     );
-  } finally {
-    overviewSweeping = false;
-  }
+  })();
+  overviewSweepPromise = sweep;
+  return sweep.finally(() => {
+    if (overviewSweepPromise === sweep) overviewSweepPromise = null;
+  });
 }
 
 /** Open the panel on one tab (default: everything) and refresh the other agents. */
@@ -4514,13 +4739,71 @@ export function clearOverviewSelection(): void {
  * Advance one session's seen watermark. `upTo` pins the revision the user was
  * actually shown, so a result that landed while the messages were loading stays
  * unread instead of being cleared by the same click.
+ *
+ * The write goes to the main process, which owns the one copy every window
+ * reads; the local mirror updates from the returned entry (and from the
+ * broadcast when another window is the writer), so the two can never drift.
  */
-export function markOverviewSeen(backend: BackendId, sessionId: string, upTo?: number): void {
+export async function markOverviewSeen(
+  backend: BackendId,
+  sessionId: string,
+  upTo?: number,
+): Promise<void> {
   const key = overviewKey(backend, sessionId);
-  const next = markSeenInLedger(state.overviewRead, key, upTo);
-  if (next === state.overviewRead) return;
+  const optimistic = markSeenInLedger(state.overviewRead, key, upTo);
+  // Paint immediately; the round-trip (or a concurrent window's broadcast)
+  // corrects the mirror if the entry changed meanwhile.
+  state.overviewRead = optimistic;
+  try {
+    const entry = await window.awefork.overviewMarkSeen(backend, sessionId, upTo);
+    // null = nothing moved (already seen). Apply the authoritative entry so a
+    // revision that landed while the call was in flight is not lost.
+    if (entry) applyOverviewEntry(key, entry);
+  } catch {
+    // Keep a fallback copy so a later boot can merge this watermark back.
+    saveLegacyLocalLedger(state.overviewRead);
+  }
+}
+
+function applyOverviewUpdate(update: OverviewReadUpdate): void {
+  if (!overviewSnapshotReady) {
+    pendingOverviewUpdates.push(update);
+    return;
+  }
+  if (update.sequence <= overviewSequence) return;
+  overviewSequence = update.sequence;
+  if ("entry" in update) {
+    if (update.entry) applyOverviewEntry(update.key, update.entry);
+    else if (update.key in state.overviewRead) {
+      const { [update.key]: _gone, ...kept } = state.overviewRead;
+      void _gone;
+      state.overviewRead = kept;
+    }
+  }
+  if (typeof update.unknown === "string") {
+    state.overviewUnknown = { ...state.overviewUnknown, [update.key]: update.unknown };
+  } else if (update.unknown === null) {
+    clearOverviewUnknownByKey(update.key);
+    if (update.entry) markOverviewIdleByKey(update.key);
+  }
+}
+
+/** Fold one broadcast/applied entry into the local mirror. */
+function applyOverviewEntry(key: string, entry: OverviewReadEntry): void {
+  const prev = state.overviewRead[key];
+  const next = mergeOverviewLedger(state.overviewRead, { [key]: entry });
+  const merged = next[key];
+  if (
+    prev &&
+    merged &&
+    prev.revision === merged.revision &&
+    prev.seen === merged.seen &&
+    prev.settledAt === merged.settledAt &&
+    prev.failed === merged.failed &&
+    prev.settleId === merged.settleId
+  )
+    return;
   state.overviewRead = next;
-  saveOverviewLedger(next);
 }
 
 /** Drop one session's overview records (delete): nothing left to project. */
@@ -4528,25 +4811,70 @@ function forgetOverviewSession(backend: BackendId, sessionId: string): void {
   const key = overviewKey(backend, sessionId);
   if (state.overview.selectedKey === key) state.overview.selectedKey = null;
   clearOverviewUnknown(backend, sessionId);
-  if (!(key in state.overviewRead)) return;
-  const { [key]: _read, ...keptRead } = state.overviewRead;
-  void _read;
-  state.overviewRead = keptRead;
-  saveOverviewLedger(keptRead);
+  if (key in state.overviewRead) {
+    const { [key]: _read, ...keptRead } = state.overviewRead;
+    void _read;
+    state.overviewRead = keptRead;
+  }
+  if (key in state.overviewIdle) {
+    const { [key]: _idle, ...keptIdle } = state.overviewIdle;
+    void _idle;
+    state.overviewIdle = keptIdle;
+  }
+  // The main copy removes both the result and persisted unknown marker.
+  void window.awefork.overviewForget(backend, sessionId).catch(() => {});
 }
 
 /**
- * Stop flagging a session as 状态未知. Called when the user actually opens it:
- * awefork still cannot confirm how that run ended, but a question mark the user
- * has already looked at is noise, not honesty. Any later evidence re-projects
- * the row normally.
+ * Remove one stale unknown marker after an explicit run ending or deletion.
  */
-function clearOverviewUnknown(backend: BackendId, sessionId: string): void {
+function clearOverviewUnknown(backend: BackendId, sessionId: string, runId?: string): void {
   const key = overviewKey(backend, sessionId);
+  const current = state.overviewUnknown[key];
+  if (runId && current !== undefined && current !== "" && current !== runId) return;
+  clearOverviewUnknownByKey(key);
+}
+
+function clearOverviewUnknownByKey(key: string): void {
   if (!(key in state.overviewUnknown)) return;
   const { [key]: _gone, ...kept } = state.overviewUnknown;
   void _gone;
   state.overviewUnknown = kept;
+}
+
+function markOverviewIdle(backend: BackendId, sessionId: string): void {
+  markOverviewIdleByKey(overviewKey(backend, sessionId));
+}
+
+function markOverviewIdleByKey(key: string): void {
+  if (state.overviewUnknown[key] !== undefined || state.overviewIdle[key]) return;
+  state.overviewIdle = { ...state.overviewIdle, [key]: true };
+}
+
+function setOverviewUnknown(
+  backend: BackendId,
+  sessionId: string,
+  unknown: boolean,
+  runId?: string,
+): void {
+  const key = overviewKey(backend, sessionId);
+  if (unknown) {
+    const current = state.overviewUnknown[key];
+    const nextRunId = runId ?? current ?? "";
+    if (current === nextRunId) return;
+    if (key in state.overviewIdle) {
+      const { [key]: _idle, ...kept } = state.overviewIdle;
+      void _idle;
+      state.overviewIdle = kept;
+    }
+    state.overviewUnknown = { ...state.overviewUnknown, [key]: nextRunId };
+  } else {
+    const current = state.overviewUnknown[key];
+    if (current === undefined || (runId && current !== runId)) return;
+    clearOverviewUnknownByKey(key);
+    markOverviewIdle(backend, sessionId);
+  }
+  void window.awefork.overviewSetUnknown(backend, sessionId, unknown, runId).catch(() => {});
 }
 
 /**
@@ -4554,21 +4882,50 @@ function clearOverviewUnknown(backend: BackendId, sessionId: string): void {
  * result: "unknown" (silent timeout, lost connection) and "aborted" (a prompt
  * that never became a run) leave the ledger alone, so the panel can never claim
  * a finished run it did not see finish.
+ *
+ * The mint itself goes to the main process — one writer, every window sees the
+ * same revision — and the local mirror follows the returned entry. A window
+ * that is offline when the run settles still records it locally through the
+ * optimistic fold; the boot merge (see loadOverviewLedgerFromMain) folds those
+ * revisions back into the authoritative copy instead of dropping them.
  */
-function recordOverviewOutcome(backend: BackendId, sessionId: string, reason: SettleReason): void {
+function recordOverviewOutcome(
+  backend: BackendId,
+  sessionId: string,
+  reason: SettleReason,
+  observationId?: string,
+): void {
   const key = overviewKey(backend, sessionId);
   if (reason === "unknown") {
-    state.overviewUnknown = { ...state.overviewUnknown, [key]: true };
+    setOverviewUnknown(backend, sessionId, true, observationId);
     return;
   }
-  if (reason === "aborted") return;
-  const next = recordOverviewSettle(state.overviewRead, key, {
-    settledAt: Date.now(),
-    failed: reason === "failed",
+  if (reason === "aborted") {
+    setOverviewUnknown(backend, sessionId, false, observationId);
+    return;
+  }
+  const failed = reason === "failed";
+  const settledAt = Date.now();
+  const settleId =
+    observationId ?? overviewRunIds.get(streamKey(backend, sessionId)) ?? crypto.randomUUID();
+  const previousLedger = state.overviewRead;
+  const nextLedger = recordOverviewSettle(previousLedger, key, {
+    settledAt,
+    failed,
+    settleId,
   });
-  state.overviewRead = next;
-  saveOverviewLedger(next);
-  clearOverviewUnknown(backend, sessionId);
+  state.overviewRead = nextLedger;
+  if (nextLedger !== previousLedger) {
+    clearOverviewUnknown(backend, sessionId, settleId);
+    markOverviewIdle(backend, sessionId);
+  }
+  void window.awefork
+    .overviewRecordSettle(backend, sessionId, failed, settleId)
+    .then((entry) => applyOverviewEntry(key, entry))
+    .catch(() => {
+      // The optimistic fold stays and is spooled for the next shared merge.
+      saveLegacyLocalLedger(state.overviewRead);
+    });
 }
 
 /** Most recent streamed tail of a session's run, for the row's activity line. */
@@ -4610,7 +4967,7 @@ export async function jumpToOverviewSession(
   try {
     state.overview.error = null;
     if (backend !== state.activeBackend) {
-      await switchBackend(backend);
+      await switchBackend(backend, { markSeen: false });
       if (state.activeBackend !== backend) {
         state.overview.error = t("overview.jumpSwitchFailed", { backend: label });
         return false;
@@ -4632,7 +4989,7 @@ export async function jumpToOverviewSession(
     // The overview pins the revision it was showing, so selectSession must not
     // advance the watermark on its own: a result that landed while the
     // messages were loading has to stay unread.
-    await selectSession(sessionId, { focus: true, markSeen: false });
+    await selectSession(sessionId, { markSeen: false });
     if (state.selectedId !== sessionId) {
       state.overview.error = t("overview.jumpMissing");
       return false;
@@ -4641,7 +4998,30 @@ export async function jumpToOverviewSession(
       state.overview.error = t("overview.jumpLoadFailed", { error: state.messagesError });
       return false;
     }
-    markOverviewSeen(backend, sessionId, revision);
+    // Select only after messages and the graph are ready. The earlier focus
+    // request could center a cached old node before a newer turn arrived.
+    await nextTick();
+    const latestTurn = turnGraph.value.nodes
+      .filter((node): node is TurnNode => node.kind === "turn" && node.sessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.row - b.row)
+      .at(-1);
+    if (latestTurn) {
+      await selectTurn(latestTurn, { focusCanvas: true });
+      await nextTick();
+      if (state.selectedTurnId !== latestTurn.id) {
+        state.overview.error = t("overview.jumpLoadFailed", { error: "turn focus failed" });
+        return false;
+      }
+    } else {
+      // Empty sessions have no turn card to center. Focus their real stub or
+      // empty canvas only after the session's graph has loaded.
+      state.focusRequest = { sessionId, nonce: Date.now() };
+      await nextTick();
+    }
+    // Fire-and-forget on purpose: the panel closes on the navigation landing,
+    // and the watermark follows the IPC round-trip (the local mirror already
+    // shows the badge cleared).
+    void markOverviewSeen(backend, sessionId, revision);
     state.overview.open = false;
     state.overview.selectedKey = null;
     return true;

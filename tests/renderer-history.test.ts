@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { AgentEvent, SessionSummary } from "../src/shared/types";
+import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Integration tests wiring the operation-history journal into the renderer
@@ -99,6 +100,7 @@ async function bootState(
       onEnvelope = handler;
       return () => {};
     },
+    ...createOverviewLedgerMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi; confirm: typeof confirm } }).window = {
     awefork: api,

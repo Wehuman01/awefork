@@ -15,6 +15,12 @@ import type {
   BackendsResult,
 } from "../shared/backend.js";
 import type { LineDiffResult } from "../shared/diff.js";
+import type {
+  OverviewLedgerSnapshot,
+  OverviewReadEntry,
+  OverviewReadLedger,
+  OverviewReadUpdate,
+} from "../shared/overview-ledger-types.js";
 
 import type {
   AgentInteractionResponse,
@@ -194,6 +200,37 @@ const api: AweforkApi = {
       handler(payload as BackendEventEnvelope);
     ipcRenderer.on("awefork:event", listener);
     return () => ipcRenderer.removeListener("awefork:event", listener);
+  },
+  overviewLedger: (): Promise<OverviewLedgerSnapshot> =>
+    ipcRenderer.invoke("awefork:overviewLedger"),
+  overviewRecordSettle: (
+    backend: BackendId,
+    sessionId: string,
+    failed: boolean,
+    settleId?: string,
+  ): Promise<OverviewReadEntry> =>
+    ipcRenderer.invoke("awefork:overviewRecordSettle", backend, sessionId, failed, settleId),
+  overviewSetUnknown: (
+    backend: BackendId,
+    sessionId: string,
+    unknown: boolean,
+    runId?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:overviewSetUnknown", backend, sessionId, unknown, runId),
+  overviewMarkSeen: (
+    backend: BackendId,
+    sessionId: string,
+    upTo?: number,
+  ): Promise<OverviewReadEntry | null> =>
+    ipcRenderer.invoke("awefork:overviewMarkSeen", backend, sessionId, upTo),
+  overviewForget: (backend: BackendId, sessionId: string): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:overviewForget", backend, sessionId),
+  overviewMergeLedger: (incoming: OverviewReadLedger): Promise<OverviewReadLedger> =>
+    ipcRenderer.invoke("awefork:overviewMergeLedger", incoming),
+  onOverviewRead: (handler: (update: OverviewReadUpdate) => void): (() => void) => {
+    const listener = (_event: unknown, payload: unknown) => handler(payload as OverviewReadUpdate);
+    ipcRenderer.on("awefork:overview-read", listener);
+    return () => ipcRenderer.removeListener("awefork:overview-read", listener);
   },
 };
 

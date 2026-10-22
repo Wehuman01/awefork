@@ -58,6 +58,8 @@ export interface BackendCapabilities {
  */
 export interface BackendEventEnvelope {
   backend: BackendId;
+  /** Stable id assigned by main before one event is broadcast to every window. */
+  eventId?: string;
   event: AgentEvent;
 }
 

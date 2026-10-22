@@ -20,6 +20,13 @@ import {
 import { lineageForDisplay, readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
 import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
+import type { OverviewLedgerStore } from "../shared/overview-ledger.js";
+import {
+  normalizeOverviewLedger,
+  type OverviewReadEntry,
+  type OverviewReadLedger,
+  overviewKey,
+} from "../shared/overview-ledger-types.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
 import {
   addTagsToSessions,
@@ -99,15 +106,134 @@ import { resolveZcodeCli } from "./zcode-server.js";
  * Update download progress arrives on channel "awefork:update-progress" as
  * {downloaded,total}. Events are forwarded on channel "awefork:event" as
  * {backend, event}.
+ * Canvas session overview (main-owned unread ledger, when one is passed in):
+ *   overviewLedger        -> overview snapshot         for a new window
+ *   overviewRecordSettle(backend, session, failed, runId?) -> entry (once)
+ *   overviewMarkSeen(backend, session, upTo?)      -> entry | null (broadcast)
+ *   overviewForget(backend, session)               -> boolean (hard delete)
+ *   overviewMergeLedger(ledger)                    -> merged ledger (window sync)
+ * Sequence-stamped entry and unknown-state updates arrive on
+ * "awefork:overview-read".
  */
 export function registerIpc(
   registry: BackendRegistry,
   openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
+  overviewLedger?: OverviewLedgerStore,
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
   // default rather than throwing so a stale renderer can't wedge the store.
   const storeBackend = (value: unknown): BackendId => (isBackendId(value) ? value : "opencode");
+
+  // ── canvas session overview unread ledger (main-owned) ──────────────────
+  // The overview's unread record is one file in userData, written only here.
+  // Every window reads the same snapshot on boot and receives the applied entry
+  // on "awefork:overview-read" after any mutation, so a seen watermark or a new
+  // revision is visible everywhere without a second source of truth.
+  if (overviewLedger) {
+    let overviewSequence = 0;
+    const broadcast = (
+      key: string,
+      entry?: OverviewReadEntry | null,
+      unknown?: string | null,
+    ): void => {
+      const update = {
+        sequence: ++overviewSequence,
+        key,
+        ...(entry !== undefined ? { entry } : {}),
+        ...(unknown !== undefined ? { unknown } : {}),
+      };
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send("awefork:overview-read", update);
+      }
+    };
+    ipcMain.handle("awefork:overviewLedger", async () => {
+      // Capture before awaiting the disk-backed load. Any update during that
+      // await has a larger sequence and will be replayed after the snapshot.
+      const sequence = overviewSequence;
+      const snapshot = await overviewLedger.snapshot();
+      return { ...snapshot, sequence };
+    });
+    ipcMain.handle(
+      "awefork:overviewRecordSettle",
+      async (
+        _event: IpcMainInvokeEvent,
+        backend: BackendId,
+        sessionId: string,
+        failed: boolean,
+        settleId?: string,
+      ) => {
+        const key = overviewKey(storeBackend(backend), String(sessionId ?? ""));
+        const result = await overviewLedger.recordSettle(key, {
+          settledAt: Date.now(),
+          failed: Boolean(failed),
+          settleId: typeof settleId === "string" ? settleId.slice(0, 256) : undefined,
+        });
+        if (result.changed) {
+          broadcast(key, result.entry, result.unknownCleared ? null : undefined);
+        }
+        return result.entry;
+      },
+    );
+    ipcMain.handle(
+      "awefork:overviewSetUnknown",
+      async (
+        _event: IpcMainInvokeEvent,
+        backend: BackendId,
+        sessionId: string,
+        unknown: boolean,
+        runId?: string,
+      ) => {
+        const key = overviewKey(storeBackend(backend), String(sessionId ?? ""));
+        const result = await overviewLedger.setUnknown(key, Boolean(unknown), runId);
+        if (result.changed) {
+          broadcast(key, undefined, result.unknown ? (result.runId ?? "") : null);
+        }
+        return result.unknown;
+      },
+    );
+    ipcMain.handle(
+      "awefork:overviewMarkSeen",
+      async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string, upTo?: number) => {
+        const key = overviewKey(storeBackend(backend), String(sessionId ?? ""));
+        const entry = await overviewLedger.markSeen(
+          key,
+          Number.isFinite(upTo) ? Number(upTo) : undefined,
+        );
+        // Only an entry that actually moved broadcasts: a redundant mark (the
+        // watermark already at or past it) must not wake every window.
+        if (entry && entry.seen > 0) broadcast(key, entry);
+        return entry;
+      },
+    );
+    ipcMain.handle(
+      "awefork:overviewForget",
+      async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string) => {
+        const key = overviewKey(storeBackend(backend), String(sessionId ?? ""));
+        const forgotten = await overviewLedger.forget(key);
+        if (forgotten) broadcast(key, null, null);
+        return forgotten;
+      },
+    );
+    ipcMain.handle(
+      "awefork:overviewMergeLedger",
+      async (_event: IpcMainInvokeEvent, value: unknown) => {
+        const incoming = normalizeOverviewLedger(value);
+        const before = await overviewLedger.snapshot();
+        const merged = await overviewLedger.merge(incoming);
+        const after = await overviewLedger.snapshot();
+        for (const key of Object.keys(incoming)) {
+          const entry = merged[key];
+          if (entry) {
+            const unknownCleared =
+              before.unknown[key] !== undefined && after.unknown[key] === undefined;
+            broadcast(key, entry, unknownCleared ? null : undefined);
+          }
+        }
+        return merged;
+      },
+    );
+  }
 
   ipcMain.handle("awefork:ready", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
     try {

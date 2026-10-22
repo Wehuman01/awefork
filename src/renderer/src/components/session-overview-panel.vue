@@ -118,7 +118,8 @@
       <p v-if="store.overview.error" class="float-error" role="alert">
         {{ store.overview.error }}
       </p>
-      <p v-else-if="remoteFailure" class="float-note">{{ remoteFailure }}</p>
+      <p v-if="remoteFailure" class="float-note">{{ remoteFailure }}</p>
+      <p v-if="remoteFreshness" class="float-note">{{ remoteFreshness }}</p>
 
       <div v-if="selectedRow" class="float-summary">
         <div class="summary-title">
@@ -145,6 +146,14 @@
              growing a second approval surface here. -->
         <div v-if="ask" class="summary-ask">
           <b>{{ t(ask.title, ask.vars) }}</b>
+          <p v-if="ask.detail">{{ t(ask.detail, ask.vars) }}</p>
+          <pre v-if="ask.kind === 'command-approval'">{{ ask.command }}</pre>
+          <small v-if="ask.kind === 'command-approval' && ask.cwd">
+            {{ t("interaction.workingDir", { cwd: ask.cwd }) }}
+          </small>
+          <ul v-if="ask.kind === 'permission-approval'">
+            <li v-for="item in ask.requested" :key="item">{{ item }}</li>
+          </ul>
           <div v-if="askOptions" class="summary-ask-options">
             <button
               v-for="option in askOptions"
@@ -153,6 +162,20 @@
               @click="answerWithOption(option)"
             >{{ option }}</button>
           </div>
+          <ul v-else-if="ask.kind === 'user-input'">
+            <li v-for="question in ask.questions" :key="question.id">
+              <b>{{ question.header }}</b>
+              <span>{{ question.question }}</span>
+              <small v-if="question.options?.length">
+                {{ question.options.map((option) => option.label).join(" · ") }}
+              </small>
+            </li>
+          </ul>
+          <ul v-else-if="ask.kind === 'opencode-form'">
+            <li v-for="field in ask.fields" :key="field.key">
+              {{ field.title || field.key }}<small v-if="field.description">{{ field.description }}</small>
+            </li>
+          </ul>
           <div v-else-if="askApproval" class="summary-ask-actions">
             <button type="button" class="interaction-deny" @click="answerAsk('deny')">
               {{ t("overview.askDeny") }}
@@ -173,6 +196,7 @@
           <button
             v-if="selectedRow.status === 'unread' || selectedRow.status === 'failed'"
             type="button"
+            :disabled="summary.loading || summary.revision === null"
             @click="markSeen"
           >{{ t("overview.markSeen") }}</button>
           <button
@@ -216,6 +240,7 @@ import {
   overviewAgents,
   overviewPendingAsk,
   overviewRemoteError,
+  overviewRemoteFetchedAt,
   overviewRows,
   overviewStats,
   overviewStreamTail,
@@ -269,6 +294,15 @@ const remoteFailure = computed(() => {
   return t("overview.remoteFailed", {
     agents: failed.map((id) => BACKEND_LABELS[id]).join(", "),
   });
+});
+
+const remoteFreshness = computed(() => {
+  const updated = store.backendList
+    .filter((info) => info.installed && info.id !== store.activeBackend)
+    .map((info) => ({ id: info.id, at: overviewRemoteFetchedAt(info.id) }))
+    .filter((item): item is { id: BackendId; at: number } => item.at !== null)
+    .map((item) => `${BACKEND_LABELS[item.id]} ${relTime(item.at)}`);
+  return updated.length > 0 ? t("overview.remoteUpdated", { agents: updated.join(", ") }) : "";
 });
 
 const visibleRows = computed(() =>
@@ -328,56 +362,88 @@ function clearFilters(): void {
 
 // ── summary (loaded on demand, one request at a time) ───────────────────
 
-const summary = reactive<OverviewSummary & { loading: boolean; key: string | null }>({
+const summary = reactive<
+  OverviewSummary & { loading: boolean; key: string | null; revision: number | null }
+>({
   prompt: "",
   reply: "",
   loading: false,
   key: null,
+  revision: null,
 });
 let summaryToken = 0;
+let summaryReadQueue = Promise.resolve();
+const summaryCache = new Map<
+  string,
+  { updatedAt: number; revision: number | null; summary: OverviewSummary }
+>();
 
-watch(
-  () => store.overview.selectedKey,
-  async (key) => {
-    summaryToken += 1;
-    const token = summaryToken;
-    summary.key = key;
-    summary.prompt = "";
-    summary.reply = "";
-    if (!key) {
-      summary.loading = false;
-      return;
+const summarySource = computed(() => {
+  const row = selectedRow.value;
+  if (!row) return { key: null, updatedAt: 0, revision: null };
+  return {
+    key: rowKey(row),
+    updatedAt: row.session.updatedAt,
+    revision: store.overviewRead[overviewKey(row.backend, row.session.id)]?.revision ?? null,
+  };
+});
+
+watch(summarySource, async ({ key, updatedAt, revision }) => {
+  summaryToken += 1;
+  const token = summaryToken;
+  summary.key = key;
+  summary.prompt = "";
+  summary.reply = "";
+  summary.revision = null;
+  if (!key) {
+    summary.loading = false;
+    return;
+  }
+  const row = overviewRows.value.find((item) => rowKey(item) === key);
+  if (!row) {
+    summary.loading = false;
+    return;
+  }
+  // The summary cache is keyed by backend and session, so same native ids in
+  // separate agents never share text. A newer list timestamp or result
+  // revision forces a fresh read.
+  const cached = summaryCache.get(key);
+  if (cached && cached.updatedAt === updatedAt && cached.revision === revision) {
+    summary.prompt = cached.summary.prompt;
+    summary.reply = cached.summary.reply;
+    summary.revision = revision;
+    summary.loading = false;
+    return;
+  }
+  summary.loading = true;
+  let release: () => void = () => {};
+  const previousRead = summaryReadQueue;
+  summaryReadQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previousRead;
+  try {
+    if (token !== summaryToken) return;
+    const messages = await window.awefork.messages(row.backend, row.session.id);
+    if (token !== summaryToken) return;
+    const text = summarizeMessages(messages);
+    summaryCache.delete(key);
+    summaryCache.set(key, { updatedAt, revision, summary: text });
+    if (summaryCache.size > 50) {
+      const oldestKey = summaryCache.keys().next().value;
+      if (oldestKey) summaryCache.delete(oldestKey);
     }
-    const row = overviewRows.value.find((item) => rowKey(item) === key);
-    if (!row) {
-      summary.loading = false;
-      return;
-    }
-    // The visible backend's rows are usually already in the store; anything
-    // else — and a stale cache — is fetched here, one session at a time.
-    const cached = store.messagesBySession[row.session.id];
-    if (cached) {
-      const text = summarizeMessages(cached as ChatMessage[]);
-      summary.prompt = text.prompt;
-      summary.reply = text.reply;
-      summary.loading = false;
-      return;
-    }
-    summary.loading = true;
-    try {
-      const messages = await window.awefork.messages(row.backend, row.session.id);
-      if (token !== summaryToken) return;
-      const text = summarizeMessages(messages);
-      summary.prompt = text.prompt;
-      summary.reply = text.reply;
-    } catch {
-      // A failed read leaves the summary empty; the jump button reports the
-      // real error, and an empty summary is not an error the user must clear.
-    } finally {
-      if (token === summaryToken) summary.loading = false;
-    }
-  },
-);
+    summary.prompt = text.prompt;
+    summary.reply = text.reply;
+    summary.revision = revision;
+  } catch {
+    // A failed read leaves the summary empty; the jump button reports the
+    // real error, and an empty summary is not an error the user must clear.
+  } finally {
+    release();
+    if (token === summaryToken) summary.loading = false;
+  }
+});
 
 const ask = computed<AgentInteractionRequest | null>(() => {
   const row = selectedRow.value;
@@ -385,9 +451,13 @@ const ask = computed<AgentInteractionRequest | null>(() => {
   return overviewPendingAsk(row.backend, row.session.id);
 });
 
-/** Simple approvals answer in place; forms and multi-question asks do not. */
+/** Only requests with a direct allow/deny response are answered in place. */
 const askApproval = computed(
-  () => ask.value !== null && ask.value.kind !== "user-input" && ask.value.kind !== "opencode-form",
+  () =>
+    ask.value !== null &&
+    ["command-approval", "file-approval", "permission-approval", "opencode-permission"].includes(
+      ask.value.kind,
+    ),
 );
 
 /** One closed question with options can be answered with a single click. */
@@ -422,7 +492,9 @@ function answerWithOption(label: string): void {
 
 function markSeen(): void {
   const row = selectedRow.value;
-  if (row) markOverviewSeen(row.backend, row.session.id);
+  if (row && summary.revision !== null) {
+    markOverviewSeen(row.backend, row.session.id, summary.revision);
+  }
 }
 
 /**

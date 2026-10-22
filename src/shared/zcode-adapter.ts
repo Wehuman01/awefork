@@ -176,6 +176,16 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       origin,
       createdAt: row.createdAt ?? now(),
       updatedAt: row.updatedAt ?? now(),
+      ...(typeof row.status === "string"
+        ? {
+            runtimeStatus:
+              row.status === "idle"
+                ? "idle"
+                : ["active", "busy", "running"].includes(row.status)
+                  ? "running"
+                  : "unknown",
+          }
+        : {}),
     };
   };
 
