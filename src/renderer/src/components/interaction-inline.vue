@@ -3,8 +3,10 @@
     <!-- ── permission ask: allow / deny / always ── -->
     <template v-if="request.kind === 'opencode-permission'">
       <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitConfirm", { perm: request.permission }) }}</p>
-      <pre v-if="request.command" class="inline-interaction-command">{{ request.command }}</pre>
-      <p class="inline-interaction-meta">{{ t("interaction.matchedRule", { rule: ruleLabel }) }}</p>
+      <div class="inline-interaction-body">
+        <pre v-if="request.command" class="inline-interaction-command">{{ request.command }}</pre>
+        <p class="inline-interaction-meta">{{ t("interaction.matchedRule", { rule: ruleLabel }) }}</p>
+      </div>
       <div class="inline-interaction-actions">
         <button type="button" class="interaction-deny" @click="deny">{{ t("interaction.deny") }}</button>
         <button type="button" class="interaction-allow" @click="allow">{{ t("interaction.allowOnce") }}</button>
@@ -17,9 +19,11 @@
     <!-- ── form ask: fill the fields right here in the context pane ── -->
     <template v-else>
       <p class="inline-interaction-kicker">{{ t("interaction.inlineWaitInput") }}</p>
-      <p class="inline-interaction-title">{{ t(request.title) }}</p>
-      <p v-if="request.detail" class="inline-interaction-meta">{{ t(request.detail, request.vars) }}</p>
-      <InteractionForm ref="formRef" :fields="request.fields" />
+      <div class="inline-interaction-body">
+        <p class="inline-interaction-title">{{ t(request.title) }}</p>
+        <p v-if="request.detail" class="inline-interaction-meta">{{ t(request.detail, request.vars) }}</p>
+        <InteractionForm ref="formRef" :fields="request.fields" />
+      </div>
       <div class="inline-interaction-actions">
         <button type="button" class="interaction-deny" @click="cancel">{{ t("interaction.cancel") }}</button>
         <button type="button" class="interaction-allow" @click="submit">{{ t("interaction.submit") }}</button>
