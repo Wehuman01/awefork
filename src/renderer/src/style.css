@@ -4554,6 +4554,21 @@ code.md-code {
   border: 1px solid var(--primary-border);
   border-radius: 12px;
   background: var(--primary-soft);
+  /* The card is pinned between the message list and the composer, so an
+   * unbounded form would crowd the conversation out of the pane. The body
+   * scrolls inside this cap; kicker and action buttons stay pinned, keeping
+   * the ask readable and answerable without swallowing the context above. */
+  display: flex;
+  flex-direction: column;
+  max-height: min(45%, 380px);
+}
+
+/* The scrollable middle (command, title, form fields); min-height: 0 lets it
+ * shrink under the cap instead of forcing the card past it. */
+.inline-interaction-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .inline-interaction-kicker {
