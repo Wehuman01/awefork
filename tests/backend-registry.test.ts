@@ -11,8 +11,10 @@ import type { CodexJsonRpc } from "../src/main/codex-jsonrpc";
 import {
   readBackendSelection,
   readOpencodePort,
+  readQuitKeepAlive,
   writeBackendSelection,
   writeOpencodePort,
+  writeQuitKeepAlive,
 } from "../src/main/settings-store";
 import type { BackendEventEnvelope } from "../src/shared/backend";
 
@@ -684,5 +686,93 @@ describe("interaction replies route by backend", () => {
     // No permission.asked preceded it, so nothing is pending and nothing is
     // POSTed — the contract makes an unknown id a silent no-op.
     await expect(adapter.respondInteraction("any", { decision: "deny" })).resolves.toBeUndefined();
+  });
+});
+
+describe("running-session tracking and quit keep-alive", () => {
+  /** A codex client that captures the adapter's notification handler. */
+  function notifyingCodexClient(): {
+    client: CodexJsonRpc;
+    notify: (method: string, params: unknown) => void;
+  } {
+    let onNotify: ((method: string, params: unknown) => void) | null = null;
+    const client: CodexJsonRpc = {
+      request: vi.fn().mockResolvedValue({ data: [], nextCursor: null }),
+      setNotificationHandler: vi.fn((handler: (method: string, params: unknown) => void) => {
+        onNotify = handler;
+      }),
+      setRequestHandler: vi.fn(),
+      dispose: vi.fn(),
+    };
+    return {
+      client,
+      notify: (method, params) => {
+        if (!onNotify) throw new Error("adapter never installed a notification handler");
+        onNotify(method, params);
+      },
+    };
+  }
+
+  it("counts a run from message.started to session.idle, per backend", async () => {
+    const { client, notify } = notifyingCodexClient();
+    mocks.ensureCodexServer.mockResolvedValue({ client, version: null, authMessage: null });
+    const adapter = await registry.get("codex");
+    await adapter.listSessions();
+
+    expect(registry.runningSessions()).toEqual([]);
+    notify("turn/started", { threadId: "s1", turn: { id: "t1" } });
+    expect(registry.runningSessions()).toEqual([{ backend: "codex", sessionId: "s1" }]);
+    notify("turn/completed", { threadId: "s1" });
+    expect(registry.runningSessions()).toEqual([]);
+  });
+
+  it("clears a run on a session-scoped server.error", async () => {
+    const { client, notify } = notifyingCodexClient();
+    mocks.ensureCodexServer.mockResolvedValue({ client, version: null, authMessage: null });
+    const adapter = await registry.get("codex");
+    await adapter.listSessions();
+
+    notify("turn/started", { threadId: "s1", turn: { id: "t1" } });
+    adapter.prompt("s1", "hello", null).catch(() => {});
+    notify("error", { threadId: "s1", error: { message: "boom" } });
+    expect(registry.runningSessions()).toEqual([]);
+  });
+
+  it("dispose stops the servers by default and keeps them with keepAlive", async () => {
+    expect(registry.quitKeepAlive()).toBe(false);
+    registry.dispose();
+    expect(mocks.stopManagedServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopCodexServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopZcodeServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopPiChildren).toHaveBeenCalledTimes(1);
+
+    registry.dispose({ keepAlive: true });
+    // No further stop calls: keepAlive leaves every spawned server running.
+    expect(mocks.stopManagedServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopCodexServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopZcodeServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopPiChildren).toHaveBeenCalledTimes(1);
+  });
+
+  it("setQuitKeepAlive caches immediately and persists to settings.json", async () => {
+    registry.setQuitKeepAlive(true);
+    expect(registry.quitKeepAlive()).toBe(true);
+    // The persist is fire-and-forget through the serialized write queue.
+    await vi.waitFor(async () => {
+      expect(await readQuitKeepAlive(join(userDataDir, "settings.json"))).toBe(true);
+    });
+    // The persisted setting governs a plain dispose() too.
+    registry.dispose();
+    expect(mocks.stopManagedServer).not.toHaveBeenCalled();
+  });
+
+  it("loads the persisted setting at startup so a fresh registry keeps servers alive", async () => {
+    await writeQuitKeepAlive(join(userDataDir, "settings.json"), true);
+    const fresh = createBackendRegistry(userDataDir);
+    // The startup read is async; a loaded event loop needs more than one tick.
+    await vi.waitFor(() => expect(fresh.quitKeepAlive()).toBe(true));
+    fresh.dispose();
+    expect(mocks.stopManagedServer).not.toHaveBeenCalled();
+    expect(mocks.stopCodexServer).not.toHaveBeenCalled();
   });
 });

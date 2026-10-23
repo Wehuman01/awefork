@@ -855,6 +855,7 @@ import {
   selectSession,
   sessionGroups,
   setForkTagPref,
+  openCanvasTab,
   setSessionTags,
   setTagColor,
   store,

@@ -1011,6 +1011,10 @@ export function installMockAdapter(): void {
       compress: true,
       exportBranch: true,
     }),
+    // No real quit in a browser tab; the demo toggle flips but persists nowhere.
+    quitKeepAlive: async () => false,
+    setQuitKeepAlive: async () => ({ ok: true }),
+    runningSessionCount: async () => 0,
     // The demo has no sidecar recorder; the pane never shows the card here.
     fileChanges: async () => null,
     fileChangeDiff: async () => null,

@@ -93,6 +93,18 @@
       :title="theme === 'dark' ? t('topbar.themeOff') : t('topbar.themeOn')"
       @click="toggleTheme"
     >{{ theme === "dark" ? "☀" : "☾" }}</button>
+    <button
+      type="button"
+      class="icon-btn multiwindow-btn"
+      :class="{ on: quitKeepAlive }"
+      role="switch"
+      :aria-checked="quitKeepAlive"
+      :title="quitKeepAlive ? t('topbar.quitKeepAliveOn') : t('topbar.quitKeepAliveOff')"
+      @click="toggleQuitKeepAlive"
+    >
+      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
+      {{ t("topbar.quitKeepAliveLabel") }}
+    </button>
     <div class="lang-switch" role="group" aria-label="Language">
       <button
         type="button"
@@ -120,6 +132,43 @@
       <div v-if="versionOpen" class="version-menu">
         <button type="button" class="version-item" @click="runManualCheck">Check for updates</button>
       </div>
+    </div>
+
+    <!-- Turning on quit keep-alive while runs are going changes what quitting
+         means, so it confirms first — the count is the whole point of asking. -->
+    <div
+      v-if="keepAlivePromptCount !== null"
+      class="interaction-backdrop"
+      role="presentation"
+      @click="keepAlivePromptCount = null"
+    >
+      <section
+        class="interaction-dialog backend-confirm"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('topbar.quitKeepAlivePromptTitle')"
+        @click.stop
+      >
+        <p class="interaction-kicker">{{ t("topbar.quitKeepAlivePromptKicker") }}</p>
+        <h2>{{ t("topbar.quitKeepAlivePromptTitle", { count: keepAlivePromptCount }) }}</h2>
+        <ul class="compress-points">
+          <li>{{ t("topbar.quitKeepAlivePromptPoint1", { count: keepAlivePromptCount }) }}</li>
+          <li>{{ t("topbar.quitKeepAlivePromptPoint2") }}</li>
+        </ul>
+        <div class="interaction-actions">
+          <button type="button" class="interaction-deny" @click="keepAlivePromptCount = null">
+            {{ t("topbar.confirmCancel") }}
+          </button>
+          <button
+            type="button"
+            class="interaction-allow"
+            @click="keepAlivePromptCount = null; applyQuitKeepAlive(true)"
+          >
+            {{ t("topbar.quitKeepAlivePromptConfirm") }}
+          </button>
+        </div>
+        <p class="interaction-timeout">{{ t("topbar.confirmEsc") }}</p>
+      </section>
     </div>
 
     <!-- Switching backends reshapes the whole workspace, so every pick — in
@@ -189,6 +238,30 @@ function toggleMultiWindow(): void {
   multiWindow.value = !multiWindow.value;
   localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
 }
+// Quit keep-alive lives in main's settings.json (the quit dialog's checkbox
+// also writes it), so this toggle is a plain IPC call — demo mode has no
+// bridge and keeps the switch inert at its persisted default.
+const quitKeepAlive = ref(false);
+async function toggleQuitKeepAlive(): Promise<void> {
+  if (!window.awefork) return;
+  if (!quitKeepAlive.value) {
+    // Turning it on changes what quitting means, so when runs are in flight
+    // the user first sees exactly what will survive the quit.
+    const running = await window.awefork.runningSessionCount();
+    if (running > 0) {
+      keepAlivePromptCount.value = running;
+      return;
+    }
+  }
+  await applyQuitKeepAlive(!quitKeepAlive.value);
+}
+async function applyQuitKeepAlive(value: boolean): Promise<void> {
+  quitKeepAlive.value = value;
+  await window.awefork?.setQuitKeepAlive(value);
+}
+void window.awefork?.quitKeepAlive().then((value) => {
+  quitKeepAlive.value = value;
+});
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);
@@ -223,6 +296,8 @@ function toggleBackendMenu(): void {
 }
 
 const pendingBackend = ref<BackendId | null>(null);
+/** Non-null while the keep-alive-on confirmation is showing; holds the count. */
+const keepAlivePromptCount = ref<number | null>(null);
 const confirmTitle = computed(() =>
   t(multiWindow.value ? "topbar.confirmOpenTitle" : "topbar.confirmSwitchTitle", {
     label: backendLabel(pendingBackend.value),
@@ -278,7 +353,10 @@ function closeOnOutsideClick(): void {
 }
 
 function closeOnEscape(event: KeyboardEvent): void {
-  if (event.key === "Escape") pendingBackend.value = null;
+  if (event.key === "Escape") {
+    pendingBackend.value = null;
+    keepAlivePromptCount.value = null;
+  }
 }
 
 onMounted(() => {

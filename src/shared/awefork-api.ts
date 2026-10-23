@@ -240,6 +240,17 @@ export interface AweforkApi {
   openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
+  /**
+   * Whether quitting keeps the spawned backends alive so in-flight turns
+   * finish in the background (persisted in settings.json; default false).
+   */
+  quitKeepAlive(): Promise<boolean>;
+  setQuitKeepAlive(value: boolean): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Sessions with a run in flight across every backend — what quitting would
+   * interrupt, and what keep-alive would let finish in the background.
+   */
+  runningSessionCount(): Promise<number>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */

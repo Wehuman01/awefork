@@ -658,6 +658,19 @@ export function registerIpc(
     registry.capabilities(storeBackend(backend)),
   );
 
+  // Quit behavior: whether quitting leaves the spawned backends running so
+  // in-flight turns finish in the background. Read is served from the
+  // registry's cache (persisted-backed); write persists it.
+  ipcMain.handle("awefork:quitKeepAlive", () => registry.quitKeepAlive());
+  ipcMain.handle("awefork:setQuitKeepAlive", (_event: IpcMainInvokeEvent, value: unknown) => {
+    if (typeof value !== "boolean") return { ok: false, error: "expected a boolean" };
+    registry.setQuitKeepAlive(value);
+    return { ok: true };
+  });
+  // Runs in flight across every backend — the top bar counts them before
+  // offering to turn keep-alive on, so the user knows what will survive.
+  ipcMain.handle("awefork:runningSessionCount", () => registry.runningSessions().length);
+
   // ── app-level ────────────────────────────────────────────────────────────
 
   // Local file references in replies (agent output is full of them — Windows
