@@ -4235,6 +4235,45 @@ code.md-code {
   background: var(--mint-soft);
 }
 
+/* The meter's compress shortcut: a quiet round icon inside the pill. In
+   warm/hot the pill's warning hue flows through currentColor so urgency and
+   the escape hatch read as one. */
+.ctx-compress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ctx-compress:hover {
+  color: var(--primary-deep);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.ctx-meter.warm .ctx-compress {
+  color: var(--ask);
+}
+
+.ctx-meter.hot .ctx-compress {
+  color: var(--danger);
+}
+
 /* Draft preview: same card, padding and font as the textarea so switching
    between editing and previewing doesn't jump; active-state border matches
    the focused textarea. */

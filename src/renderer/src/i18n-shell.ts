@@ -78,4 +78,29 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "topbar.commandPalette": { zh: "命令面板（⌘K / Ctrl+K）", en: "Command palette (⌘K / Ctrl+K)" },
   "topbar.themeOn": { zh: "切换到深色模式", en: "Switch to dark mode" },
   "topbar.themeOff": { zh: "切换到明亮模式", en: "Switch to light mode" },
+
+  // ── top-bar.vue (backend switch confirmation) ─────────────────────────
+  "topbar.confirmKicker": { zh: "切换 Agent 后端", en: "Switch agent backend" },
+  "topbar.confirmSwitchTitle": { zh: "切换到 {label}？", en: "Switch to {label}?" },
+  "topbar.confirmSwitchPoint1": {
+    zh: "当前会话属于 {current}，切换后将新建会话",
+    en: "The open session belongs to {current}; switching starts a fresh one",
+  },
+  "topbar.confirmSwitchPoint2": {
+    zh: "现有会话仍保留在历史记录中",
+    en: "Existing sessions stay in the history",
+  },
+  "topbar.confirmOpenTitle": { zh: "打开 {label} 独立窗口？", en: "Open the {label} window?" },
+  "topbar.confirmOpenPoint1": {
+    zh: "将打开（或聚焦）{label} 的专属窗口",
+    en: "Opens (or focuses) {label}'s dedicated window",
+  },
+  "topbar.confirmOpenPoint2": {
+    zh: "当前窗口的会话不受影响",
+    en: "This window's session is unaffected",
+  },
+  "topbar.confirmSwitch": { zh: "切换", en: "Switch" },
+  "topbar.confirmOpen": { zh: "打开窗口", en: "Open window" },
+  "topbar.confirmCancel": { zh: "取消", en: "Cancel" },
+  "topbar.confirmEsc": { zh: "Esc 取消", en: "Esc to cancel" },
 };

@@ -121,6 +121,40 @@
         <button type="button" class="version-item" @click="runManualCheck">Check for updates</button>
       </div>
     </div>
+
+    <!-- Switching backends reshapes the whole workspace, so every pick — in
+         either multi-window mode — confirms first instead of acting on the
+         click alone. -->
+    <div
+      v-if="pendingBackend"
+      class="interaction-backdrop"
+      role="presentation"
+      @click="cancelBackendSwitch"
+    >
+      <section
+        class="interaction-dialog backend-confirm"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('topbar.confirmKicker')"
+        @click.stop
+      >
+        <p class="interaction-kicker">{{ t("topbar.confirmKicker") }}</p>
+        <h2>{{ confirmTitle }}</h2>
+        <ul class="compress-points">
+          <li>{{ confirmPoint1 }}</li>
+          <li>{{ t(multiWindow ? "topbar.confirmOpenPoint2" : "topbar.confirmSwitchPoint2") }}</li>
+        </ul>
+        <div class="interaction-actions">
+          <button type="button" class="interaction-deny" @click="cancelBackendSwitch">
+            {{ t("topbar.confirmCancel") }}
+          </button>
+          <button type="button" class="interaction-allow" @click="confirmBackendSwitch">
+            {{ t(multiWindow ? "topbar.confirmOpen" : "topbar.confirmSwitch") }}
+          </button>
+        </div>
+        <p class="interaction-timeout">{{ t("topbar.confirmEsc") }}</p>
+      </section>
+    </div>
   </header>
 </template>
 
@@ -185,8 +219,36 @@ function toggleBackendMenu(): void {
   if (backendOpen.value) void refreshBackendList();
 }
 
+const pendingBackend = ref<BackendId | null>(null);
+const confirmTitle = computed(() =>
+  t(multiWindow.value ? "topbar.confirmOpenTitle" : "topbar.confirmSwitchTitle", {
+    label: backendLabel(pendingBackend.value),
+  }),
+);
+const confirmPoint1 = computed(() =>
+  t(multiWindow.value ? "topbar.confirmOpenPoint1" : "topbar.confirmSwitchPoint1", {
+    label: backendLabel(pendingBackend.value),
+    current: activeLabel.value,
+  }),
+);
+
+function backendLabel(backend: BackendId | null): string {
+  return backendList.value.find((entry) => entry.id === backend)?.label ?? backend ?? "";
+}
+
 async function pickBackend(backend: BackendId): Promise<void> {
   backendOpen.value = false;
+  pendingBackend.value = backend;
+}
+
+function cancelBackendSwitch(): void {
+  pendingBackend.value = null;
+}
+
+async function confirmBackendSwitch(): Promise<void> {
+  const backend = pendingBackend.value;
+  pendingBackend.value = null;
+  if (!backend) return;
   // One switch, two behaviors: off = the in-place switch the app has always
   // had; on = every pick focuses (or opens) that agent's dedicated window.
   if (multiWindow.value) {
@@ -212,6 +274,16 @@ function closeOnOutsideClick(): void {
   backendOpen.value = false;
 }
 
-onMounted(() => document.addEventListener("click", closeOnOutsideClick));
-onUnmounted(() => document.removeEventListener("click", closeOnOutsideClick));
+function closeOnEscape(event: KeyboardEvent): void {
+  if (event.key === "Escape") pendingBackend.value = null;
+}
+
+onMounted(() => {
+  document.addEventListener("click", closeOnOutsideClick);
+  document.addEventListener("keydown", closeOnEscape);
+});
+onUnmounted(() => {
+  document.removeEventListener("click", closeOnOutsideClick);
+  document.removeEventListener("keydown", closeOnEscape);
+});
 </script>

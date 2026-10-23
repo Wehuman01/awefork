@@ -219,6 +219,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "接近窗口上限 — 可用 🗜 先压缩这条分支",
     en: "Near the window limit — 🗜 compress this branch first",
   },
+  "input.compressTitle": {
+    zh: "压缩本会话上下文（摘要化历史，释放窗口）",
+    en: "Compress this session's context (summarize history, free the window)",
+  },
   "input.send": { zh: "发送 ➤", en: "Send ➤" },
   "input.stop": { zh: "■ 停止", en: "■ Stop" },
   "input.noAttachments": {

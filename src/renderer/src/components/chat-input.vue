@@ -17,6 +17,13 @@
         <span class="ctx-bar"><span class="ctx-fill" :style="{ width: contextMeter.width }"></span></span>
         <span class="ctx-pct">{{ contextMeter.pct }}</span>
         <span class="ctx-count">{{ contextMeter.count }}</span>
+        <button
+          v-if="canCompress"
+          type="button"
+          class="ctx-compress"
+          :title="t('input.compressTitle')"
+          @click.stop="emit('compress')"
+        >⇲</button>
       </span>
       <input
         ref="fileInputEl"
@@ -116,14 +123,23 @@ const props = withDefaults(
     recentModels?: readonly ModelChoice[];
     /** Session context budget for the head-row meter; null hides it. */
     context?: ContextUsage | null;
+    /** Backend capability gate: show the meter's compress button only where summarize exists. */
+    canCompress?: boolean;
   }>(),
-  { allowAttachments: true, favoriteModels: () => [], recentModels: () => [], context: null },
+  {
+    allowAttachments: true,
+    favoriteModels: () => [],
+    recentModels: () => [],
+    context: null,
+    canCompress: false,
+  },
 );
 const emit = defineEmits<{
   send: [text: string, attachments: PromptAttachment[]];
   abort: [];
   "set-model": [model: ModelChoice | null];
   "toggle-favorite": [model: ModelChoice];
+  compress: [];
 }>();
 
 const text = ref("");

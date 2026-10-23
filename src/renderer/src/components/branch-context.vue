@@ -280,10 +280,12 @@
         :recent-models="store.recentModels"
         :allow-attachments="store.capabilities.attachments"
         :context="paneContextUsage"
+        :can-compress="store.capabilities.compress"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
         @toggle-favorite="toggleFavoriteModel"
+        @compress="compress"
       />
     </template>
   </aside>
