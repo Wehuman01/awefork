@@ -62,8 +62,20 @@
         <div class="message-body">
           <p class="tool-row"><span class="tool-chip running">running…</span></p>
           <template v-for="row in liveRows" :key="row.part.partId">
+            <!-- Reasoning with no readable text (codex encrypts its
+                 chain-of-thought): a quiet one-liner that says it thought and
+                 for how long, never a box the reader can open onto nothing. -->
+            <p
+              v-if="row.blankThinking"
+              class="thought-bare"
+              :class="{ done: row.part.endedAt !== null }"
+            >
+              <span v-if="row.part.endedAt === null" class="spinner" aria-hidden="true"></span>
+              <span class="thought-title">{{ row.title }}</span>
+              <span v-if="row.duration" class="thought-meta">· {{ row.duration }}</span>
+            </p>
             <details
-              v-if="row.part.kind === 'thinking'"
+              v-else-if="row.part.kind === 'thinking'"
               class="thought streaming-thought"
               :class="{ done: row.part.endedAt !== null }"
               :open="row.part.endedAt === null"
@@ -95,7 +107,7 @@ import type { SessionSummary } from "../../../shared/types";
 import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
 import type { LivePart, ReadonlyChatMessage } from "../state";
-import { thoughtSummary } from "../thought";
+import { hasReadableThought, thoughtSummary } from "../thought";
 import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
@@ -119,6 +131,9 @@ const liveRows = computed(() => {
   return parts.map((part) => ({
     part,
     ...thoughtSummary(part),
+    // A thinking part with nothing readable in it (codex's encrypted
+    // reasoning) renders as a one-liner instead of an expandable shell.
+    blankThinking: part.kind === "thinking" && !hasReadableThought(part.text),
     caret: part.partId === caretPartId,
   }));
 });
