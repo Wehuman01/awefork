@@ -1113,6 +1113,131 @@ describe("createCodexAdapter unsupported surfaces", () => {
     expect(callsOf("thread/delete")[0]?.params).toEqual({ threadId: "s1" });
     expect(JSON.parse(await readFile(lineagePath, "utf8"))).toEqual({});
   });
+
+  it("compacts by starting a codex compaction turn and announcing it", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/resume": () => ({ thread: THREAD_FIXTURE }),
+      "thread/compact/start": () => ({}),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    await adapter.compress("s1", { providerId: "codex", modelId: "gpt-5-codex" });
+
+    expect(callsOf("thread/compact/start")[0]?.params).toEqual({ threadId: "s1" });
+    // codex compacts as a turn of its own, so the run streams through the
+    // normal frames; the announce is what the renderer's toast keys on.
+    expect(events).toEqual([{ type: "session.compressed", sessionId: "s1" }]);
+  });
+
+  it("names a writer conflict on compact instead of the raw RPC error", async () => {
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/resume": () => {
+        throw new Error("thread s1 already has an active writer");
+      },
+      "thread/compact/start": () => ({}),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+    await expect(
+      adapter.compress("s1", { providerId: "codex", modelId: "gpt-5-codex" }),
+    ).rejects.toThrow(OWNED_ELSEWHERE_MESSAGE);
+  });
+});
+
+// ── live usage → context meter ───────────────────────────────────────────────
+
+describe("createCodexAdapter live token usage", () => {
+  /** A live `thread/tokenUsage/updated` frame, as codex 0.163 sends it. */
+  const USAGE_FRAME = {
+    threadId: "s1",
+    turnId: "turn-1",
+    tokenUsage: {
+      total: { totalTokens: 99_999, inputTokens: 90_000, outputTokens: 9_999 },
+      last: {
+        totalTokens: 24_316,
+        inputTokens: 24_311,
+        cachedInputTokens: 13_184,
+        outputTokens: 5,
+      },
+      modelContextWindow: 828_400,
+    },
+  };
+
+  async function subscribedAdapter() {
+    const { client, notify } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () => turnPageFixture([TURN_FIXTURE]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    return { adapter, notify, events };
+  }
+
+  it("stamps the recorded usage onto the turn that produced it", async () => {
+    const { adapter, notify } = await subscribedAdapter();
+
+    notify("thread/tokenUsage/updated", USAGE_FRAME);
+
+    const rows = await adapter.messages("s1");
+    const assistant = rows.find((r) => r.role === "assistant");
+    // `last`, not `total`: total accumulates the whole thread and would
+    // inflate the meter on every later turn.
+    expect(assistant).toMatchObject({
+      id: "turn-1",
+      contextTokens: 24_316,
+      contextWindow: 828_400,
+    });
+  });
+
+  it("keeps the footprint across a reload that carries no usage", async () => {
+    // codex's turn list reports no usage, so without the recorded frame the
+    // meter would blank on every reload.
+    const { adapter, notify } = await subscribedAdapter();
+
+    notify("thread/tokenUsage/updated", USAGE_FRAME);
+    await adapter.messages("s1");
+
+    const rows = await adapter.messages("s1");
+    expect(rows.find((r) => r.role === "assistant")).toMatchObject({
+      contextTokens: 24_316,
+      contextWindow: 828_400,
+    });
+  });
+
+  it("leaves the row alone when the frame carried no window", async () => {
+    const { adapter, notify } = await subscribedAdapter();
+
+    notify("thread/tokenUsage/updated", {
+      ...USAGE_FRAME,
+      tokenUsage: { last: { totalTokens: 4_000 } },
+    });
+
+    const assistant = (await adapter.messages("s1")).find((r) => r.role === "assistant");
+    expect(assistant).toMatchObject({ contextTokens: 4_000 });
+    expect(assistant?.contextWindow).toBeUndefined();
+  });
+
+  it("nudges a session refresh so the meter paints before the idle reload", async () => {
+    const { adapter, notify, events } = await subscribedAdapter();
+
+    notify("thread/tokenUsage/updated", USAGE_FRAME);
+
+    expect(events).toEqual([{ type: "session.updated", sessionId: "s1" }]);
+  });
+
+  it("ignores a frame with no usage object", async () => {
+    const { adapter, notify, events } = await subscribedAdapter();
+
+    notify("thread/tokenUsage/updated", { threadId: "s1" });
+
+    expect(events).toEqual([]);
+    const rows = await adapter.messages("s1");
+    expect(rows.find((r) => r.role === "assistant")?.contextTokens).toBeUndefined();
+  });
 });
 
 describe("createCodexAdapter auth recovery", () => {

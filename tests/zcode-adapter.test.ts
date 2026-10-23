@@ -685,6 +685,60 @@ describe("zcode adapter", () => {
     await expect(adapter.deleteSession("sess_x")).rejects.toThrow("Session not found after write");
   });
 
+  it("compacts through session/compact after subscribing", async () => {
+    const { client, calls } = fakeClient({
+      replies: { "session/compact": { compact: { state: "accepted" } } },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+
+    await adapter.compress("sess_x", {
+      providerId: "builtin:bigmodel-coding-plan",
+      modelId: "GLM-5.3",
+    });
+
+    // Subscribe first: without it the session_compacted frame never arrives
+    // and the run would hang in "running" forever.
+    expect(calls.map((c) => c.method)).toEqual(["session/subscribe", "session/compact"]);
+    expect(calls[0].params).toEqual({ sessionId: "sess_x", deliveryKind: "desktop-continuous" });
+    expect(calls[1].params).toMatchObject({ sessionId: "sess_x" });
+    // session/compact is not a v4 command — the v4 envelope of that name
+    // reports a session it cannot find (verified live against 0.17.0).
+    expect(calls.some((c) => c.method === "v4/command")).toBe(false);
+  });
+
+  it("names a failed compact with the session", async () => {
+    const { client } = fakeClient({
+      replies: { "session/compact": new Error("cannot compact while a prompt is running") },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    await expect(
+      adapter.compress("sess_x", {
+        providerId: "builtin:bigmodel-coding-plan",
+        modelId: "GLM-5.3",
+      }),
+    ).rejects.toThrow("cannot compact while a prompt is running");
+  });
+
+  it("turns a session_compacted frame into session.compressed", async () => {
+    const { client, emit } = fakeClient({ replies: {} });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    emit("session/event", { sessionId: "sess_x", type: "session_compacted", payload: {} });
+
+    expect(events).toEqual([
+      { type: "session.updated", sessionId: "sess_x" },
+      { type: "session.compressed", sessionId: "sess_x" },
+    ]);
+  });
+
   it("drops model-only harness rows but keeps real and legacy user rows", async () => {
     const modelOnly = {
       info: {

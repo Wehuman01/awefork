@@ -722,3 +722,89 @@ describe("createPiAdapter renameSession and unsupported surfaces", () => {
     );
   });
 });
+
+// ── compaction ───────────────────────────────────────────────────────────────
+
+describe("createPiAdapter compress()", () => {
+  it("runs pi's compact command on the session's own child and announces it", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    await adapter.compress("s1-mixed", { providerId: "anthropic", modelId: "claude-sonnet" });
+
+    expect(childOf(harness).calls.map((c) => c.type)).toEqual(["compact"]);
+    expect(events).toEqual([{ type: "session.compressed", sessionId: "s1-mixed" }]);
+  });
+
+  it("names a rejected compact with the session and rethrows", async () => {
+    const { adapter, rpc } = await makeHarness(["s1-mixed"], {
+      request: (command) => {
+        if (command.type === "compact") throw new Error("Nothing to compact (session too small)");
+        return null;
+      },
+    });
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    await expect(
+      adapter.compress("s1-mixed", { providerId: "anthropic", modelId: "claude-sonnet" }),
+    ).rejects.toThrow("Nothing to compact (session too small)");
+    expect(events).toEqual([
+      {
+        type: "server.error",
+        sessionId: "s1-mixed",
+        message: "pi compact failed: Nothing to compact (session too small)",
+      },
+    ]);
+    // The failed attempt still reaps the child it spawned.
+    expect(rpc.children).toHaveLength(1);
+  });
+});
+
+describe("createPiAdapter prompt() images", () => {
+  it("sends staged images as pi ImageContent blocks", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "看这张图", null, [
+      { mime: "image/png", filename: "a.png", dataUrl: "data:image/png;base64,QUJD" },
+      { mime: "image/jpeg", filename: "b.jpg", dataUrl: "data:image/jpeg;base64,R0lGODlh" },
+    ]);
+
+    expect(childOf(harness).calls).toEqual([
+      {
+        type: "prompt",
+        message: "看这张图",
+        images: [
+          { type: "image", data: "QUJD", mimeType: "image/png" },
+          { type: "image", data: "R0lGODlh", mimeType: "image/jpeg" },
+        ],
+      },
+    ]);
+  });
+
+  it("omits images when the prompt carries none, so the payload stays minimal", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "hi", null, []);
+
+    expect(childOf(harness).calls[0]).toEqual({ type: "prompt", message: "hi" });
+  });
+
+  it("inlines text attachments as named sections — pi has no file part", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "读一下这个文件", null, [
+      { mime: "text/plain", filename: "notes.md", dataUrl: "data:text/plain;base64,aGVsbG8=" },
+    ]);
+
+    expect(childOf(harness).calls[0]).toEqual({
+      type: "prompt",
+      message: "读一下这个文件\n\n--- notes.md ---\nhello",
+    });
+  });
+});

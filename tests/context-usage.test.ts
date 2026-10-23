@@ -3,10 +3,11 @@ import {
   contextUsageOf,
   contextWindowFor,
   latestContextTokens,
+  latestContextWindow,
 } from "../src/renderer/src/context-usage";
 import type { ChatMessage, ModelOption } from "../src/shared/types";
 
-function assistantRow(id: string, contextTokens?: number): ChatMessage {
+function assistantRow(id: string, contextTokens?: number, contextWindow?: number): ChatMessage {
   return {
     id,
     role: "assistant",
@@ -22,6 +23,7 @@ function assistantRow(id: string, contextTokens?: number): ChatMessage {
     finish: "stop",
     outputTokens: 10,
     ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
     error: null,
   };
 }
@@ -39,6 +41,33 @@ describe("latestContextTokens", () => {
   it("skips zero/unreported rows and returns null when none reported", () => {
     expect(latestContextTokens([assistantRow("a1", 0), assistantRow("a2")])).toBeNull();
     expect(latestContextTokens([])).toBeNull();
+  });
+});
+
+describe("latestContextWindow", () => {
+  it("reads the window the newest reporting row carried", () => {
+    const messages = [assistantRow("a1", 12_000, 200_000), assistantRow("a2", 41_000, 828_400)];
+    expect(latestContextWindow(messages)).toBe(828_400);
+  });
+
+  it("stops at the newest footprint — an older row's window is another model's", () => {
+    // The meter's `used` comes from a3, so a2's window (set while another model
+    // was configured) must not leak into the ratio.
+    const messages = [
+      assistantRow("a1", 12_000, 200_000),
+      assistantRow("a2", 41_000, 828_400),
+      assistantRow("a3", 50_000),
+    ];
+    expect(latestContextWindow(messages)).toBeNull();
+  });
+
+  it("returns null when no row reported a footprint or a window", () => {
+    expect(latestContextWindow([assistantRow("a1", 12_000)])).toBeNull();
+    expect(latestContextWindow([])).toBeNull();
+    // A user row can never lend a window.
+    expect(
+      latestContextWindow([{ ...assistantRow("u1"), role: "user", contextWindow: 1_000 }]),
+    ).toBeNull();
   });
 });
 
