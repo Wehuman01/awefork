@@ -143,6 +143,13 @@ export interface PersistedComposer {
    * picker's 最近 group. Auto-maintained and capped; optional like the above.
    */
   recentModels?: ModelChoice[];
+  /**
+   * The project directory the workspace last had open, restored at boot so
+   * 新建对话 lands in the project the user was working in instead of whatever
+   * cwd the agent server runs under. Optional: older files have none, and
+   * null means nothing worth remembering.
+   */
+  selectedDirectory?: string | null;
 }
 
 /** Fork lineage recorded by awefork when it forks a session. */

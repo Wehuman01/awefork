@@ -45,6 +45,19 @@ const CODEX: SessionSummary = {
   updatedAt: 1_726_000_000_000,
 };
 
+/** A newest-by-updatedAt session living in a scratch directory, the way a TUI
+ *  run in a temp dir registers itself — the auto-select must not chase it when
+ *  a project is remembered. */
+const SCRATCH: SessionSummary = {
+  id: "s9",
+  title: "临时目录里的一次性会话",
+  directory: "/var/folders/scratch/T",
+  parentSessionId: null,
+  origin: "root",
+  createdAt: 1_726_000_100_000,
+  updatedAt: 1_726_000_100_000,
+};
+
 const MODEL: ModelChoice = { providerId: "oc", modelId: "glm-5.3" };
 
 /** A mid-story turn node: openDraft turns it into a fork-branch draft. */
@@ -76,6 +89,7 @@ async function bootState(
     composer?: PersistedComposer | null;
     messages?: Record<string, ChatMessage[]>;
     includeSecond?: boolean;
+    includeScratch?: boolean;
   } = {},
 ) {
   vi.resetModules();
@@ -86,7 +100,14 @@ async function bootState(
     sessions: vi.fn(async (backend: BackendId) =>
       backend === "codex"
         ? { sessions: [CODEX], lineage: {} }
-        : { sessions: options.includeSecond ? [OPENCODE, SECOND] : [OPENCODE], lineage: {} },
+        : {
+            sessions: options.includeScratch
+              ? [...(options.includeSecond ? [OPENCODE, SECOND] : [OPENCODE]), SCRATCH]
+              : options.includeSecond
+                ? [OPENCODE, SECOND]
+                : [OPENCODE],
+            lineage: {},
+          },
     ),
     messages: vi.fn(
       async (_backend: BackendId, sessionId: string) => options.messages?.[sessionId] ?? [],
@@ -227,8 +248,12 @@ describe("composer persistence × backend switch", () => {
     expect(h.api.prompt).toHaveBeenCalledWith("opencode", "s1", "hello", null, []);
     expect(h.store.draft).toBeNull();
     // Without advancing the 600ms debounce — a crash right after sending
-    // must not resurrect the sent draft.
-    expect(h.saves).toContainEqual({ backend: "opencode", value: null });
+    // must not resurrect the sent draft. The remembered project stays in
+    // the sidecar, so the save is a value with a null draft, not null.
+    expect(h.saves).toContainEqual({
+      backend: "opencode",
+      value: expect.objectContaining({ draft: null }),
+    });
   });
 
   it("filters restored pane model picks down to sessions that still exist", async () => {
@@ -239,6 +264,37 @@ describe("composer persistence × backend switch", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(h.store.paneModels).toEqual({ s1: MODEL });
+  });
+
+  it("reopens the remembered project at boot instead of the newest session's directory", async () => {
+    const h = await bootState({
+      includeScratch: true,
+      composer: {
+        draft: null,
+        paneModels: {},
+        lastModel: null,
+        selectedDirectory: "/demo/shop-api",
+      },
+    });
+
+    // The scratch session is newest overall, but the boot keeps the project
+    // the last session ended in and selects within it.
+    expect(h.store.selectedDirectory).toBe("/demo/shop-api");
+    expect(h.store.selectedId).toBe("s1");
+  });
+
+  it("without a remembered project the boot still follows the newest session", async () => {
+    const h = await bootState({ includeScratch: true });
+    expect(h.store.selectedDirectory).toBe("/var/folders/scratch/T");
+  });
+
+  it("persists the open project on the debounced sidecar flush", async () => {
+    const h = await bootState();
+    await h.mod.selectSession("s1");
+    await vi.advanceTimersByTimeAsync(600);
+
+    const last = [...h.saves].reverse().find((s) => s.backend === "opencode");
+    expect(last?.value).toMatchObject({ selectedDirectory: "/demo/shop-api" });
   });
 });
 

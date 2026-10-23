@@ -916,6 +916,18 @@ async function bootBackend(backend: BackendId): Promise<void> {
   } catch {
     state.knownDirs = [];
   }
+  // Restore the remembered project BEFORE the session load: its auto-select
+  // fills selectedDirectory only when null, and without this it picks the
+  // globally newest session's directory — which can be a scratch dir another
+  // client (the TUI) happened to run in, putting every palette 新建对话 there.
+  // Restored here rather than in restoreComposer so the auto-select also picks
+  // the initial session inside the remembered project in one pass.
+  try {
+    const remembered = (await window.awefork.composer(backend))?.selectedDirectory;
+    if (remembered) state.selectedDirectory = remembered;
+  } catch {
+    // Best-effort: a missing sidecar falls back to the auto-select below.
+  }
   try {
     state.trash = (await window.awefork.trash(backend)).map((entry) => entry.id);
   } catch {
@@ -2999,12 +3011,12 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
 export async function createSession(directory?: string): Promise<void> {
   const backend = state.activeBackend;
   state.actionError = null;
+  // Frozen at entry: redo must recreate in the project the original landed in,
+  // not wherever the user has navigated by the time undo is pressed.
+  const target = directory ?? state.selectedDirectory ?? undefined;
   let created: SessionSummary;
   try {
-    created = await window.awefork.createSession(
-      backend,
-      directory ?? state.selectedDirectory ?? undefined,
-    );
+    created = await window.awefork.createSession(backend, target);
   } catch (error) {
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
@@ -3019,10 +3031,7 @@ export async function createSession(directory?: string): Promise<void> {
       return true;
     },
     redo: async () => {
-      const s = await window.awefork.createSession(
-        backend,
-        directory ?? state.selectedDirectory ?? undefined,
-      );
+      const s = await window.awefork.createSession(backend, target);
       box.id = s.id;
       await refreshSessions();
       if (backend === state.activeBackend) await selectSession(s.id);
@@ -3553,7 +3562,8 @@ function composerSnapshot(): PersistedComposer | null {
     Object.keys(paneModels).length === 0 &&
     state.lastModel === null &&
     state.favoriteModels.length === 0 &&
-    state.recentModels.length === 0
+    state.recentModels.length === 0 &&
+    state.selectedDirectory === null
     ? null
     : {
         draft,
@@ -3561,6 +3571,7 @@ function composerSnapshot(): PersistedComposer | null {
         lastModel: plainModel(state.lastModel),
         favoriteModels: state.favoriteModels.map(plainQuickModel),
         recentModels: state.recentModels.map(plainQuickModel),
+        selectedDirectory: state.selectedDirectory,
       };
 }
 
@@ -3615,6 +3626,12 @@ watch(
 );
 watch(
   () => state.recentModels,
+  () => scheduleComposerPersist(),
+);
+// The open project rides the same sidecar: without it a restart would land
+// 新建对话 wherever the agent server's cwd points.
+watch(
+  () => state.selectedDirectory,
   () => scheduleComposerPersist(),
 );
 

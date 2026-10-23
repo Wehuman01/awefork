@@ -73,6 +73,10 @@ export async function readComposer(filePath: string): Promise<PersistedComposer 
       lastModel: sanitizeModel(v.lastModel),
       favoriteModels: sanitizeModelList(v.favoriteModels),
       recentModels: sanitizeModelList(v.recentModels),
+      selectedDirectory:
+        typeof v.selectedDirectory === "string" && v.selectedDirectory !== ""
+          ? v.selectedDirectory
+          : null,
     };
   } catch {
     return null;

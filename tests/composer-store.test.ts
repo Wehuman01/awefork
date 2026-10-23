@@ -31,7 +31,12 @@ describe("composer store", () => {
   it("round-trips a draft with attachments and pane models", async () => {
     const path = await tempComposerPath();
     await writeComposer(path, composer);
-    expect(await readComposer(path)).toEqual({ ...composer, favoriteModels: [], recentModels: [] });
+    expect(await readComposer(path)).toEqual({
+      ...composer,
+      favoriteModels: [],
+      recentModels: [],
+      selectedDirectory: null,
+    });
   });
 
   it("round-trips an empty composer (no draft, no picks)", async () => {
@@ -43,6 +48,7 @@ describe("composer store", () => {
       lastModel: null,
       favoriteModels: [],
       recentModels: [],
+      selectedDirectory: null,
     });
   });
 
@@ -65,7 +71,7 @@ describe("composer store", () => {
       ],
     };
     await writeComposer(path, composer);
-    expect(await readComposer(path)).toEqual(composer);
+    expect(await readComposer(path)).toEqual({ ...composer, selectedDirectory: null });
   });
 
   it("drops malformed fields instead of failing the whole read", async () => {
@@ -93,7 +99,23 @@ describe("composer store", () => {
       lastModel: { providerId: "z", modelId: "bad", variant: null },
       favoriteModels: [{ providerId: "p", modelId: "m1", variant: null }],
       recentModels: [],
+      selectedDirectory: null,
     });
+  });
+
+  it("round-trips the remembered project directory, dropping empty strings", async () => {
+    const path = await tempComposerPath();
+    const withDir = {
+      draft: null,
+      paneModels: {},
+      lastModel: null,
+      selectedDirectory: "/demo/shop-api",
+    };
+    await writeComposer(path, withDir);
+    expect((await readComposer(path))?.selectedDirectory).toBe("/demo/shop-api");
+
+    await writeFile(path, JSON.stringify({ ...withDir, selectedDirectory: "" }), "utf8");
+    expect((await readComposer(path))?.selectedDirectory).toBeNull();
   });
 
   it("removes the file when written null", async () => {
@@ -111,6 +133,7 @@ describe("composer store", () => {
       lastModel: null,
       favoriteModels: [],
       recentModels: [],
+      selectedDirectory: null,
     };
     // Without serialization both writes race the rename; the queue keeps
     // them ordered so the file never ends up mid-flight.
