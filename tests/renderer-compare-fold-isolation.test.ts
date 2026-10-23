@@ -49,4 +49,17 @@ describe("compare card fold isolation", () => {
     expect(context).not.toMatch(/class="pair"/);
     expect(context).not.toMatch(/stepPager/);
   });
+
+  it("keeps the column head off the aligned mode", async () => {
+    const context = await readFile(CONTEXT_PATH, "utf8");
+
+    // The aligned header cards above already name both sides and mark the
+    // current one. A column head there would only repeat them, and its
+    // "选中" would tear the lens down mid-comparison — selecting a session
+    // is the compare exit switch. Only the free side-by-side mode, whose two
+    // timelines share no header, keeps the head.
+    const aligned = context.slice(context.indexOf('in pairColumns'), context.indexOf('<!-- 不同源'));
+    expect(aligned).not.toMatch(/cmp-fcol-head/);
+    expect(context.slice(context.indexOf('<!-- 不同源'))).toMatch(/cmp-fcol-head/);
+  });
 });

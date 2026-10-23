@@ -65,18 +65,9 @@
               class="cmp-fcol"
               :class="sideOf(ci)"
             >
-              <div class="cmp-fcol-head">
-                <button
-                  type="button"
-                  :title="t('branch.selectColumn', { title: col.title })"
-                  @click="selectColumn(col.id)"
-                >{{ t("branch.select") }}</button>
-                <button
-                  type="button"
-                  :title="t('branch.jumpLatest')"
-                  @click="scrollLatest(ci)"
-                >{{ t("branch.latest") }}</button>
-              </div>
+              <!-- No column head here: the aligned header cards above already
+                   name both sides and mark the current one, and "选中" would
+                   tear the lens down mid-comparison. -->
               <CmpCell
                 v-for="cell in col.cells"
                 :key="cell.id"
