@@ -289,6 +289,18 @@ describe("ensureOpencodeServer", () => {
     );
   });
 
+  test("surfaces cmd's exit 9009 as ENOENT so the port walk aborts on Windows", async () => {
+    // shell:true on win32 hides the spawn's own ENOENT; cmd.exe exits with
+    // 9009 instead (and its message text is locale-dependent).
+    const child = fakeRunningChild();
+    queueMicrotask(() => {
+      child.exitCode = 9009;
+    });
+    await expect(
+      ensureOpencodeServer(0, () => child, { portRaceGraceMs: 10, readyDeadlineMs: 2000 }),
+    ).rejects.toThrow(/ENOENT \(cmd exit 9009\)/);
+  });
+
   test("waits for the event stream, not just /session, before resolving", async () => {
     // Entry probe fails once; then REST answers while /event 503s two polls.
     // eventFailures: 3 — the held-port wait's reuse probe burns one /event

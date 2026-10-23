@@ -316,6 +316,38 @@ describe("zcode-server", () => {
       expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(realCatalog);
     });
 
+    it("finds the Windows per-user install of the ZCode desktop app", async () => {
+      const home = "/Users/tester";
+      const bundledCli = `${home}/AppData/Local/Programs/zcode/resources/glm/zcode.cjs`;
+      mocks.existsSync.mockImplementation((path: string) => path === bundledCli);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        process.env,
+        home,
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result).toEqual({ command: "node", args: [bundledCli], env: {} });
+    });
+
+    it("normalizes backslash overrides so the provider catalog resolves on Windows", async () => {
+      const override = "C:\\Apps\\ZCode\\resources\\glm\\zcode.cjs";
+      const catalog = "C:/Apps/ZCode/resources/glm/provider/zcode-builtin.json";
+      mocks.existsSync.mockImplementation((path: string) => path === override || path === catalog);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, AWEFORK_ZCODE_CLI: override },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(catalog);
+    });
+
     it("uses PATH fallback on linux when bundle is absent", async () => {
       mocks.existsSync.mockReturnValue(false);
       mocks.execFile.mockResolvedValue({ stdout: "zcode 0.16.5\n", stderr: "" });
