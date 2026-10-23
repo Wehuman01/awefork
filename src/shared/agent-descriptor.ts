@@ -151,6 +151,24 @@ export interface AgentMessageFields {
   readonly error: readonly string[];
 }
 
+/**
+ * Where a message row reports the tokens its step used, as dot-paths per
+ * bucket; an empty list means the protocol has no such field. `total` wins
+ * when the backend computes one (its own accounting of the whole step);
+ * otherwise the parts are summed — opencode's `input` excludes the cached
+ * reads it reports separately, so the sum is the step's footprint in the
+ * model's context window. A protocol that reports no usage omits the
+ * section, and its messages carry no contextTokens.
+ */
+export interface AgentUsageFact {
+  readonly total: readonly string[];
+  readonly input: readonly string[];
+  readonly output: readonly string[];
+  readonly reasoning: readonly string[];
+  readonly cacheRead: readonly string[];
+  readonly cacheWrite: readonly string[];
+}
+
 /** A text-bearing part kind: which part type holds it and how rows join. */
 export interface AgentTextPart {
   readonly type: string;
@@ -377,6 +395,8 @@ export interface OpenCodeDescriptor {
     readonly textPath?: readonly string[];
     /** Row-level attachment array; absent = attachments are file parts (v1). */
     readonly attachments?: AgentAttachmentsFact;
+    /** Token-usage paths; absent = this protocol reports no usage per row. */
+    readonly usage?: AgentUsageFact;
   };
   /** Part timing field names; absent = v1's start/end. */
   readonly partTimeKeys?: AgentPartTimeKeys;
@@ -741,7 +761,11 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   }
 
   const messages = section(root, "messages", "agent descriptor");
-  onlyKeys(messages, ["fields", "parts", "partsPath", "textPath", "attachments"], "messages");
+  onlyKeys(
+    messages,
+    ["fields", "parts", "partsPath", "textPath", "attachments", "usage"],
+    "messages",
+  );
   const messagesFields = parseFieldPaths<AgentMessageFields>(
     messages.fields,
     [
@@ -805,6 +829,28 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       nameField: stringAt(record.nameField, "messages.attachments.nameField"),
       mimeField: stringAt(record.mimeField, "messages.attachments.mimeField"),
       dataField: stringAt(record.dataField, "messages.attachments.dataField"),
+    };
+  }
+
+  // Optional token-usage paths; an omitted key parses to an empty path list,
+  // which contextTokensOf already treats as "this protocol has no such field".
+  let usage: AgentUsageFact | undefined;
+  if (messages.usage !== undefined) {
+    const record = objectAt(messages.usage, "messages.usage");
+    onlyKeys(
+      record,
+      ["total", "input", "output", "reasoning", "cacheRead", "cacheWrite"],
+      "messages.usage",
+    );
+    const pathsAt = (key: string): readonly string[] =>
+      record[key] === undefined ? [] : dotPathsAt(record[key], `messages.usage.${key}`);
+    usage = {
+      total: pathsAt("total"),
+      input: pathsAt("input"),
+      output: pathsAt("output"),
+      reasoning: pathsAt("reasoning"),
+      cacheRead: pathsAt("cacheRead"),
+      cacheWrite: pathsAt("cacheWrite"),
     };
   }
 
@@ -958,6 +1004,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
       ...(partsPath ? { partsPath } : {}),
       ...(textPath ? { textPath } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(usage ? { usage } : {}),
       parts: {
         text: parseTextPart(parts.text, "messages.parts.text"),
         thinking: parseTextPart(parts.thinking, "messages.parts.thinking"),
@@ -1136,6 +1183,33 @@ export function firstNumber(source: unknown, candidates: readonly string[]): num
     if (typeof value === "number") return value;
   }
   return null;
+}
+
+/**
+ * The step's footprint in the model's context window: the backend's own
+ * total when it reports one, else the sum of the parts it reports. null when
+ * the row reports none of them.
+ */
+export function contextTokensOf(row: unknown, usage: AgentUsageFact | undefined): number | null {
+  if (!usage) return null;
+  const total = firstNumber(row, usage.total);
+  if (total !== null) return total;
+  let sum = 0;
+  let seen = false;
+  for (const paths of [
+    usage.input,
+    usage.output,
+    usage.reasoning,
+    usage.cacheRead,
+    usage.cacheWrite,
+  ]) {
+    const value = firstNumber(row, paths);
+    if (value !== null) {
+      sum += value;
+      seen = true;
+    }
+  }
+  return seen ? sum : null;
 }
 
 /** First x.y[.z…] triple in raw CLI output, null when there is none. */

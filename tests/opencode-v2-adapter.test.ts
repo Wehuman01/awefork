@@ -442,6 +442,8 @@ describe("v2 message mapping", () => {
         completedAt: 103,
         finish: "tool-calls",
         outputTokens: 7,
+        // usage sums: input 5 + output 7 + reasoning 3 + cache 0
+        contextTokens: 15,
         error: null,
       },
     ]);

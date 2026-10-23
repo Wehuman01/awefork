@@ -70,7 +70,12 @@ interface PiMessage {
   timestamp?: number;
   model?: string;
   provider?: string;
-  usage?: { output?: number };
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
   stopReason?: string;
   errorMessage?: string;
 }
@@ -108,6 +113,8 @@ interface PiModel {
   name: string;
   provider: string;
   reasoning: boolean;
+  /** Context window in tokens, when the provider catalog ships it. */
+  contextWindow?: number;
   input: ("text" | "image")[];
 }
 
@@ -250,6 +257,24 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       .filter(Boolean);
 
   /** Map an ordered branch to ChatMessage rows, inheriting model/variant. */
+  /**
+   * pi-ai reports usage with cache reads/writes separate from input, like
+   * opencode — the sum is the step's footprint in the model's context window.
+   */
+  function piContextTokens(usage: PiMessage["usage"]): number | null {
+    if (!usage) return null;
+    const parts = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+
   const mapBranch = (branch: PiEntry[]): ChatMessage[] => {
     const rows: ChatMessage[] = [];
     let providerId: string | null = null;
@@ -292,6 +317,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
               error: null,
             });
           } else if (message.role === "assistant") {
+            const contextTokens = piContextTokens(message.usage);
             rows.push({
               id: entry.id,
               role: "assistant",
@@ -306,6 +332,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
               completedAt: createdAt,
               finish: STOP_REASON_TO_FINISH[message.stopReason ?? ""] ?? null,
               outputTokens: typeof message.usage?.output === "number" ? message.usage.output : null,
+              ...(contextTokens === null ? {} : { contextTokens }),
               error: message.errorMessage ?? null,
             });
           }
@@ -507,6 +534,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
           modelName: model.name || model.id,
           variants: model.reasoning ? THINKING_LEVELS : [],
           attachment: model.input.includes("image"),
+          ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
         }));
       } finally {
         proc.kill();

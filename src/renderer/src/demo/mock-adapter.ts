@@ -312,6 +312,7 @@ const MODELS: ModelOption[] = [
     modelName: "GLM 5.3 Flash",
     variants: ["low", "medium", "high"],
     attachment: true,
+    contextWindow: 128_000,
   },
   {
     providerId: "oc-awerouter",
@@ -320,6 +321,7 @@ const MODELS: ModelOption[] = [
     modelName: "GLM 5.3",
     variants: ["minimal", "low", "medium", "high", "xhigh"],
     attachment: true,
+    contextWindow: 200_000,
   },
   {
     providerId: "oc-local",
@@ -328,6 +330,7 @@ const MODELS: ModelOption[] = [
     modelName: "Qwen3 Coder 30B",
     variants: [],
     attachment: false,
+    contextWindow: 128_000,
   },
 ];
 
@@ -406,7 +409,17 @@ export function installMockAdapter(): void {
   const ensureMessages = (id: string): ChatMessage[] => {
     let list = messages.get(id);
     if (!list) {
-      list = sessionTurns(defs, id).flatMap(turnMessages);
+      // The meter reads the newest reported step, so let usage grow over
+      // the session instead of every turn reporting the same footprint.
+      let contextBase = 9_000;
+      list = sessionTurns(defs, id).flatMap((turn) => {
+        const rows = turnMessages(turn);
+        contextBase += 2_400 + (turn.tokens ?? 800) * 6;
+        for (const row of rows) {
+          if (row.role === "assistant") row.contextTokens = contextBase;
+        }
+        return rows;
+      });
       messages.set(id, list);
     }
     return list;

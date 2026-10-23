@@ -285,6 +285,7 @@
         :favorite-models="store.favoriteModels"
         :recent-models="store.recentModels"
         :allow-attachments="store.capabilities.attachments"
+        :context="paneContextUsage"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
@@ -315,6 +316,7 @@ import {
   inlineHostVisible,
   isTurnMarked,
   paneComposerModel,
+  paneContextUsage,
   paneMessages,
   paneTurn,
   retryTurn,
