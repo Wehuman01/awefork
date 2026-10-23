@@ -231,6 +231,146 @@ try {
   }, 15_000, "fork grown");
   check("draft send forks a new branch onto the canvas", true);
 
+  // 4b. File browser panel: the tabs switch the middle column and the
+  //     sidebar, and the panel mounts with its states. The demo adapter has
+  //     no filesystem, so the listing answers "not found" — the panel must
+  //     phrase that, not crash or spin.
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".fb"));
+  })()`), 5000, "files tab opens the browser");
+  const fbStates = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      visible: Boolean(document.querySelector(".fb")),
+      canvasHidden: document.querySelector(".viewport")?.offsetParent === null,
+      error: document.querySelector(".fb-state.err")?.textContent ?? "",
+      crumbs: document.querySelectorAll(".fb-crumb").length,
+      quick: Boolean(document.querySelector(".fb-quick-input")),
+      preview: Boolean(document.querySelector(".fb-preview")),
+    })`);
+    if (!state.visible || !state.canvasHidden || !state.quick || !state.preview) {
+      throw new Error(`file panel incomplete: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "file panel states");
+  check("files tab shows the browser and hides the canvas", true);
+  check("a missing listing is phrased, not spun", fbStates.error.length > 0, fbStates.error);
+  check("path breadcrumbs render for the landing directory", fbStates.crumbs >= 1, `${fbStates.crumbs} crumbs`);
+
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("sidebar files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".ft"));
+  })()`), 5000, "sidebar files tab");
+  const tree = await retry(
+    () =>
+      cdp.evaluate(`({
+        tree: Boolean(document.querySelector(".ft")),
+        places: document.querySelectorAll(".ft-row").length,
+        sessionsHidden: document.querySelector(".sidebar-sessions")?.offsetParent === null,
+      })`),
+    5000,
+    "sidebar file tab",
+  );
+  check("sidebar files tab shows common places", tree.tree && tree.places >= 4 && tree.sessionsHidden, JSON.stringify(tree));
+  await cdp.evaluate(`[...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("会话")).click()`);
+  await cdp.evaluate(`[...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("画布")).click()`);
+
+  // 4c. Path drop: an internal payload lands in the draft it is dropped on
+  //     as verbatim text — no attachment chip, no send — and the drop
+  //     affordance lights the target while the drag is over it.
+  const DROP_PATH = "/demo/shop-api/docs/interaction-notes.md";
+  /**
+   * Dispatch a path drag onto the element `elExpr` resolves to in the page.
+   * The highlight is read after a frame, because Vue applies the class on
+   * its next tick rather than inside the event handler.
+   */
+  const dropOnto = (elExpr, paths, files = false) =>
+    cdp.evaluate(`(async () => {
+      const el = (${elExpr});
+      if (!el) return { ok: false, why: "target missing" };
+      const dt = new DataTransfer();
+      if (${JSON.stringify(paths)}.length > 0) {
+        dt.setData("application/x-awefork-path", JSON.stringify(${JSON.stringify(paths)}));
+      }
+      if (${JSON.stringify(files)}) {
+        dt.items.add(new File(["x"], "from-finder.md", { type: "text/markdown" }));
+      }
+      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      const highlighted = el.classList.contains("drop-on");
+      el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return { ok: true, highlighted };
+    })()`);
+
+  await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
+  await retry(() => cdp.evaluate(fillTextarea(".draft textarea", "请帮我看一下这个文件：")), 5000, "draft fill");
+  const dropped = await retry(async () => {
+    const result = await dropOnto(`document.querySelector(".draft")`, [DROP_PATH]);
+    if (!result.ok) throw new Error(result.why);
+    return result;
+  }, 5000, "internal drop on draft");
+  check("dragover highlights the draft as a drop target", dropped.highlighted === true);
+  const draftText = await retry(
+    () => cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`),
+    5000,
+    "draft value",
+  );
+  check(
+    "path lands as plain text on its own line",
+    draftText === `请帮我看一下这个文件：\n${DROP_PATH}\n`,
+    JSON.stringify(draftText),
+  );
+  check(
+    "no attachment chip was staged",
+    (await cdp.evaluate(`document.querySelectorAll(".draft .att-chip").length`)) === 0,
+  );
+  check(
+    "the draft was not sent",
+    (await cdp.evaluate(`Boolean(document.querySelector(".draft"))`)) === true,
+  );
+
+  // 4d. Dropping on another turn retargets the draft (continue/fork), and
+  //     the first draft's unsent text is parked, not lost.
+  const retargeted = await retry(async () => {
+    const result = await dropOnto(`document.querySelectorAll(".turn")[1]`, [DROP_PATH]);
+    if (!result.ok) throw new Error(result.why);
+    return result;
+  }, 5000, "drop on turn card");
+  check("drop on a turn card is accepted", retargeted.ok === true);
+  await retry(async () => {
+    const text = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+    if (!text.includes(DROP_PATH)) throw new Error(`retarget draft missing path: ${JSON.stringify(text)}`);
+  }, 5000, "retargeted draft");
+  await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "back to first target");
+  const restored = await retry(
+    () => cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`),
+    5000,
+    "parked draft",
+  );
+  check(
+    "the first draft's unsent text survived the retarget",
+    restored === `请帮我看一下这个文件：\n${DROP_PATH}\n`,
+    JSON.stringify(restored),
+  );
+
+  // 4e. An external drop the OS cannot name inserts nothing and says so.
+  const beforeExternal = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+  await retry(async () => {
+    const result = await dropOnto(`document.querySelector(".draft")`, [], true);
+    if (!result.ok) throw new Error(result.why);
+  }, 5000, "external drop");
+  await retry(
+    () => cdp.evaluate(`Boolean(document.querySelector(".fb-notice"))`),
+    5000,
+    "unnamed-drop notice",
+  );
+  const afterExternal = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+  check("an unnamed external drop inserts nothing", beforeExternal === afterExternal);
+
   // 5. No error toast survived the whole run.
   const errorToast = await cdp.evaluate(`document.querySelector(".toast.banner-error")?.textContent ?? ""`);
   check("no error toast raised", errorToast === "", errorToast);

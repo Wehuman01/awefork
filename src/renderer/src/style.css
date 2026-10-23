@@ -6674,6 +6674,16 @@ html[data-theme="dark"] ::selection {
   color: var(--ink-faint);
 }
 
+.fp-lang {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--lavender-soft);
+  border: 1px solid var(--line);
+  color: var(--lavender-deep);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
 .fp-head {
   display: flex;
   align-items: center;
@@ -7061,4 +7071,33 @@ html[data-theme="dark"] .file-info-backdrop {
 
 html[data-theme="dark"] .fp-image {
   background: #241d2e;
+}
+
+/* Enlarged preview: the same pane, fixed over the app. Esc or the button
+   steps back; a new file's preview resets it. Declared after the base
+   rules so the more specific selectors win without reordering them. */
+.fp.zoomed {
+  position: fixed;
+  inset: 16px;
+  z-index: 75;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 12px;
+  outline: none;
+}
+
+.fp.zoomed .fp-image {
+  max-height: calc(100vh - 96px);
+}
+
+.fp.zoomed .fp-markdown {
+  max-width: 860px;
+  margin: 0 auto;
+  font-size: 14px;
+}
+
+html[data-theme="dark"] .fp.zoomed {
+  background: var(--card);
 }

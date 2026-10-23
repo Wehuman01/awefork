@@ -22,13 +22,12 @@ import type {
   SearchOptions,
   TextPreview,
 } from "../shared/file-types.js";
+import { MAX_ENTRIES } from "../shared/file-types.js";
 
 /** Text previews stop here; the UI says what was cut instead of hanging. */
 export const MAX_PREVIEW_BYTES = 512 * 1024;
 /** Image previews come back as data URLs, so they get their own smaller cap. */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** One directory listing stops here; the UI marks the folder as capped. */
-export const MAX_ENTRIES = 2000;
 /** Quick search visits at most this many entries before giving up. */
 const SEARCH_BUDGET = 50_000;
 

@@ -34,6 +34,9 @@ export interface FileError {
 
 export type FsResult<T> = { ok: true; value: T } | { ok: false; error: FileError };
 
+/** One directory listing stops here; the UI marks the folder as capped. */
+export const MAX_ENTRIES = 2000;
+
 /** One entry of a directory listing. */
 export interface FileEntry {
   name: string;

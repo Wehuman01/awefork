@@ -1,5 +1,11 @@
 <template>
-  <div class="fp">
+  <div
+    class="fp"
+    :class="{ zoomed }"
+    tabindex="0"
+    @keydown.space.prevent="toggleZoom"
+    @keydown.esc="zoomed = false"
+  >
     <template v-if="!preview">
       <p class="fp-empty">{{ t("files.previewEmpty") }}</p>
     </template>
@@ -14,9 +20,20 @@
     <template v-else-if="preview.status === 'text'">
       <div class="fp-head">
         <span class="fp-name" :title="preview.path">{{ nameOf(preview.path) }}</span>
+        <span v-if="codeLang" class="fp-lang">{{ codeLang }}</span>
         <span v-if="preview.truncated" class="fp-trunc" :title="t('files.truncatedTitle')">{{
           t("files.truncated")
         }}</span>
+        <button
+          type="button"
+          class="fp-open"
+          :class="{ on: zoomed }"
+          :title="zoomed ? t('files.unzoom') : t('files.zoom')"
+          :aria-label="zoomed ? t('files.unzoom') : t('files.zoom')"
+          :aria-pressed="zoomed"
+          @click="toggleZoom"
+          >⤢</button
+        >
         <button type="button" class="fp-open" :title="t('files.openSystem')" @click="openSystem">↗</button>
       </div>
       <MarkdownView v-if="isMarkdown" class="fp-markdown" :source="preview.text ?? ''" />
@@ -42,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { displayName } from "../../../shared/file-paths";
 import { flashNotice, type PreviewState } from "../files";
 import { t } from "../i18n";
@@ -51,6 +68,21 @@ import { MarkdownView } from "./markdown-view";
 const props = defineProps<{ preview: PreviewState | null }>();
 
 const preview = computed(() => props.preview);
+
+/** Space (or the ⤢ button) enlarges the current preview; Esc steps back. */
+const zoomed = ref(false);
+
+function toggleZoom(): void {
+  zoomed.value = !zoomed.value;
+}
+
+// A new file replaces the preview, so the enlargement cannot outlive it.
+watch(
+  () => props.preview?.path,
+  () => {
+    zoomed.value = false;
+  },
+);
 
 const MARKDOWN_EXTENSIONS = [".md", ".markdown", ".mdown"];
 const CODE_EXTENSIONS: Record<string, string> = {

@@ -101,6 +101,17 @@ export async function initFiles(): Promise<void> {
   }
 }
 
+/**
+ * First look at the file view: land on the project root when one is open,
+ * else the home directory. A no-op once anything has been browsed — the
+ * browsing position survives view switches.
+ */
+export async function ensureBrowsing(root: string | null): Promise<void> {
+  if (files.browsing !== null) return;
+  await initFiles();
+  await browseTo(root ?? files.homePath ?? "/");
+}
+
 async function load(dir: string): Promise<void> {
   const seq = ++listSeq;
   files.loading = true;
@@ -114,6 +125,10 @@ async function load(dir: string): Promise<void> {
   // A newer navigation (or a refresh of another directory) already won.
   if (seq !== listSeq) return;
   files.loading = false;
+  // The attempted directory is recorded either way: a failed listing still
+  // shows where the user tried to go, so the error has a breadcrumb and a
+  // path to correct, and "up" leads somewhere sensible.
+  files.browsing = dir;
   if (!result.ok) {
     files.entries = [];
     files.error = result.error;
@@ -364,7 +379,10 @@ export async function loadTreeChildren(dir: string): Promise<void> {
     files.treeError[dir] = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  files.treeChildren[dir] = result.value.entries.filter((entry) => entry.isDir);
+  // Directories only, dot-prefixed ones left out — a project tree is for
+  // navigating source, not for wading through .git and .cache. The list view
+  // still shows them behind its own hidden-files toggle.
+  files.treeChildren[dir] = result.value.entries.filter((entry) => entry.isDir && !entry.hidden);
 }
 
 /** Expand a node, loading its children on first open (never recursively). */

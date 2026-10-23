@@ -556,6 +556,8 @@ Fix item 1 first: register the middleware once on the route group; one line clos
     en: "The file is large; only its head is previewed",
   },
   "files.openSystem": { zh: "用系统应用打开", en: "Open with the system app" },
+  "files.zoom": { zh: "放大预览（空格）", en: "Enlarge the preview (Space)" },
+  "files.unzoom": { zh: "收起放大（Esc）", en: "Shrink the preview (Esc)" },
   "files.openFailed": { zh: "系统无法打开这个文件", en: "The system could not open this file" },
   "files.quickOpen": { zh: "在当前项目里快速查找文件", en: "Quick-find a file in this project" },
   "files.quickPlaceholder": {

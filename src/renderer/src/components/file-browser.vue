@@ -216,10 +216,12 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { displayName, joinSegments, parentOf, pathSegments } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
+import { MAX_ENTRIES } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
   browseTo,
   clearQuickSearch,
+  ensureBrowsing,
   files,
   flashNotice,
   goBack,
@@ -240,11 +242,9 @@ import {
 } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
 import { t } from "../i18n";
+import { mainView } from "../layout";
 import { store } from "../state";
 import FilePreview from "./file-preview.vue";
-
-/** Same cap the main process enforces, so the note matches the listing. */
-const MAX_ENTRIES = 2000;
 
 const pathInput = ref("");
 const filterInput = ref("");
@@ -265,6 +265,20 @@ watch(quickInput, (value) => {
   if (value.trim() === "") clearQuickSearch();
 });
 watch(quickHiddenInput, (value) => setQuickIncludeHidden(value));
+
+// The first time the file view is shown, land somewhere useful — the open
+// project, else the home directory. Afterwards the browsing position
+// belongs to the user and survives view switches. Waiting for boot keeps
+// the project root (which loads asynchronously) ahead of the home dir.
+watch(
+  [mainView, () => store.booted],
+  () => {
+    if (mainView.value === "files" && store.booted) {
+      void ensureBrowsing(store.selectedDirectory);
+    }
+  },
+  { immediate: true },
+);
 
 const crumbs = computed(() => {
   if (files.browsing === null) return [];
