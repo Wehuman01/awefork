@@ -246,6 +246,11 @@ export interface AweforkApi {
    */
   quitKeepAlive(): Promise<boolean>;
   setQuitKeepAlive(value: boolean): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Sessions with a run in flight across every backend — what quitting would
+   * interrupt, and what keep-alive would let finish in the background.
+   */
+  runningSessionCount(): Promise<number>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */

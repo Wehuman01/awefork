@@ -154,6 +154,23 @@ const DICT: Dict = {
     zh: "已关：退出 awefork 会停止所有后端并中断进行中的任务（有任务在跑时会先弹确认）",
     en: "Off: quitting stops every backend and interrupts in-flight runs (a confirmation asks first when runs are going)",
   },
+  "topbar.quitKeepAlivePromptKicker": {
+    zh: "退出保留后台",
+    en: "Keep on quit",
+  },
+  "topbar.quitKeepAlivePromptTitle": {
+    zh: "有 {count} 个任务正在后台运行",
+    en: "{count} task(s) running in the background",
+  },
+  "topbar.quitKeepAlivePromptPoint1": {
+    zh: "开启后退出 awefork 不会关闭这些任务，它们会继续跑完并写入各自的会话记录",
+    en: "With this on, quitting will not close them — they finish and land in their session files",
+  },
+  "topbar.quitKeepAlivePromptPoint2": {
+    zh: "关闭此开关（默认）则退出即停止全部后端并中断这些任务",
+    en: "Leaving it off (the default) stops every backend and interrupts them on quit",
+  },
+  "topbar.quitKeepAlivePromptConfirm": { zh: "开启保留", en: "Turn on keep-alive" },
 
   // ── state.ts visible strings ───────────────────────────────────────────
   "error.openWindowFailed": {

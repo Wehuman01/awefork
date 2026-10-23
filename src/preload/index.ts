@@ -176,6 +176,7 @@ const api: AweforkApi = {
   quitKeepAlive: (): Promise<boolean> => ipcRenderer.invoke("awefork:quitKeepAlive"),
   setQuitKeepAlive: (value: boolean): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:setQuitKeepAlive", value),
+  runningSessionCount: (): Promise<number> => ipcRenderer.invoke("awefork:runningSessionCount"),
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),

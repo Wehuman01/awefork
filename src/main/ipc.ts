@@ -667,6 +667,9 @@ export function registerIpc(
     registry.setQuitKeepAlive(value);
     return { ok: true };
   });
+  // Runs in flight across every backend — the top bar counts them before
+  // offering to turn keep-alive on, so the user knows what will survive.
+  ipcMain.handle("awefork:runningSessionCount", () => registry.runningSessions().length);
 
   // ── app-level ────────────────────────────────────────────────────────────
 

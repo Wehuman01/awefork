@@ -769,9 +769,8 @@ describe("running-session tracking and quit keep-alive", () => {
   it("loads the persisted setting at startup so a fresh registry keeps servers alive", async () => {
     await writeQuitKeepAlive(join(userDataDir, "settings.json"), true);
     const fresh = createBackendRegistry(userDataDir);
-    // The startup read is async; give it a tick to land before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fresh.quitKeepAlive()).toBe(true);
+    // The startup read is async; a loaded event loop needs more than one tick.
+    await vi.waitFor(() => expect(fresh.quitKeepAlive()).toBe(true));
     fresh.dispose();
     expect(mocks.stopManagedServer).not.toHaveBeenCalled();
     expect(mocks.stopCodexServer).not.toHaveBeenCalled();
