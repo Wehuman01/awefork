@@ -1,5 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
-import { recordFork } from "./lineage-store.js";
+import { recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -156,9 +156,25 @@ interface ZcodeCatalogModel {
 
 const SESSION_EVENT_METHOD = "session/event";
 
+/**
+ * The v4 command channel. zcode's legacy session/* methods cover only the
+ * turn lifecycle (create/resume/list/send/stop/fork/compact/setModel/…);
+ * session bookkeeping — rename, delete — lives on the v4 gateway's command
+ * envelope, which the desktop client itself drives. Verified live against
+ * zcode 0.17.0: `v4/command` with type "renameSession"/"deleteSession".
+ */
+const COMMAND_METHOD = "v4/command";
+
 /** How long fork() waits for a running parent session to settle. */
 const FORK_BUSY_WAIT_MS = 10 * 60 * 1000;
 const FORK_BUSY_POLL_MS = 1000;
+
+/** What v4/command answers with; `status: "failed"` carries the reason. */
+interface ZcodeCommandResult {
+  status?: string;
+  reasonCode?: string;
+  message?: string;
+}
 
 export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   const now = options.now ?? Date.now;
@@ -236,6 +252,36 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     const summary = mapSessionRow(row ?? {});
     if (!summary.id) throw new Error("zcode session/create returned no session id");
     return summary;
+  };
+
+  /**
+   * One v4 command envelope. The server replies `{status, …}` with the
+   * commandId echoed; a `status: "failed"` frame is an application-level
+   * rejection (unknown session, persistence mismatch) and must surface as an
+   * error, not a silent success — the renderer only refreshes on resolve.
+   */
+  const runCommand = async (
+    type: "renameSession" | "deleteSession",
+    sessionId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> => {
+    const client = await options.client();
+    const result = await client.request<ZcodeCommandResult | null>(
+      COMMAND_METHOD,
+      {
+        commandId: `awefork-${type}-${sessionId}-${now()}`,
+        clientId: "awefork",
+        sessionId,
+        type,
+        payload,
+        issuedAt: now(),
+      },
+      30_000,
+    );
+    if (result?.status && result.status !== "accepted") {
+      const detail = result.message ?? result.reasonCode ?? result.status;
+      throw new Error(`zcode ${type} failed: ${detail}`);
+    }
   };
 
   const promptTextOf = (parts: ZcodeMessage["parts"]): string =>
@@ -685,18 +731,22 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       throw new Error("zcode does not support session compression yet");
     },
 
-    // The app-server protocol has no delete primitives; the renderer hides
-    // the affordances (capabilities.deleteSession/deleteMessage === false).
-    async deleteSession() {
-      throw new Error("zcode does not support deleting sessions yet");
+    // Session bookkeeping rides the v4 command channel (the same one the
+    // desktop client drives): there is no session/delete or session/rename
+    // method on the legacy surface. Delete is a soft delete server-side
+    // (time_deleted), which drops the row from session/list — what awefork's
+    // refresh reads.
+    async deleteSession(sessionId) {
+      await runCommand("deleteSession", sessionId, {});
+      await removeFork(options.lineagePath, sessionId);
     },
 
     async deleteMessage() {
       throw new Error("zcode does not support deleting a single message yet");
     },
 
-    async renameSession() {
-      throw new Error("zcode does not support renaming sessions yet");
+    async renameSession(sessionId, title) {
+      await runCommand("renameSession", sessionId, { title });
     },
 
     async prompt(sessionId, text, model) {
@@ -742,6 +792,21 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       }
     },
 
+    // The ZCode Protocol does carry server→client interaction requests
+    // (interaction/requestPermission, interaction/requestUserInput), but two
+    // verified facts rule out implementing this through the existing pipe:
+    //   1. zcode-jsonrpc answers ONLY the two methods in its SAFE_REPLIES
+    //      allowlist and rejects every other server request with
+    //      method-not-found, so a permission ask never reaches this adapter.
+    //   2. Live probing (0.17.0, build mode and guarded mode, a turn that
+    //      actually invoked Bash) produced zero interaction frames — the
+    //      only server requests were session/requestRuntimePreferences and
+    //      interaction/requestOfficialMcpAuthHeaders, both already safe-
+    //      answered by the transport.
+    // Wiring it up would mean relaxing the allowlist so an unanswered
+    // permission could block a turn — a worse failure than today's, where
+    // the transport refuses visibly and the tool call fails fast. The
+    // renderer never queues a zcode ask, so this stays unreachable.
     async respondInteraction() {
       throw new Error("zcode has no interaction awaiting a reply");
     },
