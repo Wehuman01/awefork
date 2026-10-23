@@ -133,6 +133,10 @@ async function load(dir: string): Promise<void> {
     files.entries = [];
     files.error = result.error;
     files.capped = false;
+    // The failed listing shows no rows, so the old selection and preview
+    // would describe entries the user cannot see.
+    files.selectedPath = null;
+    files.preview = null;
     return;
   }
   files.browsing = result.value.path;
@@ -286,6 +290,12 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
     };
     return;
   }
+  // An image that exists but is too big fails only as an image; surfacing
+  // "binary" from the text fallback below would misname the problem.
+  if (image && !image.ok && image.error.code === "too-large") {
+    files.preview = { path: entry.path, status: "error", error: image.error };
+    return;
+  }
   const text = await window.awefork.readTextPreview(entry.path).catch(() => null);
   if (seq !== previewSeq) return;
   if (text?.ok) {
@@ -308,12 +318,6 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   };
 }
 
-export function clearPreview(): void {
-  previewSeq += 1;
-  files.preview = null;
-  files.selectedPath = null;
-}
-
 /**
  * Locate an entry from elsewhere (quick open, "reveal"): enter its parent
  * directory, select it, and preview it when it is a file.
@@ -321,8 +325,6 @@ export function clearPreview(): void {
 export async function revealEntry(entry: FileEntry): Promise<void> {
   const parent = parentOf(entry.path);
   if (parent !== null && !samePath(parent, files.browsing ?? "")) {
-    await browseTo(parent);
-  } else if (files.browsing === null && parent !== null) {
     await browseTo(parent);
   }
   files.selectedPath = entry.path;
@@ -369,10 +371,17 @@ export function clearQuickSearch(): void {
 
 // ── sidebar tree ───────────────────────────────────────────────────────
 
+/** Bumped per directory on every tree load; stale responses are dropped. */
+const treeSeq: Record<string, number> = {};
+
 export async function loadTreeChildren(dir: string): Promise<void> {
+  treeSeq[dir] = (treeSeq[dir] ?? 0) + 1;
+  const seq = treeSeq[dir];
   files.treeLoading[dir] = true;
   files.treeError[dir] = null;
   const result = await window.awefork.listDir(dir).catch(() => null);
+  // A newer load for the same directory already won; let it finish the job.
+  if (seq !== treeSeq[dir]) return;
   files.treeLoading[dir] = false;
   if (!result?.ok) {
     files.treeChildren[dir] = [];

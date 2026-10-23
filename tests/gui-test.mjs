@@ -133,7 +133,7 @@ async function retry(fn, timeout = 20_000, label) {
 /** Set a form control's value the Vue v-model way: prototype setter + input event. */
 const fillTextarea = (selector, text) => `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
-  if (!el) return false;
+  if (!el) throw new Error("missing " + ${JSON.stringify(selector)});
   const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
   set.call(el, ${JSON.stringify(text)});
   el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -188,7 +188,10 @@ try {
   const prompt = `gui-smoke-${Date.now()}`;
   await retry(() => cdp.evaluate(fillTextarea(".chat-input textarea", prompt)), 5000, "composer fill");
   await cdp.evaluate(`document.querySelector(".chat-input .send").click()`);
-  await retry(() => cdp.evaluate(`Boolean(document.querySelector(".chat-input .abort"))`), 10_000, "running state");
+  await retry(async () => {
+    const running = await cdp.evaluate(`Boolean(document.querySelector(".chat-input .abort"))`);
+    if (!running) throw new Error("composer not in running state yet");
+  }, 10_000, "running state");
   check("sent prompt flips composer into running state", true);
   await retry(async () => {
     const done = await cdp.evaluate(`({
@@ -363,13 +366,18 @@ try {
     const result = await dropOnto(`document.querySelector(".draft")`, [], true);
     if (!result.ok) throw new Error(result.why);
   }, 5000, "external drop");
-  await retry(
-    () => cdp.evaluate(`Boolean(document.querySelector(".fb-notice"))`),
-    5000,
-    "unnamed-drop notice",
-  );
+  const notice = await retry(async () => {
+    const text = await cdp.evaluate(`document.querySelector(".fb-notice")?.textContent ?? ""`);
+    if (text === "") throw new Error("no notice after the drop");
+    return text;
+  }, 5000, "unnamed-drop notice");
   const afterExternal = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
   check("an unnamed external drop inserts nothing", beforeExternal === afterExternal);
+  check(
+    "the unnamed-drop notice says the paths could not be resolved",
+    notice.includes("拿不到") || notice.includes("Could not resolve"),
+    notice,
+  );
 
   // 5. No error toast survived the whole run.
   const errorToast = await cdp.evaluate(`document.querySelector(".toast.banner-error")?.textContent ?? ""`);

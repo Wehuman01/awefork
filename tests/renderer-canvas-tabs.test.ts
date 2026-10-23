@@ -38,6 +38,14 @@ const FORK_OF_A: SessionSummary = {
   origin: "fork",
 };
 
+const STORY_C: SessionSummary = {
+  ...STORY_A,
+  id: "story-c",
+  title: "新故事",
+  createdAt: 1_726_000_000_002,
+  updatedAt: 1_726_000_000_002,
+};
+
 function rowsFor(sessionId: string): ChatMessage[] {
   return [
     {
@@ -199,6 +207,37 @@ describe("canvas tabs", () => {
     expect(state.store.selectedId).toBeNull();
     const survivor = state.store.canvasTabs.find((t) => t.rootId === "story-b");
     expect(survivor).toBeDefined();
+  });
+
+  it("a blank tab opened after a story died can adopt a NEW story on refresh", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a");
+    apiSessions = [STORY_B]; // story-a deleted server-side
+    await state.refreshSessions();
+    expect(state.store.selectedId).toBeNull();
+
+    // The user opens a fresh blank tab (the ＋ button)…
+    await state.openCanvasTab(null);
+    // …and a new story appears: the refresh may adopt it into that tab.
+    apiSessions = [STORY_B, STORY_C];
+    await state.refreshSessions();
+    expect(state.store.selectedId).toBe("story-c");
+    expect(state.activeCanvasTab.value?.rootId).toBe("story-c");
+  });
+
+  it("never adopts a story another open tab already shows", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a"); // tab 2 owns story-a
+    // Back to the story-b tab, so the dying story is the ACTIVE one.
+    await state.activateCanvasTab(state.store.canvasTabs[0].id);
+    apiSessions = [STORY_A]; // story-b deleted server-side
+    await state.refreshSessions();
+
+    // The active (story-b) tab died blank; story-a is the only survivor and
+    // another tab owns it, so the refill must leave the tab blank rather
+    // than put two tabs on one story.
+    expect(state.store.selectedId).toBeNull();
+    expect(state.store.canvasTabs.filter((t) => t.rootId === "story-a").length).toBe(1);
   });
 
   it("keeps the live camera parked on the active tab", async () => {

@@ -1218,7 +1218,7 @@ export async function refreshSessions(): Promise<void> {
       state.selectedDirectory &&
       (!state.selectedId || !directorySessions.value.some((s) => s.id === state.selectedId))
     ) {
-      await selectSession(latestSessionId(directorySessions.value));
+      await selectSession(refillSessionId());
     }
     await ensureCanvasMessages();
   } catch (error) {
@@ -1332,6 +1332,7 @@ function pruneCanvasTabs(): void {
  */
 export async function activateCanvasTab(tabId: string): Promise<void> {
   if (tabId === state.activeCanvasTabId) return;
+  activeTabStoryDied = false;
   syncActiveTab();
   const tab = state.canvasTabs.find((t) => t.id === tabId);
   if (!tab) return;
@@ -1377,6 +1378,7 @@ export async function openCanvasTab(sessionId: string | null): Promise<void> {
     }
   }
   canvasTabSeq += 1;
+  activeTabStoryDied = false;
   const tab: CanvasTab = {
     id: `tab-${canvasTabSeq}`,
     rootId: null,
@@ -1402,6 +1404,7 @@ export async function closeCanvasTab(tabId: string): Promise<void> {
   if (state.canvasTabs.length === 0) {
     // Closing the last tab leaves one blank tab, not a tab-less limbo.
     canvasTabSeq += 1;
+    activeTabStoryDied = false;
     const blank: CanvasTab = {
       id: `tab-${canvasTabSeq}`,
       rootId: null,
@@ -4635,6 +4638,26 @@ function latestSessionId(sessions: SessionSummary[]): string | null {
   return sessions.reduce((a, b) => (a.updatedAt > b.updatedAt ? a : b)).id;
 }
 
+/**
+ * The session refreshSessions may auto-adopt into the active tab: the latest
+ * one whose story root no OTHER open tab already shows. Adopting a story
+ * another tab owns would put two tabs on one story; when every story is
+ * claimed elsewhere the active tab just stays blank.
+ */
+function refillSessionId(): string | null {
+  const claimed = new Set(
+    state.canvasTabs
+      .filter((t) => t.id !== state.activeCanvasTabId && t.rootId !== null)
+      .map((t) => t.rootId as string),
+  );
+  if (claimed.size === 0) return latestSessionId(directorySessions.value);
+  for (const session of directorySessions.value) {
+    const root = storyRootOf(visibleSessions.value, state.lineage, session.id);
+    if (root === null || !claimed.has(root)) return session.id;
+  }
+  return null;
+}
+
 // ── backend switch ──────────────────────────────────────────────────────
 
 /** Fold the visible run maps into the backend's parked slot. */
@@ -4782,6 +4805,7 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   searchQuery.value = "";
   for (const key of Object.keys(cardHeights)) delete cardHeights[key];
   Object.assign(cardHeights, snapshot.cardHeights);
+  activeTabStoryDied = false;
   state.canvasTabs = snapshot.canvasTabs.map((tab) => ({ ...tab }));
   state.activeCanvasTabId = snapshot.activeCanvasTabId;
   state.canvasTabViews = { ...snapshot.canvasTabViews };
@@ -4853,6 +4877,7 @@ function resetWorkspace(): void {
   state.fitRequest = null;
   state.turnJumpRequest = null;
   searchQuery.value = "";
+  activeTabStoryDied = false;
   canvasTabSeq += 1;
   state.canvasTabs = [
     {

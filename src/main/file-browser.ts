@@ -202,7 +202,9 @@ export async function readTextPreview(
   const cap = Math.min(Math.max(Math.trunc(maxBytes) || MAX_PREVIEW_BYTES, 1), MAX_PREVIEW_BYTES);
   let handle: fs.FileHandle | null = null;
   try {
-    const stat = await fs.lstat(file);
+    // stat (not lstat): a symlink must resolve — one pointing at a directory
+    // answers "not a directory" instead of failing the open with EISDIR.
+    const stat = await fs.stat(file);
     if (stat.isDirectory()) return fail({ code: "not-a-directory" });
     handle = await fs.open(file, "r");
     // One byte past the cap tells us the file was longer without reading it all.
@@ -226,7 +228,8 @@ export async function readImagePreview(target: string): Promise<FsResult<ImagePr
   const mime = IMAGE_MIME[path.extname(file).toLowerCase()];
   if (!mime) return fail({ code: "unsupported" });
   try {
-    const stat = await fs.lstat(file);
+    // stat (not lstat) so symlinked images resolve to the file they name.
+    const stat = await fs.stat(file);
     if (stat.isDirectory()) return fail({ code: "not-a-directory" });
     if (stat.size > MAX_IMAGE_BYTES) return fail({ code: "too-large" });
     const bytes = await fs.readFile(file);

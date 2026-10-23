@@ -624,7 +624,6 @@ Fix item 1 first: register the middleware once on the route group; one line clos
     zh: "跨盘符无法计算相对路径，请复制绝对路径",
     en: "No relative path across drives — copy the absolute path",
   },
-  "files.relLoading": { zh: "读取中…", en: "Loading…" },
   "files.close": { zh: "关闭", en: "Close" },
   "files.noProject": { zh: "未选择项目", en: "No project selected" },
   "files.infoKind": { zh: "种类", en: "Kind" },

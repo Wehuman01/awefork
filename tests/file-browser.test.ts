@@ -177,6 +177,13 @@ describe("readTextPreview", () => {
     if (!bin.ok) expect(bin.error.code).toBe("binary");
   });
 
+  it("answers not-a-directory for a symlink pointing at a directory", async () => {
+    symlinkSync(path.join(root, "docs"), path.join(root, "link-to-docs"));
+    const result = await readTextPreview(path.join(root, "link-to-docs"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("not-a-directory");
+  });
+
   it("treats maxBytes as a ceiling: a smaller cap is honored, a larger one is not", async () => {
     writeFileSync(path.join(root, "huge.txt"), "y".repeat(MAX_PREVIEW_BYTES + 2048));
     const small = await readTextPreview(path.join(root, "huge.txt"), 10);

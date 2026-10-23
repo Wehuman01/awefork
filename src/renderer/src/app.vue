@@ -283,7 +283,10 @@ function onTabDragLeave(): void {
   cancelTabHover();
 }
 
-function onTabDrop(): void {
+function onTabDrop(event: DragEvent): void {
+  // The tab declared itself a drop target in dragover; without this the
+  // browser default (open the file) would navigate the renderer away.
+  event.preventDefault();
   cancelTabHover();
 }
 

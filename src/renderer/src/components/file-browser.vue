@@ -143,7 +143,7 @@
     </div>
 
     <div class="fb-body">
-      <div class="fb-entries" :class="files.view" @contextmenu.prevent="onListContextMenu">
+      <div class="fb-entries" :class="files.view" @contextmenu.prevent>
         <p v-if="files.loading" class="fb-state">{{ t("files.loading") }}</p>
         <p v-else-if="listError" class="fb-state err">{{ listError }}</p>
         <p v-else-if="files.entries.length === 0" class="fb-state">{{ t("files.dirEmpty") }}</p>
@@ -367,10 +367,5 @@ function submitPath(): void {
 
 function toggleView(): void {
   setView(files.view === "list" ? "grid" : "list");
-}
-
-function onListContextMenu(event: MouseEvent): void {
-  // A right-click on empty space in the list is not an entry action.
-  if ((event.target as HTMLElement).closest(".fb-row, .fb-tile")) return;
 }
 </script>
