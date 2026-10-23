@@ -3606,6 +3606,15 @@ function safeFileName(title: string): string {
 const PERSIST_DEBOUNCE_MS = 600;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let restoringComposer = false;
+/**
+ * The backend whose composer state is loaded in memory right now. Every
+ * persist is suppressed while this is null or names a backend other than the
+ * one being written: between a backend flip and its sidecar read-back the
+ * in-memory values still belong to the outgoing backend — or are the cleared
+ * defaults of a first visit — and flushing either would overwrite the
+ * incoming backend's saved favorites, recents and draft with the wrong data.
+ */
+let composerLoadedFor: BackendId | null = null;
 
 /** The reactive draft copied into plain objects the IPC layer can clone. */
 function plainPersistedDraft(): PersistedDraft | null {
@@ -3654,8 +3663,11 @@ function composerSnapshot(): PersistedComposer | null {
 function scheduleComposerPersist(): void {
   // Mid-switch the workspace is being reset for the next backend; flushing
   // here would clobber the outgoing backend's draft with empty state.
-  // switchBackend flushes it explicitly before parking instead.
-  if (restoringComposer || switchingBackend) return;
+  // switchBackend flushes it explicitly before parking instead. The
+  // composerLoadedFor check covers the rest of that window: until the target
+  // backend's sidecar has been read back, whatever is in memory is either the
+  // outgoing backend's state or cleared defaults — never the target's.
+  if (restoringComposer || switchingBackend || composerLoadedFor !== state.activeBackend) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistTimer = null;
@@ -3677,12 +3689,39 @@ async function flushComposer(backend: BackendId): Promise<void> {
     persistTimer = null;
   }
   if (restoringComposer) return;
+  // Only the backend whose state is actually loaded may be written — the same
+  // guard as the debounced path, spelled out here because the switch calls
+  // this with an explicit target while the in-memory state may already belong
+  // to the next one.
+  if (composerLoadedFor !== backend) return;
   const value = composerSnapshot();
   try {
     await window.awefork.saveComposer(backend, value);
   } catch {
     // Same contract as the debounced flush: losing the write only costs
     // crash-recovery of unsent input.
+  }
+}
+
+/**
+ * Drop one backend's persisted draft without touching the rest of its
+ * sidecar. Reached when a send landed after the workspace moved on, so the
+ * in-memory state can no longer be written for it: writing null would delete
+ * the whole file and take the backend's favorites, recents and remembered
+ * project with it.
+ */
+async function clearComposerDraft(backend: BackendId): Promise<void> {
+  let current: PersistedComposer | null = null;
+  try {
+    current = await window.awefork.composer(backend);
+  } catch {
+    return;
+  }
+  if (!current?.draft) return;
+  try {
+    await window.awefork.saveComposer(backend, { ...current, draft: null });
+  } catch {
+    // A surviving draft only costs a resurrected text box, never session data.
   }
 }
 
@@ -3718,45 +3757,54 @@ watch(
  * vanished session drops it entirely.
  */
 async function restoreComposer(): Promise<void> {
+  const backend = state.activeBackend;
+  // Claim the backend before the IPC hop, not after: a state change landing
+  // during the read (the boot's own directory auto-select, a refresh during a
+  // switch) would otherwise flush the outgoing backend's — or cleared default
+  // — values into this backend's sidecar.
+  restoringComposer = true;
   let persisted: PersistedComposer | null = null;
   try {
-    persisted = await window.awefork.composer(state.activeBackend);
+    persisted = await window.awefork.composer(backend);
   } catch {
     return;
-  }
-  restoringComposer = true;
-  try {
-    // Same existence filter as the write path: picks for sessions that
-    // vanished while the app was away don't resurrect in memory.
-    const paneModels: Record<string, ModelChoice> = {};
-    for (const [id, model] of Object.entries(persisted?.paneModels ?? {})) {
-      if (state.sessions.some((s) => s.id === id)) paneModels[id] = model;
-    }
-    state.paneModels = paneModels;
-    state.lastModel = persisted?.lastModel ?? null;
-    state.favoriteModels = persisted?.favoriteModels ?? [];
-    state.recentModels = persisted?.recentModels ?? [];
-    const draft = persisted?.draft ?? null;
-    // An empty draft is nothing to hand back; a fresh openDraft is better.
-    if (draft && draft.text.trim() !== "") {
-      if (state.sessions.some((s) => s.id === draft.sessionId)) {
-        const anchor = await draftAnchor(draft.sessionId, draft.atMessageId);
-        if (anchor) {
-          state.draft = {
-            nodeId: anchor.nodeId,
-            sessionId: draft.sessionId,
-            atMessageId: anchor.atMessageId,
-            contextMode: draft.contextMode ?? "inherit",
-            text: draft.text,
-            model: draft.model,
-            attachments: draft.attachments.map((a) => ({ ...a })),
-          };
-          void ensureModels();
-        }
-      }
-    }
   } finally {
     restoringComposer = false;
+  }
+  // The switch may have moved on while the read was in flight; the payload
+  // belongs to a parked world now and must not become this one's state.
+  if (backend !== state.activeBackend) return;
+  composerLoadedFor = backend;
+  // Same existence filter as the write path: picks for sessions that
+  // vanished while the app was away don't resurrect in memory.
+  const paneModels: Record<string, ModelChoice> = {};
+  for (const [id, model] of Object.entries(persisted?.paneModels ?? {})) {
+    if (state.sessions.some((s) => s.id === id)) paneModels[id] = model;
+  }
+  state.paneModels = paneModels;
+  state.lastModel = persisted?.lastModel ?? null;
+  state.favoriteModels = persisted?.favoriteModels ?? [];
+  state.recentModels = persisted?.recentModels ?? [];
+  const draft = persisted?.draft ?? null;
+  // An empty draft is nothing to hand back; a fresh openDraft is better.
+  if (draft && draft.text.trim() !== "") {
+    if (state.sessions.some((s) => s.id === draft.sessionId)) {
+      const anchor = await draftAnchor(draft.sessionId, draft.atMessageId);
+      // The draft's anchor costs another IPC round trip; a switch during it
+      // makes this payload stale, same as above.
+      if (anchor && backend === state.activeBackend) {
+        state.draft = {
+          nodeId: anchor.nodeId,
+          sessionId: draft.sessionId,
+          atMessageId: anchor.atMessageId,
+          contextMode: draft.contextMode ?? "inherit",
+          text: draft.text,
+          model: draft.model,
+          attachments: draft.attachments.map((a) => ({ ...a })),
+        };
+        void ensureModels();
+      }
+    }
   }
   // Normalize the file: stale sessions and dropped drafts get pruned.
   scheduleComposerPersist();
@@ -3886,8 +3934,10 @@ export async function sendDraft(): Promise<void> {
     } else {
       // The switch landed after the prompt went out: the run is real (it
       // streams through the parked runtime), so the outgoing backend's
-      // persisted draft is stale and must not come back.
-      void window.awefork.saveComposer(backend, null).catch(() => {});
+      // persisted draft is stale and must not come back. Clear just the
+      // draft — writing null would delete the whole sidecar and with it the
+      // backend's favorites and recents.
+      void clearComposerDraft(backend).catch(() => {});
     }
   } catch (error) {
     // The prompt never reached a run; settle as failed so no success tint
@@ -4247,6 +4297,11 @@ interface WorkspaceSnapshot {
   selectedTurnId: string | null;
   models: ModelOption[];
   modelsRequested: boolean;
+  /** Composer state this backend last showed; refilled from its own sidecar
+   *  on a cold boot and carried across a switch here. */
+  lastModel: ModelChoice | null;
+  favoriteModels: ModelChoice[];
+  recentModels: ModelChoice[];
   /** Measured card heights, so the restored canvas keeps its exact layout. */
   cardHeights: Record<string, number>;
 }
@@ -4274,6 +4329,9 @@ function parkWorkspace(backend: BackendId): void {
     selectedTurnId: state.selectedTurnId,
     models: [...state.models],
     modelsRequested,
+    lastModel: state.lastModel ? { ...state.lastModel } : null,
+    favoriteModels: [...state.favoriteModels],
+    recentModels: [...state.recentModels],
     cardHeights: { ...cardHeights },
   });
 }
@@ -4304,6 +4362,13 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.selectedTurnId = snapshot.selectedTurnId;
   state.models = snapshot.models;
   modelsRequested = snapshot.modelsRequested;
+  // Composer state comes back with the snapshot — it is this backend's, parked
+  // when it was last visible. The sidecar read in revalidateBackend only
+  // reconciles what changed while the backend was away.
+  state.lastModel = snapshot.lastModel;
+  state.favoriteModels = snapshot.favoriteModels;
+  state.recentModels = snapshot.recentModels;
+  composerLoadedFor = state.activeBackend;
   state.messagesError = null;
   state.loadingMessages = false;
   state.loadingCanvas = false;
@@ -4372,7 +4437,9 @@ function resetWorkspace(): void {
   modelsRequested = false;
   state.draft = null;
   // Backend-specific like the draft: the incoming backend's own composer
-  // sidecar refills it during boot.
+  // sidecar refills it during boot. Until it does, these are cleared
+  // defaults and must never be written back over the sidecar's contents.
+  composerLoadedFor = null;
   state.lastModel = null;
   state.favoriteModels = [];
   state.recentModels = [];
@@ -4414,6 +4481,11 @@ export async function switchBackend(backend: BackendId): Promise<void> {
     parkWorkspace(state.activeBackend);
     parkRuntime(state.activeBackend);
     state.activeBackend = backend;
+    // From here until the target's composer state is back, nothing in memory
+    // belongs to it — suppress every persist so a state change during the
+    // switch can't overwrite the target's sidecar with the outgoing backend's
+    // values or with cleared defaults.
+    composerLoadedFor = null;
     restoreRuntime(backend);
     const parked = workspaceCache.get(backend);
     if (parked) {
