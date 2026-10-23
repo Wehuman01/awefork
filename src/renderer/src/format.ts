@@ -16,6 +16,17 @@ export function formatTokens(count: number): string {
   return `${(count / 1000).toFixed(1)}k tok`;
 }
 
+/**
+ * Compact unitless token count for the composer's context meter:
+ * 830 / 12.4k / 182k / 1M. Trailing ".0" is dropped so 1.0M reads 1M.
+ */
+export function formatTokenCount(count: number): string {
+  if (count < 1000) return `${count}`;
+  const compact = (value: number): string => `${Number(value.toFixed(1))}`;
+  if (count < 1_000_000) return `${compact(count / 1000)}k`;
+  return `${compact(count / 1_000_000)}M`;
+}
+
 /** Compact age of a timestamp for sidebar rows: 刚刚 / 5分钟前 / 3小时前 / 2天前. */
 export function relTime(ms: number): string {
   const minutes = Math.floor((Date.now() - ms) / 60000);

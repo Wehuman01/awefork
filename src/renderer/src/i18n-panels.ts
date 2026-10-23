@@ -207,6 +207,18 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "用哪个模型继续这条分支",
     en: "Pick the model to continue this branch",
   },
+  "input.contextTitle": {
+    zh: "上下文 {used} / {window} tokens（{pct}%）— 本会话最近一次请求后的占用",
+    en: "Context {used} / {window} tokens ({pct}%) — occupancy after this session's latest request",
+  },
+  "input.contextTitleNoWindow": {
+    zh: "上下文已用 {used} tokens · 该模型未报告窗口大小",
+    en: "Context {used} tokens used · model window unknown",
+  },
+  "input.contextHint": {
+    zh: "接近窗口上限 — 可用 🗜 先压缩这条分支",
+    en: "Near the window limit — 🗜 compress this branch first",
+  },
   "input.send": { zh: "发送 ➤", en: "Send ➤" },
   "input.stop": { zh: "■ 停止", en: "■ Stop" },
   "input.noAttachments": {

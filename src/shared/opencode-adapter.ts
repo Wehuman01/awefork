@@ -1,4 +1,5 @@
 import {
+  contextTokensOf,
   firstNumber,
   firstString,
   type OpenCodeDescriptor,
@@ -339,6 +340,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         // that follows. v2 makes the marker the row itself, so it maps to the
         // same user-row shape v1 produces.
         const compaction = isCompactionRow(row, messageParts);
+        const contextTokens = contextTokensOf(m, descriptor.messages.usage);
         return {
           id: firstString(m, fields.id) ?? "",
           role: compaction
@@ -364,6 +366,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           completedAt: firstNumber(m, fields.completedAt),
           finish: firstString(m, fields.finish),
           outputTokens: firstNumber(m, fields.outputTokens),
+          ...(contextTokens !== null ? { contextTokens } : {}),
           error: firstString(m, fields.error),
           ...(compaction ? { compaction: true } : {}),
         };

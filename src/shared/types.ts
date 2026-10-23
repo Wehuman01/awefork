@@ -56,6 +56,13 @@ export interface ChatMessage {
   finish: string | null;
   /** Output tokens of this assistant message; null on user rows or when unreported. */
   outputTokens: number | null;
+  /**
+   * How much of the model's context window this step left behind: its prompt
+   * (input + cached reads) plus what it generated. The pane composer's
+   * context meter reads the newest row that reports one. Absent on user rows
+   * and when the backend reports no usage.
+   */
+  contextTokens?: number | null;
   /** Why the run failed (provider/API error reported by the backend); null when it didn't. */
   error: string | null;
   /**
@@ -76,6 +83,12 @@ export interface ModelOption {
   variants: readonly string[];
   /** Whether the model accepts file/image attachments. */
   attachment: boolean;
+  /**
+   * The model's context window in tokens; null when the backend's catalog
+   * doesn't say. The composer's context meter divides the session's usage
+   * by it.
+   */
+  contextWindow?: number | null;
 }
 
 /** The model to run a prompt with; null = the backend's configured default. */

@@ -46,6 +46,12 @@ import type {
   SessionSummary,
 } from "../../shared/types";
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
+import {
+  type ContextUsage,
+  contextUsageOf,
+  contextWindowFor,
+  latestContextTokens,
+} from "./context-usage";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
 import { listSep, t } from "./i18n";
@@ -571,6 +577,19 @@ export function composerModelFor(sessionId: string): ModelChoice | null {
 export const paneComposerModel = computed<ModelChoice | null>(() => {
   const id = state.selectedId;
   return id ? composerModelFor(id) : null;
+});
+
+/**
+ * The pane composer's context budget: how much of the next run's window the
+ * selected session already occupies. Used tokens come from the session's
+ * latest reported step; the window from the model the composer will send
+ * with. null when the backend reports neither — the meter simply stays away.
+ */
+export const paneContextUsage = computed<ContextUsage | null>(() => {
+  const sessionId = state.selectedId;
+  if (!sessionId) return null;
+  const used = latestContextTokens(state.messagesBySession[sessionId] ?? []);
+  return contextUsageOf(used, contextWindowFor(paneComposerModel.value, state.models));
 });
 
 /**

@@ -87,7 +87,13 @@ interface ZcodeMessage {
       options?: { reasoningLevel?: string } | null;
     } | null;
     time?: { created?: number; completed?: number | null } | null;
-    tokens?: { output?: number | null } | null;
+    tokens?: {
+      total?: number | null;
+      input?: number | null;
+      output?: number | null;
+      reasoning?: number | null;
+      cache?: { read?: number | null; write?: number | null } | null;
+    } | null;
     finish?: string | null;
     error?: { message?: string; data?: { message?: string } } | null;
     /** Runtime-injected rows carry metadata with a visibility flag. */
@@ -123,6 +129,8 @@ interface ZcodeProviderModel {
   name?: string;
   reasoning?: { variants?: string[] } | null;
   modalities?: { input?: string[] } | null;
+  /** Context/output caps from the v2 provider config, when it ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 interface ZcodeProviderEntry {
@@ -142,6 +150,8 @@ interface ZcodeCatalogModel {
   providerLabel?: string | null;
   reasoning?: { levels?: Array<{ value?: string }> | null } | null;
   properties?: { inputFormat?: { supportsImage?: boolean } | null } | null;
+  /** Context/output caps, when the runtime catalog ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 const SESSION_EVENT_METHOD = "session/event";
@@ -235,6 +245,32 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       .join("\n")
       .trim();
 
+  /**
+   * zcode reports the step's whole footprint directly (`tokens.total`) and
+   * its `input` already includes the cached reads — unlike opencode, so the
+   * total wins and the parts never sum with it.
+   */
+  function zcodeContextTokens(tokens: NonNullable<ZcodeMessage["info"]>["tokens"]): number | null {
+    if (!tokens) return null;
+    if (typeof tokens.total === "number") return tokens.total;
+    const parts = [
+      tokens.input,
+      tokens.output,
+      tokens.reasoning,
+      tokens.cache?.read,
+      tokens.cache?.write,
+    ];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+
   function mapMessage(message: ZcodeMessage): ChatMessage[] {
     const info = message.info ?? {};
     const parts = message.parts ?? [];
@@ -296,6 +332,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       (typeof info.error?.data?.message === "string" && info.error.data.message) ||
       (typeof info.error?.message === "string" && info.error.message) ||
       null;
+    const contextTokens = zcodeContextTokens(info.tokens);
     // A turn whose assistant side produced nothing visible yields no row —
     // empty rows would flicker above the live stream (same as codex).
     if (text || thinking || toolNames.length > 0 || error) {
@@ -313,6 +350,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         completedAt: info.time?.completed ?? null,
         finish: info.finish === "tool-calls" ? "tool-calls" : info.finish ? "stop" : null,
         outputTokens: typeof info.tokens?.output === "number" ? info.tokens.output : null,
+        ...(contextTokens !== null ? { contextTokens } : {}),
         error,
       });
     }
@@ -420,6 +458,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           .map((level) => level.value)
           .filter((value): value is string => typeof value === "string" && value !== ""),
         attachment: entry.properties?.inputFormat?.supportsImage ?? false,
+        ...(entry.limit?.context ? { contextWindow: entry.limit.context } : {}),
       }));
   };
 
@@ -561,6 +600,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
             modelName: model.name ?? modelId,
             variants: model.reasoning?.variants ?? [],
             attachment: model.modalities?.input?.includes("image") ?? false,
+            ...(model.limit?.context ? { contextWindow: model.limit.context } : {}),
           });
         }
       }

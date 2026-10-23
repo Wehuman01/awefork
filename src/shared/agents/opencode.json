@@ -45,6 +45,14 @@
       "outputTokens": ["info.tokens.output"],
       "error": ["info.error.data.message", "info.error.name"]
     },
+    "usage": {
+      "total": ["info.tokens.total"],
+      "input": ["info.tokens.input"],
+      "output": ["info.tokens.output"],
+      "reasoning": ["info.tokens.reasoning"],
+      "cacheRead": ["info.tokens.cache.read"],
+      "cacheWrite": ["info.tokens.cache.write"]
+    },
     "parts": {
       "text": { "type": "text", "field": "text", "join": "\n" },
       "thinking": { "type": "reasoning", "field": "text", "join": "\n\n" },

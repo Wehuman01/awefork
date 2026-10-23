@@ -8,6 +8,16 @@
     @drop.prevent="onDrop"
   >
     <div class="chat-input-head">
+      <span
+        v-if="contextMeter"
+        class="ctx-meter"
+        :class="contextMeter.level"
+        :title="contextMeter.title"
+      >
+        <span class="ctx-bar"><span class="ctx-fill" :style="{ width: contextMeter.width }"></span></span>
+        <span class="ctx-pct">{{ contextMeter.pct }}</span>
+        <span class="ctx-count">{{ contextMeter.count }}</span>
+      </span>
       <input
         ref="fileInputEl"
         type="file"
@@ -79,6 +89,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
 import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
+import type { ContextUsage } from "../context-usage";
+import { formatTokenCount } from "../format";
 import { t } from "../i18n";
 import {
   indentLines,
@@ -102,8 +114,10 @@ const props = withDefaults(
     favoriteModels?: readonly ModelChoice[];
     /** Recent hand-picked models for the picker's 最近 group. */
     recentModels?: readonly ModelChoice[];
+    /** Session context budget for the head-row meter; null hides it. */
+    context?: ContextUsage | null;
   }>(),
-  { allowAttachments: true, favoriteModels: () => [], recentModels: () => [] },
+  { allowAttachments: true, favoriteModels: () => [], recentModels: () => [], context: null },
 );
 const emit = defineEmits<{
   send: [text: string, attachments: PromptAttachment[]];
@@ -140,6 +154,38 @@ onMounted(fitTextarea);
 const inputPlaceholder = computed(() => {
   if (props.running) return t("input.placeholderRunning");
   return t("input.placeholder");
+});
+
+/**
+ * The head-row context meter. Sits on the left of the otherwise-empty head
+ * row so it never competes with the footer's model picker; renders nothing
+ * when the backend reports no usage for the session.
+ */
+const contextMeter = computed(() => {
+  const context = props.context;
+  if (!context) return null;
+  const ratio = context.ratio;
+  const pct = ratio === null ? null : Math.round(ratio * 100);
+  const level = ratio === null ? "" : ratio >= 0.9 ? "hot" : ratio >= 0.7 ? "warm" : "";
+  const count =
+    context.window === null
+      ? formatTokenCount(context.used)
+      : `${formatTokenCount(context.used)} / ${formatTokenCount(context.window)}`;
+  const title =
+    context.window === null
+      ? t("input.contextTitleNoWindow", { used: formatTokenCount(context.used) })
+      : t("input.contextTitle", {
+          used: formatTokenCount(context.used),
+          window: formatTokenCount(context.window),
+          pct: pct ?? 0,
+        }) + (ratio !== null && ratio >= 0.9 ? `\n${t("input.contextHint")}` : "");
+  return {
+    level,
+    pct: pct === null ? "" : `${Math.max(pct, context.used > 0 ? 1 : 0)}%`,
+    width: ratio === null ? "0%" : `${Math.min(Math.round(ratio * 100), 100)}%`,
+    count,
+    title,
+  };
 });
 
 /** The selected model's capability, when the catalog already knows it. */

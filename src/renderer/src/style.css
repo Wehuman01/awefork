@@ -4143,13 +4143,86 @@ code.md-code {
 }
 
 /* Head row: attachment + preview sit above the textarea so the footer's
-   model picker gets the full row width. */
+   model picker gets the full row width. The context meter takes the row's
+   unused left side (margin-right:auto) — borrowing dead space instead of
+   squeezing the footer's controls. */
 .chat-input-head {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 2px;
   margin-bottom: 2px;
+}
+
+/* Context meter: a quiet capacity pill. Amber/red only read as warnings —
+   distinct in shape from the ask dialogs that own those hues as badges. */
+.ctx-meter {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+.ctx-meter:hover {
+  border-color: var(--primary-border);
+}
+
+.ctx-bar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.ctx-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  transition: width 0.3s ease;
+}
+
+.ctx-pct {
+  flex: 0 0 auto;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-count {
+  min-width: 0;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-meter.warm .ctx-fill {
+  background: var(--ask);
+}
+
+.ctx-meter.warm .ctx-pct {
+  color: var(--ask);
+}
+
+.ctx-meter.hot .ctx-fill {
+  background: var(--danger);
+}
+
+.ctx-meter.hot .ctx-pct {
+  color: var(--danger);
 }
 
 .chat-input-foot {

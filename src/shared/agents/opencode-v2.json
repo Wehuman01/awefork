@@ -80,6 +80,13 @@
       "outputTokens": ["tokens.output"],
       "error": ["error.message", "error.type"]
     },
+    "usage": {
+      "input": ["tokens.input"],
+      "output": ["tokens.output"],
+      "reasoning": ["tokens.reasoning"],
+      "cacheRead": ["tokens.cache.read"],
+      "cacheWrite": ["tokens.cache.write"]
+    },
     "parts": {
       "text": {
         "type": "text",
