@@ -85,6 +85,13 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "sidebar.restoreSession": { zh: "恢复这个会话", en: "Restore this session" },
   "sidebar.archiveEmpty": { zh: "归档区是空的", en: "Archive is empty" },
+  "sidebar.fileDock": { zh: "📁 文件", en: "📁 Files" },
+  "sidebar.fileDockNoDir": {
+    zh: "还没有选中的项目目录",
+    en: "No project directory selected yet",
+  },
+  "sidebar.fileDockLoading": { zh: "读取中…", en: "Loading…" },
+  "sidebar.fileDockEmpty": { zh: "这个文件夹是空的", en: "This folder is empty" },
   "sidebar.menuUnpin": { zh: "★ 取消置顶", en: "★ Unpin" },
   "sidebar.menuPin": { zh: "☆ 置顶", en: "☆ Pin" },
   "sidebar.menuUnmark": { zh: "★ 取消关键标记", en: "★ Unmark as key" },

@@ -439,6 +439,8 @@
       </div>
     </div>
 
+    <SessionFileDock />
+
     <div
       v-if="menu"
       class="ctx-menu"
@@ -869,6 +871,7 @@ import {
   visibleSessions,
 } from "../state";
 import FileTree from "./file-tree.vue";
+import SessionFileDock from "./session-file-dock.vue";
 
 const query = ref("");
 const searchInputEl = ref<HTMLInputElement | null>(null);

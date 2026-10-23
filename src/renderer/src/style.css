@@ -1476,6 +1476,77 @@ mark.hl {
   padding: 2px 0 4px;
 }
 
+/* ── session view bottom file dock ─────────────────────────────────── */
+
+.sfd {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-bottom: 4px;
+}
+
+.sfd-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-faint);
+}
+
+.sfd-head:hover {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.sfd-caret {
+  font-size: 10px;
+}
+
+.sfd-dir {
+  margin-left: auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.sfd-refresh {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sfd-refresh:hover {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.sfd-body {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px 0 6px;
+}
+
+.sfd-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* A file leaf sits where the tree node's caret would be, keeping names
+   aligned with the directories above it. */
+.sfd-file-row .sfd-file-leaf {
+  flex: 0 0 14px;
+}
+
 .arch-row {
   display: flex;
   align-items: center;

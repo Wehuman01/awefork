@@ -36,9 +36,16 @@ export const PANEL_LIMITS: Record<PanelSide, { min: number; max: number }> = {
   context: { min: 300, max: 680 },
 };
 
+/** Whether the session view's bottom file dock is expanded. */
+export const fileDockOpen = ref(true);
+
 function load(): Record<PanelSide, PanelState> {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) {
+      const extra = JSON.parse(raw) as { fileDockOpen?: unknown };
+      if (typeof extra.fileDockOpen === "boolean") fileDockOpen.value = extra.fileDockOpen;
+    }
     if (!raw) return structuredClone(DEFAULTS);
     const parsed = JSON.parse(raw) as Partial<Record<PanelSide, Partial<PanelState>>>;
     const merge = (side: PanelSide): PanelState => {
@@ -93,8 +100,17 @@ export function setSidebarView(view: SidebarView): void {
 export function persistLayout(): void {
   localStorage.setItem(
     LAYOUT_KEY,
-    JSON.stringify({ sidebar: { ...panels.sidebar }, context: { ...panels.context } }),
+    JSON.stringify({
+      sidebar: { ...panels.sidebar },
+      context: { ...panels.context },
+      fileDockOpen: fileDockOpen.value,
+    }),
   );
+}
+
+export function toggleFileDock(): void {
+  fileDockOpen.value = !fileDockOpen.value;
+  persistLayout();
 }
 
 export function togglePanel(side: PanelSide): void {

@@ -153,6 +153,7 @@ describe("persistLayout", () => {
     expect(JSON.parse(storage.getItem("awefork:layout") ?? "{}")).toEqual({
       sidebar: { width: 400, collapsed: false, saved: DEFAULTS.sidebar.saved },
       context: { width: 512, collapsed: false, saved: DEFAULTS.context.saved },
+      fileDockOpen: true,
     });
   });
 });
