@@ -4609,7 +4609,8 @@ function resetWorkspace(): void {
   state.draft = null;
   state.stashedDrafts = {};
   // Backend-specific like the draft: the incoming backend's own composer
-  // sidecar refills it during boot. Until it does, these are cleared  // defaults and must never be written back over the sidecar's contents.
+  // sidecar refills it during boot. Until it does, these are cleared
+  // defaults and must never be written back over the sidecar's contents.
   composerLoadedFor = null;
   state.lastModel = null;
   state.favoriteModels = [];
