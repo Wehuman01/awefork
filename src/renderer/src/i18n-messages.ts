@@ -225,6 +225,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "选中「{title}」并退出对比",
     en: "Select “{title}” and exit compare",
   },
+  "branch.syncScrollTitle": {
+    zh: "同步滚动：滚轮滚动时两栏一起下滑",
+    en: "Sync scroll: the wheel carries both columns down together",
+  },
   "branch.select": { zh: "选中", en: "Select" },
   "branch.jumpLatest": { zh: "跳到这个会话的最新回合", en: "Jump to this session's latest turn" },
   "branch.latest": { zh: "⤓ 最新", en: "⤓ Latest" },

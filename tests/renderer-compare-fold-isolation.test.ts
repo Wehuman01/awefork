@@ -52,7 +52,6 @@ describe("compare card fold isolation", () => {
 
   it("keeps the column head off the aligned mode", async () => {
     const context = await readFile(CONTEXT_PATH, "utf8");
-
     // The aligned header cards above already name both sides and mark the
     // current one. A column head there would only repeat them, and its
     // "选中" would tear the lens down mid-comparison — selecting a session
@@ -64,5 +63,30 @@ describe("compare card fold isolation", () => {
     );
     expect(aligned).not.toMatch(/cmp-fcol-head/);
     expect(context.slice(context.indexOf("<!-- 不同源"))).toMatch(/cmp-fcol-head/);
+  });
+
+  it("offers lockstep scrolling, off until asked for", async () => {
+    const context = await readFile(CONTEXT_PATH, "utf8");
+
+    // Both columns are independently scrolling, so the wheel only moves one
+    // unless the user opts in. The toggle lives in the compare header and
+    // every column reports its scroll to the same handler.
+    expect(context).toMatch(/@click="syncScroll = !syncScroll"/);
+    expect(context).toMatch(/:class="\{ 'sync-on': syncScroll \}"/);
+    expect(context.match(/@scroll="onColScroll\(ci, \$event\)"/g)).toHaveLength(2);
+    expect(context).toMatch(/const syncScroll = ref\(false\)/);
+  });
+
+  it("syncs by progress ratio, not pixel offset", async () => {
+    const context = await readFile(CONTEXT_PATH, "utf8");
+
+    // The two columns rarely share a scrollable height, so a pixel offset
+    // would stop the shorter one at its end while the other still had room.
+    // The ratio carries the other column to the same fraction of its own
+    // range, and the echo guard keeps the relayed scroll from bouncing back.
+    expect(context).toMatch(/const ratio = source\.scrollTop \/ span/);
+    expect(context).toMatch(/el\.scrollTop = ratio \* otherSpan/);
+    expect(context).toMatch(/if \(!syncScroll\.value\) return;/);
+    expect(context).toMatch(/source === syncingFrom/);
   });
 });

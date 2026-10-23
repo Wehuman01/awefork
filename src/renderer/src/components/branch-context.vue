@@ -7,6 +7,13 @@
         <button
           type="button"
           class="nav-btn"
+          :class="{ 'sync-on': syncScroll }"
+          :title="t('branch.syncScrollTitle')"
+          @click="syncScroll = !syncScroll"
+        >{{ syncScroll ? "⇅" : "↕" }}</button>
+        <button
+          type="button"
+          class="nav-btn"
           :title="t('branch.exitCompare')"
           @click="exitCompare()"
         >✕</button>
@@ -64,6 +71,7 @@
               :ref="(el) => setColEl(ci, el)"
               class="cmp-fcol"
               :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
               <!-- No column head here: the aligned header cards above already
                    name both sides and mark the current one, and "选中" would
@@ -96,6 +104,7 @@
               :ref="(el) => setColEl(ci, el)"
               class="cmp-fcol"
               :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
               <div class="cmp-fcol-head">
                 <button
@@ -552,6 +561,39 @@ function setColEl(index: number, el: unknown): void {
 function scrollLatest(index: number): void {
   const el = colEls.get(index);
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+}
+
+/**
+ * Optional lockstep scrolling. Each column keeps its own height, so the two
+ * rarely match — syncing by pixel offset would stop the shorter column at its
+ * end while the other still had room. Progress ratio instead: scrolling one
+ * column carries the other to the same fraction of its own scrollable range,
+ * so both read "about as far along" whichever is longer.
+ */
+const syncScroll = ref(false);
+
+/** The column currently being dragged by the user, to avoid echo loops. */
+let syncingFrom: Element | null = null;
+
+function onColScroll(index: number, event: Event): void {
+  if (!syncScroll.value) return;
+  const source = event.currentTarget as HTMLElement | null;
+  if (!source || source === syncingFrom) return;
+  const span = source.scrollHeight - source.clientHeight;
+  if (span <= 0) return;
+  const ratio = source.scrollTop / span;
+  syncingFrom = source;
+  for (const [other, el] of colEls) {
+    if (other === index) continue;
+    const otherSpan = el.scrollHeight - el.clientHeight;
+    if (otherSpan <= 0) continue;
+    el.scrollTop = ratio * otherSpan;
+  }
+  // The scroll events this assignment fires land after the current one, so
+  // the guard is released on the next frame rather than synchronously.
+  requestAnimationFrame(() => {
+    syncingFrom = null;
+  });
 }
 
 /** Jump into one of the compared sessions — a fresh selection tears the lens down. */

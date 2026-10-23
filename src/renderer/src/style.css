@@ -2980,6 +2980,14 @@ mark.hl {
   background: var(--primary-soft);
 }
 
+/* lockstep-scroll toggle in the compare header — the primary colour marks
+   "on" without borrowing the star's pink */
+.nav-btn.sync-on {
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+}
+
 /* key-turn mark toggle in the pane header */
 .nav-btn.mark-on {
   background: var(--mark);
