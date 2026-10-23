@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AweforkApi,
   BodySearchRequest,
@@ -15,6 +15,15 @@ import type {
   BackendsResult,
 } from "../shared/backend.js";
 import type { LineDiffResult } from "../shared/diff.js";
+import type {
+  DirListing,
+  FileEntry,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "../shared/file-types.js";
 
 import type {
   AgentInteractionResponse,
@@ -167,6 +176,28 @@ const api: AweforkApi = {
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
+  listDir: (target: string): Promise<FsResult<DirListing>> =>
+    ipcRenderer.invoke("awefork:listDir", target),
+  statFile: (target: string): Promise<FsResult<FileStat>> =>
+    ipcRenderer.invoke("awefork:statFile", target),
+  readTextPreview: (target: string, maxBytes?: number): Promise<FsResult<TextPreview>> =>
+    ipcRenderer.invoke("awefork:readTextPreview", target, maxBytes),
+  readImagePreview: (target: string): Promise<FsResult<ImagePreview>> =>
+    ipcRenderer.invoke("awefork:readImagePreview", target),
+  relativeToRoot: (root: string, target: string): Promise<FsResult<string | null>> =>
+    ipcRenderer.invoke("awefork:relativeToRoot", root, target),
+  searchFiles: (
+    root: string,
+    query: string,
+    options?: SearchOptions,
+  ): Promise<FsResult<FileEntry[]>> =>
+    ipcRenderer.invoke("awefork:searchFiles", root, query, options),
+  homePath: (): Promise<string> => ipcRenderer.invoke("awefork:homePath"),
+  showInFolder: (target: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:showInFolder", target),
+  // webUtils.getPathForFile is the only sanctioned way to name a File that
+  // arrived from outside the app; the legacy File.path is non-standard.
+  pathForFile: (file: File): string | null => webUtils.getPathForFile(file),
   saveTextFile: (
     defaultName: string,
     content: string,

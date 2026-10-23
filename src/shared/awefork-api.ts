@@ -6,6 +6,15 @@ import type {
 } from "./backend.js";
 import type { LineDiffResult } from "./diff.js";
 import type {
+  DirListing,
+  FileEntry,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "./file-types.js";
+import type {
   AgentInteractionResponse,
   ArchiveKind,
   ArchiveState,
@@ -235,6 +244,28 @@ export interface AweforkApi {
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */
   pickDirectory(): Promise<string | null>;
+  /**
+   * File browser surface (read-only, backend-free). Every fallible call
+   * answers with an FsResult so the UI can phrase the failure; browsing
+   * never touches the agent's project directory.
+   */
+  listDir(target: string): Promise<FsResult<DirListing>>;
+  statFile(target: string): Promise<FsResult<FileStat>>;
+  readTextPreview(target: string, maxBytes?: number): Promise<FsResult<TextPreview>>;
+  readImagePreview(target: string): Promise<FsResult<ImagePreview>>;
+  /** Project-relative path; value null = no relative path exists (cross-drive). */
+  relativeToRoot(root: string, target: string): Promise<FsResult<string | null>>;
+  searchFiles(root: string, query: string, options?: SearchOptions): Promise<FsResult<FileEntry[]>>;
+  /** Home directory, anchoring the file panel's common locations. */
+  homePath(): Promise<string>;
+  /** Reveal an entry in the OS file manager. */
+  showInFolder(target: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Resolve the real path of a File dropped in from outside the app (Finder).
+   * null when the OS will not name it — the caller says so instead of
+   * inventing a path or silently turning the drop into an attachment.
+   */
+  pathForFile(file: File): string | null;
   /**
    * Write text to a user-chosen path through a native save dialog. {ok:false}
    * when the dialog is canceled; {ok:false,error} when the write fails.

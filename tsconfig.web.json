@@ -31,6 +31,8 @@
     "src/shared/branch-markdown.ts",
     "src/shared/branch-compare.ts",
     "src/shared/local-path.ts",
+    "src/shared/file-paths.ts",
+    "src/shared/file-types.ts",
     "src/shared/diff.ts",
     "src/shared/agents/*.json",
     "src/shared/agent-descriptor.ts"
