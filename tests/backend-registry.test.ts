@@ -573,7 +573,7 @@ describe("capabilities and store paths", () => {
       deleteSession: true,
       attachments: false,
       fileChanges: false,
-      compress: false,
+      compress: true,
       exportBranch: false,
     });
     expect(await registry.capabilities("opencode")).toEqual({

@@ -63,6 +63,15 @@ export interface ChatMessage {
    * and when the backend reports no usage.
    */
   contextTokens?: number | null;
+  /**
+   * The window `contextTokens` was measured against, when the backend reports
+   * the window alongside the usage instead of only through its model catalog.
+   * Codex is the case: its model list carries no window at all and the live
+   * `thread/tokenUsage/updated` frame is the only place one appears. A
+   * row-reported window wins over the catalog, because it is the window the
+   * backend actually measured this step against.
+   */
+  contextWindow?: number | null;
   /** Why the run failed (provider/API error reported by the backend); null when it didn't. */
   error: string | null;
   /**

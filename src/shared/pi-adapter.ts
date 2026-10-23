@@ -93,6 +93,12 @@ interface PiEntry {
   modelId?: string;
   thinkingLevel?: string;
   name?: string;
+  /** compaction entries: the summary that replaced everything before it. */
+  summary?: string;
+  /** compaction entries: the first entry the summary did NOT fold away. */
+  firstKeptEntryId?: string;
+  /** compaction entries: the footprint the fold started from. */
+  tokensBefore?: number;
 }
 
 interface PiHeader {
@@ -289,6 +295,49 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         case "thinking_level_change":
           variant = entry.thinkingLevel ?? null;
           break;
+        // pi appends a compaction entry after folding history: the summary it
+        // carries is what later prompts send instead of the folded turns. The
+        // row is a marker (no text of its own) exactly like opencode's, so the
+        // pane draws its divider and the summary reads as the reply after it.
+        case "compaction": {
+          if (!entry.summary) break;
+          const at = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+          const createdAt = Number.isNaN(at) ? 0 : at;
+          rows.push({
+            id: entry.id,
+            role: "user",
+            text: "",
+            thinking: "",
+            toolNames: [],
+            modelId,
+            providerId,
+            variant,
+            attachmentNames: [],
+            createdAt,
+            completedAt: null,
+            finish: null,
+            outputTokens: null,
+            compaction: true,
+            error: null,
+          });
+          rows.push({
+            id: `${entry.id}:summary`,
+            role: "assistant",
+            text: entry.summary,
+            thinking: "",
+            toolNames: [],
+            modelId,
+            providerId,
+            variant,
+            attachmentNames: [],
+            createdAt,
+            completedAt: createdAt,
+            finish: "stop",
+            outputTokens: null,
+            error: null,
+          });
+          break;
+        }
         case "message": {
           const message = entry.message;
           if (!message || typeof message.role !== "string") break;
@@ -619,10 +668,36 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       throw new Error("pi cannot export a detached native session");
     },
 
-    // pi has no compaction primitive; the renderer hides the affordance
-    // (capabilities.compress === false) and this throws if ever reached.
-    async compress() {
-      throw new Error("pi cannot compress sessions");
+    /**
+     * pi folds history with its own `compact` RPC command (verified against
+     * 0.55.3's rpc-mode). It resolves only when the whole summary is written,
+     * so unlike opencode's detached summarize this one can await the result
+     * before announcing: the compaction entry is already in the file, and the
+     * marker + summary rows show on the next reload. The model argument is
+     * unused — pi summarizes with the session's own model, which it must
+     * already have for the session to have any turns.
+     */
+    async compress(sessionId) {
+      const found = await requireSession(sessionId);
+      let proc = sessions.get(sessionId);
+      if (!proc) proc = await ensureRpc(sessionId, found.file, found.header?.cwd ?? "");
+      sessions.set(sessionId, proc);
+      cancelReap(sessionId);
+      try {
+        await proc.request({ type: "compact" }, 300_000);
+      } catch (error) {
+        // A request-level failure (no model configured, nothing to compact)
+        // has no frame to settle the run by itself; surface it with the
+        // session id so the renderer settles, then rethrow.
+        const detail = error instanceof Error ? error.message : String(error);
+        emit({ type: "server.error", sessionId, message: `pi compact failed: ${detail}` });
+        scheduleReap(sessionId);
+        throw error instanceof Error ? error : new Error(detail);
+      } finally {
+        invalidate(sessionId);
+        scheduleReap(sessionId);
+      }
+      emit({ type: "session.compressed", sessionId });
     },
 
     async deleteSession() {
@@ -641,7 +716,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       invalidate(sessionId);
     },
 
-    async prompt(sessionId, text, model) {
+    async prompt(sessionId, text, model, attachments) {
       const found = await requireSession(sessionId);
       let proc = sessions.get(sessionId);
       if (!proc) proc = await ensureRpc(sessionId, found.file, found.header?.cwd ?? "");
@@ -649,6 +724,12 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       // A run is starting on this child; a reap armed by the previous run
       // must not fire mid-flight.
       cancelReap(sessionId);
+      // pi's prompt takes images only, as ImageContent blocks with the base64
+      // payload out of the data URL. The composer normalizes every non-image
+      // to text/plain, so those are flattened into the message text instead:
+      // pi has no file part to hang them on.
+      const images = (attachments ?? []).filter((a) => a.mime.startsWith("image/"));
+      const inline = (attachments ?? []).filter((a) => !a.mime.startsWith("image/"));
       try {
         if (model) {
           await proc.request({
@@ -659,7 +740,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
           const level = model.variant ?? null;
           if (level) await proc.request({ type: "set_thinking_level", level });
         }
-        await proc.request({ type: "prompt", message: text });
+        await proc.request({
+          type: "prompt",
+          message: withInlineFiles(text, inline),
+          ...(images.length > 0 ? { images: images.map(toPiImage) } : {}),
+        });
       } catch (error) {
         // A request-level failure (auth, dead child) has no frame to settle
         // the run by itself; surface it with the session id so the renderer
@@ -768,7 +853,39 @@ function renameScript(root: string, file: string, title: string): string {
   ].join("\n");
 }
 
-/** Normalize pi's agent stream onto awefork's smaller event surface. */
+/** Map one staged image attachment onto pi's ImageContent shape. */
+function toPiImage(attachment: PromptAttachment): {
+  type: "image";
+  data: string;
+  mimeType: string;
+} {
+  // pi takes the payload, not the URL: a data URL's base64 starts after the
+  // comma. A malformed URL yields the whole string and pi rejects the prompt,
+  // which the caller's catch turns into a named error rather than a silent
+  // drop of the attachment.
+  const comma = attachment.dataUrl.indexOf(",");
+  return {
+    type: "image",
+    data: comma === -1 ? attachment.dataUrl : attachment.dataUrl.slice(comma + 1),
+    mimeType: attachment.mime,
+  };
+}
+
+/**
+ * Append non-image attachments to the prompt text as named sections. pi's
+ * prompt has no file part to hang them on, and silently dropping a staged
+ * document would be worse than a slightly verbose message.
+ */
+function withInlineFiles(text: string, files: readonly PromptAttachment[]): string {
+  if (files.length === 0) return text;
+  const sections = files.map((file) => {
+    const at = file.dataUrl.indexOf(",");
+    const payload = at === -1 ? "" : file.dataUrl.slice(at + 1);
+    return `--- ${file.filename} ---\n${payload}`;
+  });
+  return [text, ...sections].join("\n\n");
+}
+
 function emitPiEvent(sessionId: string, event: unknown, emit: (event: AgentEvent) => void): void {
   if (typeof event !== "object" || event === null) return;
   const e = event as Record<string, unknown>;

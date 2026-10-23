@@ -51,6 +51,7 @@ import {
   contextUsageOf,
   contextWindowFor,
   latestContextTokens,
+  latestContextWindow,
 } from "./context-usage";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
@@ -594,14 +595,18 @@ export const paneComposerModel = computed<ModelChoice | null>(() => {
 /**
  * The pane composer's context budget: how much of the next run's window the
  * selected session already occupies. Used tokens come from the session's
- * latest reported step; the window from the model the composer will send
- * with. null when the backend reports neither — the meter simply stays away.
+ * latest reported step; the window from the row that reported it when the
+ * backend put one there, else from the model the composer will send with.
+ * null when the backend reports neither — the meter simply stays away.
  */
 export const paneContextUsage = computed<ContextUsage | null>(() => {
   const sessionId = state.selectedId;
   if (!sessionId) return null;
-  const used = latestContextTokens(state.messagesBySession[sessionId] ?? []);
-  return contextUsageOf(used, contextWindowFor(paneComposerModel.value, state.models));
+  const messages = state.messagesBySession[sessionId] ?? [];
+  const used = latestContextTokens(messages);
+  const window =
+    latestContextWindow(messages) ?? contextWindowFor(paneComposerModel.value, state.models);
+  return contextUsageOf(used, window);
 });
 
 /**

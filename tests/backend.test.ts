@@ -24,24 +24,35 @@ describe("backendCapabilities", () => {
     });
   });
 
-  it("gates codex to no message delete and no attachments", () => {
+  it("gates codex to no message delete, no attachments, and compaction", () => {
     expect(backendCapabilities("codex")).toEqual({
       deleteMessage: false,
       deleteSession: true,
       attachments: false,
       fileChanges: false,
-      compress: false,
+      compress: true,
       exportBranch: false,
     });
   });
 
-  it("gives zcode session delete through the v4 command channel", () => {
+  it("gives pi compaction and no session delete", () => {
+    expect(backendCapabilities("pi")).toEqual({
+      deleteMessage: false,
+      deleteSession: false,
+      attachments: true,
+      fileChanges: false,
+      compress: true,
+      exportBranch: false,
+    });
+  });
+
+  it("gives zcode session delete through the v4 command channel and compaction", () => {
     expect(backendCapabilities("zcode")).toEqual({
       deleteMessage: false,
       deleteSession: true,
       attachments: false,
       fileChanges: false,
-      compress: false,
+      compress: true,
       exportBranch: false,
     });
   });

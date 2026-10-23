@@ -65,10 +65,11 @@ interface CodexTurn {
   startedAt?: number;
   completedAt?: number | null;
   /**
-   * Per-turn token usage. codex 0.163's `thread/turns/list` omits it — usage
-   * only arrives live via the `thread/tokenUsage/updated` notification — so
-   * this is absent in practice and read defensively for future builds that
-   * project it onto the turn.
+   * Per-turn token usage. codex 0.163's `thread/turns/list` omits it and its
+   * rollout writes it as an untyped `token_count` event, so this stays absent
+   * in practice; `thread/tokenUsage/updated` is where the numbers actually
+   * arrive and the adapter records them per thread (see usageByThread) for
+   * `messages()` to fold back onto the newest turn.
    */
   usage?: CodexTokenUsage | null;
 }
@@ -77,10 +78,14 @@ interface CodexTurn {
  * codex's token accounting (`thread/tokenUsage/updated`): a breakdown per
  * response, with `total` accumulating across the thread and `last` scoped to
  * the turn that just finished. `totalTokens` is the backend's own sum.
+ * `modelContextWindow` is the window the backend just measured against —
+ * codex's model catalog carries no window of its own, so this frame is the
+ * only place the meter can learn it.
  */
 interface CodexTokenUsage {
   total?: CodexTokenBreakdown | null;
   last?: CodexTokenBreakdown | null;
+  modelContextWindow?: number | null;
 }
 
 interface CodexTokenBreakdown {
@@ -144,6 +149,15 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   let emitEvent: ((event: AgentEvent) => void) | null = null;
   /** threadId → its in-flight turn id (interrupt needs the pair). */
   const activeTurns = new Map<string, string>();
+  /**
+   * threadId → the newest usage the live `thread/tokenUsage/updated` frame
+   * reported, plus the turn it arrived on. codex persists usage only as an
+   * untyped `token_count` rollout event and `thread/turns/list` drops it, so
+   * the live frame is the only place the meter can read it; keeping the pair
+   * lets `messages()` stamp it onto the turn that produced it (and lets a
+   * reload keep showing the footprint instead of losing it with the frame).
+   */
+  const usageByThread = new Map<string, { turnId: string; usage: CodexTokenUsage }>();
   /** threadId → itemId → containing turn id, rebuilt whenever turns load. */
   const turnIndex = new Map<string, Map<string, string>>();
   const pendingInteractions = new Map<string, PendingInteraction>();
@@ -300,9 +314,8 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
    * The turn's footprint in the model's context window, same rule as
    * opencode/zcode: the backend's own total when it reports one, else the sum of
    * the parts it reports (cached reads count — they are part of what the next
-   * prompt carries). null when the turn reports no usage at all, which is every
-   * turn on codex 0.163: `thread/turns/list` carries no usage and the live
-   * `thread/tokenUsage/updated` notification is not folded back into history.
+   * prompt carries). The usage comes from the live `thread/tokenUsage/updated`
+   * frame (see usageByThread): codex 0.163's `thread/turns/list` reports none.
    */
   function contextTokensOfUsage(usage: CodexTokenUsage | null | undefined): number | null {
     if (!usage) return null;
@@ -328,6 +341,16 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       }
     }
     return seen ? sum : null;
+  }
+
+  /**
+   * The window the frame measured against, if it carried one. codex's
+   * `model/list` has no window field at all (verified against 0.163), so the
+   * live usage frame is the only per-model window available to the meter.
+   */
+  function windowOfUsage(usage: CodexTokenUsage | null | undefined): number | null {
+    const window = usage?.modelContextWindow;
+    return typeof window === "number" && window > 0 ? window : null;
   }
 
   function mapTurn(turn: CodexTurn, thread: CodexThread | null): ChatMessage[] {
@@ -521,7 +544,24 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     async messages(sessionId) {
       const thread = await readThread(sessionId);
       const turns = await listTurns(sessionId);
-      return turns.flatMap((turn) => mapTurn(turn, thread));
+      const rows = turns.flatMap((turn) => mapTurn(turn, thread));
+      // Fold the live usage frame back onto the turn it arrived on: without
+      // this the meter goes blank after every reload, because the turn list
+      // itself carries no usage on 0.163.
+      const recorded = usageByThread.get(sessionId);
+      if (!recorded) return rows;
+      const index = rows.findIndex((row) => row.role === "assistant" && row.id === recorded.turnId);
+      const row = rows[index];
+      if (row) {
+        const contextTokens = contextTokensOfUsage(recorded.usage);
+        const contextWindow = windowOfUsage(recorded.usage);
+        rows[index] = {
+          ...row,
+          ...(contextTokens === null ? {} : { contextTokens }),
+          ...(contextWindow === null ? {} : { contextWindow }),
+        };
+      }
+      return rows;
     },
 
     // codex does not round-trip sent bytes; retry prefill is text-only.
@@ -633,10 +673,34 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       throw new Error("codex does not support exporting a detached session");
     },
 
-    // codex has no compaction primitive; the renderer hides the affordance
-    // (capabilities.compress === false) and this throws if ever reached.
-    async compress() {
-      throw new Error("codex does not support session compaction");
+    /**
+     * codex compacts by starting a turn of its own: `thread/compact/start`
+     * asks the app-server to fold the thread into a summary, and the work then
+     * arrives as an ordinary turn (a `contextCompaction` item, its own
+     * tokenUsage frame, then turn/completed). Fire-and-forget like prompt: the
+     * request returns empty, and the stream plus the session.idle that
+     * turn/completed emits carry the outcome. The model argument is unused —
+     * codex always summarizes with the thread's own model.
+     */
+    async compress(sessionId) {
+      try {
+        await resumeThread(sessionId);
+      } catch (error) {
+        if (!isNotMaterialized(error)) {
+          if (isWriterConflict(error)) throw new Error(OWNED_ELSEWHERE_MESSAGE);
+          throw error;
+        }
+      }
+      try {
+        await client.request("thread/compact/start", { threadId: sessionId }, 30_000);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (isWriterConflict(error)) throw new Error(OWNED_ELSEWHERE_MESSAGE);
+        throw new Error(`codex compact failed: ${detail}`);
+      }
+      // The compaction turn is asynchronous; announce it the same way opencode
+      // does so the renderer's compress flow (toast + reload) behaves alike.
+      emit({ type: "session.compressed", sessionId });
     },
 
     async deleteSession(sessionId) {
@@ -740,7 +804,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         if (!stopped.flag) handler(event);
       };
       client.setNotificationHandler((method, params) => {
-        emitCodexNotification(method, params, emit, activeTurns);
+        emitCodexNotification(method, params, emit, activeTurns, usageByThread);
       });
       client.setRequestHandler?.((method, params) => {
         const requestId = `codex-interaction-${nextInteractionId++}`;
@@ -814,6 +878,7 @@ function emitCodexNotification(
   params: unknown,
   emit: (event: AgentEvent) => void,
   activeTurns: Map<string, string>,
+  usageByThread: Map<string, { turnId: string; usage: CodexTokenUsage }>,
 ): void {
   const p = (params ?? {}) as {
     threadId?: string;
@@ -827,6 +892,7 @@ function emitCodexNotification(
     willRetry?: boolean;
     error?: { message?: string };
     status?: { type?: string };
+    tokenUsage?: CodexTokenUsage | null;
   };
   const threadId = typeof p.threadId === "string" ? p.threadId : null;
   switch (method) {
@@ -869,6 +935,17 @@ function emitCodexNotification(
         activeTurns.delete(threadId);
         emit({ type: "session.idle", sessionId: threadId });
       }
+      break;
+    }
+    case "thread/tokenUsage/updated": {
+      // codex persists usage only as an untyped rollout event and its turn
+      // list drops it, so this frame is the meter's only source. Record it
+      // against the turn it arrived on, then nudge the renderer to reload so
+      // the meter paints without waiting for the idle reload.
+      const turnId = p.turnId ?? activeTurns.get(threadId ?? "") ?? null;
+      if (!threadId || !turnId || !p.tokenUsage) break;
+      usageByThread.set(threadId, { turnId, usage: p.tokenUsage });
+      emit({ type: "session.updated", sessionId: threadId });
       break;
     }
     case "item/agentMessage/delta": {

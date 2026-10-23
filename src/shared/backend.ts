@@ -87,26 +87,28 @@ export function backendCapabilities(
   switch (backend) {
     case "codex":
       // codex records fork parents itself, so no detached export; no
-      // single-message delete; no image round-trip.
+      // single-message delete; no image round-trip. Compaction is
+      // thread/compact/start (a turn of its own, streamed like any run).
       return {
         deleteMessage: false,
         deleteSession: true,
         attachments: false,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
     case "pi":
       // pi sessions are append-only files: no message delete, no session
       // delete primitive. Images round-trip through prompt images. A pi
       // branch copy bakes `parentSession` into the new file header, so the
-      // fork linkage is pi's — no detached export.
+      // fork linkage is pi's — no detached export. Compaction is the `compact`
+      // RPC command.
       return {
         deleteMessage: false,
         deleteSession: false,
         attachments: true,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
     case "zcode":
@@ -114,13 +116,13 @@ export function backendCapabilities(
       // (`v4/command`), which the legacy session/* surface lacks; no
       // single-message delete. Fork linkage lives in zcode's own store
       // (forkedSessionId + parentSessionId), so a detached copy is not
-      // offered.
+      // offered. Compaction is the legacy session/compact method.
       return {
         deleteMessage: false,
         deleteSession: true,
         attachments: false,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
   }

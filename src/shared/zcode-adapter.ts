@@ -564,6 +564,13 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           emit({ type: "session.idle", sessionId });
           emit({ type: "session.updated", sessionId });
           break;
+        // A compaction finished: the summary turn is written and later
+        // prompts carry it instead of the folded history. Reload + toast.
+        case "session.compacted":
+        case "session_compacted":
+          emit({ type: "session.updated", sessionId });
+          emit({ type: "session.compressed", sessionId });
+          break;
         case "turn.failed":
         case "turn_error":
           emit({
@@ -725,10 +732,30 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       throw new Error("zcode cannot export a detached session");
     },
 
-    // The app-server protocol has no compaction primitive; the renderer hides
-    // the affordance (capabilities.compress === false).
-    async compress() {
-      throw new Error("zcode does not support session compression yet");
+    /**
+     * Fold the session's history into a summary through zcode's own compaction
+     * primitive. It is a dedicated method, not a v4 command: `session/compact`
+     * (verified live against 0.17.0 — the v4 command of the same name only
+     * answers the desktop client's envelope and reports a session it cannot
+     * find). The method submits a `/compact` turn in the background and
+     * returns immediately with the post-compaction snapshot; the summary then
+     * arrives through the normal turn stream, and `session_compacted` closes
+     * it, which the event mapping turns into session.compressed.
+     */
+    async compress(sessionId, _model) {
+      const client = await options.client();
+      try {
+        await ensureSubscribed(sessionId);
+        await client.request<{ compact?: { state?: string } } | null>(
+          "session/compact",
+          { sessionId, inputId: `awefork-compact-${now()}` },
+          60_000,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        emit({ type: "server.error", sessionId, message: `zcode compact failed: ${detail}` });
+        throw new Error(`zcode compact failed: ${detail}`);
+      }
     },
 
     // Session bookkeeping rides the v4 command channel (the same one the
