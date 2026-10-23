@@ -90,6 +90,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "sidebar.menuUnmark": { zh: "★ 取消关键标记", en: "★ Unmark as key" },
   "sidebar.menuMark": { zh: "☆ 标记为关键对话", en: "☆ Mark as key turn" },
   "sidebar.rename": { zh: "✏️ 重命名", en: "✏️ Rename" },
+  "sidebar.openInNewTab": { zh: "🞂 在新标签打开故事", en: "🞂 Open story in new tab" },
   "sidebar.setTags": { zh: "🏷 设置标签…", en: "🏷 Set tags…" },
   "sidebar.compareTitle": {
     zh: "点画布上的一张卡片，或在侧栏点一个会话，与它并排对比",

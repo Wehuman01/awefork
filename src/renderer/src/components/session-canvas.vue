@@ -432,6 +432,7 @@ import {
   retryNode,
   selectTurn,
   sendDraft,
+  setActiveCanvasTabView,
   setDraftAttachments,
   setDraftContextMode,
   setDraftModel,
@@ -908,6 +909,34 @@ function fitTo(nodes: TurnNode[]): void {
 function fitView(): void {
   fitTo(graph.value.nodes);
 }
+
+// ── canvas tabs: park / restore the camera ──────────────────────────
+// The live camera is written into the active tab's slot on every change, so
+// switching away never loses it; activation replays the saved transform and
+// hands the camera to the user (no re-fit, no overview flash).
+
+watch([scale, tx, ty], () => {
+  setActiveCanvasTabView({ scale: scale.value, tx: tx.value, ty: ty.value });
+});
+
+watch(
+  () => store.canvasTabRestoreRequest,
+  (request) => {
+    if (!request) return;
+    const view = store.canvasTabViews[request.tabId];
+    if (!view) return;
+    scale.value = view.scale;
+    tx.value = view.tx;
+    ty.value = view.ty;
+    userAdjustedView = true;
+    overviewProvisional = false;
+    overviewShown = true;
+    centeredFor = store.selectedId;
+    pendingFocus = null;
+    pendingJump = null;
+    loadingAnchorId = null;
+  },
+);
 
 /** ⎇ badge click: pull the selected session's whole fork subtree into view. */
 function focusSubtree(): void {

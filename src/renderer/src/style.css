@@ -6294,6 +6294,79 @@ html[data-theme="dark"] ::selection {
   flex-direction: column;
 }
 
+/* ── story tabs: one canvas tab per fork-tree story ─────────────────── */
+
+.story-tabs-slot {
+  flex: 0 0 auto;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.story-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.story-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.story-tab:hover {
+  background: var(--row-hover);
+  color: var(--primary-deep);
+}
+
+.story-tab.on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.story-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.story-tab-x {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.story-tab-x:hover {
+  background: var(--row-hover);
+  opacity: 1;
+}
+
+.story-tab-new {
+  padding: 4px 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 /* the sidebar's session half keeps its own scroll when the file tab shows */
 .sidebar-sessions,
 .sidebar-files {
