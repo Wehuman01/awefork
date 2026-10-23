@@ -4032,6 +4032,23 @@ mark.hl {
   }
 }
 
+/* Reasoning a reader cannot see into (codex encrypts its chain-of-thought):
+   one quiet line — spinner while it runs, the real duration once done — in
+   place of the expandable box, which would open onto nothing. */
+.thought-bare {
+  margin: 0 0 6px;
+  padding: 2px 0;
+  color: var(--lavender-deep);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* a finished line is a record, not a live status — dimmer than the live one */
+.thought-bare.done {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
 /* ── markdown (assistant replies in the pane) ───────────────────────── */
 
 .md {

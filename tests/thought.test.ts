@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { thoughtSummary, thoughtTitle } from "../src/renderer/src/thought";
+import { hasReadableThought, thoughtSummary, thoughtTitle } from "../src/renderer/src/thought";
+
+describe("hasReadableThought", () => {
+  it("treats codex's encrypted reasoning as blank", () => {
+    // the rollout item carries only encrypted_content and summary: [] — the
+    // adapter builds a part with no text at all
+    expect(hasReadableThought("")).toBe(false);
+    expect(hasReadableThought(" \n\n ")).toBe(false);
+  });
+
+  it("accepts reasoning a reader can see", () => {
+    expect(hasReadableThought("**检查配置**\n\n先看配置文件")).toBe(true);
+  });
+});
 
 describe("thoughtTitle", () => {
   it("extracts the bolded first line (OpenAI-style reasoning summary)", () => {
