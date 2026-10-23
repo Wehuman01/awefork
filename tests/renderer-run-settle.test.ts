@@ -445,6 +445,129 @@ describe("canvas message loading", () => {
     expect(started).toHaveLength(11);
   });
 
+  it("loads a session that appears while the batch is still in flight", async () => {
+    const pending = new Map<string, (rows: ChatMessage[]) => void>();
+    const started: string[] = [];
+    const slow = new Set<string>();
+    const fork = (id: string): SessionSummary => ({
+      ...SESSION,
+      id,
+      parentSessionId: SESSION.id,
+      origin: "fork",
+      createdAt: SESSION.createdAt + 20,
+      updatedAt: SESSION.updatedAt - 20,
+    });
+    let sessions = branchSessions(10);
+    const h = await bootState({
+      deferInit: true,
+      sessions: () => sessions,
+      messages: async (_backend, id) => {
+        started.push(id);
+        if (!slow.has(id)) return [USER_ROW];
+        return new Promise<ChatMessage[]>((resolve) => {
+          pending.set(id, resolve);
+        });
+      },
+    });
+    await h.ready;
+    expect(h.store.loadingCanvas).toBe(false);
+    // A scheduled refresh finds several new forks; their reads are slow, so
+    // the batch they start is still in flight when the next refresh lands.
+    sessions = [
+      ...sessions,
+      fork("branch-20"),
+      fork("branch-21"),
+      fork("branch-22"),
+      fork("branch-23"),
+      fork("branch-24"),
+    ];
+    for (const id of ["branch-20", "branch-21", "branch-22", "branch-23", "branch-24"])
+      slow.add(id);
+    void h.state.refreshSessions();
+    for (let round = 0; round < 50 && pending.size < 4; round += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(h.store.loadingCanvas).toBe(true);
+    expect(pending.size).toBe(4);
+    // A second refresh — same selection, same directory — discovers one more
+    // fork. selectedId is unchanged, so this call reuses the running batch:
+    // the only way the new branch is ever read is by joining it.
+    sessions = [...sessions, fork("branch-25")];
+    slow.add("branch-25");
+    void h.state.refreshSessions();
+    // The refresh applies its session list and reaches ensureCanvasMessages
+    // in the same synchronous stretch, still while the batch is in flight.
+    for (let round = 0; round < 50 && h.store.sessions.length !== 16; round += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(h.store.sessions).toHaveLength(16);
+    expect(h.store.loadingCanvas).toBe(true);
+    // Drain: the late branch has to be read without an extra click or refresh.
+    for (let round = 0; round < 50 && !started.includes("branch-25"); round += 1) {
+      for (const [id, resolve] of [...pending]) {
+        pending.delete(id);
+        resolve([USER_ROW]);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(started).toContain("branch-25");
+    // Joining the running batch, not starting a second one: the already-read
+    // story is not read again.
+    expect(started.filter((id) => id === "s1" || id === "branch-10")).toHaveLength(2);
+    for (const [id, resolve] of [...pending]) {
+      pending.delete(id);
+      resolve([USER_ROW]);
+    }
+    for (let round = 0; round < 50 && h.store.loadingCanvas; round += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(h.store.messagesBySession["branch-25"]).toHaveLength(1);
+    expect(h.store.loadingCanvas).toBe(false);
+  });
+
+  it("starts the new workspace's read while a slow previous workspace still holds slots", async () => {
+    const pending = new Map<string, (rows: ChatMessage[]) => void>();
+    const calls: Array<{ backend: BackendId; id: string }> = [];
+    const other = {
+      ...SESSION,
+      id: "other",
+      directory: "/other",
+      updatedAt: SESSION.updatedAt - 1,
+    };
+    const h = await bootState({
+      deferInit: true,
+      sessions: [SESSION, other, ...branchSessions(10).slice(1)],
+      messages: async (backend, id) => {
+        calls.push({ backend, id });
+        if (id === "s1" || id === "branch-10" || id === "other") return [USER_ROW];
+        return new Promise<ChatMessage[]>((resolve) => {
+          pending.set(id, resolve);
+        });
+      },
+    });
+    void h.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    // Four slow requests of the old workspace hold every shared slot.
+    expect(pending.size).toBe(4);
+    const switching = h.state.switchDirectory("/other");
+    void switching;
+    await vi.advanceTimersByTimeAsync(0);
+    // Still unresolved — the new workspace must read anyway, not wait for them.
+    expect(pending.size).toBe(4);
+    expect(h.store.selectedId).toBe("other");
+    expect(calls).toContainEqual({ backend: "codex", id: "other" });
+    expect(h.store.messagesBySession.other).toHaveLength(1);
+    for (const [id, resolve] of [...pending]) {
+      pending.delete(id);
+      resolve([USER_ROW]);
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    await switching;
+    await h.ready;
+    expect(h.store.loadingMessages).toBe(false);
+    expect(h.store.loadingCanvas).toBe(false);
+  });
+
   it.each(["backend", "directory"] as const)(
     "cancels old jobs across a %s switch without clearing the new loading state",
     async (mode) => {
@@ -479,7 +602,12 @@ describe("canvas message loading", () => {
       await vi.advanceTimersByTimeAsync(0);
       const backend = mode === "backend" ? "opencode" : "codex";
       expect(h.store.activeBackend).toBe(backend);
+      // The new workspace's read is already in flight — the stale requests
+      // that still hold every shared slot have not blocked it.
+      expect(calls).toContainEqual({ backend, id: "other" });
+      // Free only the old workspace's slots; the new read keeps going.
       for (const [id, resolve] of [...pending]) {
+        if (id === "other") continue;
         pending.delete(id);
         resolve([USER_ROW]);
       }

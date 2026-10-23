@@ -46,6 +46,28 @@ import ${JSON.stringify(join(root, "src/renderer/src/style.css"))};
 const counters = globalThis.__canvasCounters = { turns: 0, scanned: 0, graphs: 0, updates: 0 };
 const Surface = ${fullApp} ? App : Canvas;
 const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+
+/** A viewport with no width or height would make every "is it visible" check
+ *  meaningless — intersecting a zero-size rect is not visibility. Fail loudly
+ *  instead of recording numbers that look fine. */
+function viewportRect() {
+  const viewport = document.querySelector('.viewport');
+  if (!viewport) throw new Error('benchmark: .viewport is missing from the mounted surface');
+  const rect = viewport.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) {
+    throw new Error('benchmark: viewport has no size (' + rect.width + 'x' + rect.height + '); ' +
+      'the mount container must give the canvas a real layout');
+  }
+  return rect;
+}
+
+/** Intersection of a card with the live viewport; only meaningful because
+ *  viewportRect() already refused a zero-size rect. */
+function intersects(cardRect, viewport) {
+  return cardRect.right > viewport.left && cardRect.left < viewport.right &&
+    cardRect.bottom > viewport.top && cardRect.top < viewport.bottom;
+}
+
 let rows = {};
 window.awefork = {
   messages: async (_backend, id) => structuredClone(rows[id] ?? []),
@@ -116,20 +138,19 @@ window.runCanvasBenchmark = async ({ branches, samples, assistantSteps }) => {
     app.mixin({ updated() { counters.updates++; } });
     app.mount('#app');
     for (let i = 0; i < 6; i++) { await nextTick(); await frame(); }
-    const viewport = document.querySelector('.viewport');
-    const rect = viewport.getBoundingClientRect();
-    const visibleCards = [...document.querySelectorAll('.turn')].filter(card => {
-      const r = card.getBoundingClientRect();
-      return r.right > rect.left && r.left < rect.right && r.bottom > rect.top && r.top < rect.bottom;
-    }).length;
-    viewport.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
+    const rect = viewportRect();
+    const viewportEl = document.querySelector('.viewport');
+    const visibleCards = [...document.querySelectorAll('.turn')].filter(card =>
+      intersects(card.getBoundingClientRect(), rect),
+    ).length;
+    viewportEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
     await nextTick();
     const drag = await measure(i => {
       window.dispatchEvent(new MouseEvent('mousemove', { clientX: 20 + i * 2, clientY: 20 + i }));
     }, samples);
     window.dispatchEvent(new MouseEvent('mouseup'));
     const zoom = await measure(i => {
-      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true,
+      viewportEl.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true,
         clientX: 700, clientY: 450, deltaY: i % 2 ? 1 : -1 }));
     }, samples);
     const reload = await measure(() => loadMessages('branch-1', false, state.activeBackend), samples);
@@ -141,6 +162,7 @@ window.runCanvasBenchmark = async ({ branches, samples, assistantSteps }) => {
     }]), samples);
     const repeatedTail = await measure(() => setStreamTail(state.activeBackend, 'branch-1', 'stream unchanged'), samples);
     results.push({ branches: count, cards: turnGraph.value.nodes.length, visibleCards,
+      viewport: { w: Math.round(rect.width), h: Math.round(rect.height) },
       domElements: document.querySelectorAll('*').length, drag, zoom, reload, outsideReload, stream, repeatedTail });
     app.unmount();
     await nextTick();
@@ -184,11 +206,8 @@ window.runColdCanvasBenchmark = async ({ branches, assistantSteps }) => {
       const cards = [...document.querySelectorAll('.turn')].filter(el => el.dataset.nodeId.startsWith(selected + ':'));
       const readable = cards.filter(el => el.textContent.includes('Reply'));
       if (readable.length && firstReadableMs === null) firstReadableMs = performance.now() - start;
-      const viewport = document.querySelector('.viewport').getBoundingClientRect();
-      const visible = readable.some(el => {
-        const r = el.getBoundingClientRect();
-        return r.right > viewport.left && r.left < viewport.right && r.bottom > viewport.top && r.top < viewport.bottom;
-      });
+      const viewport = viewportRect();
+      const visible = readable.some(el => intersects(el.getBoundingClientRect(), viewport));
       if (visible && firstVisibleMs === null) firstVisibleMs = performance.now() - start;
       if (visible && !state.loadingMessages && firstReadyMs === null) firstReadyMs = performance.now() - start;
       finalVisible = visible;
@@ -203,7 +222,9 @@ window.runColdCanvasBenchmark = async ({ branches, assistantSteps }) => {
       if (finished) settledFrames++;
     }
     await loading;
-    coldLoads.push({ branches: count, firstReadableMs, firstVisibleMs, firstReadyMs,
+    const finalViewport = viewportRect();
+    coldLoads.push({ branches: count, viewport: { w: Math.round(finalViewport.width), h: Math.round(finalViewport.height) },
+      firstReadableMs, firstVisibleMs, firstReadyMs,
       allLoadedMs: Math.max(...requests.map(r => r.finishedMs)), maxConcurrent,
       finalVisible, panPreserved: manualTransform === null ? null : manualTransform === document.querySelector('.world').style.transform,
       ...counters, requests });
@@ -227,7 +248,14 @@ if (!sourceRef) {
 
 const temp = await mkdtemp(join(tmpdir(), "awefork-canvas-bench-"));
 try {
-  await writeFile(join(temp, "index.html"), '<div id="app"></div><script type="module" src="/benchmark-entry.js"></script>');
+  await writeFile(
+    join(temp, "index.html"),
+    // The canvas-only mount needs a flex column host: .viewport sizes itself
+    // with flex:1, and a plain block #app collapses it to height 0 — a
+    // zero-size viewport silently invalidates every visibility check.
+    '<style>html,body{height:100%;margin:0}#app{height:100%;display:flex;flex-direction:column;min-height:0}</style>' +
+      '<div id="app"></div><script type="module" src="/benchmark-entry.js"></script>',
+  );
   await writeFile(join(temp, "benchmark-entry.js"), renderer);
   await build({
     configFile: false,
@@ -316,8 +344,8 @@ app.whenReady().then(async () => {
   };
   if (output) await writeFile(output, `${JSON.stringify(report, null, 2)}\n`);
   if (report.coldLoads) console.table(report.coldLoads.map(({ requests, ...summary }) => summary));
-  else console.table(report.results.map(({ branches, cards, visibleCards, drag, zoom, reload, outsideReload, stream }) => ({
-    branches, cards, visibleCards,
+  else console.table(report.results.map(({ branches, cards, visibleCards, viewport, drag, zoom, reload, outsideReload, stream }) => ({
+    branches, cards, visibleCards, viewport: `${viewport.w}x${viewport.h}`,
     dragMs: drag.medianMs.toFixed(2), dragP95Ms: drag.p95Ms.toFixed(2), zoomMs: zoom.medianMs.toFixed(2),
     reloadMs: reload.medianMs.toFixed(2), outsideReloadMs: outsideReload.medianMs.toFixed(2),
     streamMs: stream.medianMs.toFixed(2), turnsPerDrag: drag.raw[0].turns, graphsPerReload: reload.raw[0].graphs,

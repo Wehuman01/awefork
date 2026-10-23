@@ -2980,6 +2980,14 @@ mark.hl {
   background: var(--primary-soft);
 }
 
+/* lockstep-scroll toggle in the compare header — the primary colour marks
+   "on" without borrowing the star's pink */
+.nav-btn.sync-on {
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+}
+
 /* key-turn mark toggle in the pane header */
 .nav-btn.mark-on {
   background: var(--mark);
@@ -3037,25 +3045,15 @@ mark.hl {
   text-overflow: ellipsis;
 }
 
-.cmp-pager {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cmp-pager-pos {
-  font-size: 11.5px;
-  font-weight: 800;
-  color: var(--ink-soft);
-  min-width: 38px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
+/* The comparison body is a flex column so the two scrolling columns can take
+   the remaining height below the header cards; see .cmp-free for why the
+   columns are never bound into one row grid. */
 .cmp-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px 14px 16px;
 }
 
@@ -3191,24 +3189,6 @@ mark.hl {
   font-weight: 600;
 }
 
-/* pairs live in ONE scroll container, row i = left[i] ⇄ right[i], so the
-   columns never drift apart and no sync-scroll machinery exists */
-.cmp-pairs {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  /* natural heights: a folded card (or blank slot) must not stretch to an
-     open neighbor's height — the folded list stays compact to browse */
-  align-items: start;
-  gap: 8px;
-  scroll-margin-top: 8px;
-}
-
 .cell {
   border-radius: 12px;
   border: 1px solid var(--line);
@@ -3335,14 +3315,12 @@ mark.hl {
   -webkit-line-clamp: unset;
 }
 
-/* free side-by-side (不同源): each column is its own scroll container — the
-   timelines don't correspond, so there is nothing to keep in lockstep */
-.cmp-body.free {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
+/* Both compare modes render two independently scrolling columns. The
+   timelines correspond in the aligned mode, but binding the rows into one
+   grid would force both sides of a row to share its height — an open card
+   then balloons its neighbour's slot and pushes that column's next turn
+   out of sight. Letting each column flow on its own is what makes opening
+   one side's turn free. */
 .cmp-free {
   flex: 1;
   min-height: 0;

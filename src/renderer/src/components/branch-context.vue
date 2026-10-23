@@ -4,25 +4,13 @@
     <template v-if="compare">
       <div class="cmp-head">
         <span class="cmp-head-title">{{ compare.plan ? t("branch.compareTitle") : t("branch.freeTitle") }}</span>
-        <div v-if="compare.plan" class="cmp-pager">
-          <button
-            type="button"
-            class="nav-btn"
-            :title="t('branch.prevPair')"
-            :disabled="pagerPos === 0"
-            @click="stepPager(-1)"
-          >‹</button>
-          <span class="cmp-pager-pos">{{
-            pairRows.length === 0 ? "0 / 0" : `${pagerPos + 1} / ${pairRows.length}`
-          }}</span>
-          <button
-            type="button"
-            class="nav-btn"
-            :title="t('branch.nextPair')"
-            :disabled="pagerPos >= pairRows.length - 1"
-            @click="stepPager(1)"
-          >›</button>
-        </div>
+        <button
+          type="button"
+          class="nav-btn"
+          :class="{ 'sync-on': syncScroll }"
+          :title="t('branch.syncScrollTitle')"
+          @click="syncScroll = !syncScroll"
+        >{{ syncScroll ? "⇅" : "↕" }}</button>
         <button
           type="button"
           class="nav-btn"
@@ -31,7 +19,7 @@
         >✕</button>
       </div>
 
-      <div class="cmp-body" :class="{ free: !compare.plan }">
+      <div class="cmp-body">
         <div class="cmp-cols">
           <div class="cmp-colcard left">
             <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">{{ t("branch.current") }}</span>
@@ -73,21 +61,26 @@
             >{{ t("branch.samePrompt") }}</span>
           </div>
 
-          <div v-if="pairRows.length === 0" class="cmp-empty">
+          <div v-if="pairColumns.length === 0" class="cmp-empty">
             {{ t("branch.emptyAfterFork") }}
           </div>
-          <div v-else class="cmp-pairs">
+          <div v-else class="cmp-free">
             <div
-              v-for="(row, i) in pairRows"
-              :key="i"
-              :ref="(el) => setPairEl(i, el)"
-              class="pair"
+              v-for="(col, ci) in pairColumns"
+              :key="col.id"
+              :ref="(el) => setColEl(ci, el)"
+              class="cmp-fcol"
+              :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
+              <!-- No column head here: the aligned header cards above already
+                   name both sides and mark the current one, and "选中" would
+                   tear the lens down mid-comparison. -->
               <CmpCell
-                v-for="side in sides"
-                :key="side"
-                :cell="row[side]"
-                :side="side"
+                v-for="cell in col.cells"
+                :key="cell.id"
+                :cell="cell"
+                :side="sideOf(ci)"
               />
             </div>
           </div>
@@ -110,7 +103,8 @@
               :key="col.id"
               :ref="(el) => setColEl(ci, el)"
               class="cmp-fcol"
-              :class="sides[ci]"
+              :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
               <div class="cmp-fcol-head">
                 <button
@@ -414,29 +408,38 @@ function sideOf(index: number): (typeof sides)[number] {
   return index === 0 ? "left" : "right";
 }
 
-const pairRows = computed(() => {
+/**
+ * The aligned mode's two columns. Each side's divergent turns become one
+ * column, so the lists flow independently: opening a card on one side never
+ * stretches the other side's row or pushes its next turn out of view. The
+ * pairing is kept as the "up" flag — a turn that belongs to the upstream
+ * branch rather than this side's own.
+ */
+const pairColumns = computed<FreeColumn[]>(() => {
   const current = compare.value;
   if (!current?.plan) return [];
   const plan = current.plan;
-  const cell = (node: TurnNode, side: (typeof sides)[number]): DisplayCell => ({
-    id: node.id,
-    title: node.title,
-    preview: node.preview,
-    toolNames: node.toolNames,
-    modelIds: node.modelIds,
-    durationMs: node.durationMs,
-    outputTokens: node.outputTokens,
-    error: node.error,
-    badge: badgeOf(node),
-    flag: node.sessionId !== current.pair[side === "left" ? "leftId" : "rightId"] ? "up" : null,
+  return sides.map((side) => {
+    const sideId = current.pair[side === "left" ? "leftId" : "rightId"];
+    const cells: DisplayCell[] = plan[side].map((node) => ({
+      id: node.id,
+      title: node.title,
+      preview: node.preview,
+      toolNames: node.toolNames,
+      modelIds: node.modelIds,
+      durationMs: node.durationMs,
+      outputTokens: node.outputTokens,
+      error: node.error,
+      badge: badgeOf(node),
+      flag: node.sessionId !== sideId ? "up" : null,
+    }));
+    const tokens = plan[side].reduce((sum, n) => sum + n.outputTokens, 0);
+    const errors = plan[side].filter((n) => n.error !== null).length;
+    const bits = [t("branch.turnsCount", { n: cells.length })];
+    if (tokens > 0) bits.push(formatTokens(tokens));
+    if (errors > 0) bits.push(`⚠ ${errors}`);
+    return { id: sideId, title: sideTitle(sideId), meta: bits.join(" · "), cells };
   });
-  const rows: { left: DisplayCell | null; right: DisplayCell | null }[] = [];
-  for (let i = 0; i < Math.max(plan.left.length, plan.right.length); i += 1) {
-    const l = plan.left[i];
-    const r = plan.right[i];
-    rows.push({ left: l ? cell(l, "left") : null, right: r ? cell(r, "right") : null });
-  }
-  return rows;
 });
 
 const samePrompt = computed(() => {
@@ -468,11 +471,15 @@ interface FreeColumn {
 const freeColumns = computed<FreeColumn[] | null>(() => {
   const current = compare.value;
   if (!current || current.plan) return null;
-  return [current.pair.leftId, current.pair.rightId].map((id) => {
+  return [current.pair.leftId, current.pair.rightId].map((id, ci) => {
     const turns = buildTurns(id, store.messagesBySession[id] ?? []);
     const inherited = inheritedTurns(id, turns);
+    // The side namespaces the id: two independent stories are free to mint the
+    // same message ids, and an unnamespaced collision would let one column's
+    // fold state ride on the other's card.
+    const side = sides[ci];
     const cells: DisplayCell[] = turns.map((turn, i) => ({
-      id: `${id}:${turn.messageId}`,
+      id: `${side}:${id}:${turn.messageId}`,
       title: turn.title,
       preview: turn.preview,
       toolNames: turn.toolNames,
@@ -483,8 +490,8 @@ const freeColumns = computed<FreeColumn[] | null>(() => {
       badge: i < inherited ? null : i - inherited + 1,
       flag: i < inherited ? "inherited" : null,
     }));
-    const tokens = turns.reduce((sum, t) => sum + t.outputTokens, 0);
-    const errors = turns.filter((t) => t.error !== null).length;
+    const tokens = turns.reduce((sum, turn) => sum + turn.outputTokens, 0);
+    const errors = turns.filter((turn) => turn.error !== null).length;
     const bits = [
       inherited > 0
         ? t("branch.turnsMeta", { n: turns.length, m: inherited })
@@ -546,21 +553,6 @@ function badgeOf(node: TurnNode): number {
 
 const prefixOpen = ref(false);
 
-const pagerPos = ref(0);
-const pairEls = new Map<number, Element>();
-
-function setPairEl(index: number, el: unknown): void {
-  if (el) pairEls.set(index, el as Element);
-  else pairEls.delete(index);
-}
-
-function stepPager(delta: number): void {
-  const count = pairRows.value.length;
-  if (count === 0) return;
-  pagerPos.value = Math.min(count - 1, Math.max(0, pagerPos.value + delta));
-  pairEls.get(pagerPos.value)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 const colEls = new Map<number, Element>();
 
 function setColEl(index: number, el: unknown): void {
@@ -573,6 +565,39 @@ function scrollLatest(index: number): void {
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 }
 
+/**
+ * Optional lockstep scrolling. Each column keeps its own height, so the two
+ * rarely match — syncing by pixel offset would stop the shorter column at its
+ * end while the other still had room. Progress ratio instead: scrolling one
+ * column carries the other to the same fraction of its own scrollable range,
+ * so both read "about as far along" whichever is longer.
+ */
+const syncScroll = ref(false);
+
+/** The column currently being dragged by the user, to avoid echo loops. */
+let syncingFrom: Element | null = null;
+
+function onColScroll(index: number, event: Event): void {
+  if (!syncScroll.value) return;
+  const source = event.currentTarget as HTMLElement | null;
+  if (!source || source === syncingFrom) return;
+  const span = source.scrollHeight - source.clientHeight;
+  if (span <= 0) return;
+  const ratio = source.scrollTop / span;
+  syncingFrom = source;
+  for (const [other, el] of colEls) {
+    if (other === index) continue;
+    const otherSpan = el.scrollHeight - el.clientHeight;
+    if (otherSpan <= 0) continue;
+    el.scrollTop = ratio * otherSpan;
+  }
+  // The scroll events this assignment fires land after the current one, so
+  // the guard is released on the next frame rather than synchronously.
+  requestAnimationFrame(() => {
+    syncingFrom = null;
+  });
+}
+
 /** Jump into one of the compared sessions — a fresh selection tears the lens down. */
 function selectColumn(sessionId: string): void {
   void selectSession(sessionId);
@@ -583,9 +608,7 @@ function selectColumn(sessionId: string): void {
 watch(
   () => store.compare,
   () => {
-    pagerPos.value = 0;
     prefixOpen.value = false;
-    pairEls.clear();
     colEls.clear();
   },
 );
@@ -660,9 +683,9 @@ function onSetModel(model: ModelChoice | null): void {
 }
 
 // ←/→ walk turns without leaving the pane — but never while typing somewhere.
-// During an aligned comparison they page the pair rows; free side-by-side has
-// no pairing, so they do nothing there. Esc leaves the comparison (or cancels
-// a pending pick).
+// They do nothing while a comparison is open: both modes render two
+// independently scrolling columns, so there is no single list to walk. Esc
+// leaves the comparison (or cancels a pending pick).
 function onKeydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   const typing =
@@ -683,11 +706,9 @@ function onKeydown(event: KeyboardEvent): void {
   }
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   if (typing) return;
-  if (store.compare) {
-    event.preventDefault();
-    if (compare.value?.plan) stepPager(event.key === "ArrowLeft" ? -1 : 1);
-    return;
-  }
+  // Both compare modes are two independently scrolling columns now, so there
+  // is no row to page; the arrows keep their pane-only turn walking.
+  if (store.compare) return;
   if (!pane.value) return;
   event.preventDefault();
   stepTurn(event.key === "ArrowLeft" ? -1 : 1);

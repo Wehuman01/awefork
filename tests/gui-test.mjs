@@ -315,16 +315,36 @@ try {
   check("reload restores the dragged width", near(reloadedWidth, 420), `${reloadedWidth}px`);
 
   const canvasBefore = await panelWidth(".viewport");
-  await dblclickSidebarHandle();
-  await expectWidth(".sidebar", 0, "double-click collapses the sidebar");
+  // Reload can leave the page without focus, and Input.dispatchMouseEvent
+  // then drops presses before they reach the DOM (verified with capture-phase
+  // window listeners: not even a mousedown arrives). Bring the page back to
+  // the front first; the retry below re-issues the gesture anyway.
+  await cdp.send("Page.bringToFront");
+  // A reload can leave the renderer unfocused, and Chromium then drops
+  // Input.dispatchMouseEvent presses before they reach the DOM (verified: not
+  // even a capture-phase mousedown arrives, and togglePanel never runs). Focus
+  // emulation makes the page accept input regardless of real window focus.
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // Input.dispatchMouseEvent can race the fresh document right after a
+  // reload: the press is lost before it ever reaches the DOM (verified with
+  // capture-phase window listeners — no mousedown at all). Re-issue the same
+  // gesture like the drag checks do; the width assertions stay as strict.
+  await retry(async () => {
+    await dblclickSidebarHandle();
+    const collapsed = await panelWidth(".sidebar");
+    if (!near(collapsed, 0)) throw new Error(`double-click collapses the sidebar: ${collapsed}px, want 0px`);
+  }, 5000, "double-click collapses the sidebar");
   await retry(async () => {
     const grown = await panelWidth(".viewport");
     if (!near(grown, canvasBefore + 420, 4)) {
       throw new Error(`canvas did not absorb the freed pixels: ${grown}px, want ${canvasBefore + 420}px`);
     }
   }, 5000, "canvas absorbs the freed pixels");
-  await dblclickSidebarHandle();
-  await expectWidth(".sidebar", 420, "double-click restores the sidebar");
+  await retry(async () => {
+    await dblclickSidebarHandle();
+    const restored = await panelWidth(".sidebar");
+    if (!near(restored, 420)) throw new Error(`double-click restores the sidebar: ${restored}px, want 420px`);
+  }, 5000, "double-click restores the sidebar");
   await retry(async () => {
     const back = await panelWidth(".viewport");
     if (!near(back, canvasBefore, 4)) throw new Error(`canvas did not return the pixels: ${back}px`);
