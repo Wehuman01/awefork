@@ -821,6 +821,7 @@ import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { listSep, t } from "../i18n";
 import { panels, persistLayout, setSidebarView, sidebarView } from "../layout";
+import { settings } from "../settings";
 import {
   addDirectory,
   allTags,
@@ -890,7 +891,7 @@ function clearQuery(): void {
 // ── enhanced search (✦) ─────────────────────────────────────────────
 
 /** Which surfaces plain terms search; body is opt-in (a scan costs a round-trip per session). */
-const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
+const searchScopes = reactive<ScopeSet>({ ...settings.search.scopes });
 const boostOpen = ref(false);
 
 /** Pin a search to one project directory. Empty = search every project (default). */
@@ -898,7 +899,16 @@ const projectScope = ref<string>("");
 /** Options: every directory the sidebar knows about, in session-recency order. */
 const projectOptions = computed(() => sessionGroups.value.map((group) => group.directory));
 /** How many sessions to scan for body hits; "all" means no cap. */
-const searchLimit = ref<string>("1000");
+const searchLimit = ref<string>(settings.search.cap > 0 ? String(settings.search.cap) : "all");
+
+// The ✦ panel's per-search knobs double as the next search's defaults, so a
+// choice made in the panel and the same row in settings never disagree.
+watch(searchScopes, () => {
+  settings.search.scopes = { ...searchScopes };
+});
+watch(searchLimit, (value) => {
+  settings.search.cap = value === "all" ? 0 : Number(value);
+});
 
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
@@ -920,7 +930,7 @@ const boostActive = computed(
     boostOpen.value ||
     projectScope.value !== "" ||
     searchScopes.body ||
-    searchLimit.value !== "1000" ||
+    searchLimit.value !== String(settings.search.cap) ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
     parsedQuery.value.includes.some((term) => term.scope !== null),
@@ -942,16 +952,16 @@ const boostOffDefault = computed(
     !searchScopes.title ||
     !searchScopes.tag ||
     searchScopes.body ||
-    searchLimit.value !== "1000",
+    searchLimit.value !== String(settings.search.cap),
 );
 
-/** One click back to title+tag, all projects, cap 1000. */
+/** One click back to title+tag, all projects, the configured cap. */
 function resetBoost(): void {
   searchScopes.title = true;
   searchScopes.tag = true;
   searchScopes.body = false;
   projectScope.value = "";
-  searchLimit.value = "1000";
+  searchLimit.value = String(settings.search.cap);
 }
 
 // ── body scan (main-process, two-phase) ─────────────────────────────

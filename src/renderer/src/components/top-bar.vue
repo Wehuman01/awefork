@@ -90,9 +90,9 @@
     <button
       type="button"
       class="icon-btn cmdk-btn"
-      :title="theme === 'dark' ? t('topbar.themeOff') : t('topbar.themeOn')"
-      @click="toggleTheme"
-    >{{ theme === "dark" ? "☀" : "☾" }}</button>
+      :title="themeTitle"
+      @click="cycleTheme"
+    >{{ themeGlyph() }}</button>
     <button
       type="button"
       class="icon-btn multiwindow-btn"
@@ -124,6 +124,15 @@
       >EN</button>
     </div>
     <HistoryButton />
+    <button
+      type="button"
+      class="icon-btn settings-btn"
+      :class="{ on: settingsOpen }"
+      :title="t('topbar.settings', { mod: modKey })"
+      :aria-label="t('topbar.settings', { mod: modKey })"
+      :aria-expanded="settingsOpen"
+      @click="toggleSettings()"
+    >⚙</button>
     <div class="version-wrap" @click.stop>
       <button type="button" class="version-btn" @click="toggleVersionMenu">
         <span>{{ versionLabel }}</span>
@@ -213,8 +222,9 @@ import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
-import { togglePalette } from "../layout";
-import { modWith } from "../platform-key";
+import { settingsOpen, togglePalette, toggleSettings } from "../layout";
+import { modKey, modWith } from "../platform-key";
+import { settings } from "../settings";
 import {
   checkForUpdates,
   directories,
@@ -224,19 +234,18 @@ import {
   switchBackend,
   switchDirectory,
 } from "../state";
-import { theme, toggleTheme } from "../theme";
+import { cycleTheme, theme, themeGlyph } from "../theme";
 import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);
 const backendOpen = ref(false);
-// Shared through localStorage so the preference survives restarts and applies
-// to every window — new agent windows open by the main process read it at
-// their own boot.
-const multiWindow = ref(localStorage.getItem("awefork:multiWindow") === "1");
+// Shared through the settings blob so the preference survives restarts and
+// applies to every window — new agent windows opened by the main process read
+// it at their own boot.
+const multiWindow = computed(() => settings.canvas.multiWindow);
 function toggleMultiWindow(): void {
-  multiWindow.value = !multiWindow.value;
-  localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
+  settings.canvas.multiWindow = !settings.canvas.multiWindow;
 }
 // Quit keep-alive lives in main's settings.json (the quit dialog's checkbox
 // also writes it), so this toggle is a plain IPC call — demo mode has no
@@ -279,6 +288,13 @@ const activeLabel = computed(
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
 // The palette shortcut shows the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere.
 const paletteKeyLabel = modWith("K");
+// The theme button cycles light → dark → system, so its hint names the state
+// it is in, not just the state it would switch to.
+const themeTitle = computed(() => {
+  const preference = settings.appearance.theme;
+  if (preference === "system") return t("topbar.themeSystem");
+  return preference === "dark" ? t("topbar.themeOff") : t("topbar.themeOn");
+});
 
 function toggleOpen(): void {
   open.value = !open.value;

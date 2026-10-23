@@ -1,4 +1,5 @@
 import { reactive, ref } from "vue";
+import { settings } from "./settings";
 
 /**
  * Shell layout state: the two side panels' widths and folded state, the
@@ -69,14 +70,25 @@ export const panels = reactive(load());
 /** True while the ⌘K palette overlay is up. */
 export const paletteOpen = ref(false);
 
-/** Which surface the middle column shows. */
-export const mainView = ref<MainView>("canvas");
+/** True while the floating settings page is up. */
+export const settingsOpen = ref(false);
+
+/** Which surface the middle column shows; the settings page owns the default. */
+export const mainView = ref<MainView>(settings.canvas.defaultView);
 
 /** Which surface the sidebar shows. */
 export const sidebarView = ref<SidebarView>("sessions");
 
 export function togglePalette(): void {
   paletteOpen.value = !paletteOpen.value;
+}
+
+/** Open or close the floating settings page; the ⚙ button and ⌘, share it. */
+export function toggleSettings(open?: boolean): void {
+  settingsOpen.value = open ?? !settingsOpen.value;
+  // Only one overlay at a time — a palette left up behind the panel would
+  // swallow the next Escape.
+  if (settingsOpen.value) paletteOpen.value = false;
 }
 
 /** Switch the middle column; called by the tabs and by file surfaces that
@@ -122,6 +134,19 @@ export function togglePanel(side: PanelSide): void {
     panel.saved = panel.width;
     panel.collapsed = true;
   }
+  persistLayout();
+}
+
+/**
+ * The settings page's "reset layout": both panels back to their default
+ * width and unfolded, and the file dock reopened. Only the layout blob is
+ * touched — every other preference keeps its value.
+ */
+export function resetLayout(): void {
+  for (const side of ["sidebar", "context"] as const) {
+    panels[side] = structuredClone(DEFAULTS[side]);
+  }
+  fileDockOpen.value = true;
   persistLayout();
 }
 

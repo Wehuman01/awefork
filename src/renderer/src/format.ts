@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { settings } from "./settings";
 
 /** Compact render of a run's wall time: 4.2s / 2m05s / 1h30m. */
 export function formatDuration(ms: number): string {
@@ -29,6 +30,9 @@ export function formatTokenCount(count: number): string {
 
 /** Compact age of a timestamp for sidebar rows: just now / 5 min ago / 3 h ago / 2 d ago. */
 export function relTime(ms: number): string {
+  // "Absolute" trades relative phrasing for a wall-clock reading — the same
+  // timestamp in a form that is stable to read at a glance.
+  if (settings.language.timeStyle === "absolute") return clockTime(ms);
   const minutes = Math.floor((Date.now() - ms) / 60000);
   if (minutes < 1) return t("format.justNow");
   if (minutes < 60) return t("format.minutesAgo", { n: minutes });
@@ -37,6 +41,22 @@ export function relTime(ms: number): string {
   const days = Math.floor(hours / 24);
   if (days < 30) return t("format.daysAgo", { n: days });
   return t("format.monthsAgo", { n: Math.floor(days / 30) });
+}
+
+/**
+ * Time-of-day for the absolute style: HH:MM for today, M/D HH:MM earlier this
+ * year, YYYY/M/D beyond — the shortest form that still places the moment.
+ */
+function clockTime(ms: number): string {
+  const then = new Date(ms);
+  const now = new Date();
+  const pad = (value: number): string => value.toString().padStart(2, "0");
+  const clock = `${pad(then.getHours())}:${pad(then.getMinutes())}`;
+  if (then.toDateString() === now.toDateString()) return clock;
+  if (then.getFullYear() === now.getFullYear()) {
+    return `${then.getMonth() + 1}/${then.getDate()} ${clock}`;
+  }
+  return `${then.getFullYear()}/${then.getMonth() + 1}/${then.getDate()}`;
 }
 
 /** Last two segments of a directory for compact display ("/" and "\\" both split). */

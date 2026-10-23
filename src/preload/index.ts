@@ -186,8 +186,8 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:statFile", target),
   readTextPreview: (target: string, maxBytes?: number): Promise<FsResult<TextPreview>> =>
     ipcRenderer.invoke("awefork:readTextPreview", target, maxBytes),
-  readImagePreview: (target: string): Promise<FsResult<ImagePreview>> =>
-    ipcRenderer.invoke("awefork:readImagePreview", target),
+  readImagePreview: (target: string, maxBytes?: number): Promise<FsResult<ImagePreview>> =>
+    ipcRenderer.invoke("awefork:readImagePreview", target, maxBytes),
   relativeToRoot: (root: string, target: string): Promise<FsResult<string | null>> =>
     ipcRenderer.invoke("awefork:relativeToRoot", root, target),
   searchFiles: (

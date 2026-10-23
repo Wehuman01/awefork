@@ -263,7 +263,7 @@ export interface AweforkApi {
   listDir(target: string): Promise<FsResult<DirListing>>;
   statFile(target: string): Promise<FsResult<FileStat>>;
   readTextPreview(target: string, maxBytes?: number): Promise<FsResult<TextPreview>>;
-  readImagePreview(target: string): Promise<FsResult<ImagePreview>>;
+  readImagePreview(target: string, maxBytes?: number): Promise<FsResult<ImagePreview>>;
   /** Project-relative path; value null = no relative path exists (cross-drive). */
   relativeToRoot(root: string, target: string): Promise<FsResult<string | null>>;
   searchFiles(root: string, query: string, options?: SearchOptions): Promise<FsResult<FileEntry[]>>;

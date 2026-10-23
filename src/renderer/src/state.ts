@@ -59,6 +59,7 @@ import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 import { insertPathText } from "./path-insert";
+import { settings } from "./settings";
 
 /** One canvas tab: a story (fork tree) parked next to the active one. */
 export interface CanvasTab {
@@ -908,8 +909,14 @@ interface CompletionWatch {
 
 const completionWatches = new Map<string, CompletionWatch>();
 const interactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
-/** Mirrors main's JSON-RPC safe-reply deadline; exported for the countdown UI. */
-export const INTERACTION_TIMEOUT_MS = 30_000;
+/** Default countdown for the settings page; 0 disables the auto-deny timer. */
+const DEFAULT_INTERACTION_TIMEOUT_MS = 30_000;
+/** The live countdown: the settings page can shorten, lengthen or disable it. */
+export function interactionTimeoutMs(): number {
+  return settings.canvas.autoDenySeconds > 0
+    ? settings.canvas.autoDenySeconds * 1000
+    : DEFAULT_INTERACTION_TIMEOUT_MS;
+}
 const WATCH_INTERVAL_MS = 1500;
 // Give up after ~4 minutes with no completion AND no liveness sign — every
 // delta resets the ticks, and so does any poll that observes the message list
@@ -1099,10 +1106,12 @@ export async function init(): Promise<void> {
   await bootBackend(backend);
   // New-version check once startup settles: the agent server has just come up,
   // so give the handshake a beat. Fire-and-forget — never blocks first paint,
-  // and every failure path stays silent.
-  setTimeout(() => {
-    void checkForUpdates("startup").catch(() => null);
-  }, UPDATE_CHECK_DELAY_MS);
+  // and every failure path stays silent. The settings page can turn it off.
+  if (settings.updates.checkOnLaunch) {
+    setTimeout(() => {
+      void checkForUpdates("startup").catch(() => null);
+    }, UPDATE_CHECK_DELAY_MS);
+  }
 }
 
 /**
@@ -2108,7 +2117,11 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
   // arming the 30s auto-deny here would silently kill a question the user can
   // still see. Idle/error cleanup still drops them when the turn actually ends.
   if (request.kind === "opencode-permission" || request.kind === "opencode-form") return;
-  state.interactionDeadlines[key] = Date.now() + INTERACTION_TIMEOUT_MS;
+  // 0 = the user turned auto-deny off in settings; the ask then waits for an
+  // explicit answer, and idle/error cleanup still drops it when the turn ends.
+  if (settings.canvas.autoDenySeconds <= 0) return;
+  const timeoutMs = interactionTimeoutMs();
+  state.interactionDeadlines[key] = Date.now() + timeoutMs;
   interactionTimers.set(
     key,
     setTimeout(() => {
@@ -2120,7 +2133,7 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
       }
       dropInteraction(backend, request.requestId);
       void window.awefork.respondInteraction(backend, request.requestId, { decision: "deny" });
-    }, INTERACTION_TIMEOUT_MS),
+    }, timeoutMs),
   );
 }
 

@@ -26,6 +26,7 @@ import type {
   TextPreview,
 } from "../../shared/file-types";
 import { t } from "./i18n";
+import { settings } from "./settings";
 
 export type FileView = "list" | "grid";
 
@@ -55,10 +56,11 @@ export const files = reactive({
   capped: false,
   /** Selected entry path — the preview and the context menu both act on it. */
   selectedPath: null as string | null,
-  view: "list" as FileView,
+  /** Seeded from the settings page's default view; the toolbar overrides it. */
+  view: settings.files.view as FileView,
   /** Name filter for the current directory only — never a project search. */
   filter: "",
-  showHidden: false,
+  showHidden: settings.files.showHidden,
   quickQuery: "",
   quickResults: [] as FileEntry[],
   quickLoading: false,
@@ -235,10 +237,14 @@ export function setFilter(value: string): void {
 
 export function setView(view: FileView): void {
   files.view = view;
+  // The toolbar choice doubles as the default for the next boot, so the
+  // settings row and the toggle never disagree.
+  settings.files.view = view;
 }
 
 export function toggleHidden(): void {
   files.showHidden = !files.showHidden;
+  settings.files.showHidden = files.showHidden;
 }
 
 /** Directories shown by the current filter and hidden-files setting. */
@@ -266,6 +272,16 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     }
     return;
   }
+  // "System app" hands the file to the OS instead of the in-app preview; a
+  // failure (no handler for the type) falls back to the preview so the click
+  // still does something visible.
+  if (settings.files.openOnDouble === "system") {
+    const result = await window.awefork.openPath(entry.path).catch(() => null);
+    if (result?.ok) {
+      files.selectedPath = entry.path;
+      return;
+    }
+  }
   await previewEntry(entry);
 }
 
@@ -274,7 +290,9 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   const seq = ++previewSeq;
   files.selectedPath = entry.path;
   files.preview = { path: entry.path, status: "loading" };
-  const image = await window.awefork.readImagePreview(entry.path).catch(() => null);
+  const image = await window.awefork
+    .readImagePreview(entry.path, settings.files.imageCapMb * 1024 * 1024)
+    .catch(() => null);
   if (seq !== previewSeq) return;
   if (image?.ok) {
     const value: ImagePreview = image.value;
@@ -286,7 +304,9 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
     };
     return;
   }
-  const text = await window.awefork.readTextPreview(entry.path).catch(() => null);
+  const text = await window.awefork
+    .readTextPreview(entry.path, settings.files.previewCapKb * 1024)
+    .catch(() => null);
   if (seq !== previewSeq) return;
   if (text?.ok) {
     const value: TextPreview = text.value;

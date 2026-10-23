@@ -719,8 +719,10 @@ export function registerIpc(
       readTextPreview(target, maxBytes),
   );
 
-  ipcMain.handle("awefork:readImagePreview", (_event: IpcMainInvokeEvent, target: string) =>
-    readImagePreview(target),
+  ipcMain.handle(
+    "awefork:readImagePreview",
+    (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
+      readImagePreview(target, maxBytes),
   );
 
   ipcMain.handle(
