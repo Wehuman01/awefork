@@ -16,7 +16,7 @@ import {
   type TurnGraph,
   type TurnNode,
 } from "../../shared/canvas-graph";
-import { selectCanvasSessions } from "../../shared/canvas-scope";
+import { selectCanvasSessions, storyRootOf } from "../../shared/canvas-scope";
 import {
   buildSessionTree,
   descendantSessionIds,
@@ -60,6 +60,26 @@ import { panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 import { insertPathText } from "./path-insert";
 
+/** One canvas tab: a story (fork tree) parked next to the active one. */
+export interface CanvasTab {
+  id: string;
+  /** Story root session id; null = a blank tab with nothing selected yet. */
+  rootId: string | null;
+  /** Session the tab had selected when it was last active. */
+  selectedId: string | null;
+  /** Turn the tab had locked when it was last active. */
+  selectedTurnId: string | null;
+  /** Directory the tab was browsing. */
+  directory: string | null;
+}
+
+/** The canvas camera one tab parked when the user switched away. */
+export interface CanvasTabView {
+  scale: number;
+  tx: number;
+  ty: number;
+}
+
 interface DraftState {
   /** Canvas node the composer is attached to. */
   nodeId: string;
@@ -101,6 +121,25 @@ function localCapabilities(backend: BackendId): BackendCapabilities {
 
 interface AppState {
   connectionError: string | null;
+  /**
+   * One browser-style canvas tab per story. The active tab's selection is
+   * state.selectedId itself — the tab record is the snapshot swapped on
+   * activate/deactivate, so every existing selectedId reader keeps working.
+   */
+  canvasTabs: CanvasTab[];
+  activeCanvasTabId: string | null;
+  /**
+   * Per-tab canvas camera (scale + translate), written live by the canvas as
+   * the user pans/zooms. Keyed by tab id; absent = the tab has no saved view
+   * yet and its canvas opens on the default framing.
+   */
+  canvasTabViews: Record<string, CanvasTabView>;
+  /**
+   * Bumped on tab activation so the canvas re-applies the incoming tab's
+   * saved camera instead of re-framing from scratch. Consumed by watch, like
+   * the other request fields.
+   */
+  canvasTabRestoreRequest: { tabId: string; nonce: number } | null;
   /**
    * True once the startup session load has settled (sessions arrived or the
    * retries ran out). Gates the canvas's "no sessions yet" empty state so a
@@ -295,6 +334,10 @@ interface AppState {
 
 const state = reactive<AppState>({
   connectionError: null,
+  canvasTabs: [{ id: "tab-1", rootId: null, selectedId: null, selectedTurnId: null, directory: null }],
+  activeCanvasTabId: "tab-1",
+  canvasTabViews: {},
+  canvasTabRestoreRequest: null,
   booted: false,
   activeBackend: "opencode",
   backendList: [],
@@ -1161,9 +1204,15 @@ export async function refreshSessions(): Promise<void> {
         a.updatedAt > b.updatedAt ? a : b,
       ).directory;
     }
+    // Tabs whose story went away (deleted / archived in the agent's own TUI)
+    // park as blank tabs instead of resurrecting dead sessions on activation.
+    pruneCanvasTabs();
     // Select before the batch load so the initial session's panel and canvas
-    // node are ready the moment the working set finishes loading.
+    // node are ready the moment the working set finishes loading. Skipped
+    // while the active tab's story just died — that tab parks blank instead
+    // of silently adopting whatever is latest.
     if (
+      !activeTabStoryDied &&
       state.selectedDirectory &&
       (!state.selectedId || !directorySessions.value.some((s) => s.id === state.selectedId))
     ) {
@@ -1209,6 +1258,161 @@ async function leaveEmptiedDirectory(): Promise<void> {
   else state.selectedDirectory = null;
 }
 
+// ── canvas tabs ──────────────────────────────────────────────────────
+// Browser-style tabs over stories: the active tab's selection IS
+// state.selectedId — the tab records are snapshots swapped on activate, so
+// every existing selectedId reader (pane, composer, palette) keeps working.
+
+let canvasTabSeq = 1;
+
+export const activeCanvasTab = computed<CanvasTab | null>(() =>
+  state.canvasTabs.find((t) => t.id === state.activeCanvasTabId) ?? null,
+);
+
+/** The story-root sessions the open tabs point at, tab order. */
+export function tabRootSession(tab: CanvasTab): SessionSummary | null {
+  return tab.rootId ? (visibleSessions.value.find((s) => s.id === tab.rootId) ?? null) : null;
+}
+
+/**
+ * Snapshot the live selection into the active tab. Runs on every selection
+ * change (so a tab's title/root follow the user) and on every switch-away
+ * (so the tab parks exactly what was on screen).
+ */
+function syncActiveTab(): void {
+  const tab = activeCanvasTab.value;
+  if (!tab) return;
+  tab.selectedId = state.selectedId;
+  tab.selectedTurnId = state.selectedTurnId;
+  tab.directory = state.selectedDirectory;
+  tab.rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+}
+
+/**
+ * True while the active tab's story died and the tab parks blank: the boot
+ * refill in refreshSessions must not adopt another story into that tab (it
+ * would collide with the tab already owning that story). A fresh selection
+ * or a tab switch clears it.
+ */
+let activeTabStoryDied = false;
+
+/** Tabs whose story vanished park as blank tabs; live ones re-resolve roots. */
+function pruneCanvasTabs(): void {
+  const visible = new Set(visibleSessions.value.map((s) => s.id));
+  for (const tab of state.canvasTabs) {
+    if (tab.selectedId !== null && !visible.has(tab.selectedId)) {
+      tab.selectedId = null;
+      tab.selectedTurnId = null;
+      tab.rootId = null;
+    } else if (tab.rootId !== null && !visible.has(tab.rootId)) {
+      tab.rootId = null;
+    }
+  }
+  // The active tab's own snapshot fields just went blank while the live
+  // selection still names the dead session — blank that too, and keep the
+  // refill from refilling it.
+  const active = activeCanvasTab.value;
+  if (active && active.selectedId === null && state.selectedId !== null) {
+    state.selectedId = null;
+    state.selectedTurnId = null;
+    state.streamParts = [];
+    activeTabStoryDied = true;
+  } else {
+    syncActiveTab();
+  }
+}
+
+/**
+ * Switch the canvas to another tab: park the outgoing selection, then restore
+ * the incoming one through the normal selectSession path (directory, stream
+ * parts, message load all come along). The saved camera follows separately
+ * via canvasTabRestoreRequest — the canvas applies it.
+ */
+export async function activateCanvasTab(tabId: string): Promise<void> {
+  if (tabId === state.activeCanvasTabId) return;
+  syncActiveTab();
+  const tab = state.canvasTabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  state.activeCanvasTabId = tabId;
+  state.canvasTabRestoreRequest = { tabId, nonce: Date.now() };
+  if (tab.selectedId) {
+    await selectSession(tab.selectedId);
+    return;
+  }
+  state.selectedId = null;
+  state.selectedTurnId = null;
+  state.streamParts = [];
+  if (tab.directory) state.selectedDirectory = tab.directory;
+}
+
+/**
+ * Open a story in a tab: dedupes on the story root (one story, one tab —
+ * activating an existing tab just moves its selection), else spawns a new
+ * tab next to the active one. null asks for a blank tab (the ＋ button).
+ */
+export async function openCanvasTab(sessionId: string | null): Promise<void> {
+  syncActiveTab();
+  if (sessionId) {
+    const root = storyRootOf(visibleSessions.value, state.lineage, sessionId);
+    const existing = root ? state.canvasTabs.find((t) => t.rootId === root) : undefined;
+    if (existing) {
+      await activateCanvasTab(existing.id);
+      if (existing.id === state.activeCanvasTabId && state.selectedId !== sessionId) {
+        await selectSession(sessionId, { focus: true });
+      }
+      return;
+    }
+  }
+  const tab: CanvasTab = {
+    id: `tab-${(canvasTabSeq += 1)}`,
+    rootId: null,
+    selectedId: null,
+    selectedTurnId: null,
+    directory: state.selectedDirectory,
+  };
+  const at = state.canvasTabs.findIndex((t) => t.id === state.activeCanvasTabId);
+  state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at + 1, 0, tab);
+  state.activeCanvasTabId = tab.id;
+  state.canvasTabRestoreRequest = { tabId: tab.id, nonce: Date.now() };
+  if (sessionId) {
+    await selectSession(sessionId, { focus: true });
+  }
+}
+
+export async function closeCanvasTab(tabId: string): Promise<void> {
+  const index = state.canvasTabs.findIndex((t) => t.id === tabId);
+  if (index < 0) return;
+  const wasActive = state.activeCanvasTabId === tabId;
+  state.canvasTabs.splice(index, 1);
+  delete state.canvasTabViews[tabId];
+  if (state.canvasTabs.length === 0) {
+    // Closing the last tab leaves one blank tab, not a tab-less limbo.
+    const blank: CanvasTab = {
+      id: `tab-${(canvasTabSeq += 1)}`,
+      rootId: null,
+      selectedId: null,
+      selectedTurnId: null,
+      directory: state.selectedDirectory,
+    };
+    state.canvasTabs.push(blank);
+    state.activeCanvasTabId = blank.id;
+    state.selectedId = null;
+    state.selectedTurnId = null;
+    state.streamParts = [];
+    return;
+  }
+  if (!wasActive) return;
+  const next = state.canvasTabs[Math.min(index, state.canvasTabs.length - 1)];
+  if (next) await activateCanvasTab(next.id);
+}
+
+/** Live camera write from the canvas: park the view on the active tab. */
+export function setActiveCanvasTabView(view: CanvasTabView): void {
+  const id = state.activeCanvasTabId;
+  if (!id) return;
+  state.canvasTabViews[id] = view;
+}
+
 export async function selectSession(
   sessionId: string | null,
   options: { focus?: boolean } = {},
@@ -1230,6 +1434,8 @@ export async function selectSession(
   void ensureModels();
   // Reload unconditionally: clicking a card is also the user's healing path
   // for a stale card (e.g. a lost SSE finish signal).
+  syncActiveTab();
+  activeTabStoryDied = false;
   await ensureCanvasMessages(true);
 }
 
@@ -1249,6 +1455,7 @@ export async function selectTurn(
     await selectSession(node.sessionId);
   }
   state.selectedTurnId = node.id;
+  syncActiveTab();
   if (options.focusCanvas) {
     state.turnJumpRequest = { nodeId: node.id, nonce: Date.now() };
   }
@@ -4475,6 +4682,10 @@ interface WorkspaceSnapshot {
   recentModels: ModelChoice[];
   /** Measured card heights, so the restored canvas keeps its exact layout. */
   cardHeights: Record<string, number>;
+  /** Canvas tabs are session-keyed, so they park with the workspace. */
+  canvasTabs: CanvasTab[];
+  activeCanvasTabId: string | null;
+  canvasTabViews: Record<string, CanvasTabView>;
 }
 
 const workspaceCache = new Map<BackendId, WorkspaceSnapshot>();
@@ -4504,6 +4715,9 @@ function parkWorkspace(backend: BackendId): void {
     favoriteModels: [...state.favoriteModels],
     recentModels: [...state.recentModels],
     cardHeights: { ...cardHeights },
+    canvasTabs: state.canvasTabs.map((tab) => ({ ...tab })),
+    activeCanvasTabId: state.activeCanvasTabId,
+    canvasTabViews: { ...state.canvasTabViews },
   });
 }
 
@@ -4553,6 +4767,10 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   searchQuery.value = "";
   for (const key of Object.keys(cardHeights)) delete cardHeights[key];
   Object.assign(cardHeights, snapshot.cardHeights);
+  state.canvasTabs = snapshot.canvasTabs.map((tab) => ({ ...tab }));
+  state.activeCanvasTabId = snapshot.activeCanvasTabId;
+  state.canvasTabViews = { ...snapshot.canvasTabViews };
+  state.canvasTabRestoreRequest = null;
   const selected = state.selectedId;
   state.streamParts = selected
     ? [...(streamBuffers.get(streamKey(state.activeBackend, selected)) ?? [])]
@@ -4620,6 +4838,12 @@ function resetWorkspace(): void {
   state.fitRequest = null;
   state.turnJumpRequest = null;
   searchQuery.value = "";
+  state.canvasTabs = [
+    { id: `tab-${(canvasTabSeq += 1)}`, rootId: null, selectedId: null, selectedTurnId: null, directory: null },
+  ];
+  state.activeCanvasTabId = state.canvasTabs[0]?.id ?? null;
+  state.canvasTabViews = {};
+  state.canvasTabRestoreRequest = null;
   for (const key of Object.keys(cardHeights)) delete cardHeights[key];
 }
 

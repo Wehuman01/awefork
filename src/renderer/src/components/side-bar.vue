@@ -300,6 +300,7 @@
                 }"
                 :title="row.session.title || '(untitled)'"
                 @click="onRowClick(row.session.id)"
+                @auxclick="onRowAuxClick(row.session.id, $event)"
                 @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
               >
                 <span class="dot"></span>
@@ -468,6 +469,9 @@
       </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">{{
         t("sidebar.rename")
+      }}</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInNewTabFromMenu">{{
+        t("sidebar.openInNewTab")
       }}</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">{{
         t("sidebar.setTags")
@@ -848,6 +852,7 @@ import {
   selectSession,
   sessionGroups,
   setForkTagPref,
+  openCanvasTab,
   setSessionTags,
   setTagColor,
   store,
@@ -1263,6 +1268,19 @@ function onRowClick(sessionId: string): void {
     return;
   }
   void enterCompare(from, sessionId);
+}
+
+/** Middle-click opens the story in a new canvas tab, browser-style. */
+function onRowAuxClick(sessionId: string, event: MouseEvent): void {
+  if (event.button !== 1) return;
+  event.preventDefault();
+  void openCanvasTab(sessionId);
+}
+
+function openInNewTabFromMenu(): void {
+  const id = menu.value?.sessionId;
+  closeMenu();
+  if (id) void openCanvasTab(id);
 }
 
 function toggleMarkFromMenu(): void {

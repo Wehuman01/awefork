@@ -43,6 +43,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "cmp.noText": { zh: "(无文本回复)", en: "(no text reply)" },
 
   // ── session-canvas.vue ─────────────────────────────────────────────────
+  "canvas.tabsLabel": { zh: "画板故事标签", en: "Canvas story tabs" },
+  "canvas.tabClose": { zh: "关闭标签", en: "Close tab" },
+  "canvas.tabNewTitle": { zh: "新建画板标签", en: "New canvas tab" },
+  "canvas.tabBlank": { zh: "新画板", en: "New canvas" },
   "canvas.deleteTurnTitle": {
     zh: "删除这个回合（更早的对话保留）",
     en: "Delete this turn (earlier conversation stays)",

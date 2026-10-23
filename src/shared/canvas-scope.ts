@@ -10,6 +10,31 @@
 
 import type { LineageMap, SessionSummary } from "./types.js";
 
+/**
+ * The story root a session belongs to: walk parents (awefork lineage first,
+ * agent parentage as fallback) until the chain leaves the known set. The same
+ * walk selectCanvasSessions uses to keep whole stories together — exported so
+ * canvas tabs can dedupe on it: one story, one tab.
+ */
+export function storyRootOf(
+  sessions: SessionSummary[],
+  lineage: LineageMap,
+  sessionId: string | null,
+): string | null {
+  if (!sessionId) return null;
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  if (!byId.has(sessionId)) return null;
+  let rootId = sessionId;
+  const walked = new Set([rootId]);
+  for (;;) {
+    const parent = lineage[rootId]?.parentId ?? byId.get(rootId)?.parentSessionId;
+    if (!parent || !byId.has(parent) || walked.has(parent)) break;
+    walked.add(parent);
+    rootId = parent;
+  }
+  return rootId;
+}
+
 export function selectCanvasSessions(
   sessions: SessionSummary[],
   lineage: LineageMap,

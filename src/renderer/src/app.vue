@@ -80,6 +80,7 @@
             >{{ t("files.tabFiles") }}</button
           >
         </nav>
+        <CanvasTabs v-show="mainView === 'canvas'" class="story-tabs-slot" />
         <SessionCanvas v-show="mainView === 'canvas'" class="main-body" />
         <FileBrowser v-show="mainView === 'files'" class="main-body" />
       </div>
@@ -147,6 +148,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
+import CanvasTabs from "./components/canvas-tabs.vue";
 import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
 import FileBrowser from "./components/file-browser.vue";
