@@ -69,6 +69,20 @@ describe("insertPathText", () => {
     const result = insertPathText("abcdef", path, { start: 4, end: 2 });
     expect(result.text).toBe(`abcd\n${path}\nef`);
   });
+
+  it("stacks consecutive drops one per line, each keeping its own caret", () => {
+    // Two files dropped in a row: the second lands after the first, on its
+    // own line, and the caret keeps moving down.
+    let text = "";
+    let caret: Caret | undefined;
+    for (const dropped of ["/a/first.md", "/b/second.md"]) {
+      const result = insertPathText(text, dropped, caret);
+      text = result.text;
+      caret = result.caret;
+    }
+    expect(text).toBe("/a/first.md\n/b/second.md\n");
+    expect(caret).toEqual({ start: text.length, end: text.length });
+  });
 });
 
 describe("joinPaths", () => {
