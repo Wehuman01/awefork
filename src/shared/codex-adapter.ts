@@ -406,9 +406,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     const message = error instanceof Error ? error.message : String(error);
     // 0.154 said "is not materialized yet"; 0.163's thread/resume says
     // "no rollout found for thread id" for the same state.
-    return (
-      message.includes("is not materialized yet") || message.includes("no rollout found")
-    );
+    return message.includes("is not materialized yet") || message.includes("no rollout found");
   }
 
   return {
