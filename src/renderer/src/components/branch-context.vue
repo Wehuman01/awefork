@@ -466,11 +466,15 @@ interface FreeColumn {
 const freeColumns = computed<FreeColumn[] | null>(() => {
   const current = compare.value;
   if (!current || current.plan) return null;
-  return [current.pair.leftId, current.pair.rightId].map((id) => {
+  return [current.pair.leftId, current.pair.rightId].map((id, ci) => {
     const turns = buildTurns(id, store.messagesBySession[id] ?? []);
     const inherited = inheritedTurns(id, turns);
+    // The side namespaces the id: two independent stories are free to mint the
+    // same message ids, and an unnamespaced collision would let one column's
+    // fold state ride on the other's card.
+    const side = sides[ci];
     const cells: DisplayCell[] = turns.map((turn, i) => ({
-      id: `${id}:${turn.messageId}`,
+      id: `${side}:${id}:${turn.messageId}`,
       title: turn.title,
       preview: turn.preview,
       toolNames: turn.toolNames,
