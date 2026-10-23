@@ -157,6 +157,10 @@
             @click="openFavorite(sess)"
           >
             <span class="fav-dot"></span>
+            <span v-if="sess.origin === 'fork'" class="fork-glyph">⎇</span>
+            <span v-if="isEmptyContext(sess.id)" class="cut-glyph" :title="t('cut.markerTitle')"
+              >✂</span
+            >
             <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
             <span
               v-for="tag in rowTags(sess.id, 1).tags"
@@ -281,6 +285,12 @@
               >
                 <span class="dot"></span>
                 <span v-if="row.session.origin === 'fork'" class="fork-glyph">⎇</span>
+                <span
+                  v-if="isEmptyContext(row.session.id)"
+                  class="cut-glyph"
+                  :title="t('cut.markerTitle')"
+                  >✂</span
+                >
                 <span class="sess-name">
                   <template
                     v-for="(segment, index) in titleSegments(row.session.title)"
@@ -804,6 +814,7 @@ import {
   favoriteSessions,
   forkTagPrefOf,
   hueOf,
+  isEmptyContext,
   isTurnMarked,
   jumpToMessage,
   openSessionTerminal,

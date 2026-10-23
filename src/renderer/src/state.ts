@@ -368,6 +368,18 @@ export const visibleSessions = computed<SessionSummary[]>(() => {
   );
 });
 
+/**
+ * Whether a session is a fork that carries none of its parent's history.
+ * Story roots and history-carrying forks both report false: the marker only
+ * labels the exception, so everything unmarked reads as "has history".
+ * A lineage record written before the field existed means a fork that
+ * inherited, so a missing context counts as inherit.
+ */
+export function isEmptyContext(sessionId: string | null): boolean {
+  if (!sessionId) return false;
+  return state.lineage[sessionId]?.context === "none";
+}
+
 export const sessionGroups = computed<SessionGroup[]>(() => {
   const groups = buildSessionTree(visibleSessions.value, state.lineage);
   // Registered-but-empty directories keep their group so the sidebar offers

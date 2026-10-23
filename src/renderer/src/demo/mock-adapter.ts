@@ -254,6 +254,27 @@ const SESSION_DEFS: SessionDef[] = [
     turns: [],
   },
   {
+    // The demo's empty-context fork: it hangs off r3 in the lineage but
+    // carries none of the parent's turns, so the canvas severs its edge.
+    id: "s-clean",
+    title: "从零重写登录",
+    origin: "fork",
+    parent: "s-root",
+    atMessageId: "r3",
+    emptyContext: true,
+    minutesAgo: 860,
+    turns: [
+      {
+        id: "k1",
+        prompt: "不参考前面的方案，从零设计一套登录，先说你打算怎么做",
+        reply:
+          "从约束出发而不是从实现出发：先确定攻击面（撞库、重放、会话固定），再选凭证形态。建议短期 access + 可吊销 refresh，具体实现先不套用历史方案。",
+        tokens: 900,
+        minutesAgo: 850,
+      },
+    ],
+  },
+  {
     id: "w-root",
     title: "官网首页改版",
     origin: "root",
@@ -401,6 +422,7 @@ export function installMockAdapter(): void {
         parentId: def.parent,
         atMessageId: def.atMessageId,
         createdAt: minutesAgo(def.minutesAgo),
+        ...(def.emptyContext ? { context: "none" as const } : {}),
       };
     }
   }

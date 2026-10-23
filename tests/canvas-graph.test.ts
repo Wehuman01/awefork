@@ -145,7 +145,50 @@ describe("buildTurnGraph", () => {
     // The re-keyed-ids fallback used to count b's own turn as an inherited
     // prefix (a context:none fork has no inherited rows at all).
     expect(nodeIds(graph, "b")).toEqual(["b:b-u1"]);
-    expect(graph.edges).toContainEqual({ from: "a:a-u1", to: "b:b-u1", kind: "fork" });
+    expect(graph.edges).toContainEqual({
+      from: "a:a-u1",
+      to: "b:b-u1",
+      kind: "fork",
+      context: "none",
+    });
+  });
+
+  it("stamps only the fork edge into a branch with its context, never the sequence edges", () => {
+    const graph = buildTurnGraph({
+      sessions: [
+        session("a"),
+        session("b", { origin: "fork", createdAt: 500 }),
+        session("c", { origin: "fork", createdAt: 600 }),
+      ],
+      lineage: { b: fork("a", "a-u1", { context: "none" }), c: fork("a", "a-u2") },
+      messages: {
+        a: chain(["a-u1", "a-r1"], ["a-u2", "a-r2"]),
+        b: chain(["b-u1", "b-r1"], ["b-u2", "b-r2"]),
+        c: chain(["a-u1", "a-r1"], ["a-u2", "a-r2"], ["c-u3", "c-r3"]),
+      },
+    });
+
+    // Only the empty-context fork's edge carries the marker; the fork that
+    // inherits history and every sequence edge stay plain.
+    const marked = graph.edges.filter((e) => e.context !== undefined);
+    expect(marked).toEqual([{ from: "a:a-u1", to: "b:b-u1", kind: "fork", context: "none" }]);
+    expect(graph.edges).toContainEqual({ from: "a:a-u2", to: "c:c-u3", kind: "fork" });
+    expect(graph.edges).toContainEqual({ from: "b:b-u1", to: "b:b-u2", kind: "sequence" });
+  });
+
+  it("stamps a severed empty-context fork's stub edge so the canvas can break the line", () => {
+    const graph = buildTurnGraph({
+      sessions: [session("a"), session("b", { origin: "fork", createdAt: 500 })],
+      lineage: { b: fork("a", "a-u1", { context: "none" }) },
+      messages: { a: chain(["a-u1", "a-r1"]), b: [] },
+    });
+
+    expect(graph.edges).toContainEqual({
+      from: "a:a-u1",
+      to: "b::stub",
+      kind: "fork",
+      context: "none",
+    });
   });
 
   it("renders an empty branch as a stub node connected to its fork point", () => {

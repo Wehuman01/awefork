@@ -9,7 +9,36 @@
     <div class="world" :style="worldStyle">
       <svg class="edges" :width="svgSize.w" :height="svgSize.h">
         <g v-for="edge in edgesWithPoints" :key="`${edge.from}->${edge.to}`">
+          <template v-if="edge.severed">
+            <!-- An empty-context fork: the line is cut in two, because context
+                 does not cross it. Both halves keep the fork edge's own look. -->
+            <path
+              :d="edge.headPath"
+              class="edge fork severed"
+              :class="{
+                active: onActivePath(edge),
+                dim: hasActivePath && !onActivePath(edge),
+                desc: isSubtreeEdge(edge),
+                'cmp-el': cmpEdgeRole(edge) === 'l',
+                'cmp-er': cmpEdgeRole(edge) === 'r',
+                'cmp-edim': cmpEdgeRole(edge) === 'dim',
+              }"
+            />
+            <path
+              :d="edge.tailPath"
+              class="edge fork severed"
+              :class="{
+                active: onActivePath(edge),
+                dim: hasActivePath && !onActivePath(edge),
+                desc: isSubtreeEdge(edge),
+                'cmp-el': cmpEdgeRole(edge) === 'l',
+                'cmp-er': cmpEdgeRole(edge) === 'r',
+                'cmp-edim': cmpEdgeRole(edge) === 'dim',
+              }"
+            />
+          </template>
           <path
+            v-else
             :d="edge.path"
             class="edge"
             :class="{
@@ -38,6 +67,17 @@
         </g>
         <path v-if="draftEdge" :d="draftEdge.path" class="edge draft-edge" />
       </svg>
+
+      <!-- the ✂ badge filling a severed edge's gap; it sits in the world layer,
+           so the branch keeps its marker however many turns it grows -->
+      <span
+        v-for="badge in cutBadges"
+        :key="`cut:${badge.id}`"
+        class="edge-cut-badge"
+        :style="{ left: `${badge.x}px`, top: `${badge.y}px` }"
+        :title="t('cut.markerTitle')"
+        >✂</span
+      >
 
       <article
         v-for="node in graph.nodes"
@@ -206,7 +246,11 @@
             @click="
               setDraftContextMode(store.draft?.contextMode === 'none' ? 'inherit' : 'none')
             "
-          >{{ store.draft?.contextMode === "none" ? t("canvas.ctxNoneLabel") : t("canvas.ctxInheritLabel") }}</button>
+          >{{
+            store.draft?.contextMode === "none"
+              ? `✂ ${t("canvas.ctxNoneLabel")}`
+              : `⛓ ${t("canvas.ctxInheritLabel")}`
+          }}</button>
           <button type="button" class="close" @click="dismissDraft">✕</button>
         </div>
         <div v-if="(store.draft?.attachments.length ?? 0) > 0" class="draft-atts">
@@ -508,8 +552,68 @@ function forkCountOf(node: TurnNode): number {
   return node.sessionId === store.selectedId ? (directForkCounts.value.get(node.id) ?? 0) : 0;
 }
 
-const edgesWithPoints = computed(() =>
-  graph.value.edges.flatMap((edge) => {
+/**
+ * Split a cubic bezier at `t`, returning both halves as their own control
+ * polygons (de Casteljau). Used to cut a real gap out of an empty-context
+ * fork edge: context does not flow across that edge, so the line is severed.
+ */
+function splitCubic(
+  curve: ReadonlyArray<readonly [number, number]>,
+  t: number,
+): [[number, number][], [number, number][]] {
+  const [p0, p1, p2, p3] = curve as [
+    readonly [number, number],
+    readonly [number, number],
+    readonly [number, number],
+    readonly [number, number],
+  ];
+  const lerp = (a: readonly [number, number], b: readonly [number, number]): [number, number] => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+  ];
+  const a = lerp(p0, p1);
+  const b = lerp(p1, p2);
+  const c = lerp(p2, p3);
+  const d = lerp(a, b);
+  const e = lerp(b, c);
+  const mid = lerp(d, e);
+  return [
+    [[...p0], a, d, mid],
+    [mid, e, c, [...p3]],
+  ];
+}
+
+function cubicPath(curve: ReadonlyArray<readonly [number, number]>): string {
+  const [p0, p1, p2, p3] = curve;
+  if (!p0 || !p1 || !p2 || !p3) return "";
+  return `M ${p0[0]} ${p0[1]} C ${p1[0]} ${p1[1]}, ${p2[0]} ${p2[1]}, ${p3[0]} ${p3[1]}`;
+}
+
+/** Half-width of the gap cut out of an empty-context edge, in curve-length fraction. */
+const CUT_GAP = 0.075;
+
+/**
+ * One drawn edge. Severed edges carry the two halves of the curve instead of
+ * a single path, plus the gap's midpoint where the ✂ badge sits.
+ */
+interface DrawnEdge {
+  from: string;
+  to: string;
+  kind: "sequence" | "fork";
+  ex: number;
+  ey: number;
+  severed: boolean;
+  /** Whole curve; empty on a severed edge. */
+  path: string;
+  /** The two halves of a severed edge; empty on an intact one. */
+  headPath: string;
+  tailPath: string;
+  cutX: number;
+  cutY: number;
+}
+
+const edgesWithPoints = computed<DrawnEdge[]>(() =>
+  graph.value.edges.flatMap((edge): DrawnEdge[] => {
     const from = nodeById.value.get(edge.from);
     const to = nodeById.value.get(edge.to);
     if (!from || !to) return [];
@@ -518,15 +622,65 @@ const edgesWithPoints = computed(() =>
     const x2 = to.x;
     const y2 = to.y + to.height / 2;
     const bend = Math.max(46, (x2 - x1) / 2);
+    const curve: [number, number][] = [
+      [x1, y1],
+      [x1 + bend, y1],
+      [x2 - bend, y2],
+      [x2, y2],
+    ];
+    const base = {
+      from: edge.from,
+      to: edge.to,
+      kind: edge.kind,
+      ex: x2 - 2,
+      ey: y2,
+    };
+
+    if (edge.kind === "fork" && edge.context === "none") {
+      const t1 = 0.5 - CUT_GAP;
+      const t2 = 0.5 + CUT_GAP;
+      // Split at t2 first, then cut the front piece at t1 (its parameter is
+      // measured on the original curve, so rescale by t2).
+      const [front, back] = splitCubic(curve, t2);
+      const [head] = splitCubic(front, t1 / t2);
+      const [m0, m1, m2, m3] = curve as [
+        [number, number],
+        [number, number],
+        [number, number],
+        [number, number],
+      ];
+      return [
+        {
+          ...base,
+          severed: true,
+          path: "",
+          headPath: cubicPath(head),
+          tailPath: cubicPath(back),
+          cutX: (m0[0] + 3 * m1[0] + 3 * m2[0] + m3[0]) / 8,
+          cutY: (m0[1] + 3 * m1[1] + 3 * m2[1] + m3[1]) / 8,
+        },
+      ];
+    }
+
     return [
       {
-        ...edge,
-        path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
-        ex: x2 - 2,
-        ey: y2,
+        ...base,
+        severed: false,
+        path: cubicPath(curve),
+        headPath: "",
+        tailPath: "",
+        cutX: 0,
+        cutY: 0,
       },
     ];
   }),
+);
+
+/** The ✂ badges sitting in the gaps of severed fork edges. */
+const cutBadges = computed(() =>
+  edgesWithPoints.value.flatMap((edge) =>
+    edge.severed ? [{ id: `${edge.from}->${edge.to}`, x: edge.cutX, y: edge.cutY }] : [],
+  ),
 );
 
 const sequenceCount = computed(() => new Set(graph.value.nodes.map((n) => n.sessionId)).size);

@@ -1167,6 +1167,17 @@ mark.hl {
   flex: 0 0 auto;
 }
 
+/* The empty-context ✂ marker: a bare glyph on purpose. The draft composer's
+   toggle is a bordered pill that switches the context mode, and a same-looking
+   static mark would invite clicks it cannot answer — so this one carries no
+   border, no background, and the default cursor. */
+.cut-glyph {
+  color: var(--ask-deep);
+  font-weight: 800;
+  flex: 0 0 auto;
+  cursor: default;
+}
+
 .sess-name {
   white-space: nowrap;
   overflow: hidden;
@@ -2012,6 +2023,26 @@ mark.hl {
 .edge.draft-edge {
   stroke: var(--primary);
   stroke-dasharray: 6 6;
+}
+
+/* the ✂ badge filling a severed edge's gap. It lives in the world layer, so
+   it scales with the canvas and stays put however the branch grows. */
+.edge-cut-badge {
+  position: absolute;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1.5px solid var(--ask-border);
+  color: var(--ask-deep);
+  font-size: 10.5px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 7px rgba(196, 138, 92, 0.22);
+  cursor: default;
+  z-index: 2;
 }
 
 .edge-dot {
@@ -2946,6 +2977,28 @@ mark.hl {
   margin-top: 5px;
 }
 
+/* the pane's one sentence for an empty-context branch — the marker's meaning
+   in words, on its own row under the head so the title keeps its width */
+.ctx-cut-note {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0 16px 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--ask-deep);
+  background: var(--ask-soft);
+  border: 1px solid var(--ask-border);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+
+.ctx-cut-glyph {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
 .ctx-running {
   font-size: 11px;
   font-weight: 800;
@@ -2959,7 +3012,18 @@ mark.hl {
 .ctx-nav {
   display: flex;
   gap: 4px;
-  flex: 0 0 auto;
+  /* The head holds the icon, the title block and this row of controls. A fork
+     with the ⇄ compare-parent button makes the row wider than the pane, and
+     flex: 0 0 auto then squeezed the title to a one-character column. Let the
+     controls wrap and cap their share so the title always keeps room. */
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 55%;
+}
+
+.nav-cmp {
+  white-space: nowrap;
 }
 
 .nav-btn {
@@ -3081,6 +3145,19 @@ mark.hl {
 .cmp-colcard.right {
   background: var(--mint-soft);
   border: 1px solid var(--mint);
+}
+
+/* an empty-context side: same column hue, but the border goes dashed + amber
+   so "no parent history" reads at a glance next to a history-carrying side */
+.cmp-colcard.empty-ctx {
+  border-style: dashed;
+  border-color: var(--ask-border);
+}
+
+.cmp-cutnote {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ask-deep);
 }
 
 .cmp-colname {
@@ -3580,6 +3657,33 @@ mark.hl {
 .chain-card:hover {
   border-color: var(--primary-border);
   background: var(--primary-soft);
+}
+
+/* an empty-context branch's lineage: one line naming where it split off. The
+   ancestor cards are not listed at all — none of them is in this context. */
+.chain-lineage {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--panel);
+}
+
+.chain-lineage-glyph {
+  flex: 0 0 auto;
+  color: var(--lavender);
+  font-weight: 800;
+}
+
+.chain-lineage-body {
+  min-width: 0;
+}
+
+.chain-lineage .chain-preview {
+  color: var(--ask-deep);
+  font-weight: 700;
 }
 
 .chain-step {
@@ -4394,6 +4498,15 @@ code.md-code {
   flex: 0 0 auto;
   font-size: 11px;
   opacity: 0.85;
+}
+
+/* the empty-context ✂ marker on a session row — bare like the sidebar's */
+.palette-cut {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ask-deep);
+  cursor: default;
 }
 
 /* session tag chips, same colors the sidebar row shows */
@@ -5324,6 +5437,29 @@ code.md-code {
 
 .digest-glyph.root {
   color: var(--mint);
+}
+
+/* the empty-context ✂ marker beside a digest row's title — bare, not a chip */
+.digest-cut {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ask-deep);
+  cursor: default;
+}
+
+/* the digest's own empty-context line: this panel has room for words, so it
+   states the consequence instead of only marking it */
+.digest-ctx {
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ask-deep);
+  background: var(--ask-soft);
+  border: 1px solid var(--ask-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-top: 1px;
 }
 
 .digest-title {

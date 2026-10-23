@@ -21,6 +21,12 @@
             @click="run(item)"
           >
             <span class="palette-icon">{{ item.icon }}</span>
+            <span
+              v-if="item.emptyContext"
+              class="palette-cut"
+              :title="t('cut.markerTitle')"
+              >✂</span
+            >
             <span v-if="item.pinned" class="palette-pin" :title="t('palette.pinned')">📌</span>
             <span class="palette-label">{{ item.label }}</span>
             <span v-if="(item.tags?.length ?? 0) > 0" class="palette-tags">
@@ -52,6 +58,7 @@ import {
   compareWithParent,
   createSession,
   exitCompare,
+  isEmptyContext,
   refreshSessions,
   requestCanvasFit,
   selectSession,
@@ -71,6 +78,8 @@ interface PaletteItem {
   run: () => void;
   /** Session items only: the sidebar's pin badge rides along. */
   pinned?: boolean;
+  /** Session items only: the empty-context ✂ marker rides along. */
+  emptyContext?: boolean;
   /** Session items only: the sidebar's tag chips ride along. */
   tags?: string[];
 }
@@ -163,6 +172,7 @@ const items = computed<PaletteItem[]>(() => {
         label: s.title || "(untitled)",
         hint: shortDir(s.directory),
         pinned: store.pins.includes(s.id),
+        emptyContext: isEmptyContext(s.id),
         tags: tagsOf(s.id),
         run: () => void jumpToSession(s),
       }),

@@ -110,6 +110,20 @@ describe("buildBranchDigests", () => {
     expect(c?.forkedFrom?.turnTitle).toBe("第二个问题");
   });
 
+  it("reports each branch's context mode so the UI can mark the exceptions", () => {
+    const { sessions, lineage, messages } = story();
+    // c is the interesting case: a fork that carries no parent history.
+    lineage.c = { parentId: "a", atMessageId: "a-u1", createdAt: 600, context: "none" };
+    const graph = buildTurnGraph({ sessions, lineage, messages });
+    const byId = new Map(buildBranchDigests(graph, sessions, lineage).map((d) => [d.sessionId, d]));
+
+    // A story root has nothing to inherit — "root", never mistaken for a fork.
+    expect(byId.get("a")?.context).toBe("root");
+    // A lineage record without the field predates it: forks inherited.
+    expect(byId.get("b")?.context).toBe("inherit");
+    expect(byId.get("c")?.context).toBe("none");
+  });
+
   it("flags branches with a failed run and drops lineage pointing outside the story", () => {
     const sessions = [
       session("a"),

@@ -1,5 +1,11 @@
 import { buildTurns, type Turn } from "./turns.js";
-import type { ChatMessage, LineageMap, ModelChoice, SessionSummary } from "./types.js";
+import type {
+  ChatMessage,
+  ForkContextMode,
+  LineageMap,
+  ModelChoice,
+  SessionSummary,
+} from "./types.js";
 
 /**
  * Turn-level graph for one project directory.
@@ -57,6 +63,13 @@ export interface GraphEdge {
   from: string;
   to: string;
   kind: "sequence" | "fork";
+  /**
+   * On a fork edge only: whether the child branch carries the parent's
+   * history. "none" marks an empty-context fork — the canvas draws such an
+   * edge severed, because context does not flow across it. Absent on
+   * sequence edges and on forks recorded before the field existed.
+   */
+  context?: ForkContextMode;
 }
 
 export interface TurnGraph {
@@ -215,8 +228,13 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     return node;
   };
 
-  const connect = (from: string | null, to: string, kind: GraphEdge["kind"]): void => {
-    if (from) edges.push({ from, to, kind });
+  const connect = (
+    from: string | null,
+    to: string,
+    kind: GraphEdge["kind"],
+    context?: ForkContextMode,
+  ): void => {
+    if (from) edges.push({ from, to, kind, ...(context ? { context } : {}) });
   };
 
   const visit = (
@@ -225,6 +243,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     fromRow: number,
     sourceNodeId: string | null,
     edgeKind: GraphEdge["kind"],
+    edgeContext?: ForkContextMode,
   ): void => {
     if (visitedSessions.has(session.id)) return;
     visitedSessions.add(session.id);
@@ -254,12 +273,15 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
           outputTokens: 0,
           error: null,
         });
-        connect(sourceNodeId, stub.id, edgeKind);
+        connect(sourceNodeId, stub.id, edgeKind, edgeContext);
       }
     }
 
     let previousId = sourceNodeId;
     let previousKind = edgeKind;
+    // The fork's context rides on the edge INTO this session's first node
+    // (or its stub). Every later sequence edge stays plain.
+    let incomingContext = edgeContext;
     for (const [index, turn] of fresh.entries()) {
       const node = addNode(session, startCol + index, fromRow, {
         id: `${session.id}:${turn.messageId}`,
@@ -276,9 +298,10 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
         error: turn.error,
       });
       nodeByMessage.set(turn.messageId, node.id);
-      connect(previousId, node.id, index === 0 ? previousKind : "sequence");
+      connect(previousId, node.id, index === 0 ? previousKind : "sequence", incomingContext);
       previousId = node.id;
       previousKind = "sequence";
+      incomingContext = undefined;
       fromRow = node.row;
     }
 
@@ -291,6 +314,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
         forkNode ? forkNode.row + 1 : fromRow + 1,
         forkNode?.id ?? previousId,
         "fork",
+        record?.context,
       );
     }
   };

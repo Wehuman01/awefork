@@ -21,19 +21,33 @@
 
       <div class="cmp-body">
         <div class="cmp-cols">
-          <div class="cmp-colcard left">
+          <div
+            class="cmp-colcard left"
+            :class="{ 'empty-ctx': isEmptyContext(compare.pair.leftId) }"
+          >
             <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">{{ t("branch.current") }}</span>
-            <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">{{
-              sideTitle(compare.pair.leftId)
-            }}</span>
+            <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">
+              <span v-if="isEmptyContext(compare.pair.leftId)" class="cut-glyph">✂</span>
+              {{ sideTitle(compare.pair.leftId) }}
+            </span>
             <span class="cmp-colmeta">{{ colMeta(0) }}</span>
-          </div>
-          <div class="cmp-colcard right">
-            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">{{ t("branch.current") }}</span>
-            <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">{{
-              sideTitle(compare.pair.rightId)
+            <span v-if="isEmptyContext(compare.pair.leftId)" class="cmp-cutnote">{{
+              t("cut.compareNote")
             }}</span>
+          </div>
+          <div
+            class="cmp-colcard right"
+            :class="{ 'empty-ctx': isEmptyContext(compare.pair.rightId) }"
+          >
+            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">{{ t("branch.current") }}</span>
+            <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">
+              <span v-if="isEmptyContext(compare.pair.rightId)" class="cut-glyph">✂</span>
+              {{ sideTitle(compare.pair.rightId) }}
+            </span>
             <span class="cmp-colmeta">{{ colMeta(1) }}</span>
+            <span v-if="isEmptyContext(compare.pair.rightId)" class="cmp-cutnote">{{
+              t("cut.compareNote")
+            }}</span>
           </div>
         </div>
 
@@ -218,6 +232,14 @@
         <span v-if="isRunning" class="ctx-running">{{ t("branch.running") }}</span>
       </div>
 
+      <!-- The marker's meaning in words, on its own row: the head is already
+           tight with the nav buttons, and squeezing this in turned the title
+           into a vertical strip on a narrow pane. -->
+      <div v-if="isEmptyContext(store.selectedId)" class="ctx-cut-note">
+        <span class="ctx-cut-glyph">✂</span>
+        <span>{{ t("cut.paneNote") }}</span>
+      </div>
+
       <div v-if="store.messagesError" class="banner banner-error">{{ store.messagesError }}</div>
 
       <MessageList
@@ -229,7 +251,22 @@
         :error="null"
         @retry="retry"
       >
-        <template v-if="contextTurns.length > 0 || omittedCount > 0" #context>
+        <template v-if="isEmptyContext(store.selectedId)" #context>
+          <!-- An empty-context branch carries none of these ancestors, so the
+               pane does not list them as numbered context steps at all: it
+               names where the branch split off and stops there. -->
+          <div class="chain">
+            <div class="chain-label">{{ t("cut.chainLabel") }}</div>
+            <div class="chain-lineage">
+              <span class="chain-lineage-glyph">⎇</span>
+              <span class="chain-lineage-body">
+                <span class="chain-title">{{ t("cut.splitFrom", { title: cutParentTitle }) }}</span>
+                <span class="chain-preview">{{ t("cut.chainGhost") }}</span>
+              </span>
+            </div>
+          </div>
+        </template>
+        <template v-else-if="contextTurns.length > 0 || omittedCount > 0" #context>
           <div class="chain">
             <div class="chain-label">{{ t("branch.chainLabel") }}</div>
             <p v-if="omittedCount > 0" class="chain-omitted">{{ t("branch.chainOmitted", { n: omittedCount }) }}</p>
@@ -310,6 +347,7 @@ import {
   exitCompare,
   exportBranchMarkdown,
   inlineHostVisible,
+  isEmptyContext,
   isTurnMarked,
   paneComposerModel,
   paneContextUsage,
@@ -638,6 +676,18 @@ const MAX_CONTEXT = 12;
 const omittedCount = computed(() => Math.max(0, activeChain.value.length - 1 - MAX_CONTEXT));
 const contextTurns = computed(() => activeChain.value.slice(0, -1).slice(-MAX_CONTEXT));
 const chainStart = computed(() => omittedCount.value + 1);
+
+/**
+ * Title of the branch an empty-context fork split off from. It comes from
+ * lineage rather than the chain: the chain's ancestors are exactly what this
+ * branch does not carry, so the pane names the parent instead of listing them.
+ */
+const cutParentTitle = computed(() => {
+  const id = store.selectedId;
+  const parentId = id ? store.lineage[id]?.parentId : undefined;
+  const title = parentId ? (store.sessions.find((s) => s.id === parentId)?.title ?? "") : "";
+  return title || t("cut.splitFromFallback");
+});
 
 function jumpTo(node: TurnNode): void {
   void selectTurn(node, { focusCanvas: true });

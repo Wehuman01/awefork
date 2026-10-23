@@ -9,13 +9,19 @@
  */
 
 import type { TurnGraph, TurnNode } from "./canvas-graph.js";
-import type { LineageMap, SessionSummary } from "./types.js";
+import type { ForkContextMode, LineageMap, SessionSummary } from "./types.js";
 
 export interface BranchDigest {
   sessionId: string;
   title: string;
   /** Where this branch forked from; null for story roots. */
   forkedFrom: { sessionId: string; sessionTitle: string; turnTitle: string } | null;
+  /**
+   * Whether the branch carries the parent's history. Story roots report
+   * "root": they have nothing to inherit and nothing to have been cut off
+   * from, so UIs can tell "not a fork" apart from "a fork with history".
+   */
+  context: ForkContextMode | "root";
   /**
    * 1-based attempt among the forks that split off the same turn carrying the
    * same first prompt — the retry-as-fork family. null when the branch is
@@ -71,6 +77,7 @@ export function buildBranchDigests(
         sessionId,
         title: session.title,
         forkedFrom,
+        context: record ? (record.context ?? "inherit") : "root",
         attempt: null,
         turnCount: turns.length,
         outputTokens: turns.reduce((sum, n) => sum + n.outputTokens, 0),

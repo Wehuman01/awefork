@@ -79,8 +79,38 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "当前会复制切点前的全部对话到新分支；点击切换为空上下文",
     en: "Currently copies everything before the cut into the new branch; click to switch to empty context",
   },
-  "canvas.ctxNoneLabel": { zh: "✂ 空上下文", en: "✂ Empty context" },
-  "canvas.ctxInheritLabel": { zh: "⛓ 带历史", en: "⛓ With history" },
+  // Glyphs live in the templates, not here — a label is text in either language.
+  "canvas.ctxNoneLabel": { zh: "空上下文", en: "Empty context" },
+  "canvas.ctxInheritLabel": { zh: "带历史", en: "With history" },
+  // The static ✂ marker (sidebar / digest / compare column / canvas edge):
+  // it must never read as the draft's clickable toggle, hence its own strings.
+  "cut.markerTitle": {
+    zh: "空上下文分支：不带母本历史，从自己的第一句话开始",
+    en: "Empty-context branch: carries no parent history, starts from its own first turn",
+  },
+  "cut.digestChip": {
+    zh: "空上下文 · 从自己的第一句话开始",
+    en: "Empty context · starts from its own first turn",
+  },
+  // The pane is where the user actually reads, so the marker becomes a
+  // sentence that states the consequence rather than a symbol to decode.
+  "cut.paneNote": {
+    zh: "这条分支不带母本历史，从自己的第一句话开始。",
+    en: "This branch carries no parent history; it starts from its own first turn.",
+  },
+  // Above a story path, "上下文里没有" replaces the old "上文链路" heading —
+  // those ancestor turns are lineage, not this branch's context.
+  "cut.chainLabel": { zh: "故事路径", en: "Story path" },
+  "cut.splitFrom": { zh: "从「{title}」分出", en: "Split off from “{title}”" },
+  "cut.splitFromFallback": { zh: "母本分支", en: "the parent branch" },
+  "cut.chainGhost": {
+    zh: "母本的对话没有带过来",
+    en: "The parent's turns did not come along",
+  },
+  "cut.compareNote": {
+    zh: "✂ 不带母本历史",
+    en: "✂ Carries no parent history",
+  },
   "canvas.remove": { zh: "移除", en: "Remove" },
   "canvas.phContinue": {
     zh: "描述下一步…（发送后继续这个分支）",
