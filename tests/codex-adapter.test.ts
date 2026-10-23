@@ -349,6 +349,24 @@ describe("createCodexAdapter prompt()", () => {
     expect(callsOf("turn/start")).toHaveLength(1);
   });
 
+  it("skips resume for a fresh thread with no rollout yet (codex 0.163 wording)", async () => {
+    // Regression: a brand-new thread/start session has no rollout until its
+    // first turn; 0.163's thread/resume refuses it with "no rollout found
+    // for thread id", which surfaced as an error toast on every new codex
+    // session's first prompt.
+    const { client, callsOf } = fakeClient({
+      "thread/resume": () => {
+        throw new Error("no rollout found for thread id s1");
+      },
+      "turn/start": () => ({ turn: { id: "turn-9" } }),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    await adapter.prompt("s1", "你好", null);
+
+    expect(callsOf("turn/start")).toHaveLength(1);
+  });
+
   it("explains a refused writer instead of echoing codex's lock wording", async () => {
     const { client } = fakeClient({
       "thread/resume": () => {

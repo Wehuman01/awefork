@@ -404,7 +404,11 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
 
   function isNotMaterialized(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return message.includes("is not materialized yet");
+    // 0.154 said "is not materialized yet"; 0.163's thread/resume says
+    // "no rollout found for thread id" for the same state.
+    return (
+      message.includes("is not materialized yet") || message.includes("no rollout found")
+    );
   }
 
   return {
@@ -575,8 +579,15 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         // turn/start only sees threads this server has loaded, and reading a
         // thread no longer loads it (readThread deliberately avoids the
         // writer). Taking the writer here is correct: a turn appends to the
-        // rollout. Idempotent when the thread is already loaded.
-        await resumeThread(sessionId);
+        // rollout. Idempotent when the thread is already loaded. A brand-new
+        // thread/start session has no rollout until its first turn, and
+        // thread/resume refuses it — that refusal is not an error, the
+        // turn/start below is what materializes the rollout.
+        try {
+          await resumeThread(sessionId);
+        } catch (error) {
+          if (!isNotMaterialized(error)) throw error;
+        }
         const response = await client.request<{ turn?: { id?: string } }>("turn/start", params);
         if (response?.turn?.id) activeTurns.set(sessionId, response.turn.id);
       } catch (error) {
