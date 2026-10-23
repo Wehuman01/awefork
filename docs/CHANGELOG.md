@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.7
+
+- **新建对话不再落到 server 的工作目录** — 命令面板的“＋”在没有任何选中目录时会发出不带 `location` 的空 body，opencode server 就按自己的 cwd 建 session：后台 service 跑在 `$HOME`，而一个从临时目录启动的 TUI 会把 session 建在 `/var/folders/…/T`。启动时的自动选中又会让“全局最新 session”的目录当选——那往往正是 TUI 在临时目录里跑出来的那条，于是之后每个新建对话都继承了这个垃圾目录，“在终端打开”也忠实地 `cd` 进去。现在打开的项目目录随每个 backend 的 composer sidecar 持久化：`bootBackend` 在加载 session 列表之前就把它读回来，自动选中于是在记住的项目里选 session，而不是全局最新的那条；目录变化随草稿走同一个防抖落盘，切 backend 各存各的。`createSession` 的撤销/重做也在入口冻结了目标目录，不会再跑到用户后来切到的目录去建。
+- **Dark mode** — 在 peach-soda 浅色主题之外新增深色主题，`html[data-theme]` 驱动的整套 CSS 变量覆盖画布、侧栏、右栏、对话框、markdown 与代码块；跟随系统偏好或手动切换，选择本地记忆。
+- **大画布加载性能** — 画布节点布局与消息批量加载做了批处理化改造：一次 refresh 发现的兄弟分支并入同一批加载，滚动/缩放的布局计算从每节点重排改为一次性测量，百万级会话的画布首屏不再逐卡等待。
+- **每个 ask 都渲染在它自己的会话里** — opencode 的 permission 与 form 询问不再争夺一个全局 modal：两类 ask 都内联显示在对应会话对话面板的尾部，后台会话的 ask 停泊在它自己的面板上、选中时才浮现；modal 只保留面板无法呈现的情况（codex 审批、关联不到会话的 opencode ask、对比模式或面板隐藏时），任何 ask 都不会凭空消失。
+- **opencode 的 permission / form 询问可以在应用内回答** — 命中 permission 配置里 `"ask"` 规则的 run 以前会永远停住，因为 server 端的询问没有入口回答；`permission.asked` 帧现在走 codex 那套 interaction 通道，内联渲染在对话尾部：被 gate 的命令、命中的规则 pattern，以及 Deny / Allow once / Always allow 三个回复（“always”由 opencode 自己存成 saved permission）。`form.created` 的结构化表单（登录、MCP elicitation）同样可答：文本、下拉、数字/整数范围、布尔、多选与 external 链接字段按 server 发来的字段联合渲染，必填先校验，“Other…” 收集自由文本，Cancel 取消、Submit 回帖答案 map；在别处（TUI）被回答的 ask 通过 `form.replied`/`form.cancelled` 自动退场。
+- **重启后仍在等待的 form 会重新出现** — 应用重启时 server 端还挂着的 form 询问会通过订阅重新露面，而不是让那条 turn 永远停在“运行中”。
+- **运行指示色从薄荷绿换成天蓝** — 与深色主题和错误/成功色各自分开。
+- **v2 把 fork 和 subagent 分开了** — v2 给两种父子关系各自字段，而旧映射把它们读成同一个，于是每个 fork 都被标成 origin“subagent”并被侧栏树和画布刻意隐藏；在 awefork 之外（TUI、web UI）建的 fork 会整条消失。`parentSessionId` 现在只读 `parentID`，新增 `forkSessionId` 读 `fork.sessionID`。
+- **v2 导出的副本保持可见根节点** — 导出为独立会话在 v2 下曾经无效：fork 成功，但 v2 的 fork 端点会把父节点盖到副本自己的行上，刷新时副本又被映射成隐藏的 subagent。awefork 现在把只有它知道的事记录下来——副本是 detached export——被标记的行在渲染层看的每一处都丢掉 server 的父链接。
+- **codex: 新 thread 干净启动、丢帧不再劫持 abort、回复兜底会排队** — 新建 codex thread 不再因为 rollout 文件还不存在而弹错误（读作空）；丢掉的 `turn/completed` 帧留下的陈旧 turn id 不会再被后来的 abort 用 codex 的原始 RPC 错误打断；JSON-RPC 请求兜底从 30 s 放宽到 60 s，严格排在渲染层自己的 30 s 自动拒绝之后。
+- **故事搜索跳转后自动收起** — 点中一条命中后面板消失，不再盖在画布上。
+
+### Install
+
+This release ships notes only — no installers attached. Build locally with `npm run dist` (macOS dmg) or `npm run dist:win` (Windows exe).
+
 ## v0.3.6
 
 - **Bilingual UI completed** — the language toggle now covers the whole renderer, not just the interaction dialogs: every remaining hardcoded-Chinese surface (sidebar, chat input, model picker, command palette, compress/fork-tag/variant dialogs, message list and code blocks, canvas, compare views, history and marks panels, undo toasts, state errors and confirm prompts, relative-time text, attachment notices) is extracted into zh/en dictionaries (~460 keys across five per-surface `i18n-*.ts` modules merged into `i18n.ts`'s single `t()`), with list separators (`、` vs `, `) following the locale. Deliberately untouched: the 中文/English switcher labels, the literal search-grammar examples (`body:词` …), and the demo fixture's sample conversation content.
