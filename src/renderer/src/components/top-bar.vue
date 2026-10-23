@@ -86,7 +86,7 @@
       class="icon-btn cmdk-btn"
       :title="t('topbar.commandPalette')"
       @click="togglePalette()"
-    >⌘K</button>
+    >{{ paletteKeyLabel }}</button>
     <button
       type="button"
       class="icon-btn cmdk-btn"
@@ -203,6 +203,8 @@ const activeLabel = computed(
 // The version button is always there (so manual checks stay reachable); a
 // placeholder stands in until the first check fills the real version in.
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
+// The palette shortcut shows the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere.
+const paletteKeyLabel = navigator.platform.toLowerCase().includes("mac") ? "⌘K" : "Ctrl+K";
 
 function toggleOpen(): void {
   open.value = !open.value;

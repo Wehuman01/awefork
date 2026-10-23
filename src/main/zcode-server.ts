@@ -33,11 +33,19 @@ export interface ZcodeCli {
   env?: Record<string, string>;
 }
 
-/** Candidate .cjs bundle paths, most common first. darwin-only for now. */
+/**
+ * Candidate .cjs bundle paths, most common first. Forward separators on
+ * purpose: node's fs accepts "/" on every platform, and tests simulate any
+ * platform from any host (host `join` would emit "\" on Windows).
+ */
 function bundleCandidates(home: string, plat: NodeJS.Platform): string[] {
+  if (plat === "win32") {
+    return [
+      "C:/Program Files/ZCode/resources/glm/zcode.cjs",
+      posix.join(home, "AppData", "Local", "Programs", "zcode", "resources", "glm", "zcode.cjs"),
+    ];
+  }
   if (plat !== "darwin") return [];
-  // POSIX separators on purpose: the layout is darwin's, and tests simulate
-  // darwin from any host (host `join` would emit "\" on Windows).
   return [
     "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
     posix.join(home, "Applications", "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs"),
@@ -88,10 +96,11 @@ export async function resolveZcodeCli(
  * hand it over whenever the file can be located next to the script.
  */
 function builtinProviderEnv(scriptPath: string): Record<string, string> {
-  // Same POSIX-separator rule as bundleCandidates: the catalog layout is
-  // part of the darwin bundle, and node's fs accepts "/" on every platform
-  // for an AWEFORK_ZCODE_CLI override.
-  const dir = posix.dirname(scriptPath);
+  // Forward-separator rule as bundleCandidates: node's fs accepts "/" on
+  // every platform, and normalizing "\" first lets a Windows-style
+  // AWEFORK_ZCODE_CLI override survive posix.dirname.
+  const script = scriptPath.replaceAll("\\", "/");
+  const dir = posix.dirname(script);
   const candidates = [
     posix.join(dir, "provider", "zcode-builtin.json"),
     posix.resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
