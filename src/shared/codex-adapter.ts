@@ -64,6 +64,32 @@ interface CodexTurn {
   error?: { message?: string } | null;
   startedAt?: number;
   completedAt?: number | null;
+  /**
+   * Per-turn token usage. codex 0.163's `thread/turns/list` omits it — usage
+   * only arrives live via the `thread/tokenUsage/updated` notification — so
+   * this is absent in practice and read defensively for future builds that
+   * project it onto the turn.
+   */
+  usage?: CodexTokenUsage | null;
+}
+
+/**
+ * codex's token accounting (`thread/tokenUsage/updated`): a breakdown per
+ * response, with `total` accumulating across the thread and `last` scoped to
+ * the turn that just finished. `totalTokens` is the backend's own sum.
+ */
+interface CodexTokenUsage {
+  total?: CodexTokenBreakdown | null;
+  last?: CodexTokenBreakdown | null;
+}
+
+interface CodexTokenBreakdown {
+  totalTokens?: number | null;
+  inputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  cacheWriteInputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningOutputTokens?: number | null;
 }
 
 interface CodexItem {
@@ -270,6 +296,40 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return lookup();
   }
 
+  /**
+   * The turn's footprint in the model's context window, same rule as
+   * opencode/zcode: the backend's own total when it reports one, else the sum of
+   * the parts it reports (cached reads count — they are part of what the next
+   * prompt carries). null when the turn reports no usage at all, which is every
+   * turn on codex 0.163: `thread/turns/list` carries no usage and the live
+   * `thread/tokenUsage/updated` notification is not folded back into history.
+   */
+  function contextTokensOfUsage(usage: CodexTokenUsage | null | undefined): number | null {
+    if (!usage) return null;
+    // `total` accumulates the whole thread, so a later turn would inflate the
+    // meter; `last` is the turn's own step. Prefer `last` when both exist, but
+    // fall back to `total` for a notification that only carried it.
+    const breakdown = usage.last ?? usage.total;
+    if (!breakdown) return null;
+    if (typeof breakdown.totalTokens === "number") return breakdown.totalTokens;
+    const parts = [
+      breakdown.inputTokens,
+      breakdown.outputTokens,
+      breakdown.reasoningOutputTokens,
+      breakdown.cachedInputTokens,
+      breakdown.cacheWriteInputTokens,
+    ];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+
   function mapTurn(turn: CodexTurn, thread: CodexThread | null): ChatMessage[] {
     const items = turn.items ?? [];
     const startedAt = secToMs(turn.startedAt) ?? Date.now();
@@ -315,6 +375,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       ...new Set(items.map(toolNameOfItem).filter((name): name is string => name !== null)),
     ];
     const error = turn.error?.message ?? null;
+    const contextTokens = contextTokensOfUsage(turn.usage);
     // A turn whose assistant side produced nothing visible (yet) yields no
     // assistant row — empty rows would flicker above the live stream.
     if (text || thinking || toolNames.length > 0 || error) {
@@ -332,6 +393,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         completedAt: secToMs(turn.completedAt),
         finish: turn.status === "completed" ? "stop" : null,
         outputTokens: null,
+        ...(contextTokens !== null ? { contextTokens } : {}),
         error,
       });
     }
