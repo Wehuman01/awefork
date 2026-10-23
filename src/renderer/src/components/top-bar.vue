@@ -93,6 +93,18 @@
       :title="theme === 'dark' ? t('topbar.themeOff') : t('topbar.themeOn')"
       @click="toggleTheme"
     >{{ theme === "dark" ? "☀" : "☾" }}</button>
+    <button
+      type="button"
+      class="icon-btn multiwindow-btn"
+      :class="{ on: quitKeepAlive }"
+      role="switch"
+      :aria-checked="quitKeepAlive"
+      :title="quitKeepAlive ? t('topbar.quitKeepAliveOn') : t('topbar.quitKeepAliveOff')"
+      @click="toggleQuitKeepAlive"
+    >
+      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
+      {{ t("topbar.quitKeepAliveLabel") }}
+    </button>
     <div class="lang-switch" role="group" aria-label="Language">
       <button
         type="button"
@@ -189,6 +201,18 @@ function toggleMultiWindow(): void {
   multiWindow.value = !multiWindow.value;
   localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
 }
+// Quit keep-alive lives in main's settings.json (the quit dialog's checkbox
+// also writes it), so this toggle is a plain IPC call — demo mode has no
+// bridge and keeps the switch inert at its persisted default.
+const quitKeepAlive = ref(false);
+function toggleQuitKeepAlive(): void {
+  if (!window.awefork) return;
+  quitKeepAlive.value = !quitKeepAlive.value;
+  void window.awefork.setQuitKeepAlive(quitKeepAlive.value);
+}
+void window.awefork?.quitKeepAlive().then((value) => {
+  quitKeepAlive.value = value;
+});
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);

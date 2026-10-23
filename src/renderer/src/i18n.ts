@@ -144,6 +144,17 @@ const DICT: Dict = {
   },
   "topbar.multiWindowLabel": { zh: "独立窗口", en: "Separate windows" },
 
+  // ── top-bar quit keep-alive toggle ──────────────────────────────────────
+  "topbar.quitKeepAliveLabel": { zh: "退出保留后台", en: "Keep on quit" },
+  "topbar.quitKeepAliveOn": {
+    zh: "已开：退出 awefork 后后端继续在后台运行，进行中的任务会完成并写入会话记录",
+    en: "On: quitting leaves the backends running so in-flight turns finish and land in their session files",
+  },
+  "topbar.quitKeepAliveOff": {
+    zh: "已关：退出 awefork 会停止所有后端并中断进行中的任务（有任务在跑时会先弹确认）",
+    en: "Off: quitting stops every backend and interrupts in-flight runs (a confirmation asks first when runs are going)",
+  },
+
   // ── state.ts visible strings ───────────────────────────────────────────
   "error.openWindowFailed": {
     zh: "无法打开 {backend} 窗口。",
