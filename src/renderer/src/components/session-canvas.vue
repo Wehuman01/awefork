@@ -676,6 +676,8 @@ let activeDrag: { move: (event: MouseEvent) => void; up: () => void } | null = n
 function onMouseDown(event: MouseEvent): void {
   if (event.button !== 0) return;
   loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   panning.value = true;
   const startX = event.clientX - tx.value;
   const startY = event.clientY - ty.value;
@@ -708,6 +710,8 @@ function zoomBy(factor: number): void {
 
 function zoomAt(px: number, py: number, factor: number): void {
   loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   const next = Math.min(1.8, Math.max(0.45, scale.value * factor));
   const applied = next / scale.value;
   tx.value = px - (px - tx.value) * applied;
@@ -739,6 +743,8 @@ function fitView(): void {
 
 /** ⎇ badge click: pull the selected session's whole fork subtree into view. */
 function focusSubtree(): void {
+  userAdjustedView = true;
+  overviewProvisional = false;
   const ids = new Set(forkedFromSelection.value);
   if (store.selectedId) ids.add(store.selectedId);
   fitTo(graph.value.nodes.filter((n) => ids.has(n.sessionId)));
@@ -779,6 +785,14 @@ let pendingJump: string | null = null;
 // so later graph changes (a branch switch reshaping the canvas) never re-fit
 // and flash the whole-graph view before a jump lands.
 let overviewShown = false;
+// The overview above was taken while sibling branches were still loading: the
+// graph can still grow and re-band its rows, so the framing is provisional
+// until the batch settles. Handing the view back to openInitialView at that
+// point is what keeps the selected card on screen.
+let overviewProvisional = false;
+// Any manual pan / zoom / fit hands the camera to the user for good — the
+// load-settle pass must not yank the view back afterwards.
+let userAdjustedView = false;
 
 function nodesOf(sessionId: string | null): TurnNode[] {
   if (!sessionId) return [];
@@ -790,8 +804,10 @@ function openInitialView(): void {
   if (graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
     fitView();
     overviewShown = true;
+    overviewProvisional = store.loadingCanvas;
     return;
   }
+  overviewProvisional = false;
   if (store.selectedId && nodesOf(store.selectedId).length > 0) {
     focusNow(store.selectedId);
   }
@@ -829,6 +845,20 @@ watch(graph, () => {
     if (anchor) alignNode(anchor);
   }
   if (centeredFor === null && !overviewShown) openInitialView();
+  // The provisional overview was framed on a partial graph. Once sibling
+  // branches push it past the overview limit, the whole-graph fit stops being
+  // the right framing — hand the camera to the selected branch, whose anchor
+  // then survives every further row re-band.
+  if (
+    overviewProvisional &&
+    graph.value.nodes.length > OVERVIEW_NODE_LIMIT &&
+    centeredFor === null &&
+    store.selectedId &&
+    nodesOf(store.selectedId).length > 0
+  ) {
+    focusNow(store.selectedId);
+    overviewProvisional = false;
+  }
 });
 watch(
   () => store.loadingMessages,
@@ -869,6 +899,20 @@ watch(
         const anchor = loadingAnchorId ? nodeById.value.get(loadingAnchorId) : null;
         if (anchor) alignNode(anchor);
         loadingAnchorId = null;
+        // The batch settled: whatever the initial overview framed on a
+        // partial graph is now stale. Re-decide on the final graph unless the
+        // user has taken the camera (or a focus/jump is about to land).
+        if (
+          overviewProvisional &&
+          !userAdjustedView &&
+          centeredFor === null &&
+          pendingFocus === null &&
+          pendingJump === null
+        ) {
+          overviewProvisional = false;
+          overviewShown = false;
+          openInitialView();
+        }
       });
     });
   },
@@ -877,7 +921,10 @@ watch(
 watch(
   () => store.fitRequest,
   (nonce) => {
-    if (nonce) fitView();
+    if (!nonce) return;
+    userAdjustedView = true;
+    overviewProvisional = false;
+    fitView();
   },
 );
 
@@ -1177,6 +1224,8 @@ function followViewportInMinimap(): boolean {
 
 function onMinimapDown(event: MouseEvent): void {
   loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   if (event.button !== 0) return;
   const point = minimapWorldPoint(event.clientX, event.clientY);
   camTarget = point ? { ...point } : null;

@@ -1,7 +1,7 @@
 {
-  "measuredAt": "2026-10-22T08:05:48.070Z",
-  "commit": "0728ba9923c5c2b13c4c77683c17697b4a851b00",
-  "changes": " M docs/CONTRIBUTING.md\n M src/renderer/src/components/session-canvas.vue\n M src/renderer/src/state.ts\n M tests/gui-test.mjs\n M tests/renderer-run-settle.test.ts\n?? scripts/canvas-benchmark.mjs\n?? src/renderer/src/message-loader.ts\n?? tests/message-loader.test.ts\n",
+  "measuredAt": "2026-10-22T11:18:35.011Z",
+  "commit": "ec81515a6cc43915bff263eda59d1ba3a32411fd",
+  "changes": " M docs/performance/2026-10-22/warm-after.json\n M docs/performance/2026-10-22/warm-before.json\n M package.json\n M scripts/canvas-benchmark.mjs\n M src/renderer/src/components/session-canvas.vue\n M src/renderer/src/state.ts\n M tests/renderer-run-settle.test.ts\n?? tests/canvas-initial-view.test.mjs\n",
   "platform": "darwin",
   "arch": "arm64",
   "cpu": "Apple M4",
@@ -30,623 +30,627 @@
   "coldLoads": [
     {
       "branches": 100,
-      "firstReadableMs": 92.29999999701977,
+      "viewport": {
+        "w": 1440,
+        "h": 872
+      },
+      "firstReadableMs": 99.70000000298023,
       "firstVisibleMs": null,
       "firstReadyMs": null,
-      "allLoadedMs": 16478.40000000596,
+      "allLoadedMs": 16566.90000000596,
       "maxConcurrent": 100,
       "finalVisible": false,
       "panPreserved": null,
-      "turns": 327891,
-      "scanned": 22096910,
-      "graphs": 171,
-      "updates": 174,
+      "turns": 328330,
+      "scanned": 22138130,
+      "graphs": 170,
+      "updates": 173,
       "requests": [
         {
           "backend": "opencode",
           "id": "branch-100",
-          "startedMs": 11.400000005960464,
-          "finishedMs": 60.79999999701977
+          "startedMs": 10.799999997019768,
+          "finishedMs": 60.400000005960464
         },
         {
           "backend": "opencode",
           "id": "main",
-          "startedMs": 78.1000000089407,
-          "finishedMs": 113.1000000089407
+          "startedMs": 78.90000000596046,
+          "finishedMs": 117.70000000298023
         },
         {
           "backend": "opencode",
           "id": "branch-1",
-          "startedMs": 78.1000000089407,
-          "finishedMs": 16478.40000000596
+          "startedMs": 78.90000000596046,
+          "finishedMs": 16566.90000000596
         },
         {
           "backend": "opencode",
           "id": "branch-2",
-          "startedMs": 78.1000000089407,
-          "finishedMs": 146.90000000596046
+          "startedMs": 78.90000000596046,
+          "finishedMs": 131.09999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-3",
-          "startedMs": 78.1000000089407,
-          "finishedMs": 161.5
+          "startedMs": 78.90000000596046,
+          "finishedMs": 145
         },
         {
           "backend": "opencode",
           "id": "branch-4",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 197.6000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 159.59999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-5",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 214.90000000596046
+          "startedMs": 79.20000000298023,
+          "finishedMs": 176.59999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-6",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 234.1000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 226.59999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-7",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 254.6000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 247.59999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-8",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 275.79999999701977
+          "startedMs": 79.20000000298023,
+          "finishedMs": 269.70000000298023
         },
         {
           "backend": "opencode",
           "id": "branch-9",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 327.29999999701977
+          "startedMs": 79.20000000298023,
+          "finishedMs": 291.90000000596046
         },
         {
           "backend": "opencode",
           "id": "branch-10",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 353.6000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 316.09999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-11",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 385.70000000298023
+          "startedMs": 79.20000000298023,
+          "finishedMs": 376.09999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-12",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 414.20000000298023
+          "startedMs": 79.20000000298023,
+          "finishedMs": 403.79999999701977
         },
         {
           "backend": "opencode",
           "id": "branch-13",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 485.40000000596046
+          "startedMs": 79.20000000298023,
+          "finishedMs": 432.59999999403954
         },
         {
           "backend": "opencode",
           "id": "branch-14",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 516.9000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 463.20000000298023
         },
         {
           "backend": "opencode",
           "id": "branch-15",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 549.4000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 547.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-16",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 584
+          "startedMs": 79.20000000298023,
+          "finishedMs": 582.2999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-17",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 663.7999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 619.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-18",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 701.1000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 698.2999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-19",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 739.7999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 737.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-20",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 825.5
+          "startedMs": 79.20000000298023,
+          "finishedMs": 775.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-21",
-          "startedMs": 78.40000000596046,
+          "startedMs": 79.20000000298023,
           "finishedMs": 867.2999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-22",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 911.2999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 911.5
         },
         {
           "backend": "opencode",
           "id": "branch-23",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1006.7999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 957.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-24",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1053.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1056.4000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-25",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1101.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1104
         },
         {
           "backend": "opencode",
           "id": "branch-26",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1206.2999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1155.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-27",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1257.6000000089407
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1268
         },
         {
           "backend": "opencode",
           "id": "branch-28",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1367.7000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1320.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-29",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1421.5
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1436.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-30",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1538.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1494.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-31",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1596
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1616.5
         },
         {
           "backend": "opencode",
           "id": "branch-32",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1722.4000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1674.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-33",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1782.9000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1804.5999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-34",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1913.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 1868.7000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-35",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 1979.5
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2003.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-36",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2121.4000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2067.7999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-37",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2193.5
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2207.5
         },
         {
           "backend": "opencode",
           "id": "branch-38",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2337
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2275.4000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-39",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2407.2999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2420.5999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-40",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2553.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2491.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-41",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2626.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2642.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-42",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2780
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2718.5
         },
         {
           "backend": "opencode",
           "id": "branch-43",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 2855.7000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2874.7999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-44",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3016.7000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 2952.7999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-45",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3095.9000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3117.5
         },
         {
           "backend": "opencode",
           "id": "branch-46",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3263.2000000029802
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3196.5
         },
         {
           "backend": "opencode",
           "id": "branch-47",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3345
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3366.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-48",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3519.4000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3449.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-49",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3604.9000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3628.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-50",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3784.4000000059605
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3714.2000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-51",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 3872.7999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3901.7000000029802
         },
         {
           "backend": "opencode",
           "id": "branch-52",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4065.2999999970198
+          "startedMs": 79.20000000298023,
+          "finishedMs": 3991.2999999970198
         },
         {
           "backend": "opencode",
           "id": "branch-53",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4156
+          "startedMs": 79.20000000298023,
+          "finishedMs": 4181.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-54",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4348.5
+          "startedMs": 79.20000000298023,
+          "finishedMs": 4274.0999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-55",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4444.20000000298
+          "startedMs": 79.20000000298023,
+          "finishedMs": 4468.5
         },
         {
           "backend": "opencode",
           "id": "branch-56",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4644.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 4564.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-57",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4742.70000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 4768.5
         },
         {
           "backend": "opencode",
           "id": "branch-58",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 4946.70000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 4973
         },
         {
           "backend": "opencode",
           "id": "branch-59",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 5155.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 5180.9000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-60",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 5367.29999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 5393.20000000298
         },
         {
           "backend": "opencode",
           "id": "branch-61",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 5582.5
+          "startedMs": 79.29999999701977,
+          "finishedMs": 5610.20000000298
         },
         {
           "backend": "opencode",
           "id": "branch-62",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 5801.100000008941
+          "startedMs": 79.29999999701977,
+          "finishedMs": 5830.20000000298
         },
         {
           "backend": "opencode",
           "id": "branch-63",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 6021.70000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 6052.4000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-64",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 6246.29999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 6276.5
         },
         {
           "backend": "opencode",
           "id": "branch-65",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 6475.70000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 6506.4000000059605
         },
         {
           "backend": "opencode",
           "id": "branch-66",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 6704.9000000059605
+          "startedMs": 79.29999999701977,
+          "finishedMs": 6746.5
         },
         {
           "backend": "opencode",
           "id": "branch-67",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 6941.4000000059605
+          "startedMs": 79.29999999701977,
+          "finishedMs": 6986.79999999702
         },
         {
           "backend": "opencode",
           "id": "branch-68",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 7184
+          "startedMs": 79.29999999701977,
+          "finishedMs": 7229.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-69",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 7427.70000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 7473.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-70",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 7675
+          "startedMs": 79.29999999701977,
+          "finishedMs": 7723.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-71",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 7922.20000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 7975.5999999940395
         },
         {
           "backend": "opencode",
           "id": "branch-72",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 8170.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 8230.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-73",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 8425.60000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 8488.40000000596
         },
         {
           "backend": "opencode",
           "id": "branch-74",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 8682.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 8750.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-75",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 8947.90000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 9015
         },
         {
           "backend": "opencode",
           "id": "branch-76",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 9213
+          "startedMs": 79.29999999701977,
+          "finishedMs": 9284
         },
         {
           "backend": "opencode",
           "id": "branch-77",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 9473.90000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 9547.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-78",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 9740.10000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 9815.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-79",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 10008
+          "startedMs": 79.29999999701977,
+          "finishedMs": 10088.90000000596
         },
         {
           "backend": "opencode",
           "id": "branch-80",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 10279.90000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 10367.90000000596
         },
         {
           "backend": "opencode",
           "id": "branch-81",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 10562.40000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 10647.59999999404
         },
         {
           "backend": "opencode",
           "id": "branch-82",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 10848.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 10929.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-83",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 11131
+          "startedMs": 79.29999999701977,
+          "finishedMs": 11215.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-84",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 11418.10000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 11507.20000000298
         },
         {
           "backend": "opencode",
           "id": "branch-85",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 11707.5
+          "startedMs": 79.29999999701977,
+          "finishedMs": 11798.59999999404
         },
         {
           "backend": "opencode",
           "id": "branch-86",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 11997.90000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 12090.09999999404
         },
         {
           "backend": "opencode",
           "id": "branch-87",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 12295.60000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 12392.09999999404
         },
         {
           "backend": "opencode",
           "id": "branch-88",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 12604.90000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 12691.59999999404
         },
         {
           "backend": "opencode",
           "id": "branch-89",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 12913.10000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 12996.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-90",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 13219.20000000298
+          "startedMs": 79.29999999701977,
+          "finishedMs": 13304.40000000596
         },
         {
           "backend": "opencode",
           "id": "branch-91",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 13532.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 13614.20000000298
         },
         {
           "backend": "opencode",
           "id": "branch-92",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 13847.5
+          "startedMs": 79.29999999701977,
+          "finishedMs": 13930.5
         },
         {
           "backend": "opencode",
           "id": "branch-93",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 14165.10000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 14246.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-94",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 14484.79999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 14568.29999999702
         },
         {
           "backend": "opencode",
           "id": "branch-95",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 14808.10000000894
+          "startedMs": 79.29999999701977,
+          "finishedMs": 14897.70000000298
         },
         {
           "backend": "opencode",
           "id": "branch-96",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 15135.5
+          "startedMs": 79.29999999701977,
+          "finishedMs": 15224.40000000596
         },
         {
           "backend": "opencode",
           "id": "branch-97",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 15465.29999999702
+          "startedMs": 79.29999999701977,
+          "finishedMs": 15553
         },
         {
           "backend": "opencode",
           "id": "branch-98",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 15796.40000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 15883.59999999404
         },
         {
           "backend": "opencode",
           "id": "branch-99",
-          "startedMs": 78.40000000596046,
-          "finishedMs": 16138.40000000596
+          "startedMs": 79.29999999701977,
+          "finishedMs": 16219.90000000596
         }
       ]
     }

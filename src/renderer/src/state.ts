@@ -1355,6 +1355,14 @@ interface CanvasMessageLoad {
   generation: number;
   selectedId: string | null;
   directory: string | null;
+  /** Set once the batch has no more work of its own, so a late reuse does not
+   *  attach to a promise that is about to settle. */
+  drained: boolean;
+  /** Every session id this batch has queued (priority + rest), so a reused
+   *  batch can tell a genuinely new session from one it already picked up. */
+  queued: Set<string>;
+  /** Siblings still to read; appended to when the session set grows. */
+  rest: string[];
   promise: Promise<void>;
 }
 
@@ -1363,13 +1371,38 @@ const canvasMessageQueue: Array<{
   backend: BackendId;
   sessionId: string;
   fresh: boolean;
+  /** The selected chain of the live workspace: may exceed the shared budget. */
+  priority: boolean;
   current: () => boolean;
   resolve: () => void;
 }> = [];
 let activeCanvasRequests = 0;
+let activeCanvasPriorityRequests = 0;
 const CANVAS_LOAD_CONCURRENCY = 4;
+/** Reserved lanes for the live workspace's selected chain. Stale requests
+ *  cannot be cancelled, so without this a slow previous workspace can hold
+ *  every shared slot and block the new selection from reading at all. The
+ *  worst-case in-flight canvas reads is therefore 6, a fixed budget. */
+const CANVAS_PRIORITY_CONCURRENCY = 2;
 
 function pumpCanvasMessages(): void {
+  for (;;) {
+    const canStartPriority =
+      activeCanvasPriorityRequests < CANVAS_PRIORITY_CONCURRENCY &&
+      activeCanvasRequests < CANVAS_LOAD_CONCURRENCY + CANVAS_PRIORITY_CONCURRENCY;
+    if (!canStartPriority) break;
+    const job = canvasMessageQueue.find((entry) => entry.priority && entry.current());
+    if (!job) break;
+    canvasMessageQueue.splice(canvasMessageQueue.indexOf(job), 1);
+    activeCanvasRequests += 1;
+    activeCanvasPriorityRequests += 1;
+    void loadSessionMessages(job.sessionId, true, job.backend, job.fresh).finally(() => {
+      activeCanvasRequests -= 1;
+      activeCanvasPriorityRequests -= 1;
+      job.resolve();
+      pumpCanvasMessages();
+    });
+  }
   while (activeCanvasRequests < CANVAS_LOAD_CONCURRENCY && canvasMessageQueue.length > 0) {
     const job = canvasMessageQueue.shift();
     if (!job) return;
@@ -1395,12 +1428,25 @@ function ensureCanvasMessages(reloadSelected = false): Promise<void> {
   const previous = canvasMessageLoad;
   if (
     !reloadSelected &&
+    !previous?.drained &&
     previous?.backend === backend &&
     previous.generation === generation &&
     previous.selectedId === selectedId &&
     previous.directory === directory
-  )
+  ) {
+    // The batch is still in flight but the session set may have grown — a
+    // refreshSessions that found a new fork would otherwise leave it as a
+    // stub card until something else re-selects the session.
+    const arrived = canvasSessions.value
+      .map((s) => s.id)
+      .filter((id) => !previous.queued.has(id) && !attemptedMessages.has(id));
+    if (arrived.length > 0) {
+      for (const id of arrived) previous.queued.add(id);
+      previous.rest.push(...arrived);
+      pumpCanvasMessages();
+    }
     return previous.promise;
+  }
 
   const sessions = canvasSessions.value;
   const byId = new Map(sessions.map((s) => [s.id, s]));
@@ -1429,6 +1475,9 @@ function ensureCanvasMessages(reloadSelected = false): Promise<void> {
     generation,
     selectedId,
     directory,
+    drained: false,
+    queued: new Set([...priority, ...rest]),
+    rest,
     promise: Promise.resolve(),
   };
   canvasMessageLoad = batch;
@@ -1438,7 +1487,7 @@ function ensureCanvasMessages(reloadSelected = false): Promise<void> {
     backend === state.activeBackend &&
     selectedId === state.selectedId &&
     directory === state.selectedDirectory;
-  const load = (ids: string[]) => {
+  const load = (ids: string[], priorityIds = new Set<string>()) => {
     const jobs = ids.map(
       (sessionId) =>
         new Promise<void>((resolve) => {
@@ -1446,6 +1495,7 @@ function ensureCanvasMessages(reloadSelected = false): Promise<void> {
             backend,
             sessionId,
             fresh: reloadSelected && sessionId === selectedId,
+            priority: priorityIds.has(sessionId),
             current,
             resolve,
           });
@@ -1457,10 +1507,17 @@ function ensureCanvasMessages(reloadSelected = false): Promise<void> {
   state.loadingMessages = priority.some((id) => state.messagesBySession[id] === undefined);
   state.loadingCanvas = true;
   batch.promise = (async () => {
-    await load(priority);
+    await load(priority, new Set(priority));
     if (!current()) return;
     state.loadingMessages = false;
-    await load(rest);
+    // Keep draining until the queue is really empty: sessions that arrived
+    // mid-batch (a refresh that found new forks) wait in `rest`.
+    while (batch.rest.length > 0) {
+      const next = batch.rest.splice(0, batch.rest.length);
+      await load(next);
+      if (!current()) return;
+    }
+    batch.drained = true;
   })().finally(() => {
     if (canvasMessageLoad === batch) {
       state.loadingMessages = false;

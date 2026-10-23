@@ -58,8 +58,11 @@ describe("compare card fold isolation", () => {
     // "选中" would tear the lens down mid-comparison — selecting a session
     // is the compare exit switch. Only the free side-by-side mode, whose two
     // timelines share no header, keeps the head.
-    const aligned = context.slice(context.indexOf('in pairColumns'), context.indexOf('<!-- 不同源'));
+    const aligned = context.slice(
+      context.indexOf("in pairColumns"),
+      context.indexOf("<!-- 不同源"),
+    );
     expect(aligned).not.toMatch(/cmp-fcol-head/);
-    expect(context.slice(context.indexOf('<!-- 不同源'))).toMatch(/cmp-fcol-head/);
+    expect(context.slice(context.indexOf("<!-- 不同源"))).toMatch(/cmp-fcol-head/);
   });
 });
