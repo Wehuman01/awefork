@@ -58,6 +58,7 @@ import { track, trackEvent } from "./history";
 import { listSep, t } from "./i18n";
 import { panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
+import { insertPathText } from "./path-insert";
 
 interface DraftState {
   /** Canvas node the composer is attached to. */
@@ -207,6 +208,14 @@ interface AppState {
   /** True while the draft's fork+prompt round-trip is in flight. */
   draftSending: boolean;
   /**
+   * Unsent drafts of targets the user navigated away from, keyed by
+   * draftKeyOf. Opening a draft for another target parks the outgoing one
+   * here instead of dropping its text; coming back restores it. Bounded by
+   * MAX_STASHED_DRAFTS and pruned when a session vanishes — the same
+   * lifecycle the single draft always had, now per target.
+   */
+  stashedDrafts: Record<string, DraftState>;
+  /**
    * Open branch comparison (⇄): the two session ids shown side by
    * side in the right pane. null = normal pane. Any fresh selection tears it
    * down — compare is a lens, not a selection.
@@ -332,6 +341,7 @@ const state = reactive<AppState>({
   composerFocusRequest: null,
   draft: null,
   draftSending: false,
+  stashedDrafts: {},
   compare: null,
   comparePickFrom: null,
   forkTagAsk: null,
@@ -2673,7 +2683,7 @@ async function softDeleteSession(backend: BackendId, sessionId: string): Promise
     // trash push hides the deleted session from the directory pool.
     landing = landingAfterHide(sessionId);
     state.trash = [...state.trash, sessionId];
-    if (state.draft?.sessionId === sessionId) state.draft = null;
+    dropDraftsOfSession(sessionId);
     clearCompareOf(sessionId);
   }
   const session = findSessionAnywhere(backend, sessionId);
@@ -2816,7 +2826,7 @@ async function archiveSessionFlow(backend: BackendId, sessionId: string): Promis
   const landing = landingAfterHide(sessionId);
 
   await archiveAddOrThrow(backend, "session", sessionId);
-  if (state.draft?.sessionId === sessionId) state.draft = null;
+  dropDraftsOfSession(sessionId);
   clearCompareOf(sessionId);
   if (state.selectedId === sessionId) {
     state.selectedId = null;
@@ -2853,12 +2863,8 @@ async function archiveDirectoryFlow(backend: BackendId, directory: string): Prom
   const selectedHere =
     state.selectedDirectory === directory ||
     state.sessions.some((s) => s.id === state.selectedId && s.directory === directory);
-  const draftedHere = state.sessions.some(
-    (s) => s.id === state.draft?.sessionId && s.directory === directory,
-  );
-
   await archiveAddOrThrow(backend, "directory", directory);
-  if (draftedHere) state.draft = null;
+  dropDraftsOfDirectory(directory);
   // A directory archive can hide either compared branch — drop the lens.
   exitCompare();
   if (!selectedHere) return true;
@@ -3306,12 +3312,84 @@ function openDraftAt(draft: DraftState): void {
   state.draft = draft;
 }
 
+/**
+ * A session going away takes its drafts with it — the active one and every
+ * parked one. Deletion, archive and directory archive all funnel here.
+ */
+function dropDraftsOfSession(sessionId: string): void {
+  if (state.draft?.sessionId === sessionId) state.draft = null;
+  for (const [key, draft] of Object.entries(state.stashedDrafts)) {
+    if (draft.sessionId === sessionId) delete state.stashedDrafts[key];
+  }
+}
+
+/** Same, for every session of a directory being archived. */
+function dropDraftsOfDirectory(directory: string): void {
+  const inDir = (draft: DraftState): boolean =>
+    state.sessions.some((s) => s.id === draft.sessionId && s.directory === directory);
+  if (state.draft && inDir(state.draft)) state.draft = null;
+  for (const [key, draft] of Object.entries(state.stashedDrafts)) {
+    if (inDir(draft)) delete state.stashedDrafts[key];
+  }
+}
+
+/**
+ * Stable identity of a draft's target: the session, plus the turn it forks
+ * after (null = the session's tip, i.e. continue in place). Two targets
+ * sharing a key share one draft — that is what makes switching between
+ * them lossless, and what the persistence layer keys stashes by.
+ */
+export function draftKeyOf(sessionId: string, atMessageId: string | null): string {
+  return `${sessionId}:${atMessageId ?? "*"}`;
+}
+
+/** How many parked drafts one backend keeps before the oldest is dropped. */
+const MAX_STASHED_DRAFTS = 12;
+
+/** Park an unsent draft for later, evicting the oldest past the cap. */
+function stashDraft(draft: DraftState): void {
+  const key = draftKeyOf(draft.sessionId, draft.atMessageId);
+  state.stashedDrafts[key] = draft;
+  const keys = Object.keys(state.stashedDrafts);
+  while (keys.length > MAX_STASHED_DRAFTS) {
+    const oldest = keys.shift();
+    if (oldest === undefined) break;
+    delete state.stashedDrafts[oldest];
+  }
+}
+
+/** Drop a parked draft once its text is gone for good (sent, closed, deleted). */
+function unstashDraft(sessionId: string, atMessageId: string | null): void {
+  delete state.stashedDrafts[draftKeyOf(sessionId, atMessageId)];
+}
+
 export function openDraft(node: TurnNode): void {
+  const atMessageId = isSessionTip(node) ? null : node.messageId;
+  const key = draftKeyOf(node.sessionId, atMessageId);
+  const current = state.draft;
+  // Park the outgoing target's unsent text instead of dropping it: this is
+  // what lets the user walk between targets without losing a half-written
+  // prompt. An empty draft is nothing to keep.
+  if (
+    current !== null &&
+    draftKeyOf(current.sessionId, current.atMessageId) !== key &&
+    current.text.trim() !== ""
+  ) {
+    stashDraft(current);
+  }
+  const stashed = state.stashedDrafts[key];
+  if (stashed !== undefined) {
+    // Restored verbatim — text, model, context mode and attachments all
+    // come back; only the canvas anchor is refreshed to today's node.
+    delete state.stashedDrafts[key];
+    openDraftAt({ ...stashed, nodeId: node.id });
+    return;
+  }
   openDraftAt({
     nodeId: node.id,
     sessionId: node.sessionId,
     // Session tip: keep talking in place; a mid-story turn grows a fork.
-    atMessageId: isSessionTip(node) ? null : node.messageId,
+    atMessageId,
     contextMode: "inherit",
     text: "",
     // Preselect the model that wrote the turn being forked from, when known;
@@ -3396,6 +3474,28 @@ export function setDraftText(text: string): void {
   if (state.draft) state.draft.text = text;
 }
 
+export type DraftInsertResult =
+  | { ok: true }
+  /** No draft is open — the caller names the target the user must pick. */
+  | { ok: false; reason: "no-draft" }
+  /** A send is in flight; the text stays put and the user is told why. */
+  | { ok: false; reason: "sending" };
+
+/**
+ * Splice text (a path, from the context menu) into the active draft at its
+ * end, keeping the store's single source of truth. The canvas drop path
+ * inserts at the live caret through the textarea instead, so the browser's
+ * native undo stack covers it; this is the store-level fallback.
+ */
+export function insertDraftText(insert: string): DraftInsertResult {
+  const draft = state.draft;
+  if (!draft) return { ok: false, reason: "no-draft" };
+  if (state.draftSending) return { ok: false, reason: "sending" };
+  const result = insertPathText(draft.text, insert);
+  draft.text = result.text;
+  return { ok: true };
+}
+
 export function setDraftModel(model: ModelChoice | null): void {
   if (!state.draft) return;
   state.draft.model = model;
@@ -3420,6 +3520,9 @@ export function setDraftAttachments(attachments: readonly DraftAttachment[]): vo
 }
 
 export function dismissDraft(): void {
+  // A closed draft's parked copy must not resurrect on the next visit to
+  // the same target — closing is an explicit discard.
+  if (state.draft) unstashDraft(state.draft.sessionId, state.draft.atMessageId);
   state.draft = null;
 }
 
@@ -3652,6 +3755,27 @@ function plainPersistedDraft(): PersistedDraft | null {
   };
 }
 
+/** The parked drafts, same plain-object treatment. */
+function plainStashedDrafts(): Record<string, PersistedDraft> {
+  const out: Record<string, PersistedDraft> = {};
+  for (const [key, draft] of Object.entries(state.stashedDrafts)) {
+    out[key] = {
+      sessionId: draft.sessionId,
+      atMessageId: draft.atMessageId,
+      contextMode: draft.contextMode,
+      text: draft.text,
+      model: plainModel(draft.model),
+      attachments: draft.attachments.map((a) => ({
+        id: a.id,
+        name: a.name,
+        mime: a.mime,
+        dataUrl: a.dataUrl,
+      })),
+    };
+  }
+  return out;
+}
+
 /** The current state as a persistable composer value; null = nothing to keep. */
 function composerSnapshot(): PersistedComposer | null {
   // Picks for sessions that no longer exist would pile up forever.
@@ -3660,7 +3784,9 @@ function composerSnapshot(): PersistedComposer | null {
     if (model && state.sessions.some((s) => s.id === id)) paneModels[id] = model;
   }
   const draft = plainPersistedDraft();
+  const stashed = plainStashedDrafts();
   return draft === null &&
+    Object.keys(stashed).length === 0 &&
     Object.keys(paneModels).length === 0 &&
     state.lastModel === null &&
     state.favoriteModels.length === 0 &&
@@ -3669,6 +3795,7 @@ function composerSnapshot(): PersistedComposer | null {
     ? null
     : {
         draft,
+        stashed,
         paneModels,
         lastModel: plainModel(state.lastModel),
         favoriteModels: state.favoriteModels.map(plainQuickModel),
@@ -3748,6 +3875,11 @@ async function clearComposerDraft(backend: BackendId): Promise<void> {
 // like the canvas nodeId) and fires precisely when their values change.
 watch(plainPersistedDraft, () => scheduleComposerPersist());
 watch(
+  () => state.stashedDrafts,
+  () => scheduleComposerPersist(),
+  { deep: true },
+);
+watch(
   () => state.paneModels,
   () => scheduleComposerPersist(),
   { deep: true },
@@ -3823,6 +3955,25 @@ async function restoreComposer(): Promise<void> {
       }
     }
   }
+  // Parked drafts come back the same way: their sessions must still exist
+  // and their text must be non-empty, or they were dead weight already.
+  // Their canvas anchors are recomputed on open, exactly like the active
+  // draft's — a stale nodeId never survives a restart.
+  const stashed: Record<string, DraftState> = {};
+  for (const [key, saved] of Object.entries(persisted?.stashed ?? {})) {
+    if (saved.text.trim() === "") continue;
+    if (!state.sessions.some((s) => s.id === saved.sessionId)) continue;
+    stashed[key] = {
+      nodeId: "",
+      sessionId: saved.sessionId,
+      atMessageId: saved.atMessageId,
+      contextMode: saved.contextMode ?? "inherit",
+      text: saved.text,
+      model: saved.model,
+      attachments: saved.attachments.map((a) => ({ ...a })),
+    };
+  }
+  state.stashedDrafts = stashed;
   // Normalize the file: stale sessions and dropped drafts get pruned.
   scheduleComposerPersist();
 }
@@ -3945,6 +4096,9 @@ export async function sendDraft(): Promise<void> {
     watchCompletion(backend, targetId, sentAt);
     if (!stale()) {
       state.draft = null;
+      // A parked copy of the just-sent target would resurrect sent text on
+      // the next visit — the send is the draft's end, parked or not.
+      unstashDraft(targetId, draft.atMessageId);
       // The sent draft must leave the sidecar now, not on the next debounce
       // — a crash inside that window would resurrect it as unsent.
       void flushComposer(backend);
@@ -4453,9 +4607,9 @@ function resetWorkspace(): void {
   state.models = [];
   modelsRequested = false;
   state.draft = null;
+  state.stashedDrafts = {};
   // Backend-specific like the draft: the incoming backend's own composer
-  // sidecar refills it during boot. Until it does, these are cleared
-  // defaults and must never be written back over the sidecar's contents.
+  // sidecar refills it during boot. Until it does, these are cleared  // defaults and must never be written back over the sidecar's contents.
   composerLoadedFor = null;
   state.lastModel = null;
   state.favoriteModels = [];

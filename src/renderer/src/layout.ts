@@ -1,9 +1,12 @@
 import { reactive, ref } from "vue";
 
 /**
- * Shell layout state: the two side panels' widths and folded state,
+ * Shell layout state: the two side panels' widths and folded state, the
+ * middle column's canvas/file view and the sidebar's sessions/file tab,
  * persisted to localStorage, plus the command palette's open flag.
- * Shared by app.vue (drag handles) and the command palette (toggle actions).
+ * Shared by app.vue (drag handles, view tabs), side-bar.vue (file tab)
+ * and the file surfaces (which switch the middle view when they need to
+ * show something).
  */
 
 export interface PanelState {
@@ -14,6 +17,12 @@ export interface PanelState {
 }
 
 export type PanelSide = "sidebar" | "context";
+
+/** What the middle column shows: the branch canvas or the file browser. */
+export type MainView = "canvas" | "files";
+
+/** What the sidebar shows: the session navigation or the file tree. */
+export type SidebarView = "sessions" | "files";
 
 const LAYOUT_KEY = "awefork:layout";
 
@@ -53,8 +62,32 @@ export const panels = reactive(load());
 /** True while the ⌘K palette overlay is up. */
 export const paletteOpen = ref(false);
 
+/** Which surface the middle column shows. */
+export const mainView = ref<MainView>("canvas");
+
+/** Which surface the sidebar shows. */
+export const sidebarView = ref<SidebarView>("sessions");
+
 export function togglePalette(): void {
   paletteOpen.value = !paletteOpen.value;
+}
+
+/** Switch the middle column; called by the tabs and by file surfaces that
+ *  need to show something (a preview, a located entry). */
+export function setMainView(view: MainView): void {
+  mainView.value = view;
+}
+
+export function openFilesView(): void {
+  mainView.value = "files";
+}
+
+export function openCanvasView(): void {
+  mainView.value = "canvas";
+}
+
+export function setSidebarView(view: SidebarView): void {
+  sidebarView.value = view;
 }
 
 export function persistLayout(): void {

@@ -6243,3 +6243,861 @@ html[data-theme="dark"] .brand .logo {
 html[data-theme="dark"] ::selection {
   background: color-mix(in srgb, var(--primary) 35%, transparent);
 }
+
+/* ── file browser: main-column tabs, sidebar tab, browser, tree, menu ── */
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-tabs,
+.side-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 0;
+  flex: 0 0 auto;
+}
+
+.main-tab,
+.side-tab {
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.main-tab:hover,
+.side-tab:hover {
+  background: var(--row-hover);
+  color: var(--primary-deep);
+}
+
+.main-tab.on,
+.side-tab.on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* the sidebar's session half keeps its own scroll when the file tab shows */
+.sidebar-sessions,
+.sidebar-files {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-files {
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+/* ── file browser (middle column) ───────────────────────────────────── */
+
+.fb {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.fb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.fb-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.fb-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fb-btn:hover:not(:disabled) {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.fb-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fb-btn.on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.fb-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.fb-crumb {
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-crumb:hover {
+  background: var(--row-hover);
+  color: var(--primary-deep);
+}
+
+.fb-crumb.last {
+  color: var(--ink);
+}
+
+.fb-crumb-sep {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.fb-path-form {
+  flex: 1 1 200px;
+  min-width: 140px;
+}
+
+.fb-path,
+.fb-filter,
+.fb-quick-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.fb-path:focus,
+.fb-filter:focus,
+.fb-quick-input:focus {
+  outline: none;
+  border-color: var(--primary-border);
+}
+
+.fb-filter {
+  flex: 0 1 150px;
+  width: 150px;
+}
+
+/* quick open (project-scoped) */
+
+.fb-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.fb-quick-icon {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.fb-quick-input {
+  flex: 1;
+}
+
+.fb-quick-hidden {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fb-quick-status {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.fb-quick-status.err {
+  color: var(--danger);
+}
+
+.fb-quick-results {
+  max-height: 220px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+.fb-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fb-quick-row:hover {
+  background: var(--row-hover);
+}
+
+.fb-quick-row-icon {
+  flex: 0 0 auto;
+}
+
+.fb-quick-row-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.fb-quick-row-path {
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* entries + preview */
+
+.fb-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.fb-entries {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.fb-entries.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+
+.fb-state {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.fb-state.err {
+  color: var(--danger);
+}
+
+.fb-capped {
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: var(--ask);
+}
+
+.fb-list-head,
+.fb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.fb-list-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  margin-bottom: 4px;
+}
+
+.fb-col-size,
+.fb-row-size {
+  flex: 0 0 76px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb-col-mtime,
+.fb-row-mtime {
+  flex: 0 0 118px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb-col-name,
+.fb-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: default;
+}
+
+.fb-row:hover {
+  background: var(--row-hover);
+}
+
+.fb-row.selected {
+  background: var(--row-active);
+}
+
+.fb-row-icon {
+  flex: 0 0 auto;
+}
+
+.fb-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  cursor: default;
+}
+
+.fb-tile:hover {
+  background: var(--row-hover);
+}
+
+.fb-tile.selected {
+  background: var(--row-active);
+  border-color: var(--primary-border);
+}
+
+.fb-tile-icon {
+  font-size: 26px;
+}
+
+.fb-tile-name {
+  font-size: 11.5px;
+  color: var(--ink);
+  text-align: center;
+  word-break: break-all;
+}
+
+/* preview pane */
+
+.fb-preview {
+  flex: 0 0 320px;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  background: var(--card);
+  overflow-y: auto;
+}
+
+.fp {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fp-empty,
+.fp-loading {
+  padding: 24px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.fp-lang {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--lavender-soft);
+  border: 1px solid var(--line);
+  color: var(--lavender-deep);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.fp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.fp-head .fp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-trunc {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ask-soft);
+  border: 1px solid var(--ask-border);
+  color: var(--ask-deep);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.fp-open,
+.fp-open-btn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.fp-open {
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+}
+
+.fp-open-btn {
+  margin: 10px 14px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fp-open:hover,
+.fp-open-btn:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.fp-image-wrap {
+  padding: 10px;
+  text-align: center;
+}
+
+.fp-image {
+  max-width: 100%;
+  max-height: 60vh;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.fp-markdown {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  overflow-x: auto;
+}
+
+.fp-code pre {
+  margin: 0;
+  padding: 8px 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.fp-code code {
+  display: block;
+  min-width: max-content;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.fp-line {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px;
+}
+
+.fp-line:hover {
+  background: var(--row-hover);
+}
+
+.fp-ln {
+  flex: 0 0 34px;
+  text-align: right;
+  color: var(--ink-faint);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-text {
+  white-space: pre;
+}
+
+.fp-error {
+  padding: 18px 14px;
+}
+
+.fp-error-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.fp-error-sub {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  word-break: break-all;
+}
+
+.fb-notice {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+/* ── sidebar file tree ──────────────────────────────────────────────── */
+
+.ft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.ft-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ft-head {
+  margin: 6px 4px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ft-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.ft-row:hover {
+  background: var(--row-hover);
+}
+
+.ft-row.active {
+  background: var(--row-active);
+}
+
+.ft-caret {
+  flex: 0 0 16px;
+  width: 16px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ft-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px 3px 0;
+  cursor: pointer;
+}
+
+.ft-row-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.ft-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ft-error {
+  padding: 8px 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+/* ── file context menu + info dialog ────────────────────────────────── */
+
+.file-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.file-menu {
+  position: fixed;
+  z-index: 71;
+  min-width: 190px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lift);
+  padding: 5px;
+  outline: none;
+}
+
+.file-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.file-menu-item:hover:not(:disabled),
+.file-menu-item:focus-visible {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.file-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.file-menu-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line);
+}
+
+.file-menu-base {
+  margin: 6px 8px 2px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--ink-faint);
+  word-break: break-all;
+}
+
+.file-menu-base-path {
+  display: block;
+}
+
+.file-info-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(74, 63, 58, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.file-info {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 14px 16px;
+}
+
+.file-info-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.file-info-head span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-info-head button {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.file-info-grid {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr;
+  gap: 6px 14px;
+  font-size: 12.5px;
+}
+
+.file-info-grid dt {
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.file-info-grid dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.file-info-path {
+  word-break: break-all;
+}
+
+/* ── path drop affordances on the canvas ────────────────────────────── */
+
+.turn.drop-on,
+.draft.drop-on {
+  outline: 2px dashed var(--primary);
+  outline-offset: 3px;
+}
+
+.viewport.path-drag-over {
+  cursor: copy;
+}
+
+/* ── dark mode ──────────────────────────────────────────────────────── */
+
+html[data-theme="dark"] .fb {
+  background: var(--bg);
+}
+
+html[data-theme="dark"] .file-info-backdrop {
+  background: rgba(20, 15, 12, 0.55);
+}
+
+html[data-theme="dark"] .fp-image {
+  background: #241d2e;
+}
+
+/* Enlarged preview: the same pane, fixed over the app. Esc or the button
+   steps back; a new file's preview resets it. Declared after the base
+   rules so the more specific selectors win without reordering them. */
+.fp.zoomed {
+  position: fixed;
+  inset: 16px;
+  z-index: 75;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 12px;
+  outline: none;
+}
+
+.fp.zoomed .fp-image {
+  max-height: calc(100vh - 96px);
+}
+
+.fp.zoomed .fp-markdown {
+  max-width: 860px;
+  margin: 0 auto;
+  font-size: 14px;
+}
+
+html[data-theme="dark"] .fp.zoomed {
+  background: var(--card);
+}

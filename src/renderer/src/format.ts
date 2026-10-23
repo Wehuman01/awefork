@@ -44,3 +44,25 @@ export function shortPath(directory: string): string {
   const parts = directory.split(/[\\/]/).filter(Boolean);
   return parts.slice(-2).join("/") || directory || "…";
 }
+
+/** File size for the file browser: 812 B / 4.2 KB / 1.1 MB (binary units). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/** Absolute timestamp for the file browser's info dialog (locale-formatted). */
+export function formatTimestamp(ms: number): string {
+  const date = new Date(ms);
+  const pad = (value: number): string => value.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}

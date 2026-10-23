@@ -2,9 +2,12 @@
   <main
     ref="viewportEl"
     class="viewport"
-    :class="{ panning }"
+    :class="{ panning, 'path-drag-over': pathDragOver }"
     @wheel.prevent="onWheel"
     @mousedown="onMouseDown"
+    @dragover.prevent="onPathDragOver"
+    @dragleave="onPathDragLeave"
+    @drop.prevent="onPathDrop"
   >
     <div class="world" :style="worldStyle">
       <svg class="edges" :width="svgSize.w" :height="svgSize.h">
@@ -84,6 +87,9 @@
         :key="node.id"
         :ref="cardRef"
         :data-node-id="node.id"
+        :data-drop="node.kind === 'turn' ? 'turn' : 'tip'"
+        :data-session="node.sessionId"
+        :data-message="node.messageId ?? ''"
         class="turn"
         :class="{
           selected: node.id === selectedTurnId,
@@ -98,6 +104,7 @@
           'cmp-r': cmpRole(node) === 'r',
           'cmp-anchor': cmpRole(node) === 'anchor',
           pickable: pickArmed,
+          'drop-on': isDropTarget(node),
         }"
         :style="{
           left: `${node.x}px`,
@@ -225,7 +232,10 @@
         v-if="draftNode"
         :ref="draftRef"
         class="draft"
+        :class="{ 'drop-on': dropTarget?.kind === 'draft' }"
         :style="{ left: `${draftX}px`, top: `${draftY}px` }"
+        data-drop="draft"
+        :data-session="store.draft?.sessionId ?? ''"
         @mousedown.stop
       >
         <div class="draft-head">
@@ -272,6 +282,7 @@
           </span>
         </div>
         <textarea
+          ref="draftTextarea"
           :value="store.draft?.text"
           :placeholder="store.draft?.atMessageId == null ? t('canvas.phContinue') : t('canvas.phNew')"
           @input="setDraftText(($event.target as HTMLTextAreaElement).value)"
@@ -390,14 +401,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { fileKind } from "../../../shared/attachment-kinds";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
 import { type DraftAttachment, readAttachments } from "../attachments";
+import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
+import { joinPaths } from "../path-insert";
 import {
   activeChain,
   cancelComparePick,
@@ -409,6 +422,7 @@ import {
   dismissDraft,
   enterCompare,
   forkedFromSelection,
+  insertDraftText,
   isSessionTip,
   isTurnDelete,
   isTurnMarked,
@@ -1511,6 +1525,135 @@ function onDraftPaste(event: ClipboardEvent): void {
 
 function removeDraftAttachment(id: string): void {
   setDraftAttachments(draftAttachments().filter((a) => a.id !== id));
+}
+
+// ── path drop: files from the file panel (or Finder) land as plain text ──
+//
+// A drop carries the file's real path and splices it into the draft it
+// landed on — never an attachment chip, never a send, never a read of the
+// file's contents. Canvas panning is pointer-driven (mousedown), so it can
+// never start from an HTML5 drag; the two gestures do not compete.
+
+interface DropTarget {
+  kind: "draft" | "turn";
+  sessionId: string;
+  messageId: string | null;
+}
+
+const pathDragOver = ref(false);
+const dropTarget = ref<DropTarget | null>(null);
+const draftTextarea = ref<HTMLTextAreaElement | null>(null);
+
+/** The drop target under the pointer, from the data attributes the cards
+ *  and the draft box carry. null = empty canvas, which guesses nothing. */
+function dropTargetFrom(event: DragEvent): DropTarget | null {
+  const el = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-drop]");
+  if (!el) return null;
+  const kind = el.dataset.drop;
+  if (kind !== "draft" && kind !== "turn") return null;
+  const sessionId = el.dataset.session || store.draft?.sessionId;
+  if (!sessionId) return null;
+  return { kind, sessionId, messageId: el.dataset.message || null };
+}
+
+function isDropTarget(node: TurnNode): boolean {
+  const target = dropTarget.value;
+  if (target?.kind !== "turn") return false;
+  return target.sessionId === node.sessionId && target.messageId === (node.messageId ?? null);
+}
+
+function onPathDragOver(event: DragEvent): void {
+  if (!isPathDrag(event)) return;
+  // preventDefault is what makes this element a drop target at all.
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  pathDragOver.value = true;
+  dropTarget.value = dropTargetFrom(event);
+}
+
+function onPathDragLeave(event: DragEvent): void {
+  // Leaving for a child of the viewport (a card, the draft) is not leaving
+  // the canvas — only a departure from the viewport clears the highlight.
+  const related = event.relatedTarget as Node | null;
+  if (related && viewportEl.value?.contains(related)) return;
+  pathDragOver.value = false;
+  dropTarget.value = null;
+}
+
+function onPathDrop(event: DragEvent): void {
+  pathDragOver.value = false;
+  dropTarget.value = null;
+  const drop = readPathDrop(event);
+  if (!drop) return;
+  event.preventDefault();
+  if (drop.paths.length === 0) {
+    // Files arrived but the OS would not name them — say so, and never
+    // invent a path or quietly restage the drop as attachments.
+    flashNotice(t("files.dropNoPath"));
+    return;
+  }
+  const target = dropTargetFrom(event);
+  if (!target) {
+    // Empty canvas: no target is guessed, and nothing is inserted anywhere.
+    flashNotice(t("files.dropNoTarget"));
+    return;
+  }
+  if (store.draftSending) {
+    // A send is in flight; the text stays where it is until it lands.
+    flashNotice(t("files.draftSending"));
+    return;
+  }
+  const text = joinPaths(drop.paths);
+  if (target.kind === "draft" && store.draft) {
+    insertIntoDraftTextarea(text);
+    return;
+  }
+  // A card: the session's tip continues in place, a mid-story turn forks —
+  // the same openDraft semantics the ＋ button uses. The draft opens first,
+  // then the path lands in its fresh textarea.
+  const node = graph.value.nodes.find(
+    (n) => n.sessionId === target.sessionId && (n.messageId ?? null) === target.messageId,
+  );
+  if (!node) {
+    flashNotice(t("files.dropNoTarget"));
+    return;
+  }
+  openDraft(node);
+  void nextTick(() => insertIntoDraftTextarea(text));
+}
+
+/**
+ * Splice text into the draft textarea at its caret through execCommand, so
+ * the browser's native undo stack covers the edit (⌘Z inside the draft
+ * takes it back out). Falls back to a direct splice when the element is
+ * not editable — a draft that is open but not on screen.
+ */
+function insertIntoDraftTextarea(text: string): void {
+  const el = draftTextarea.value;
+  if (!el || !store.draft) {
+    const result = insertDraftText(text);
+    if (!result.ok) {
+      flashNotice(result.reason === "sending" ? t("files.draftSending") : t("files.noDraftTarget"));
+    }
+    return;
+  }
+  el.focus();
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const before = el.value.slice(0, start);
+  const after = el.value.slice(end);
+  // A newline before only when the previous line has content; one after
+  // keeps following text on its own line.
+  const insert = `${before === "" || before.endsWith("\n") ? "" : "\n"}${text}\n`;
+  if (document.execCommand("insertText", false, insert)) {
+    // The input event already synced the store; the caret sits after the
+    // inserted line, ready to keep typing.
+    return;
+  }
+  el.value = `${before}${insert}${after}`;
+  setDraftText(el.value);
+  const caret = before.length + insert.length;
+  el.setSelectionRange(caret, caret);
 }
 
 /** Foot left side: tool count plus the run's wall time and output tokens when known. */

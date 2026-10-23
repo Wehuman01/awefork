@@ -1,4 +1,5 @@
 import {
+  app,
   BrowserWindow,
   dialog,
   type IpcMainInvokeEvent,
@@ -24,6 +25,16 @@ import {
   readSnapshotBlob,
   sessionChangesDir,
 } from "../shared/file-changes.js";
+import type {
+  DirListing,
+  FileEntry,
+  FileError,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "../shared/file-types.js";
 import { lineageForDisplay, readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
 import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
@@ -54,6 +65,14 @@ import {
   terminalDefaultCodexHome,
 } from "./codex-homes.js";
 import { convertDocumentToText } from "./document-convert.js";
+import {
+  listDirectory,
+  readImagePreview,
+  readTextPreview,
+  relativeToRoot,
+  searchFiles,
+  statPath,
+} from "./file-browser.js";
 import { createMessageSearcher, type MessageSearcher } from "./message-search.js";
 import { findPiSessionFile } from "./pi-server.js";
 import { openSessionInTerminal } from "./session-terminal.js";
@@ -103,6 +122,10 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   capabilities  -> { deleteMessage, attachments }
  * App-level (backend-free): openExternal, openPath, pickDirectory,
  * convertDocument, checkUpdates, skipUpdate, openRelease, downloadUpdate.
+ * File browser (also backend-free, read-only): listDir, statFile,
+ * readTextPreview, readImagePreview, relativeToRoot, searchFiles, homePath,
+ * showInFolder — each answering an FsResult (or a plain value) built by
+ * file-browser.ts.
  * Update download progress arrives on channel "awefork:update-progress" as
  * {downloaded,total}. Events are forwarded on channel "awefork:event" as
  * {backend, event}.
@@ -661,6 +684,53 @@ export function registerIpc(
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options);
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  // ── file browser (backend-free, read-only) ────────────────────────────
+  // Directory listings, metadata, bounded previews, the project-relative
+  // path and the quick search all live in file-browser.ts: absolute paths
+  // only, nothing executed, nothing written. Every handler answers with an
+  // FsResult so the renderer can phrase failures instead of catching throws.
+
+  ipcMain.handle("awefork:listDir", (_event: IpcMainInvokeEvent, target: string) =>
+    listDirectory(target),
+  );
+
+  ipcMain.handle("awefork:statFile", (_event: IpcMainInvokeEvent, target: string) =>
+    statPath(target),
+  );
+
+  ipcMain.handle(
+    "awefork:readTextPreview",
+    (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
+      readTextPreview(target, maxBytes),
+  );
+
+  ipcMain.handle("awefork:readImagePreview", (_event: IpcMainInvokeEvent, target: string) =>
+    readImagePreview(target),
+  );
+
+  ipcMain.handle(
+    "awefork:relativeToRoot",
+    (_event: IpcMainInvokeEvent, root: string, target: string) => relativeToRoot(root, target),
+  );
+
+  ipcMain.handle(
+    "awefork:searchFiles",
+    (_event: IpcMainInvokeEvent, root: string, query: string, options?: SearchOptions) =>
+      searchFiles(root, query, options),
+  );
+
+  // The home directory anchors the file panel's common locations; the
+  // renderer has no other way to name it.
+  ipcMain.handle("awefork:homePath", () => app.getPath("home"));
+
+  // Reveal an entry in the OS file manager — the one file action that
+  // leaves the app, and the only one routed through shell besides openPath.
+  ipcMain.handle("awefork:showInFolder", (_event: IpcMainInvokeEvent, target: string) => {
+    if (!isLocalPath(target)) return { ok: false, error: "not a local path" };
+    shell.showItemInFolder(target);
+    return { ok: true };
   });
 
   // Word/RTF attachments are converted here in the main process; the renderer
