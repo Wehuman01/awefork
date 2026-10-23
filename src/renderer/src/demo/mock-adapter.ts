@@ -863,6 +863,33 @@ export function installMockAdapter(): void {
       pickedCount += 1;
       return `/demo/picked-${pickedCount}`;
     },
+    // The demo runs in a browser tab with no filesystem: the file browser
+    // answers "not found" for everything, which the UI renders as its empty
+    // state rather than faking a tree.
+    listDir: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    statFile: async (target) => ({
+      ok: true as const,
+      value: {
+        path: target,
+        exists: false,
+        isDir: false,
+        isSymlink: false,
+        size: null,
+        mtime: null,
+        hidden: false,
+        childCount: null,
+      },
+    }),
+    readTextPreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    readImagePreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    relativeToRoot: async (_root, target) => ({ ok: true as const, value: target }),
+    searchFiles: async () => ({ ok: true as const, value: [] }),
+    homePath: async () => "/demo",
+    showInFolder: async () => ({
+      ok: false as const,
+      error: t("demo.openPathError", { target: "" }),
+    }),
+    pathForFile: () => null,
     // Demo runs in a real browser: a plain anchor download stands in for the
     // native save dialog, and the file lands in the browser's download dir.
     saveTextFile: async (defaultName, content) => {

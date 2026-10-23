@@ -1,5 +1,24 @@
 <template>
   <aside class="sidebar">
+    <nav class="side-tabs" :aria-label="t('files.sidebarViewLabel')">
+      <button
+        type="button"
+        class="side-tab"
+        :class="{ on: sidebarView === 'sessions' }"
+        :aria-pressed="sidebarView === 'sessions'"
+        @click="setSidebarView('sessions')"
+        >{{ t("files.tabSessions") }}</button
+      >
+      <button
+        type="button"
+        class="side-tab"
+        :class="{ on: sidebarView === 'files' }"
+        :aria-pressed="sidebarView === 'files'"
+        @click="setSidebarView('files')"
+        >{{ t("files.tabFiles") }}</button
+      >
+    </nav>
+    <div v-show="sidebarView === 'sessions'" class="sidebar-sessions">
     <div class="search-row">
       <div class="search">
         <span>⌕</span>
@@ -770,6 +789,8 @@
         </div>
       </div>
     </div>
+    </div>
+    <FileTree v-show="sidebarView === 'files'" class="sidebar-files" />
   </aside>
 </template>
 
@@ -793,7 +814,7 @@ import {
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { listSep, t } from "../i18n";
-import { panels, persistLayout } from "../layout";
+import { panels, persistLayout, setSidebarView, sidebarView } from "../layout";
 import {
   addDirectory,
   allTags,
@@ -842,6 +863,7 @@ import {
   turnGraph,
   visibleSessions,
 } from "../state";
+import FileTree from "./file-tree.vue";
 
 const query = ref("");
 const searchInputEl = ref<HTMLInputElement | null>(null);
