@@ -354,7 +354,9 @@ describe("sidebar tree", () => {
     });
     await h.mod.toggleTreeNode("/a");
     expect(h.mod.isTreeNodeExpanded("/a")).toBe(true);
-    expect(h.files.treeChildren["/a"]?.map((e) => e.name)).toEqual(["b"]);
+    // The cache keeps files alongside directories (the session file dock
+    // shows both); tree renderers filter to dirs themselves.
+    expect(h.files.treeChildren["/a"]?.map((e) => e.name)).toEqual(["b", "c.md"]);
     await h.mod.toggleTreeNode("/a");
     expect(h.mod.isTreeNodeExpanded("/a")).toBe(false);
   });

@@ -379,10 +379,11 @@ export async function loadTreeChildren(dir: string): Promise<void> {
     files.treeError[dir] = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  // Directories only, dot-prefixed ones left out — a project tree is for
-  // navigating source, not for wading through .git and .cache. The list view
-  // still shows them behind its own hidden-files toggle.
-  files.treeChildren[dir] = result.value.entries.filter((entry) => entry.isDir && !entry.hidden);
+  // Dot-prefixed entries left out — a project tree is for navigating source,
+  // not for wading through .git and .cache. Files are kept alongside
+  // directories: the tree renderers filter to dirs themselves, and the
+  // session file dock shows everything.
+  files.treeChildren[dir] = result.value.entries.filter((entry) => !entry.hidden);
 }
 
 /** Expand a node, loading its children on first open (never recursively). */
