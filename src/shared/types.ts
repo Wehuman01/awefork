@@ -148,6 +148,13 @@ export interface PersistedDraft {
  */
 export interface PersistedComposer {
   draft: PersistedDraft | null;
+  /**
+   * Unsent drafts parked for other targets (draftKeyOf → draft), so
+   * switching between canvas targets and restarting the app both hand the
+   * text back. Optional: composer.json written before this field exists
+   * has none, and older readers ignore it.
+   */
+  stashed?: Record<string, PersistedDraft>;
   paneModels: Record<string, ModelChoice>;
   /**
    * The last model the user hand-picked in any composer. A brand-new session
