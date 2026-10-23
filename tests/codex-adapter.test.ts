@@ -379,8 +379,66 @@ describe("createCodexAdapter prompt()", () => {
 
     const events: AgentEvent[] = [];
     await adapter.subscribe((event) => events.push(event));
+    // The fork recovery above takes this path's place: see the next test.
     await expect(adapter.prompt("s1", "继续", null)).rejects.toThrow(/active writer/);
 
+    const error = events.find((e) => e.type === "server.error");
+    expect(error).toMatchObject({ sessionId: "s1", message: OWNED_ELSEWHERE_MESSAGE });
+  });
+
+  it("continues in a fork when the thread's writer is refused", async () => {
+    // codex 0.163's managed daemon holds the writer lock long after the turn
+    // ended (rollout minutes stale, fd still open), so "close the other
+    // window" is advice nobody can follow. thread/fork is not gated on that
+    // lock, so prompt recovers there: the message runs, history comes along.
+    const { client, callsOf } = fakeClient({
+      "thread/resume": () => {
+        throw new Error("thread s1 already has an active writer");
+      },
+      "thread/fork": () => ({
+        thread: { id: "fork-9", forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 1 },
+      }),
+      "turn/start": (params) => ({ turn: { id: `turn-${params.threadId}` } }),
+    });
+    const lineagePath = await tempLineagePath();
+    const adapter = createCodexAdapter({ client, lineagePath, cliVersion: "0.163.0" });
+
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    await adapter.prompt("s1", "继续", null);
+
+    // The message runs on the fork, never on the locked thread.
+    const turnStarts = callsOf("turn/start");
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.params).toMatchObject({ threadId: "fork-9" });
+    expect(callsOf("thread/fork")[0]?.params).toMatchObject({ threadId: "s1" });
+
+    // The fork is a real branch in the canvas, and the user is told.
+    const saved = JSON.parse(await readFile(lineagePath, "utf8"));
+    expect(saved["fork-9"]).toMatchObject({ parentId: "s1", atMessageId: null });
+    const error = events.find((e) => e.type === "server.error");
+    expect(error?.sessionId).toBe("s1");
+    expect(error?.message).toContain(OWNED_ELSEWHERE_MESSAGE);
+    expect(error?.message).toContain("fork-9");
+  });
+
+  it("reports the writer conflict when the recovery fork is refused too", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/resume": () => {
+        throw new Error("thread s1 already has an active writer");
+      },
+      "thread/fork": () => {
+        throw new Error("thread s1 already has an active writer");
+      },
+      "turn/start": () => ({ turn: { id: "turn-9" } }),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    await expect(adapter.prompt("s1", "继续", null)).rejects.toThrow(/active writer/);
+
+    expect(callsOf("turn/start")).toHaveLength(0);
     const error = events.find((e) => e.type === "server.error");
     expect(error).toMatchObject({ sessionId: "s1", message: OWNED_ELSEWHERE_MESSAGE });
   });
@@ -423,7 +481,7 @@ describe("createCodexAdapter listSessions()", () => {
 
     const sessions = await adapter.listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["t2", "t3", "t1"]);
-    expect(sessions.map((s) => s.title)).toEqual(["(未命名会话)", "命名会话", "预览文本"]);
+    expect(sessions.map((s) => s.title)).toEqual(["(untitled session)", "命名会话", "预览文本"]);
     expect(sessions.find((s) => s.id === "t3")).toMatchObject({
       parentSessionId: "t1",
       origin: "fork",
@@ -1044,7 +1102,7 @@ describe("createCodexAdapter auth recovery", () => {
       {
         type: "server.error",
         sessionId: "s1",
-        message: `${CODEX_NOT_LOGGED_IN_MESSAGE}（no fixture for account/read）`,
+        message: `${CODEX_NOT_LOGGED_IN_MESSAGE} (no fixture for account/read)`,
       },
     ]);
   });
@@ -1114,7 +1172,7 @@ describe("createCodexAdapter server interactions", () => {
     expect(request).toMatchObject({
       kind: "command-approval",
       sessionId: "s1",
-      title: "允许执行命令？",
+      title: "Run this command?",
       command: "npm test",
       cwd: "/demo/shop-api",
       reason: "verify the fix",
@@ -1154,7 +1212,7 @@ describe("createCodexAdapter server interactions", () => {
     const [request] = requested();
     expect(request).toMatchObject({
       kind: "permission-approval",
-      requested: ["文件系统访问", "网络访问"],
+      requested: ["file system access", "network access"],
     });
     adapter.respondInteraction(request.requestId, { decision: "deny" });
     await expect(denyPending).resolves.toEqual({
@@ -1203,7 +1261,7 @@ describe("createCodexAdapter server interactions", () => {
       },
       {
         id: "q2",
-        header: "需要你的输入",
+        header: "Your input is needed",
         question: "API token？",
         options: undefined,
         isSecret: true,
@@ -1250,7 +1308,7 @@ describe("createCodexAdapter server interactions", () => {
       threadId: "s1",
       // A command approval without a command cannot be displayed safely.
     });
-    await expect(pending).rejects.toThrow("awefork 无法处理 codex 请求");
+    await expect(pending).rejects.toThrow("awefork cannot handle the codex request");
     expect(requested()).toHaveLength(0);
     expect(errors()).toHaveLength(1);
     expect(errors()[0]?.message).toContain("item/commandExecution/requestApproval");

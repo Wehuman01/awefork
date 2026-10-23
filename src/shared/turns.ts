@@ -8,7 +8,7 @@ import type { ChatMessage, ModelChoice } from "./types.js";
 const EMPTY_TITLE = "(empty prompt)";
 
 /** Title of the marker turn a session compaction inserted. */
-const COMPACTION_TITLE = "🧹 压缩会话";
+const COMPACTION_TITLE = "🧹 Compressed session";
 
 export interface Turn {
   /** User message that opens the turn. */

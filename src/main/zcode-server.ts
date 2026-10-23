@@ -82,7 +82,8 @@ export async function resolveZcodeCli(
  * Neither matches this bundle's layout (the catalog sits one level up, in
  * Resources/config/provider/), and once the runtime catalog cache in
  * ~/.zcode expires the CLI needs the file — a miss makes it exit 1 with
- * "无法定位 CLI ZCode Built-in Provider Config". The CLI accepts the path
+ * "cannot locate the CLI ZCode Built-in Provider Config". The CLI accepts the
+ * path
  * via ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (what the desktop app passes), so
  * hand it over whenever the file can be located next to the script.
  */
@@ -198,7 +199,7 @@ export async function ensureZcodeServer(
   const cli = options.cli ?? (await resolveZcodeCli());
   if (!cli) {
     throw new Error(
-      "未找到 zcode CLI。安装 ZCode 桌面端后重试，或用 AWEFORK_ZCODE_CLI 指向 zcode.cjs。",
+      "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs.",
     );
   }
 
@@ -238,8 +239,8 @@ export async function ensureZcodeServer(
     child.on("exit", (code, signal) => {
       const detail = stderrTail.trim();
       lastExitDetail = detail
-        ? `（${detail}）`
-        : `（code=${code} signal=${signal}，stderr 无输出）`;
+        ? ` (${detail})`
+        : ` (code=${code} signal=${signal}, no stderr output)`;
       console.error(
         `zcode app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
       );
@@ -265,7 +266,7 @@ export async function ensureZcodeServer(
   await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
   if (!slot.alive) {
     throw new Error(
-      `zcode app-server 启动即退出${lastExitDetail}。请确认 ZCode 桌面端已正确安装（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
+      `zcode app-server exited right after launch${lastExitDetail}. Make sure the ZCode desktop app is installed correctly (AWEFORK_ZCODE_CLI can point at zcode.cjs).`,
     );
   }
 
@@ -280,7 +281,7 @@ export async function ensureZcodeServer(
   let respawning: Promise<ServerSlot> | null = null;
   const currentHandle: ZcodeServerHandle = {
     async client() {
-      if (stopped) throw new Error("zcode app-server 已停止");
+      if (stopped) throw new Error("zcode app-server has been stopped");
       if (!slot?.alive) {
         if (!respawning) {
           respawning = spawnChild().finally(() => {
@@ -291,7 +292,7 @@ export async function ensureZcodeServer(
         // stop() during the spawn must not install (and leak) the new child.
         if (stopped) {
           discardSlot(fresh);
-          throw new Error("zcode app-server 已停止");
+          throw new Error("zcode app-server has been stopped");
         }
         // Another caller installed a live slot while this spawn ran; drop ours.
         if (slot?.alive) {
@@ -303,11 +304,11 @@ export async function ensureZcodeServer(
         await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
         if (stopped) {
           discardSlot(fresh);
-          throw new Error("zcode app-server 已停止");
+          throw new Error("zcode app-server has been stopped");
         }
         if (!fresh.alive) {
           throw new Error(
-            `zcode app-server 重启后立即退出${lastExitDetail}；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
+            `zcode app-server exited right after restart${lastExitDetail}; make sure the ZCode desktop app is installed correctly (AWEFORK_ZCODE_CLI can point at zcode.cjs).`,
           );
         }
         if (slot?.alive) {

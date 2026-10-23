@@ -180,7 +180,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       kind === "subagent_child" ? "subagent" : kind === "fork" || parent ? "fork" : "root";
     return {
       id: row.sessionId ?? "",
-      title: row.title || "(未命名会话)",
+      title: row.title || "(untitled session)",
       directory,
       parentSessionId: parent,
       origin,
@@ -226,7 +226,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   const createSessionIn = async (directory?: string | null): Promise<SessionSummary> => {
     const client = await options.client();
     const workspacePath = directory || options.homeDirectory || "";
-    if (!workspacePath) throw new Error("zcode 需要一个工作目录才能新建会话");
+    if (!workspacePath) throw new Error("zcode needs a working directory to create a session");
     const created = await client.request<{ session?: ZcodeSessionRow } | ZcodeSessionRow>(
       "session/create",
       { workspace: { workspaceKey: workspacePath, workspacePath } },
@@ -234,7 +234,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     );
     const row = (created as { session?: ZcodeSessionRow })?.session ?? (created as ZcodeSessionRow);
     const summary = mapSessionRow(row ?? {});
-    if (!summary.id) throw new Error("zcode session/create 未返回会话 id");
+    if (!summary.id) throw new Error("zcode session/create returned no session id");
     return summary;
   };
 
@@ -296,7 +296,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         variant,
         attachmentNames: (parts ?? [])
           .filter((part) => part.type === "file")
-          .map((part) => part.filename ?? "附件"),
+          .map((part) => part.filename ?? "attachment"),
         createdAt,
         completedAt: null,
         finish: null,
@@ -367,13 +367,13 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       .map((message) => message.info ?? {})
       .filter((info) => info.role === "user" || info.role === "assistant")
       .map((info) => ({ role: info.role ?? "", id: info.id ?? info.messageId ?? "" }));
-    if (rows.length === 0) throw new Error("会话没有任何消息，无法分叉");
+    if (rows.length === 0) throw new Error("session has no messages, cannot fork");
     const last = rows[rows.length - 1];
-    if (!last) throw new Error("会话没有任何消息，无法分叉");
+    if (!last) throw new Error("session has no messages, cannot fork");
     if (!atMessageId) return { cutId: last.id };
     const anchorIndex = rows.findIndex((row) => row.id === atMessageId);
     if (anchorIndex < 0) {
-      throw new Error(`未找到消息 ${atMessageId}，刷新会话后重试`);
+      throw new Error(`cannot find message ${atMessageId}, refresh the session and retry`);
     }
     // Keep the anchor turn whole: walk to the last assistant row before the
     // next user message. A turn with no reply yet cuts at the user row.
@@ -385,7 +385,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       cutIndex = i;
     }
     const cut = rows[cutIndex];
-    if (!cut?.id) throw new Error("未找到可用的分叉切点，刷新会话后重试");
+    if (!cut?.id) throw new Error("no usable fork cut point, refresh the session and retry");
     return { cutId: cut.id };
   };
 
@@ -523,7 +523,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           emit({
             type: "server.error",
             sessionId,
-            message: frame.payload?.message ?? frame.payload?.error?.message ?? "zcode 回合失败",
+            message: frame.payload?.message ?? frame.payload?.error?.message ?? "zcode turn failed",
           });
           emit({ type: "session.idle", sessionId });
           break;
@@ -612,7 +612,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     },
 
     async fork(sessionId, atMessageId, forkOptions) {
-      // 空上下文 fork: session/create in the parent's own workspace (found
+      // empty-context fork: session/create in the parent's own workspace (found
       // via session/list; the home directory is the fallback). No native
       // fork call — lineage alone links the branch to the cut point.
       if (forkOptions?.context === "none") {
@@ -630,7 +630,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       }
       const parentMessages = await fetchMessages(sessionId);
       const { cutId } = cutMessageIdOf(parentMessages, atMessageId);
-      if (!cutId) throw new Error("未找到可用的分叉切点，刷新会话后重试");
+      if (!cutId) throw new Error("no usable fork cut point, refresh the session and retry");
       const client = await options.client();
       // opencode forks a running session instantly; zcode refuses with
       // "Cannot fork while a prompt is running". The cut point is already
@@ -649,14 +649,15 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         const detail = error instanceof Error ? error.message : String(error);
         if (!/prompt is running|fork while/i.test(detail)) throw error;
         const settled = await waitForSessionIdle(sessionId, FORK_BUSY_WAIT_MS);
-        if (!settled) throw new Error("会话仍在运行，暂时无法分叉；请稍后重试");
+        if (!settled)
+          throw new Error("session is still running, cannot fork yet; retry in a moment");
         forked = await forkOnce();
       }
       const forkedId = forked?.forkedSessionId;
-      if (!forkedId) throw new Error("zcode session/fork 未返回新会话 id");
+      if (!forkedId) throw new Error("zcode session/fork returned no new session id");
       const summary: SessionSummary = {
         id: forkedId,
-        title: "(未命名会话)",
+        title: "(untitled session)",
         directory: "",
         parentSessionId: sessionId,
         origin: "fork",
@@ -675,27 +676,27 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     // parentSessionId), so a detached copy cannot be produced — the renderer
     // hides the export affordance (capabilities.exportBranch === false).
     async exportSession() {
-      throw new Error("zcode 不支持导出独立会话");
+      throw new Error("zcode cannot export a detached session");
     },
 
     // The app-server protocol has no compaction primitive; the renderer hides
     // the affordance (capabilities.compress === false).
     async compress() {
-      throw new Error("zcode 暂不支持会话压缩");
+      throw new Error("zcode does not support session compression yet");
     },
 
     // The app-server protocol has no delete primitives; the renderer hides
     // the affordances (capabilities.deleteSession/deleteMessage === false).
     async deleteSession() {
-      throw new Error("zcode 暂不支持删除会话");
+      throw new Error("zcode does not support deleting sessions yet");
     },
 
     async deleteMessage() {
-      throw new Error("zcode 暂不支持删除单条消息");
+      throw new Error("zcode does not support deleting a single message yet");
     },
 
     async renameSession() {
-      throw new Error("zcode 暂不支持重命名会话");
+      throw new Error("zcode does not support renaming sessions yet");
     },
 
     async prompt(sessionId, text, model) {
@@ -734,7 +735,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           type: "server.error",
           sessionId,
           message: detail.includes("already running")
-            ? "该会话已有正在运行的回合"
+            ? "this session already has a turn running"
             : `zcode prompt failed: ${detail}`,
         });
         throw error instanceof Error ? error : new Error(detail);
@@ -742,7 +743,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     },
 
     async respondInteraction() {
-      throw new Error("zcode 没有等待答复的交互");
+      throw new Error("zcode has no interaction awaiting a reply");
     },
 
     async abort(sessionId) {

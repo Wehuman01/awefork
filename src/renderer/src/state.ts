@@ -118,7 +118,7 @@ interface AppState {
    */
   trash: string[];
   /** The latest soft delete, driving the undo toast; null = no toast. The
-   *  entryId lets the toast's 撤销 jump straight to the undo walk. */
+   *  entryId lets the toast's Undo jump straight to the undo walk. */
   deletedToast: { sessionId: string; title: string; entryId: number } | null;
   lineage: Record<string, ForkRecord>;
   /** Session ids the user starred (persisted in pins.json). */
@@ -129,7 +129,7 @@ interface AppState {
    */
   marks: string[];
   /**
-   * The user's session labels, e.g. 执行 / 实验设计 / 咨询 (persisted in
+   * The user's session labels, e.g. work / experiment / consult (persisted in
    * tags.json as sessionId → ordered tag names). Pure awefork overlay like
    * pins: the sessions themselves keep living in the agent backend.
    */
@@ -143,7 +143,7 @@ interface AppState {
   forkTagPrefs: Record<string, boolean>;
   /**
    * The latest global tag delete, driving the tag undo toast; null = no toast.
-   * `entryId` indexes the history entry so the toast's 撤销 can undo it.
+   * `entryId` indexes the history entry so the toast's Undo can undo it.
    */
   tagDeletedToast: { tag: string; entryId: number } | null;
   /**
@@ -153,7 +153,7 @@ interface AppState {
   archive: ArchiveState;
   /**
    * Directories the user added by hand (dirs.json sidecar): they keep a
-   * sidebar group even with zero conversations, so 新建对话 has somewhere to
+   * sidebar group even with zero conversations, so a new conversation has somewhere to
    * land. Per-backend like every overlay store.
    */
   knownDirs: string[];
@@ -182,7 +182,7 @@ interface AppState {
   running: Record<string, boolean>;
   /**
    * sessionId → epoch ms when its last run settled without error. The card
-   * carries a soft "刚跑完" tint that fades to neutral over RECENT_MS — helps
+   * carries a soft "just ran" tint that fades to neutral over RECENT_MS — helps
    * the user spot which branches just finished when the canvas is full.
    * Failed runs keep no entry: mint reads as success, and their cards
    * already carry ⚠ + retry.
@@ -206,7 +206,7 @@ interface AppState {
   /** True while the draft's fork+prompt round-trip is in flight. */
   draftSending: boolean;
   /**
-   * Open branch comparison (⇄ 分支对比): the two session ids shown side by
+   * Open branch comparison (⇄): the two session ids shown side by
    * side in the right pane. null = normal pane. Any fresh selection tears it
    * down — compare is a lens, not a selection.
    */
@@ -240,14 +240,14 @@ interface AppState {
    * fork or conversation starts where the last one left off.
    */
   lastModel: ModelChoice | null;
-  /** Models the user starred in a picker; the model list shows them as 常用. */
+  /** Models the user starred in a picker; the model list shows them as Favorites. */
   favoriteModels: ModelChoice[];
-  /** Recent hand-picked models, most-recent-first; feeds the picker's 最近. */
+  /** Recent hand-picked models, most-recent-first; feeds the picker's Recent. */
   recentModels: ModelChoice[];
   /** Bumped to ask the canvas to center on a session's latest node. */
   focusRequest: { sessionId: string; nonce: number } | null;
   /**
-   * Bumped after 新增对话 so the pane composer grabs focus — the fresh
+   * Bumped after a new conversation so the pane composer grabs focus — the fresh
    * session is selected and ready for its first prompt.
    */
   composerFocusRequest: number | null;
@@ -371,7 +371,7 @@ export const visibleSessions = computed<SessionSummary[]>(() => {
 export const sessionGroups = computed<SessionGroup[]>(() => {
   const groups = buildSessionTree(visibleSessions.value, state.lineage);
   // Registered-but-empty directories keep their group so the sidebar offers
-  // 新建对话 somewhere to land. Archived paths hide entirely — registration
+  // new conversation somewhere to land. Archived paths hide entirely — registration
   // included — until restored from the archive section.
   const present = new Set(groups.map((group) => group.directory));
   const archived = new Set(state.archive.directories.map((entry) => entry.path));
@@ -531,7 +531,7 @@ export const selectedSession = computed<SessionSummary | null>(
 
 /**
  * Sessions forked from the selected one — its whole subtree. No longer a
- * highlight; the ⎇ badge's 子树取景 still frames these to put the whole
+ * highlight; the ⎇ badge's subtree framing still frames these to put the whole
  * fork tree in view.
  */
 export const forkedFromSelection = computed<Set<string>>(() =>
@@ -560,7 +560,7 @@ export const paneTurn = computed<{ turn: Turn; index: number; total: number } | 
 
 /**
  * Model+thinking the pane composer starts from: an explicit pick for this
- * session — including a deliberate 默认模型 — always wins, otherwise the
+ * session — including a deliberate default-model pick — always wins, otherwise the
  * composer mirrors the branch itself and shows the model and variant that
  * wrote the turn the pane is on. Selecting a session therefore selects its
  * setup with it, and only a hand-picked model ever overrides that. A session
@@ -847,7 +847,7 @@ const WATCH_INTERVAL_MS = 1500;
 const WATCH_MAX_TICKS = 160;
 // A dead backend (opencode killed mid-run) fails every poll fetch while the
 // reconnect loop keeps retrying the event stream. Waiting out the full 4-minute
-// cap leaves those sessions spinning "运行中" and undeletable for minutes after
+// cap leaves those sessions spinning "running" and undeletable for minutes after
 // the crash was obvious; ~30 s of consecutive fetch failures settles them as
 // failed instead. Recovery stays possible: a revived backend reconnects the
 // stream, and a still-running session's next delta re-lights it.
@@ -938,7 +938,7 @@ async function bootBackend(backend: BackendId): Promise<void> {
   // Restore the remembered project BEFORE the session load: its auto-select
   // fills selectedDirectory only when null, and without this it picks the
   // globally newest session's directory — which can be a scratch dir another
-  // client (the TUI) happened to run in, putting every palette 新建对话 there.
+  // client (the TUI) happened to run in, putting every palette new conversation there.
   // Restored here rather than in restoreComposer so the auto-select also picks
   // the initial session inside the remembered project in one pass.
   try {
@@ -1167,7 +1167,7 @@ export async function switchDirectory(directory: string): Promise<void> {
  */
 async function leaveEmptiedDirectory(): Promise<void> {
   // A registered directory keeps its (now empty) group — stay put so the
-  // next 新建对话 lands right back in it. An archived path hides entirely,
+  // next new conversation lands right back in it. An archived path hides entirely,
   // registration included, so that case still moves away.
   const current = state.selectedDirectory;
   if (
@@ -1285,7 +1285,7 @@ export function stepTurn(delta: number): void {
   state.selectedTurnId = `${target.sessionId}:${target.messageId}`;
 }
 
-// ── branch compare (⇄ 分支对比) ────────────────────────────────────────
+// ── branch compare (⇄) ───────────────────────────────────────────────────────────────────────
 
 /**
  * The open comparison rendered as an alignment plan, or null when compare is
@@ -1328,7 +1328,7 @@ function restoreContextAfterCompare(): void {
 
 /**
  * Open the dual-pane comparison of two sessions of the current directory:
- * the left column is the reference (usually the 母本), the right one the
+ * the left column is the reference (usually the original), the right one the
  * branch being inspected. When the pane can align them at a shared fork
  * anchor it does; sessions from different stories fall back to free
  * side-by-side. Comparisons are a same-directory lens, not a cross-project
@@ -1352,7 +1352,7 @@ export function exitCompare(): void {
   restoreContextAfterCompare();
 }
 
-/** Compare a branch with the 母本 it forked from — the ⇄ button's move. */
+/** Compare a branch with the original it forked from — the ⇄ button's move. */
 export function compareWithParent(sessionId: string): void {
   const parent = state.lineage[sessionId]?.parentId;
   if (!parent) return;
@@ -1667,7 +1667,7 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
   }
   // A multi-step run completes one assistant row per step; a step that ended
   // in "tool-calls" is mid-run, not done. Treating it as finished settled the
-  // run early and froze the turn at "(工具调用，无文本回复)" while the
+  // run early and froze the turn at "(tool call, no text reply)" while the
   // follow-up step was still thinking — with no idle event ever coming on
   // this opencode build, nothing reloaded the final text.
   const done = messages.some(
@@ -1683,7 +1683,7 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
   }
 }
 
-/** How long a settled session keeps its "刚跑完" tint, and the fade granularity. */
+/** How long a settled session keeps its "just ran" tint, and the fade granularity. */
 const RECENT_MS = 5 * 60_000;
 const RECENT_TICK_MS = 30_000;
 
@@ -2164,7 +2164,7 @@ export async function toggleTurnMark(node: TurnNode): Promise<void> {
   });
 }
 
-// ── session tags (执行 / 实验设计 / 咨询 …) ────────────────────────────
+// ── session tags (user-chosen labels) ─────────────────────────────────
 
 /** One session's tags, in the order they were set; empty when untagged. */
 export function tagsOf(sessionId: string): string[] {
@@ -2339,7 +2339,7 @@ async function setTagColorOrThrow(
   return true;
 }
 
-// ── fork tag inheritance (分叉继承) & subtree application (子树应用) ────
+// ── fork tag inheritance & subtree application ────────────────────────
 
 /** One session's fork tag-inheritance preference; null = ask on every fork. */
 export function forkTagPrefOf(sessionId: string): boolean | null {
@@ -2621,7 +2621,7 @@ async function restoreTag(
     await setTagColorOrThrow(backend, tag, hue);
   }
   // Undone through the toast's own button or ⌘Z alike: retire the toast so
-  // its now-dead 撤销 button doesn't linger until the timeout.
+  // its now-dead Undo button doesn't linger until the timeout.
   if (state.tagDeletedToast?.tag === tag) state.tagDeletedToast = null;
   return true;
 }
@@ -2737,7 +2737,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
     undo: () => restoreTrashedSession(backend, sessionId),
     redo: () => confirmSoftDelete(backend, sessionId),
   });
-  // The toast is pure UI: fading it only hides the 撤销 button — the history
+  // The toast is pure UI: fading it only hides the Undo button — the history
   // entry stays undoable until the restart flush.
   state.deletedToast = { sessionId, title: session.title, entryId: entry.id };
   setTimeout(() => {
@@ -3119,7 +3119,7 @@ export async function createSession(directory?: string): Promise<void> {
   state.composerFocusRequest = Date.now();
 }
 
-// ── directories (＋ 新目录 / forget) ──────────────────────────────────
+// ── directories (＋ new directory / forget) ───────────────────────────
 
 /** Pure dirs write (throws on failure); undo/redo re-use it. */
 async function dirsAddOrThrow(backend: BackendId, directory: string): Promise<boolean> {
@@ -3150,9 +3150,9 @@ async function dirsRemoveFlow(backend: BackendId, directory: string): Promise<bo
 }
 
 /**
- * ＋ 新目录：system folder picker registers the path as a sidebar group —
+ * ＋ new directory: the system folder picker registers the path as a sidebar group —
  * zero conversations and all — then opens it as the current project, ready
- * for the next 新建对话. Canceling the picker changes nothing.
+ * for the next new conversation. Canceling the picker changes nothing.
  */
 export async function addDirectory(): Promise<void> {
   state.actionError = null;
@@ -3705,7 +3705,7 @@ watch(
   () => scheduleComposerPersist(),
 );
 // The open project rides the same sidecar: without it a restart would land
-// 新建对话 wherever the agent server's cwd points.
+// new conversation wherever the agent server's cwd points.
 watch(
   () => state.selectedDirectory,
   () => scheduleComposerPersist(),
@@ -4023,7 +4023,7 @@ export function setPaneModel(sessionId: string, model: ModelChoice | null): void
   rememberModelPick(model);
 }
 
-/** How many hand-picked models the picker's 最近 group keeps. */
+/** How many hand-picked models the picker's Recent group keeps. */
 const RECENT_MODEL_CAP = 5;
 
 /** A model's identity for the quick-access lists: provider + model, no variant. */
@@ -4038,8 +4038,8 @@ function plainQuickModel(model: ModelChoice): ModelChoice {
 
 /**
  * Track the last deliberate model pick for future fresh sessions, and feed
- * the recent-picks LRU behind the picker's 最近 group. Only an actual model
- * counts — picking 默认模型 is a per-session choice and must not overwrite
+ * the recent-picks LRU behind the picker's Recent group. Only an actual model
+ * counts — picking Default model is a per-session choice and must not overwrite
  * what a new session should start from.
  */
 function rememberModelPick(model: ModelChoice | null): void {
@@ -4050,7 +4050,7 @@ function rememberModelPick(model: ModelChoice | null): void {
 }
 
 /**
- * Star or unstar a model for the picker's 常用 group. Identity is the same
+ * Star or unstar a model for the picker's Favorites group. Identity is the same
  * provider+model pair the recent list keys on — the reasoning variant is a
  * per-run choice, not part of what "a model" means here.
  */

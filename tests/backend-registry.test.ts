@@ -370,7 +370,7 @@ describe("event envelopes", () => {
     expect(envelopes).toEqual([
       {
         backend: "codex",
-        event: { type: "server.error", message: expect.stringContaining("连接中断") },
+        event: { type: "server.error", message: expect.stringContaining("connection lost") },
       },
     ]);
 
@@ -438,7 +438,9 @@ describe("switcher data and selection", () => {
     );
     const { backends } = await registry.listBackends();
     expect(backends[0]).toMatchObject({ installed: true, version: "1.19.2" });
-    expect(backends[0]?.versionWarning).toMatch(/1\.19\.2.*已测试的版本区间/);
+    expect(backends[0]?.versionWarning).toMatch(
+      /1\.19\.2.*outside the version ranges awefork has tested/,
+    );
     // Out of range is a warning, not a refusal: selecting still succeeds.
     await expect(registry.select("opencode")).resolves.toEqual({ ok: true });
   });
@@ -477,7 +479,7 @@ describe("switcher data and selection", () => {
   it("rejects an unknown backend id outright", async () => {
     const result = await registry.select("claude" as "codex");
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/未知后端/);
+    expect(result.error).toMatch(/unknown backend/);
   });
 
   it("refuses to select opencode when its CLI is missing", async () => {

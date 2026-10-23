@@ -233,7 +233,7 @@ export interface AweforkApi {
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
-  /** Native folder picker for ＋ 新目录; null when the user canceled. */
+  /** Native folder picker for the ＋ New directory entry; null when canceled. */
   pickDirectory(): Promise<string | null>;
   /**
    * Write text to a user-chosen path through a native save dialog. {ok:false}

@@ -143,24 +143,25 @@ export interface PersistedComposer {
   /**
    * The last model the user hand-picked in any composer. A brand-new session
    * (no turns, no pick of its own) starts from it instead of the agent's
-   * configured default; picking 默认模型 never overwrites the memory.
+   * configured default; picking "Default model" never overwrites the memory.
    */
   lastModel: ModelChoice | null;
   /**
-   * Models the user starred in a picker, shown above the catalog as the 常用
-   * group. Optional: composer.json written before this field exists has none.
+   * Models the user starred in a picker, shown above the catalog as the
+   * "Favorites" group. Optional: composer.json written before this field
+   * exists has none.
    */
   favoriteModels?: ModelChoice[];
   /**
    * The user's recent hand-picked models, most-recent-first, feeding the
-   * picker's 最近 group. Auto-maintained and capped; optional like the above.
+   * picker's "Recent" group. Auto-maintained and capped; optional like above.
    */
   recentModels?: ModelChoice[];
   /**
-   * The project directory the workspace last had open, restored at boot so
-   * 新建对话 lands in the project the user was working in instead of whatever
-   * cwd the agent server runs under. Optional: older files have none, and
-   * null means nothing worth remembering.
+   * The project directory the workspace last had open, restored at boot so a
+   * new conversation lands in the project the user was working in instead of
+   * whatever cwd the agent server runs under. Optional: older files have
+   * none, and null means nothing worth remembering.
    */
   selectedDirectory?: string | null;
 }
@@ -340,7 +341,7 @@ export type AgentEvent =
 export interface AgentInteractionQuestion {
   /** Stable per-request question id; the answer map keys on it. */
   id: string;
-  /** Short heading the question renders under (e.g. "选一个文件"). */
+  /** Short heading the question renders under (e.g. "Pick a file"). */
   header: string;
   /** The actual question text the agent needs answered. */
   question: string;
@@ -470,7 +471,7 @@ export type AgentInteractionRequest = (
       kind: "permission-approval";
       title: string;
       detail: string;
-      /** The scope codex is requesting, human-readable (e.g. "写入 /Users/x/repo"). */
+      /** The scope codex is requesting, human-readable (e.g. "write /Users/x/repo"). */
       requested: string[];
       reason?: string;
     }

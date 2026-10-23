@@ -124,7 +124,7 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     if (homeId === DEFAULT_HOME_ID && entry.connected) {
       emit({
         type: "server.error",
-        message: "codex app-server 连接中断，将在下次操作时重启",
+        message: "codex app-server connection lost, it will restart on the next action",
       });
     }
   }
@@ -196,10 +196,15 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
   function importToDefault(sessionId: string, ownerId: string): void {
     if (ownerId === DEFAULT_HOME_ID) return;
     const source = homesOf().find((h) => h.id === ownerId);
-    if (!source) throw new Error(`会话 ${sessionId} 的来源账号 ${ownerId} 不存在，无法继续`);
+    if (!source)
+      throw new Error(
+        `account ${ownerId} for session ${sessionId} does not exist, cannot continue`,
+      );
     const rel = findRolloutRelPath(source.path, sessionId);
     if (!rel) {
-      throw new Error(`找不到会话 ${sessionId} 的记录文件，无法用默认账号继续`);
+      throw new Error(
+        `cannot find the record file for session ${sessionId}, cannot continue with the default account`,
+      );
     }
     const dest = join(defaultHome(), "sessions", rel);
     if (!existsSync(dest)) {

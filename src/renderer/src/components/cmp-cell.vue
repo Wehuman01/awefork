@@ -58,7 +58,7 @@ export interface DisplayCell {
   error: string | null;
   /** 1-based index badge among the column's own turns; null = no badge. */
   badge: number | null;
-  /** "up" = an upstream branch's turn on the way to this one; "inherited" = copied 母本 prefix. */
+  /** "up" = an upstream branch's turn on the way to this one; "inherited" = copied original prefix. */
   flag: "up" | "inherited" | null;
 }
 </script>

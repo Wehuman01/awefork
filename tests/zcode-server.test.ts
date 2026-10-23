@@ -182,14 +182,14 @@ describe("zcode-server", () => {
       // in flight by the time stop() tears the handle down. The rejection
       // assertion must be attached before the clock advances, or the promise
       // rejects unhandled.
-      const pending = expect(handle.client()).rejects.toThrow("已停止");
+      const pending = expect(handle.client()).rejects.toThrow("has been stopped");
       handle.stop();
       await vi.advanceTimersByTimeAsync(50);
       await pending;
       // The respawned child must not have been installed — a follow-up client()
       // on a fresh handle (not the stopped one) would spawn again, not adopt it.
       expect(zcodeSpawnCount()).toBe(2);
-      await expect(handle.client()).rejects.toThrow("已停止");
+      await expect(handle.client()).rejects.toThrow("has been stopped");
     });
 
     it("a respawn that dies inside the grace window rejects instead of returning a dead client", async () => {
@@ -213,7 +213,7 @@ describe("zcode-server", () => {
       children[0]?.kill("SIGTERM");
       await vi.advanceTimersByTimeAsync(50);
 
-      const pending = expect(handle.client()).rejects.toThrow("重启后立即退出");
+      const pending = expect(handle.client()).rejects.toThrow("exited right after restart");
       // Let the respawn spawn, then kill the fresh child inside its grace.
       await vi.advanceTimersByTimeAsync(1);
       children[1]?.kill("SIGTERM");

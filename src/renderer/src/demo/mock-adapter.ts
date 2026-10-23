@@ -57,9 +57,9 @@ interface SessionDef {
   minutesAgo: number;
   /** Project directory; defaults to DIRECTORY so old defs stay one-liners. */
   directory?: string;
-  /** Preset session tags (执行 / 实验设计 / 咨询 …) for the demo's tag shelf. */
+  /** Preset session tags (user-chosen labels) for the demo's tag shelf. */
   tags?: string[];
-  /** True on forks that carry none of the parent's turns (空上下文 fork). */
+  /** True on forks that carry none of the parent's turns (empty-context fork). */
   emptyContext?: boolean;
 }
 
@@ -446,7 +446,8 @@ export function installMockAdapter(): void {
   let trash: TrashEntry[] = [];
   let archive: ArchiveState = { sessions: [], directories: [] };
   // Hand-added directories keep their group here too; the browser tab can't
-  // open a native picker, so ＋ 新目录 hands out invented paths instead.
+  // open a native picker, so the + New directory entry hands out invented
+  // paths instead.
   let knownDirs: string[] = [];
   let pickedCount = 0;
   // Session tags, seeded from the defs and mutated through setSessionTags —

@@ -215,7 +215,7 @@ describe("createPiAdapter messages()", () => {
 
   it("throws for a session id the store does not know", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.messages("nope")).rejects.toThrow(/不存在/);
+    await expect(adapter.messages("nope")).rejects.toThrow("pi session nope does not exist");
   });
 });
 
@@ -325,7 +325,7 @@ describe("createPiAdapter prompt() and abort()", () => {
   it("refuses to prompt a session the store does not know", async () => {
     const { adapter, rpc } = await makeHarness([]);
     // No fixture seeded, so nothing is readable and no child should spawn.
-    await expect(adapter.prompt("nope", "hi")).rejects.toThrow(/不存在/);
+    await expect(adapter.prompt("nope", "hi")).rejects.toThrow("pi session nope does not exist");
     expect(rpc.children).toHaveLength(0);
   });
 
@@ -351,7 +351,9 @@ describe("createPiAdapter prompt() and abort()", () => {
 
   it("throws when aborting a session with no running child", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.abort("s1-mixed")).rejects.toThrow("该会话当前没有正在运行的回合");
+    await expect(adapter.abort("s1-mixed")).rejects.toThrow(
+      "this session has no turn running right now",
+    );
   });
 
   it("concurrent prompts on one session share a single spawned child", async () => {
@@ -590,7 +592,9 @@ describe("createPiAdapter fork()", () => {
 
   it("refuses to fork at a message that is not a branch root", async () => {
     const { adapter } = await makeHarness(["s5-fork"]);
-    await expect(adapter.fork("s5-fork", "ghost")).rejects.toThrow(/找不到/);
+    await expect(adapter.fork("s5-fork", "ghost")).rejects.toThrow(
+      "cannot find message ghost in the session",
+    );
   });
 
   it("empty-context fork starts a fresh session — no branch copy, lineage kept", async () => {
@@ -704,11 +708,17 @@ describe("createPiAdapter renameSession and unsupported surfaces", () => {
 
   it("refuses delete / export / single-message delete / interaction reply", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.deleteSession("s1-mixed")).rejects.toThrow(/删除/);
-    await expect(adapter.deleteMessage("s1-mixed", "c-u1")).rejects.toThrow(/删除原语/);
-    await expect(adapter.exportSession("s1-mixed", null)).rejects.toThrow(/不支持导出/);
+    await expect(adapter.deleteSession("s1-mixed")).rejects.toThrow(
+      "pi has no native whole-session delete primitive, delete the session file by hand",
+    );
+    await expect(adapter.deleteMessage("s1-mixed", "c-u1")).rejects.toThrow(
+      "pi has no native single-message delete primitive",
+    );
+    await expect(adapter.exportSession("s1-mixed", null)).rejects.toThrow(
+      "pi cannot export a detached native session",
+    );
     await expect(adapter.respondInteraction("r1", { decision: "deny" })).rejects.toThrow(
-      /交互请求/,
+      "pi has no server-initiated interaction requests",
     );
   });
 });

@@ -12,8 +12,8 @@
       <span class="vp-label">{{ label }}</span>
       <span v-if="!disabled" class="vp-chev">{{ open ? "⌃" : "⌄" }}</span>
     </button>
-    <!-- teleport 出去：面板和画布 viewport 都有 overflow:hidden / transform，
-         弹层留在组件树里会被裁剪或跟着缩放 -->
+    <!-- teleport out: the panel and the canvas viewport both have overflow:hidden /
+         transform, so a popover left in the component tree gets clipped or scaled -->
     <Teleport to="body">
       <div v-if="open" ref="popEl" class="vp-pop" :style="popStyle" tabindex="-1" @keydown="onPopKeydown">
         <button
@@ -55,13 +55,14 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [variant: string | null] }>();
 
 const open = ref(false);
-/** -1 = the "默认" row; otherwise an index into `variants`. */
+/** -1 = the "default" row; otherwise an index into `variants`. */
 const highlighted = ref(-1);
 const rootEl = ref<HTMLElement | null>(null);
 const btnEl = ref<HTMLButtonElement | null>(null);
 const popEl = ref<HTMLElement | null>(null);
 
-/** 弹层是 fixed 定位（teleport 到 body），坐标在打开时按按钮位置算。 */
+/** The popover is fixed-position (teleported to body); its coordinates are
+ * computed from the button's position when it opens. */
 const POP_WIDTH = 190;
 const SCREEN_EDGE = 8;
 const popStyle = ref<{ left: string; top?: string; bottom?: string }>({
@@ -110,7 +111,7 @@ function show(): void {
     ? Math.max(variants.value.indexOf(props.model.variant), 0)
     : -1;
   void nextTick(() => {
-    // 按钮离窗口顶部太近、向上放不下时翻到按钮下方
+    // when the button sits too close to the window top, flip the popover below it
     const pop = popEl.value;
     if (pop && pop.getBoundingClientRect().top < SCREEN_EDGE) {
       const r = btnEl.value?.getBoundingClientRect();
@@ -133,8 +134,8 @@ function onPopKeydown(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    const size = variants.value.length + 1; // + the 默认 row at -1
-    const current = highlighted.value + 1; // 0 = 默认 row
+    const size = variants.value.length + 1; // + the default row at -1
+    const current = highlighted.value + 1; // 0 = default row
     const step = event.key === "ArrowDown" ? 1 : -1;
     highlighted.value = ((current + step + size) % size) - 1;
   } else if (event.key === "Enter") {

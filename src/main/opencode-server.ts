@@ -456,7 +456,7 @@ export async function ensureOpencodeServer(
   const detail = stderrTail.trim();
   return fail(
     `opencode server did not become ready on ${baseUrl}${
-      detail ? `：${detail}` : ""
+      detail ? ` (${detail})` : ""
     }. Is the "opencode" CLI on PATH? Start it manually with: opencode serve --port ${port}`,
   );
 }

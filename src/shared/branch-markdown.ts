@@ -2,8 +2,9 @@
  * Branch → Markdown export, shared so tests can pin the exact document shape.
  *
  * One H1 for the branch, a blockquote line with export metadata, then one H2
- * per turn carrying the metadata the canvas card footer shows (model, 档位,
- * duration, output tokens, tools, failure) plus the full prompt and reply.
+ * per turn carrying the metadata the canvas card footer shows (model, effort
+ * tier, duration, output tokens, tools, failure) plus the full prompt and
+ * reply.
  * The reply is embedded verbatim — it is already markdown — so only the
  * prompt gets fenced, with a fence at least one backtick longer than the
  * longest run inside it (4 minimum) so embedded code blocks can't close it.
@@ -74,29 +75,31 @@ function fenceFor(content: string): string {
 }
 
 function turnSection(index: number, turn: BranchMarkdownTurn): string {
-  const lines: string[] = [`## ${index}. ${turn.title || "(未命名回合)"}`, ""];
+  const lines: string[] = [`## ${index}. ${turn.title || "(untitled turn)"}`, ""];
   const meta: string[] = [];
   if (turn.model) {
-    meta.push(turn.variant ? `模型：${turn.model}（${turn.variant} 档）` : `模型：${turn.model}`);
+    meta.push(
+      turn.variant ? `Model: ${turn.model} (${turn.variant} tier)` : `Model: ${turn.model}`,
+    );
   }
   const usage: string[] = [];
-  if (turn.durationMs !== null) usage.push(`耗时 ${formatDuration(turn.durationMs)}`);
-  if (turn.outputTokens > 0) usage.push(`输出 ${formatTokens(turn.outputTokens)}`);
+  if (turn.durationMs !== null) usage.push(`${formatDuration(turn.durationMs)}`);
+  if (turn.outputTokens > 0) usage.push(`${formatTokens(turn.outputTokens)} output`);
   if (usage.length > 0) meta.push(usage.join(" · "));
-  if (turn.toolNames.length > 0) meta.push(`工具：${turn.toolNames.join("、")}`);
+  if (turn.toolNames.length > 0) meta.push(`Tools: ${turn.toolNames.join(", ")}`);
   lines.push(...meta.map((entry) => `- ${entry}`));
-  if (turn.error) lines.push(`- ⚠ 失败：${turn.error}`);
+  if (turn.error) lines.push(`- ⚠ Failed: ${turn.error}`);
   if (meta.length > 0 || turn.error) lines.push("");
 
   const prompt = turn.prompt || turn.title;
   if (prompt) {
     const fence = fenceFor(prompt);
-    lines.push("**提问**", "", fence, prompt, fence, "");
+    lines.push("**Prompt**", "", fence, prompt, fence, "");
   }
   if (turn.reply) {
-    lines.push("**回复**", "", turn.reply, "");
+    lines.push("**Reply**", "", turn.reply, "");
   } else if (turn.toolNames.length > 0 && !turn.error) {
-    lines.push("*(无文本回复)*", "");
+    lines.push("*(no text reply)*", "");
   }
   return lines.join("\n");
 }
@@ -104,9 +107,9 @@ function turnSection(index: number, turn: BranchMarkdownTurn): string {
 export function buildBranchMarkdown(input: BranchMarkdownInput): string {
   const totalTokens = input.turns.reduce((sum, turn) => sum + turn.outputTokens, 0);
   const header = [
-    `# ${input.title || "awefork 分支"}`,
+    `# ${input.title || "awefork branch"}`,
     "",
-    `> 导出于 ${formatLocalTime(input.exportedAt)} · ${input.turns.length} 个回合 · 输出 ${formatTokens(totalTokens)}`,
+    `> Exported ${formatLocalTime(input.exportedAt)} · ${input.turns.length} turns · ${formatTokens(totalTokens)} output`,
     "",
   ];
   if (input.turns.length === 0) return header.join("\n");

@@ -719,7 +719,7 @@ function zoomAt(px: number, py: number, factor: number): void {
   scale.value = next;
 }
 
-/** Frame exactly these nodes; the shared math behind 全图适配 and subtree focus. */
+/** Frame exactly these nodes; the shared math behind fit-to-view and subtree focus. */
 function fitTo(nodes: TurnNode[]): void {
   loadingAnchorId = null;
   const rect = viewportEl.value?.getBoundingClientRect();
@@ -1045,7 +1045,7 @@ const minimapGeometry = computed(() => {
   return { minX, minY, s, offX: (MM_WIDTH - worldW * s) / 2, offY: (MM_HEIGHT - worldH * s) / 2 };
 });
 
-// The map's own zoom (方案3): ⌘/Ctrl+wheel magnifies the minimap itself,
+// The map's own zoom (option 3): ⌘/Ctrl+wheel magnifies the minimap itself,
 // cursor-anchored, so colors stay readable no matter how big the world gets.
 // null = the classic whole-world overview. Stale values self-heal: mmGeom
 // clamps against the current fit, so a project switch falls back to overview.
@@ -1374,14 +1374,14 @@ function footMeta(node: TurnNode): string {
 /**
  * Running is tracked per SESSION, but only the tip card is the run in
  * progress — lighting every past turn of the session too made finished
- * cards look stuck at 运行中 while a later turn streams.
+ * cards look stuck at running while a later turn streams.
  */
 function isNodeRunning(node: TurnNode): boolean {
   return Boolean(store.running[node.sessionId]) && isSessionTip(node);
 }
 
 /**
- * The "刚跑完" tint rides the same tip-only rule as running: one card per
+ * The "just ran" tint rides the same tip-only rule as running: one card per
  * session at most, and it yields as soon as a newer run takes the tip.
  */
 function isNodeRecent(node: TurnNode): boolean {

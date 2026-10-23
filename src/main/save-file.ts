@@ -13,7 +13,7 @@ export function registerSaveFileIpc(): void {
     "awefork:saveTextFile",
     async (_event: IpcMainInvokeEvent, defaultName: unknown, content: unknown) => {
       if (typeof defaultName !== "string" || typeof content !== "string" || !content) {
-        throw new Error("saveTextFile 需要文件名与内容");
+        throw new Error("saveTextFile needs a file name and content");
       }
       // The dialog's defaultPath takes the whole path; only the base name is
       // ours to suggest, so a crafted name can't point the dialog elsewhere.

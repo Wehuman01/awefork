@@ -223,7 +223,9 @@ async function resolveOpenCodeServer(
   }
 
   if (!(await probe()).installed) {
-    throw new Error("未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。");
+    throw new Error(
+      "opencode CLI not found on PATH. Install it and retry, or run opencode serve manually.",
+    );
   }
   let lastError: unknown = null;
   for (const port of preferred) {
@@ -422,7 +424,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
 
     async select(backend) {
       if (!isBackendId(backend)) {
-        return { ok: false, error: `未知后端：${String(backend)}` };
+        return { ok: false, error: `unknown backend: ${String(backend)}` };
       }
       const installed =
         backend === "codex"
@@ -435,12 +437,12 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       if (!installed) {
         const hint =
           backend === "codex"
-            ? "未在 PATH 上找到 codex CLI。安装：npm install -g @openai/codex"
+            ? "codex CLI not found on PATH. Install: npm install -g @openai/codex"
             : backend === "zcode"
-              ? "未找到 zcode CLI。安装 ZCode 桌面端后重试，或用 AWEFORK_ZCODE_CLI 指向 zcode.cjs。"
+              ? "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs."
               : backend === "pi"
-                ? "未在 PATH 上找到 pi CLI。安装：npm install -g @mariozechner/pi-coding-agent"
-                : "未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。";
+                ? "pi CLI not found on PATH. Install: npm install -g @mariozechner/pi-coding-agent"
+                : "opencode CLI not found on PATH. Install it and retry, or run opencode serve manually.";
         return { ok: false, error: hint };
       }
       await writeBackendSelection(settingsPath, backend);

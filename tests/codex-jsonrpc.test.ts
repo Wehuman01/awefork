@@ -206,18 +206,18 @@ describe("createCodexJsonRpc", () => {
     expect(replies[4]).toEqual({
       jsonrpc: "2.0",
       id: 5,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     expect(replies[5]).toEqual({
       jsonrpc: "2.0",
       id: 6,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     // User input has no safe default value — an explicit error cancels it.
     expect(replies[6]).toEqual({
       jsonrpc: "2.0",
       id: 7,
-      error: { code: -32000, message: "awefork 未获得用户输入，请求已取消" },
+      error: { code: -32000, message: "awefork got no user input, the request was canceled" },
     });
     rpc.dispose();
   });
@@ -265,7 +265,9 @@ describe("createCodexJsonRpc", () => {
   it("replies with an error when the handler rejects an unmappable request", async () => {
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
-    rpc.setRequestHandler(() => Promise.reject(new Error("awefork 无法处理 codex 请求 x")));
+    rpc.setRequestHandler(() =>
+      Promise.reject(new Error("awefork cannot handle the codex request x")),
+    );
     stdout.emit(
       "data",
       `${JSON.stringify({
@@ -279,7 +281,7 @@ describe("createCodexJsonRpc", () => {
     expect(JSON.parse(written[0] ?? "{}")).toEqual({
       jsonrpc: "2.0",
       id: 13,
-      error: { code: -32000, message: "awefork 无法处理 codex 请求 x" },
+      error: { code: -32000, message: "awefork cannot handle the codex request x" },
     });
     rpc.dispose();
   });
@@ -329,7 +331,7 @@ describe("createCodexJsonRpc", () => {
     expect(JSON.parse(written[0] ?? "{}")).toEqual({
       jsonrpc: "2.0",
       id: 32,
-      error: { code: -32000, message: "awefork 未获得用户输入，请求已超时" },
+      error: { code: -32000, message: "awefork got no user input, the request timed out" },
     });
     rpc.dispose();
     vi.useRealTimers();
@@ -462,12 +464,12 @@ describe("createCodexJsonRpc", () => {
     expect(replies[0]).toEqual({
       jsonrpc: "2.0",
       id: 21,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     expect(replies[1]).toEqual({
       jsonrpc: "2.0",
       id: 22,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     rpc.dispose();
   });

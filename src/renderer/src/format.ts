@@ -27,7 +27,7 @@ export function formatTokenCount(count: number): string {
   return `${compact(count / 1_000_000)}M`;
 }
 
-/** Compact age of a timestamp for sidebar rows: 刚刚 / 5分钟前 / 3小时前 / 2天前. */
+/** Compact age of a timestamp for sidebar rows: just now / 5 min ago / 3 h ago / 2 d ago. */
 export function relTime(ms: number): string {
   const minutes = Math.floor((Date.now() - ms) / 60000);
   if (minutes < 1) return t("format.justNow");

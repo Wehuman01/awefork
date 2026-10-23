@@ -54,8 +54,8 @@ const SAFE_REPLIES: Record<string, unknown> = {
   "item/fileChange/requestApproval": { decision: "decline" },
   "item/permissions/requestApproval": { permissions: { fileSystem: null, network: null } },
   "mcpServer/elicitation/request": { action: "decline" },
-  execCommandApproval: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
-  applyPatchApproval: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+  execCommandApproval: { decision: { denied: { rejection: "the user declined this action" } } },
+  applyPatchApproval: { decision: { denied: { rejection: "the user declined this action" } } },
 };
 
 const KNOWN_REQUESTS = new Set([...Object.keys(SAFE_REPLIES), "item/tool/requestUserInput"]);
@@ -124,7 +124,8 @@ export function createCodexJsonRpc(
     }
     if (!handleRequest) {
       const fallback = safeReply(method);
-      if (fallback === undefined) replyError(id, -32000, "awefork 未获得用户输入，请求已取消");
+      if (fallback === undefined)
+        replyError(id, -32000, "awefork got no user input, the request was canceled");
       else replyResult(id, fallback);
       return;
     }
@@ -139,7 +140,7 @@ export function createCodexJsonRpc(
     };
     const timer = setTimeout(() => {
       const fallback = safeReply(method);
-      if (fallback === undefined) finish(null, "awefork 未获得用户输入，请求已超时");
+      if (fallback === undefined) finish(null, "awefork got no user input, the request timed out");
       else finish(fallback);
     }, requestTimeoutMs);
     // Disconnect settles the request here (the reply write is a guarded

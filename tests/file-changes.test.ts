@@ -206,7 +206,7 @@ describe("file-change recorder", () => {
     const entry = (await readSessionChanges(sessionChangesDir(root, "ses_1")))?.messages.msg_1?.[0];
     expect(entry?.status).toBe("unknown");
     expect(entry?.added).toBeNull();
-    expect(entry?.note).toContain("未观察");
+    expect(entry?.note).toContain("no content observed before the turn started");
   });
 
   it("keeps one entry per path with the latest after when a message edits twice", async () => {
@@ -280,7 +280,7 @@ describe("file-change recorder", () => {
 
     const entry = (await readSessionChanges(sessionChangesDir(root, "ses_1")))?.messages.msg_1?.[0];
     expect(entry?.status).toBe("unknown");
-    expect(entry?.note).toContain("二进制");
+    expect(entry?.note).toContain("binary file, no snapshot saved");
   });
 
   it("rehydrates from the stored index so a restart keeps the original before", async () => {

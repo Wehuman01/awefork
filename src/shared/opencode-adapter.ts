@@ -321,7 +321,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     if (fact) {
       const files = readPath(row, fact.path);
       if (!Array.isArray(files)) return [];
-      return files.map((f) => firstString(f, [fact.nameField]) ?? "附件");
+      return files.map((f) => firstString(f, [fact.nameField]) ?? "attachment");
     }
     const file = descriptor.messages.parts.file;
     return parts
@@ -512,7 +512,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
             return data
               ? {
                   mime,
-                  filename: firstString(f, [fact.nameField]) ?? "附件",
+                  filename: firstString(f, [fact.nameField]) ?? "attachment",
                   dataUrl: `data:${mime};base64,${data}`,
                 }
               : null;

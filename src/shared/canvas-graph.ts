@@ -244,7 +244,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
           id: `${session.id}::stub`,
           kind: "stub",
           messageId: null,
-          title: session.title || "空会话",
+          title: session.title || "empty session",
           preview: "",
           toolNames: [],
           modelIds: [],

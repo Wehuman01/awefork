@@ -3,7 +3,8 @@
     <slot name="context" />
     <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
       <template v-if="message.role === 'user'">
-        <!-- 压缩标记行：不是对话内容，是"此前的历史已折叠为摘要"的分界线 -->
+        <!-- compression marker row: not conversation content, a divider marking
+             "the earlier history has been folded into a summary" -->
         <div v-if="message.compaction" class="compaction-banner" role="separator">
           <span class="compaction-glyph">🧹</span>
           <span class="compaction-text">{{ t("msg.compactionBanner") }}</span>

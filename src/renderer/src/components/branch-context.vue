@@ -37,7 +37,7 @@
           </div>
         </div>
 
-        <!-- 同源: aligned pairs from the shared fork anchor -->
+        <!-- same-origin: aligned pairs from the shared fork anchor -->
         <template v-if="compare.plan">
           <button
             v-if="compare.plan.common.length > 0"
@@ -74,7 +74,7 @@
               @scroll="onColScroll(ci, $event)"
             >
               <!-- No column head here: the aligned header cards above already
-                   name both sides and mark the current one, and "选中" would
+                   name both sides and mark the current one, and "selected" would
                    tear the lens down mid-comparison. -->
               <CmpCell
                 v-for="cell in col.cells"
@@ -86,7 +86,7 @@
           </div>
         </template>
 
-        <!-- 不同源: two independent timelines, no pairing -->
+        <!-- different-origin: two independent timelines, no pairing -->
         <template v-else>
           <div class="cmp-forkline">
             <span class="cmp-fork-glyph">⇄</span>
@@ -357,7 +357,7 @@ function toggleMark(): void {
 const selectedTags = computed(() => (store.selectedId ? tagsOf(store.selectedId) : []));
 
 const chatInputEl = ref<{ focus: () => void } | null>(null);
-// 新增对话 landed: the fresh session is selected and mounted by now — put the
+// a new conversation landed: the fresh session is selected and mounted by now — put the
 // caret in the pane composer so its first prompt starts with a keystroke.
 watch(
   () => store.composerFocusRequest,
@@ -371,7 +371,8 @@ watch(
 
 /**
  * The open comparison. `plan` is null when the two sessions never meet —
- * 不同源 renders as two free side-by-side timelines instead of aligned pairs.
+ * A different-origin pair renders as two free side-by-side timelines instead of
+ * aligned pairs.
  */
 const compare = computed(() => {
   const pair = store.compare;
@@ -451,7 +452,7 @@ const samePrompt = computed(() => {
   return l != null && r != null && l.title !== "" && l.title === r.title;
 });
 
-/** Leading turns copied from the 母本 — none for roots and empty-context forks. */
+/** Leading turns copied from the original — none for roots and empty-context forks. */
 function inheritedTurns(sessionId: string, turns: Turn[]): number {
   const record = store.lineage[sessionId];
   if (!record || record.context === "none" || record.atMessageId == null) return 0;
@@ -467,7 +468,7 @@ interface FreeColumn {
 }
 
 /**
- * The free side-by-side columns (不同源): each session's whole timeline from
+ * The free side-by-side columns (different-origin): each session's whole timeline from
  * its own messages — no canvas graph needed, so the pair may cross stories.
  */
 const freeColumns = computed<FreeColumn[] | null>(() => {
@@ -615,7 +616,7 @@ watch(
   },
 );
 
-/** The selected branch's 母本, when it sits on this canvas — the ⇄ entry. */
+/** The selected branch's original, when it sits on this canvas — the ⇄ entry. */
 const compareParentId = computed(() => {
   const id = store.selectedId;
   if (!id || store.compare) return null;

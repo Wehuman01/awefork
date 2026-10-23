@@ -98,7 +98,7 @@ const rows = computed<PanelRow[]>(() => {
 
   const result: PanelRow[] = [];
 
-  // 收集倒序 entry
+  // collect entries in reverse order
   const reversed: { entry: HistoryEntry; originalIndex: number; applied: boolean }[] = [];
   for (let d = 0; d < entries.length; d++) {
     const oi = entries.length - 1 - d;
@@ -114,12 +114,12 @@ const rows = computed<PanelRow[]>(() => {
     if (!r) continue;
     const prev = i > 0 ? reversed[i - 1] : undefined;
 
-    // "当前位置"分隔线：前一条已撤销，当前已生效
+    // "current position" divider: the previous entry is undone, this one is live
     if (prev && !prev.applied && r.applied) {
       result.push({ kind: "separator", separatorLabel: t("histpanel.current") });
     }
 
-    // "以下操作已锁定"分隔线：在锁行下方第一条 entry 之前插入
+    // "locked below" divider: inserted before the first entry under the lock row
     if (!r.entry.undoable) {
       if (li > 0) insertLockSep = true;
     } else if (insertLockSep) {

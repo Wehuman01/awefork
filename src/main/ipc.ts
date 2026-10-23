@@ -233,7 +233,7 @@ export function registerIpc(
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
       if (!(await registry.capabilities(id)).exportBranch) {
-        throw new Error("这个后端不支持导出独立会话");
+        throw new Error("this backend cannot export a detached session");
       }
       return adapter.exportSession(sessionId, atMessageId);
     },
@@ -298,7 +298,7 @@ export function registerIpc(
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
       if (!(await registry.capabilities(id)).compress) {
-        throw new Error("这个后端不支持会话压缩");
+        throw new Error("this backend cannot compress sessions");
       }
       await adapter.compress(sessionId, model);
     },
@@ -359,7 +359,8 @@ export function registerIpc(
       const adapter = await withAdapter(id);
       const sessions = await adapter.listSessions();
       const session = sessions.find((entry) => entry.id === sessionId);
-      if (!session) return { ok: false, error: `会话 ${sessionId} 不存在，可能已被删除` };
+      if (!session)
+        return { ok: false, error: `session ${sessionId} not found — it may have been deleted` };
       let codexHome: string | null = null;
       let codexProviderOverride: string | null = null;
       if (id === "codex") {
@@ -520,10 +521,10 @@ export function registerIpc(
     },
   );
 
-  // Directories the user registered by hand (＋ 新目录): they render as a
-  // sidebar group even before the first conversation exists there. Stored and
-  // served canonicalized, so a hand-added spelling matches the session rows'
-  // directories however the shell reported them.
+  // Directories the user registered by hand (the ＋ New directory entry): they
+  // render as a sidebar group even before the first conversation exists there.
+  // Stored and served canonicalized, so a hand-added spelling matches the
+  // session rows' directories however the shell reported them.
   ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
     loadCanonicalDirs(backend),
   );
@@ -613,7 +614,7 @@ export function registerIpc(
   ipcMain.handle(
     "awefork:selectBackend",
     async (_event: IpcMainInvokeEvent, backend: BackendId) => {
-      if (!isBackendId(backend)) return { ok: false, error: `未知后端：${String(backend)}` };
+      if (!isBackendId(backend)) return { ok: false, error: `unknown backend: ${String(backend)}` };
       return registry.select(backend);
     },
   );
@@ -642,16 +643,17 @@ export function registerIpc(
   // renderer's parser used, so nothing reaches the OS that the markdown
   // view wouldn't have linked itself.
   ipcMain.handle("awefork:openPath", async (_event: IpcMainInvokeEvent, target: string) => {
-    if (!isLocalPath(target)) return { ok: false, error: "不是本地路径" };
+    if (!isLocalPath(target)) return { ok: false, error: "not a local path" };
     const error = await shell.openPath(target);
     return error ? { ok: false, error } : { ok: true };
   });
 
-  // Native folder picker behind ＋ 新目录 — anchored to the requesting window
-  // so the dialog stays with the app. Null on cancel, first pick otherwise.
+  // Native folder picker behind the ＋ New directory entry — anchored to the
+  // requesting window so the dialog stays with the app. Null on cancel, first
+  // pick otherwise.
   ipcMain.handle("awefork:pickDirectory", async (event: IpcMainInvokeEvent) => {
     const options: Electron.OpenDialogOptions = {
-      title: "选择要添加的项目目录",
+      title: "Choose a project directory to add",
       properties: ["openDirectory", "createDirectory"],
     };
     const window = BrowserWindow.fromWebContents(event.sender);

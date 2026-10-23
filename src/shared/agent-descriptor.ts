@@ -1148,9 +1148,9 @@ export function opencodeVersionWarning(version: string | null): string | null {
   );
   if (supported) return null;
   const ranges = opencodeDescriptors()
-    .map((descriptor) => `≥${descriptor.compat.min}，<${descriptor.compat.max}`)
-    .join("；");
-  return `opencode ${version} 不在 awefork 已测试的版本区间（${ranges}）；若运行不结束或回复为空，请切换到已测试版本`;
+    .map((descriptor) => `≥${descriptor.compat.min}, <${descriptor.compat.max}`)
+    .join("; ");
+  return `opencode ${version} is outside the version ranges awefork has tested (${ranges}); if a run never settles or the reply comes back empty, switch to a tested version`;
 }
 
 // ---------------------------------------------------------------------------

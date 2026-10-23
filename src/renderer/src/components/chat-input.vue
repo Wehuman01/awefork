@@ -117,9 +117,9 @@ const props = withDefaults(
     models: readonly ModelOption[];
     /** Backend capability gate: codex takes no attachments at all. */
     allowAttachments?: boolean;
-    /** Starred models for the picker's 常用 group. */
+    /** Starred models for the picker's Favorites group. */
     favoriteModels?: readonly ModelChoice[];
-    /** Recent hand-picked models for the picker's 最近 group. */
+    /** Recent hand-picked models for the picker's Recent group. */
     recentModels?: readonly ModelChoice[];
     /** Session context budget for the head-row meter; null hides it. */
     context?: ContextUsage | null;
@@ -355,8 +355,9 @@ function onVariantPicked(variant: string | null): void {
 }
 
 /**
- * 组输入（中文输入法）期间的回车在确认候选词，不是发送；keyCode 229 兜住
- * Safari——它在提交流的那次 keydown 上不设 isComposing。
+ * Enter during IME composition confirms the candidate word instead of sending;
+ * keyCode 229 backstops
+ * Safari, which leaves isComposing unset on the committing keydown.
  */
 function onEnterKey(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
@@ -373,7 +374,7 @@ function submit(): void {
   previewing.value = false;
 }
 
-/** Pane host pulls this after 新增对话 so the first prompt starts typing at once. */
+/** Pane host pulls this after a new conversation so the first prompt starts typing at once. */
 function focus(): void {
   textareaEl.value?.focus();
 }

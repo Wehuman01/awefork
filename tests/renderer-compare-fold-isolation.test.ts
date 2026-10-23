@@ -59,10 +59,10 @@ describe("compare card fold isolation", () => {
     // timelines share no header, keeps the head.
     const aligned = context.slice(
       context.indexOf("in pairColumns"),
-      context.indexOf("<!-- 不同源"),
+      context.indexOf("<!-- different-origin"),
     );
     expect(aligned).not.toMatch(/cmp-fcol-head/);
-    expect(context.slice(context.indexOf("<!-- 不同源"))).toMatch(/cmp-fcol-head/);
+    expect(context.slice(context.indexOf("<!-- different-origin"))).toMatch(/cmp-fcol-head/);
   });
 
   it("offers lockstep scrolling, off until asked for", async () => {

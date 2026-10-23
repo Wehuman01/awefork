@@ -103,11 +103,12 @@ interface PendingInteraction {
  * Shared with main's codex-server (its startup banner uses the same line) so
  * a run-time auth failure and the connect-time banner read identically.
  */
-export const CODEX_NOT_LOGGED_IN_MESSAGE = "codex 未登录或无可用账号：请先在终端运行 codex login";
+export const CODEX_NOT_LOGGED_IN_MESSAGE =
+  "codex is not logged in or has no usable account: run codex login in a terminal first";
 
 /** Shown when another codex process owns the thread's writer. */
 export const OWNED_ELSEWHERE_MESSAGE =
-  "该会话正被另一个 codex 实例写入（例如 aweswitch 里的会话），暂时无法继续；关闭那边后再试";
+  "this session is being written by another codex instance (e.g. a session in aweswitch) and cannot continue; close that one and retry";
 
 const PAGE_LIMIT = 100;
 
@@ -153,7 +154,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       // wrapping it as "not logged in" would send the user after codex
       // login for a crashed app-server.
       if (message.includes("connection lost") || message.includes("not connected")) return null;
-      return `${CODEX_NOT_LOGGED_IN_MESSAGE}（${message}）`;
+      return `${CODEX_NOT_LOGGED_IN_MESSAGE} (${message})`;
     }
   };
 
@@ -162,7 +163,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
 
   const mapThread = (thread: CodexThread): SessionSummary => ({
     id: thread.id,
-    title: thread.name || thread.preview || "(未命名会话)",
+    title: thread.name || thread.preview || "(untitled session)",
     directory: thread.cwd ?? "",
     parentSessionId: thread.forkedFromId ?? thread.parentThreadId ?? null,
     origin: thread.forkedFromId ? "fork" : thread.parentThreadId ? "subagent" : "root",
@@ -393,6 +394,31 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   }
 
   /**
+   * Copy a thread this server may not write to, for prompt's writer-conflict
+   * recovery. A full-history fork (no cut point, no context switch) so the
+   * new thread carries everything the locked one had; the copy's title is
+   * derived the same way listSessions derives it. Returns null when the fork
+   * itself is refused — the caller then reports the original conflict.
+   */
+  async function forkForContinuation(sessionId: string): Promise<SessionSummary | null> {
+    try {
+      const response = await client.request<{ thread?: CodexThread }>("thread/fork", {
+        threadId: sessionId,
+      });
+      const thread = response?.thread;
+      if (!thread) return null;
+      await recordFork(lineagePath, thread.id, {
+        parentId: sessionId,
+        atMessageId: null,
+        createdAt: secToMs(thread.createdAt) ?? Date.now(),
+      });
+      return mapThread(thread);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * A refused writer is a real, actionable state: another codex process
    * (typically an aweswitch session) owns the thread. Say so rather than
    * echoing codex's wording about writers and locks.
@@ -567,12 +593,15 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     },
 
     async prompt(sessionId, text, model) {
-      const params: Record<string, unknown> = {
-        threadId: sessionId,
-        input: [{ type: "text", text }],
+      const turnParams = (threadId: string) => {
+        const params: Record<string, unknown> = {
+          threadId,
+          input: [{ type: "text", text }],
+        };
+        if (model?.modelId) params.model = model.modelId;
+        if (model?.variant) params.effort = model.variant;
+        return params;
       };
-      if (model?.modelId) params.model = model.modelId;
-      if (model?.variant) params.effort = model.variant;
       try {
         // turn/start only sees threads this server has loaded, and reading a
         // thread no longer loads it (readThread deliberately avoids the
@@ -586,7 +615,10 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         } catch (error) {
           if (!isNotMaterialized(error)) throw error;
         }
-        const response = await client.request<{ turn?: { id?: string } }>("turn/start", params);
+        const response = await client.request<{ turn?: { id?: string } }>(
+          "turn/start",
+          turnParams(sessionId),
+        );
         if (response?.turn?.id) activeTurns.set(sessionId, response.turn.id);
       } catch (error) {
         // Request-level failures (auth, unknown thread) have no notification;
@@ -595,6 +627,26 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         // prompt() resolves, so a swallowed error would leave a phantom run
         // polling for a turn that never started.
         const detail = error instanceof Error ? error.message : String(error);
+        if (isWriterConflict(error)) {
+          // codex 0.163's managed app-server daemon keeps a thread's writer
+          // lock open long after its turn finished (verified on 0.163: the
+          // rollout's last write was minutes stale, yet the lock fd stayed
+          // open), so "close the other window and retry" is advice the user
+          // cannot follow. thread/fork is not gated on that lock — it copies
+          // the rollout into a fresh thread id — so continue the run there:
+          // the user keeps their message, and the fork carries the history
+          // the locked thread held.
+          const forked = await forkForContinuation(sessionId);
+          if (forked) {
+            await client.request("turn/start", turnParams(forked.id));
+            emit({
+              type: "server.error",
+              sessionId,
+              message: `${OWNED_ELSEWHERE_MESSAGE}; continued in the new branch ${forked.id}`,
+            });
+            return;
+          }
+        }
         const authDetail = await authFailureDetail();
         emit({
           type: "server.error",
@@ -636,9 +688,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
           // AND toast it — a silent refusal would look like a hung turn.
           emit({
             type: "server.error",
-            message: `codex 请求了 awefork 无法展示的交互（${method}），已拒绝`,
+            message: `codex asked for an interaction awefork cannot display (${method}), so it was declined`,
           });
-          return Promise.reject(new Error(`awefork 无法处理 codex 请求 ${method}`));
+          return Promise.reject(new Error(`awefork cannot handle the codex request ${method}`));
         }
         return new Promise<unknown>((resolve) => {
           pendingInteractions.set(requestId, { method, resolve });
@@ -887,8 +939,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "command-approval",
-        title: "允许执行命令？",
-        detail: reason ?? "Codex 请求执行一条命令。",
+        title: "Run this command?",
+        detail: reason ?? "Codex is asking to run a command.",
         command,
         cwd: typeof p.cwd === "string" ? p.cwd : undefined,
         reason,
@@ -899,8 +951,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "file-approval",
-        title: "允许修改文件？",
-        detail: reason ?? "Codex 请求修改文件。",
+        title: "Edit these files?",
+        detail: reason ?? "Codex is asking to edit files.",
         grantRoot: typeof p.grantRoot === "string" ? p.grantRoot : undefined,
         reason,
       };
@@ -909,8 +961,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "permission-approval",
-        title: "允许额外权限？",
-        detail: reason ?? "Codex 请求扩大本回合权限。",
+        title: "Grant extra permissions?",
+        detail: reason ?? "Codex is asking to widen this turn's permissions.",
         requested: permissionSummary(p.permissions),
         reason,
       };
@@ -924,7 +976,7 @@ function interactionRequest(
             return [
               {
                 id,
-                header: typeof q.header === "string" ? q.header : "需要你的输入",
+                header: typeof q.header === "string" ? q.header : "Your input is needed",
                 question: questionText,
                 options: Array.isArray(q.options)
                   ? q.options.flatMap((option) => {
@@ -949,7 +1001,7 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "user-input",
-        title: "Codex 需要你的输入",
+        title: "Codex needs your input",
         detail: reason ?? "",
         questions,
       };
@@ -959,7 +1011,7 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "mcp-elicitation",
-        title: "MCP 服务请求输入",
+        title: "MCP server requests input",
         detail: typeof p.message === "string" ? p.message : (reason ?? ""),
         serverName: typeof p.serverName === "string" ? p.serverName : "MCP",
       };
@@ -983,15 +1035,15 @@ function interactionReply(method: string, response: AgentInteractionResponse): u
     case "mcpServer/elicitation/request":
       return { action: allowed ? "accept" : "decline" };
     default:
-      return { decision: { denied: { rejection: "用户拒绝了该操作" } } };
+      return { decision: { denied: { rejection: "the user declined this action" } } };
   }
 }
 
 function permissionSummary(value: unknown): string[] {
-  if (!value || typeof value !== "object") return ["额外权限"];
+  if (!value || typeof value !== "object") return ["extra permissions"];
   const permissions = value as Record<string, unknown>;
   const result: string[] = [];
-  if (permissions.fileSystem) result.push("文件系统访问");
-  if (permissions.network) result.push("网络访问");
-  return result.length > 0 ? result : ["额外权限"];
+  if (permissions.fileSystem) result.push("file system access");
+  if (permissions.network) result.push("network access");
+  return result.length > 0 ? result : ["extra permissions"];
 }

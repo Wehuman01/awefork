@@ -132,9 +132,9 @@ const props = withDefaults(
     targets: readonly CompareTarget[];
     models: readonly ModelOption[];
     allowAttachments: boolean;
-    /** Starred models for the picker's 常用 group. */
+    /** Starred models for the picker's Favorites group. */
     favoriteModels?: readonly ModelChoice[];
-    /** Recent hand-picked models for the picker's 最近 group. */
+    /** Recent hand-picked models for the picker's Recent group. */
     recentModels?: readonly ModelChoice[];
     send: (
       ids: readonly string[],

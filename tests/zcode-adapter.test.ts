@@ -338,7 +338,7 @@ describe("zcode adapter", () => {
     const errorEvent = failEvents.find((event) => event.type === "server.error");
     expect(errorEvent).toMatchObject({ sessionId: "sess_y" });
     if (errorEvent?.type === "server.error") {
-      expect(errorEvent.message).toContain("正在运行");
+      expect(errorEvent.message).toContain("already has a turn running");
     }
   });
 

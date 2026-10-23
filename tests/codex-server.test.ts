@@ -187,7 +187,7 @@ describe("ensureCodexServer auth probe", () => {
       "account/read": { __error__: "no auth credentials" },
     });
     const result = await ensureCodexServer(() => {}, spawnFnReturning(child));
-    expect(result.authMessage).toMatch(/codex login（no auth credentials）/);
+    expect(result.authMessage).toMatch(/codex login in a terminal first \(no auth credentials\)/);
   });
 });
 

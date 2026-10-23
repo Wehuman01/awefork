@@ -109,13 +109,13 @@ export function createFileChangeRecorder(options: FileChangeRecorderOptions): Fi
       buffer = await readFile(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
-      return { kind: "skipped", note: "文件无法读取" };
+      return { kind: "skipped", note: "file could not be read" };
     }
     if (buffer.byteLength > MAX_SNAPSHOT_BYTES) {
-      return { kind: "skipped", note: "文件超过 2 MiB，未保存快照" };
+      return { kind: "skipped", note: "file over 2 MiB, no snapshot saved" };
     }
     if (buffer.includes(0)) {
-      return { kind: "skipped", note: "二进制文件，未保存快照" };
+      return { kind: "skipped", note: "binary file, no snapshot saved" };
     }
     return { kind: "ok", content: buffer.toString("utf8") };
   };
@@ -248,7 +248,7 @@ export function createFileChangeRecorder(options: FileChangeRecorderOptions): Fi
     if (!record.sawActive) {
       // Mid-run connect: record that the file was touched, claim nothing.
       entry.status = "unknown";
-      entry.note = entry.note ?? "未观察到回合开始前的内容";
+      entry.note = entry.note ?? "no content observed before the turn started";
       entry.before = null;
       entry.added = null;
       entry.removed = null;
@@ -263,7 +263,7 @@ export function createFileChangeRecorder(options: FileChangeRecorderOptions): Fi
       // trustworthy pair — a status-only row is the honest output. Absent
       // files are facts, not skips, and survive as {kind:"absent"} above.
       entry.status = "unknown";
-      entry.note = entry.note ?? "无法保存对比快照";
+      entry.note = entry.note ?? "could not save a comparison snapshot";
       await flushBlobs(messageId, record);
       await commit(messageId, entry);
       return;
@@ -290,7 +290,8 @@ export function createFileChangeRecorder(options: FileChangeRecorderOptions): Fi
       entry.status = "modified";
       entry.added = diff.added;
       entry.removed = diff.removed;
-      if (diff.added === null) entry.note = entry.note ?? "改动过大，仅显示文件状态";
+      if (diff.added === null)
+        entry.note = entry.note ?? "change too large, only the file status is shown";
     }
     await flushBlobs(messageId, record);
     await commit(messageId, entry);

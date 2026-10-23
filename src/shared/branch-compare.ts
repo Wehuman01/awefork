@@ -17,7 +17,7 @@ import { chainToTip, type TurnGraph, type TurnNode } from "./canvas-graph.js";
  */
 
 export interface ComparePlan {
-  /** Deepest node both branches share — the 分叉点 card. */
+  /** Deepest node both branches share — the fork-point card. */
   anchor: TurnNode;
   /** The shared story path root-first, anchor included — the collapsible band. */
   common: TurnNode[];

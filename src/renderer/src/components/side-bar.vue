@@ -75,17 +75,17 @@
       </div>
       <div class="boost-head">{{ t("sidebar.syntax") }}</div>
       <dl class="boost-syntax">
-        <dt><code>body:词</code></dt>
+        <dt><code>body:word</code></dt>
         <dd>{{ t("sidebar.synBody") }}</dd>
-        <dt><code>#标签</code></dt>
+        <dt><code>#tag</code></dt>
         <dd>{{ t("sidebar.synTag") }}</dd>
-        <dt><code>title:词</code></dt>
+        <dt><code>title:word</code></dt>
         <dd>{{ t("sidebar.synTitle") }}</dd>
-        <dt><code>dir:目录</code></dt>
+        <dt><code>dir:path</code></dt>
         <dd>{{ t("sidebar.synDir") }}</dd>
-        <dt><code>"精确短语"</code></dt>
+        <dt><code>"exact phrase"</code></dt>
         <dd>{{ t("sidebar.synPhrase") }}</dd>
-        <dt><code>-词</code></dt>
+        <dt><code>-word</code></dt>
         <dd>{{ t("sidebar.synExclude") }}</dd>
       </dl>
       <p class="boost-note">{{ t("sidebar.bodyNote") }}</p>
@@ -417,7 +417,8 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
-      <!-- 置顶只留在侧边栏会话行的菜单里；画布右键不提供 -->
+      <!-- pinning stays in the sidebar row menu only; canvas right-click does not
+           offer it -->
       <button
         v-if="!menu.fromCanvas"
         type="button"
@@ -679,7 +680,7 @@
               type="button"
               class="pal-swatch pal-auto"
               :class="{ picked: newTagHue === null }"
-              :style="{ '--auto-c': tagColor(newTagText.trim() || '新标签') }"
+              :style="{ '--auto-c': tagColor(newTagText.trim() || 'new tag') }"
               :title="t('sidebar.autoColor')"
               :aria-label="t('sidebar.autoColor')"
               @click="newTagHue = null"
@@ -847,7 +848,7 @@ function clearQuery(): void {
 
 // ── enhanced search (✦) ─────────────────────────────────────────────
 
-/** Which surfaces plain terms search; 正文 is opt-in (a scan costs a round-trip per session). */
+/** Which surfaces plain terms search; body is opt-in (a scan costs a round-trip per session). */
 const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
 const boostOpen = ref(false);
 
@@ -903,7 +904,7 @@ const boostOffDefault = computed(
     searchLimit.value !== "1000",
 );
 
-/** One click back to 标题+标签、全部项目、上限 1000. */
+/** One click back to title+tag, all projects, cap 1000. */
 function resetBoost(): void {
   searchScopes.title = true;
   searchScopes.tag = true;
@@ -928,7 +929,7 @@ function clearBodySearch(): void {
   bodyScanning.value = false;
 }
 
-/** Body scan runs when 正文 is checked OR a body: term states the intent outright. */
+/** Body scan runs when body is checked OR a body: term states the intent outright. */
 const bodyScopeWanted = computed(
   () => searchScopes.body || parsedQuery.value.includes.some((term) => term.scope === "body"),
 );
@@ -1069,7 +1070,7 @@ function jumpToHit(hit: BodySearchHit): void {
   void jumpToMessage(hit.sessionId, hit.messageId);
 }
 
-/** The whole project list folds under the 项目 header, Cursor-style. */
+/** The whole project list folds under the Project header, Cursor-style. */
 const projectsOpen = ref(true);
 
 // ── tag filter shelf ────────────────────────────────────────────────
@@ -1146,7 +1147,7 @@ const menu = ref<{
   title: string;
   x: number;
   y: number;
-  /** Canvas right-click: 重命名 must reveal the sidebar row first. */
+  /** Canvas right-click: rename must reveal the sidebar row first. */
   fromCanvas: boolean;
   /** The session's directory — opens its group when revealing the row. */
   directory: string | null;
@@ -1311,14 +1312,16 @@ function cancelRename(): void {
   renaming.value = null;
 }
 
-/** 组输入期间的回车在确认候选词，不是提交重命名（见 chat-input 的 onEnterKey）。 */
+/** Enter during IME composition confirms a candidate word instead of submitting
+ * the rename (see chat-input's onEnterKey). */
 function onRenameEnter(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
   commitRename();
 }
 
-/** 组输入期间的 Esc 在关候选词窗，第一次不该顺手关掉重命名。 */
+/** Esc during IME composition closes the candidate window; the first press must
+ * not also close the rename. */
 function onRenameEsc(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
@@ -1378,7 +1381,7 @@ function beginDelete(): void {
   void deleteSession(active.sessionId);
 }
 
-// ── tag editor (右键 → 设置标签) ─────────────────────────────────────
+// ── tag editor (right-click → set tag) ─────────────────────────────────────
 
 const tagMenu = ref<{ sessionId: string; x: number; y: number } | null>(null);
 const newTagText = ref("");
@@ -1407,7 +1410,7 @@ const menuTags = computed(() => {
 });
 
 /** Hue the auto cell would give the tag being typed, before it exists. */
-const newTagAutoHue = computed(() => hueOf(newTagText.value.trim() || "新标签"));
+const newTagAutoHue = computed(() => hueOf(newTagText.value.trim() || "new tag"));
 
 /** Live hue while dragging the edit slider; lands on release. */
 const hueDrag = ref<number | null>(null);
@@ -1519,7 +1522,7 @@ async function confirmDelLocal(tag: string): Promise<void> {
 
 /**
  * Delete the tag everywhere; a filter sitting on it clears via the watcher.
- * The toast in state offers 撤销 for a few seconds after.
+ * The toast in state offers Undo for a few seconds after.
  */
 function confirmDelAll(tag: string): void {
   delConfirm.value = null;
@@ -1805,7 +1808,7 @@ const visibleGroups = computed<SessionGroup[]>(() => {
   );
 });
 
-// ── branch collapse (折叠 fork 子树) ────────────────────────────────
+// ── branch collapse (collapse a fork subtree) ────────────────────────────────
 
 /** Session ids whose subtree the user folded; everything renders open by default. */
 const collapsedBranches = ref<Record<string, true>>({});

@@ -179,9 +179,9 @@ export async function ensureCodexServer(
           authMessage = NOT_LOGGED_IN_MESSAGE;
         }
       } catch (error) {
-        authMessage = `${NOT_LOGGED_IN_MESSAGE}（${
+        authMessage = `${NOT_LOGGED_IN_MESSAGE} (${
           error instanceof Error ? error.message : String(error)
-        }）`;
+        })`;
       }
       servers.set(key, slot);
       slot.result = {

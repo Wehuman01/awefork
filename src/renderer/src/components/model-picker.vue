@@ -4,8 +4,8 @@
       <span class="mp-label">{{ label }}</span>
       <span class="mp-chev">{{ open ? "⌃" : "⌄" }}</span>
     </button>
-    <!-- teleport 出去：面板和画布 viewport 都有 overflow:hidden / transform，
-         弹层留在组件树里会被裁剪或跟着缩放 -->
+    <!-- teleport out: the panel and the canvas viewport both have overflow:hidden /
+         transform, so a popover left in the component tree gets clipped or scaled -->
     <Teleport to="body">
       <div v-if="open" ref="popEl" class="mp-pop" :style="popStyle">
       <input
@@ -44,7 +44,8 @@
               <span class="mp-name">{{ entry.option.modelName }}</span>
               <span class="mp-sub">{{ entry.option.providerName }} / {{ entry.option.modelId }}</span>
             </span>
-            <!-- 行本身是 button，星标只能是 span；点击只切收藏，不选模型 -->
+            <!-- the row itself is a button, so the star can only be a span; clicking
+                 it toggles the favorite, it does not select the model -->
             <span
               class="mp-star"
               :class="{ on: isFavorite(entry.option) }"
@@ -71,9 +72,9 @@ const props = withDefaults(
   defineProps<{
     modelValue: ModelChoice | null;
     models: readonly ModelOption[];
-    /** Starred models, listed first as the 常用 group. */
+    /** Starred models, listed first as the Favorites group. */
     favoriteModels?: readonly ModelChoice[];
-    /** Recent hand-picked models (most-recent-first) for the 最近 group. */
+    /** Recent hand-picked models (most-recent-first) for the Recent group. */
     recentModels?: readonly ModelChoice[];
     title?: string;
   }>(),
@@ -93,7 +94,8 @@ const btnEl = ref<HTMLElement | null>(null);
 const searchEl = ref<HTMLInputElement | null>(null);
 const popEl = ref<HTMLElement | null>(null);
 
-/** 弹层是 fixed 定位（teleport 到 body），坐标在打开时按按钮位置算。 */
+/** The popover is fixed-position (teleported to body); its coordinates are
+ * computed from the button's position when it opens. */
 const POP_WIDTH = 300;
 const SCREEN_EDGE = 8;
 const popStyle = ref<{ left: string; top?: string; bottom?: string }>({
@@ -125,7 +127,7 @@ const catalogByKey = computed(() => {
   return map;
 });
 
-/** 常用 rows：收藏夹里仍在当前 catalog 中的模型，保持收藏顺序。 */
+/** Favorites rows: starred models still in the current catalog, in star order. */
 const favoriteRows = computed(() => {
   if (query.value.trim() !== "") return [];
   return props.favoriteModels.flatMap((choice) => {
@@ -134,7 +136,7 @@ const favoriteRows = computed(() => {
   });
 });
 
-/** 最近 rows：最近用过、未收藏、仍在 catalog 中的模型。 */
+/** Recent rows: recently used, not starred, still in the catalog. */
 const recentRows = computed(() => {
   if (query.value.trim() !== "") return [];
   const starred = new Set(props.favoriteModels.map((c) => `${c.providerId}:${c.modelId}`));
@@ -149,8 +151,10 @@ const recentRows = computed(() => {
 /** What the keyboard walks: default row (-1) + quick rows + catalog rows. */
 const navRows = computed(() => [...favoriteRows.value, ...recentRows.value, ...filtered.value]);
 
-// 星标/取消星标会即时增删快捷区行，索引会整体位移；让高亮跟随模型本身，
-// 而不是死守旧索引（否则 Enter 会选中恰好落到该位置的另一个模型）。
+// starring/unstarring adds and removes quick-group rows on the spot, shifting every
+// index; let the highlight follow the model itself,
+// instead of clinging to the old index (otherwise Enter would pick whichever other
+// model happens to land in that slot).
 watch(navRows, (rows, oldRows) => {
   if (highlighted.value < 0) return;
   const prev = oldRows?.[highlighted.value];
@@ -166,7 +170,7 @@ type Entry =
   | { kind: "header"; label: string }
   | { kind: "row"; option: ModelOption; index: number };
 
-/** Rendered list: 常用/最近 groups (search-less only), then the full catalog. */
+/** Rendered list: Favorites/Recent groups (search-less only), then the full catalog. */
 const entries = computed<Entry[]>(() => {
   const list: Entry[] = [];
   let index = 0;
@@ -218,7 +222,7 @@ function show(): void {
   highlighted.value = props.modelValue ? 0 : -1;
   void nextTick(() => {
     searchEl.value?.focus();
-    // 按钮离窗口顶部太近、向上放不下时翻到按钮下方
+    // when the button sits too close to the window top, flip the popover below it
     const pop = popEl.value;
     if (pop && pop.getBoundingClientRect().top < SCREEN_EDGE) {
       const r = btnEl.value?.getBoundingClientRect();
@@ -241,7 +245,8 @@ function pickChoice(m: ModelOption): void {
 }
 
 function onSearchKeydown(event: KeyboardEvent): void {
-  // 组输入期间的按键在操作候选词窗（见 chat-input 的 onEnterKey），跳过。
+  // keys during IME composition operate the candidate window (see chat-input's
+  // onEnterKey), so skip them.
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
@@ -255,7 +260,8 @@ function onSearchKeydown(event: KeyboardEvent): void {
       pick(null);
       return;
     }
-    // 星标会即时重排快捷区，索引可能指向旧位置：宁可不动，也不误选默认模型。
+    // starring reorders the quick group instantly, so the index may point at a stale
+    // slot: prefer doing nothing over picking the default model by accident.
     const hit = navRows.value[highlighted.value];
     if (hit) pickChoice(hit);
   } else if (event.key === "Escape") {

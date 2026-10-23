@@ -347,7 +347,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
 
   /** Summary from a parsed file, before lineage overrides. */
   const mapSession = (parsed: ParsedSession): SessionSummary => {
-    let title = "(未命名会话)";
+    let title = "(untitled session)";
     const createdAt = parsed.header?.timestamp ? Date.parse(parsed.header.timestamp) : 0;
     let updatedAt = createdAt;
     for (const entry of parsed.entries) {
@@ -356,7 +356,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       if (entry.type === "session_info" && typeof entry.name === "string" && entry.name.trim()) {
         title = entry.name.trim();
       }
-      if (title === "(未命名会话)" && entry.type === "message" && entry.message?.role === "user") {
+      if (
+        title === "(untitled session)" &&
+        entry.type === "message" &&
+        entry.message?.role === "user"
+      ) {
         const text = userTextOf(entry.message);
         if (text) title = text.slice(0, 80);
       }
@@ -431,7 +435,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
   const requireSession = async (sessionId: string): Promise<ParsedSession> => {
     const found = (await refreshIndex()).get(sessionId);
-    if (!found?.header?.id) throw new Error(`pi 会话 ${sessionId} 不存在`);
+    if (!found?.header?.id) throw new Error(`pi session ${sessionId} does not exist`);
     return found;
   };
 
@@ -441,10 +445,10 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     try {
       parsed = JSON.parse(out.trim());
     } catch {
-      throw new Error(`无法解析 pi SDK 脚本输出：${out}`);
+      throw new Error(`cannot parse the pi SDK script output: ${out}`);
     }
     if (typeof parsed.sessionFile !== "string" || typeof parsed.sessionId !== "string") {
-      throw new Error(`pi SDK 脚本未返回会话信息：${out}`);
+      throw new Error(`the pi SDK script returned no session info: ${out}`);
     }
     return { sessionFile: parsed.sessionFile, sessionId: parsed.sessionId };
   };
@@ -549,7 +553,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       const createdAt = now();
       return {
         id: sessionId,
-        title: "(未命名会话)",
+        title: "(untitled session)",
         directory: cwd,
         parentSessionId: null,
         origin: "root",
@@ -576,7 +580,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         const createdAt = now();
         return {
           id: forkedId,
-          title: "(未命名会话)",
+          title: "(untitled session)",
           directory: cwd,
           parentSessionId: sessionId,
           origin: "fork",
@@ -612,21 +616,23 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     // Per the contract a detached copy records no lineage — and since none
     // can be produced here, refuse. The renderer hides the surface anyway.
     async exportSession() {
-      throw new Error("pi 不支持导出为去关联的原生会话");
+      throw new Error("pi cannot export a detached native session");
     },
 
     // pi has no compaction primitive; the renderer hides the affordance
     // (capabilities.compress === false) and this throws if ever reached.
     async compress() {
-      throw new Error("pi 不支持会话压缩");
+      throw new Error("pi cannot compress sessions");
     },
 
     async deleteSession() {
-      throw new Error("pi 没有原生的整会话删除原语，请手动删除会话文件");
+      throw new Error(
+        "pi has no native whole-session delete primitive, delete the session file by hand",
+      );
     },
 
     async deleteMessage() {
-      throw new Error("pi 没有原生的单条消息删除原语");
+      throw new Error("pi has no native single-message delete primitive");
     },
 
     async renameSession(sessionId, title) {
@@ -675,13 +681,13 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     },
 
     async respondInteraction() {
-      throw new Error("pi 没有服务端发起的交互请求");
+      throw new Error("pi has no server-initiated interaction requests");
     },
 
     async abort(sessionId) {
       const proc = sessions.get(sessionId);
       // Nothing running means the idle UI's stop button has nothing to stop.
-      if (!proc) throw new Error("该会话当前没有正在运行的回合");
+      if (!proc) throw new Error("this session has no turn running right now");
       await proc.request({ type: "abort" });
       // agent_end normally follows an abort and re-arms the reap; arming here
       // too covers a backend that skips it.
@@ -717,13 +723,13 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
  */
 function forkCutLeafId(branch: PiEntry[], atMessageId: string | null): string {
   const last = branch[branch.length - 1];
-  if (!last) throw new Error("会话为空，无法分叉");
+  if (!last) throw new Error("session is empty, cannot fork");
   if (atMessageId === null) return last.id;
   const userIds = branch
     .filter((e) => e.type === "message" && e.message?.role === "user")
     .map((e) => e.id);
   const at = userIds.indexOf(atMessageId);
-  if (at === -1) throw new Error(`会话中找不到消息 ${atMessageId}`);
+  if (at === -1) throw new Error(`cannot find message ${atMessageId} in the session`);
   const next = userIds[at + 1];
   if (next === undefined) return last.id;
   // The next user message's parent is the final entry of the cut turn.

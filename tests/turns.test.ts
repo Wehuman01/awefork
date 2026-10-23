@@ -69,7 +69,7 @@ describe("buildTurns", () => {
     expect(turns[0]?.title).toBe("fix the bug in main.ts");
   });
 
-  it("titles a compaction marker row 压缩会话 and carries the summary as preview", () => {
+  it("titles a compaction marker row Compressed session and carries the summary as preview", () => {
     const turns = buildTurns("s1", [
       user("u1", "first question"),
       assistant("a1", "first answer"),
@@ -79,7 +79,7 @@ describe("buildTurns", () => {
     expect(turns).toHaveLength(2);
     expect(turns[1]).toMatchObject({
       messageId: "cmp1",
-      title: "🧹 压缩会话",
+      title: "🧹 Compressed session",
       preview: "整个会话的摘要",
     });
   });

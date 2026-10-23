@@ -419,8 +419,8 @@ describe("version warning", () => {
   it("names every tested range for a version outside them", () => {
     const warning = opencodeVersionWarning("2.5.0");
     expect(warning).toContain("2.5.0");
-    expect(warning).toContain("≥1.18.0，<1.19.0");
-    expect(warning).toContain("≥2.0.0，<2.2.0");
+    expect(warning).toContain("≥1.18.0, <1.19.0");
+    expect(warning).toContain("≥2.0.0, <2.2.0");
   });
 
   it("stays silent when the probe could not read a version", () => {

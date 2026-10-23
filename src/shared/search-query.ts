@@ -5,12 +5,12 @@
  * some surfaces locally (title / tags / directory) and hand the rest to the
  * main-process body scan. Tokens:
  *
- *   词             plain term — matched against every enabled scope
- *   "精确短语"     quoted term — same as a term, spaces allowed
- *   body:词        scoped term — only the session body must contain it
- *   title:词 / tag:词 / dir:词 / #标签   other scopes
- *   -词 / -"短语"  exclusion — vetoes the session when found on any surface
- *   is:收藏 / is:fork / is:运行中        state flag the session must carry
+ *   word            plain term — matched against every enabled scope
+ *   "exact phrase"  quoted term — same as a term, spaces allowed
+ *   body:word       scoped term — only the session body must contain it
+ *   title:word / tag:word / dir:word / #tag   other scopes
+ *   -word / -"phrase"  exclusion — vetoes the session when found on any surface
+ *   is:pinned / is:fork / is:running        state flag the session must carry
  *
  * Semantics (kept narrow on purpose, so the two matchers can't drift):
  *   gates     flags + dir-scoped terms + exclusions apply to the session as
@@ -18,7 +18,7 @@
  *   matching  when include terms exist, at least ONE enabled scope must
  *             contain every term it owes (its own scoped terms plus the
  *             unscoped ones). A scope that owes no terms never counts as a
- *             match — `title:登录` alone cannot be satisfied by tags.
+ *             match — `title:login` alone cannot be satisfied by tags.
  *             With no include terms at all the query is a pure filter.
  */
 
@@ -63,12 +63,9 @@ const FLAG_ALIASES: Record<string, SearchFlag> = {
   pinned: "pinned",
   pin: "pinned",
   star: "pinned",
-  收藏: "pinned",
-  星标: "pinned",
   fork: "fork",
   running: "running",
   run: "running",
-  运行中: "running",
 };
 
 export function parseSearchQuery(input: string): ParsedSearchQuery {
@@ -101,7 +98,7 @@ export function parseSearchQuery(input: string): ParsedSearchQuery {
         flagToken = !negate;
         i += 3;
       }
-      // "body: 演" — whitespace after a prefix still applies it to the next
+      // "body: run" — whitespace after a prefix still applies it to the next
       // token; a truly dangling prefix just fades away.
       while (i < input.length && /\s/.test(input[i] ?? "")) i++;
     }

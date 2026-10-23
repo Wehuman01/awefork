@@ -397,7 +397,7 @@ describe("openSessionInTerminal (guards)", () => {
     const { deps } = recordingDeps({ exec });
     const result = await openSessionInTerminal(OPENCODE, { ...deps, platform: "darwin" });
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error).toContain("打开终端失败");
+    expect(result.ok === false && result.error).toContain("failed to open a terminal");
   });
 
   it("refuses pi sessions without a session file", async () => {
@@ -407,7 +407,9 @@ describe("openSessionInTerminal (guards)", () => {
       { ...deps, platform: "darwin" },
     );
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error).toBe("找不到该会话的记录文件，无法在终端打开");
+    expect(result.ok === false && result.error).toBe(
+      "cannot find this session's record file, cannot open a terminal",
+    );
   });
 
   it("refuses zcode sessions without a CLI path", async () => {
@@ -417,7 +419,9 @@ describe("openSessionInTerminal (guards)", () => {
       { ...deps, platform: "darwin" },
     );
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error).toBe("未找到 zcode CLI 路径，无法在终端打开");
+    expect(result.ok === false && result.error).toBe(
+      "no zcode CLI path found, cannot open a terminal",
+    );
   });
 });
 
