@@ -77,4 +77,19 @@ describe("resolveStorePath", () => {
     );
     expect(resolveStorePath("", "archive", "codex", () => false)).toBe("archive-codex.json");
   });
+
+  it("joins with the directory's own separator, not a hardcoded slash", () => {
+    // A Windows userData path spells its separator with "\"; a hardcoded
+    // "/" would give the store files a name that differs from what an older
+    // awefork wrote, so the legacy-store lookup could miss a file that is
+    // really there. The join follows the directory's own style.
+    const path = resolveStorePath(
+      "C:\\Users\\peng\\AppData\\Roaming\\awefork",
+      "pins",
+      "codex",
+      () => false,
+    );
+    expect(path).toBe("C:\\Users\\peng\\AppData\\Roaming\\awefork\\pins-codex.json");
+    expect(path).not.toContain("/");
+  });
 });

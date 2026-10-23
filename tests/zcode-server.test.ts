@@ -348,6 +348,40 @@ describe("zcode-server", () => {
       expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(catalog);
     });
 
+    it("finds the provider catalog one level above a Windows bundle", async () => {
+      // The real Windows layout puts the catalog in Resources/config/provider,
+      // one level above the glm/ folder the script lives in. A drive-letter
+      // path must not be treated as relative, or the lookup lands on the cwd.
+      const script = "C:/Program Files/ZCode/resources/glm/zcode.cjs";
+      const catalog = "C:/Program Files/ZCode/resources/config/provider/zcode-builtin.json";
+      mocks.existsSync.mockImplementation((path: string) => path === script || path === catalog);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, AWEFORK_ZCODE_CLI: script },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(catalog);
+    });
+
+    it("probes the real Program Files root, not a hardcoded C: drive", async () => {
+      const script = "D:/Apps/ZCode/resources/glm/zcode.cjs";
+      mocks.existsSync.mockImplementation((path: string) => path === script);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, ProgramFiles: "D:/Apps" },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.args).toEqual([script]);
+    });
+
     it("uses PATH fallback on linux when bundle is absent", async () => {
       mocks.existsSync.mockReturnValue(false);
       mocks.execFile.mockResolvedValue({ stdout: "zcode 0.16.5\n", stderr: "" });

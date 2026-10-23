@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { OpenCodeDescriptor } from "../shared/agent-descriptor.js";
 import { createOpencodeClient } from "../shared/opencode-client.js";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -453,9 +454,12 @@ export async function ensureOpencodeServer(
   // ENOENT token so the caller's missing-CLI early abort fires on Windows
   // (where shell:true hides the spawn's own ENOENT) instead of walking every
   // candidate port.
-  if (child.exitCode === 9009) {
+  if (isCmdNotFound(child.exitCode)) {
     return fail(
-      `Could not start opencode serve: ENOENT (cmd exit 9009). Is the "opencode" CLI on PATH? Install it, or start it manually with: opencode serve --port ${port}`,
+      missingCliMessage(
+        "opencode serve",
+        `Install it, or start it manually with: opencode serve --port ${port}`,
+      ),
     );
   }
   if (await isReachable(client)) {

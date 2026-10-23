@@ -2,7 +2,7 @@
   <div ref="rootEl" class="mp">
     <button ref="btnEl" type="button" class="mp-btn" :title="title" @click="toggle">
       <span class="mp-label">{{ label }}</span>
-      <span class="mp-chev">{{ open ? "⌃" : "⌄" }}</span>
+      <span class="mp-chev">{{ open ? "▾" : "▸" }}</span>
     </button>
     <!-- teleport out: the panel and the canvas viewport both have overflow:hidden /
          transform, so a popover left in the component tree gets clipped or scaled -->

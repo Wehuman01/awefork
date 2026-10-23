@@ -120,8 +120,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "canvas.cancelEsc": { zh: "取消（Esc）", en: "Cancel (Esc)" },
   "canvas.fitView": { zh: "适配视图", en: "Fit view" },
   "canvas.mmHint": {
-    zh: "滚轮缩放画布 · ⌘滚轮缩放地图",
-    en: "Wheel zooms the canvas · ⌘wheel zooms the map",
+    zh: "滚轮缩放画布 · {mod}滚轮缩放地图",
+    en: "Wheel zooms the canvas · {mod}wheel zooms the map",
   },
   "canvas.confirmDeleteTurn": {
     zh: "删除回合「{title}」？\n只删除这一问一答，更早的对话保留。此操作不可撤销。",
@@ -166,8 +166,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Type something and the rendered Markdown will show here",
   },
   "compare.hint": {
-    zh: "⌘↵ 发送 · 两侧模型可独立选择",
-    en: "⌘↵ Send · each side can pick its own model",
+    zh: "{mod}↵ 发送 · 两侧模型可独立选择",
+    en: "{mod}↵ Send · each side can pick its own model",
   },
   "compare.sendBoth": { zh: "发送到两边 ➤", en: "Send to both ➤" },
   "compare.sendSide": { zh: "发送到{side} ➤", en: "Send to {side} ➤" },

@@ -159,9 +159,16 @@ export function resolveStorePath(
   return exists(legacy) ? legacy : suffixed;
 }
 
+/**
+ * The join, done by hand: this module is compiled into the renderer too
+ * (the web tsconfig has no node types), so it cannot import node:path. The
+ * separator follows the directory's own style — a Windows userData path
+ * spells it with "\" throughout, and mixing in "/" would give the store
+ * files a name that differs from what an older awefork wrote, so the
+ * legacy-store lookup above could miss a file that is really there.
+ */
 function joinPath(directory: string, name: string): string {
   if (directory === "") return name;
-  return directory.endsWith("/") || directory.endsWith("\\")
-    ? `${directory}${name}`
-    : `${directory}/${name}`;
+  const separator = directory.includes("\\") && !directory.includes("/") ? "\\" : "/";
+  return directory.endsWith(separator) ? `${directory}${name}` : `${directory}${separator}${name}`;
 }

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 import {
   createZcodeJsonRpc,
@@ -38,12 +39,39 @@ export interface ZcodeCli {
  * purpose: node's fs accepts "/" on every platform, and tests simulate any
  * platform from any host (host `join` would emit "\" on Windows).
  */
-function bundleCandidates(home: string, plat: NodeJS.Platform): string[] {
+function bundleCandidates(
+  home: string,
+  plat: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = {},
+): string[] {
   if (plat === "win32") {
-    return [
-      "C:/Program Files/ZCode/resources/glm/zcode.cjs",
-      posix.join(home, "AppData", "Local", "Programs", "zcode", "resources", "glm", "zcode.cjs"),
-    ];
+    // The install root follows the real environment, not a hardcoded C: —
+    // a machine that installs ZCode on another drive never sees C:. The
+    // per-machine folder is "ZCode" and the per-user one is "zcode", so
+    // each root carries its own folder name.
+    const roots: string[] = [];
+    for (const programFiles of [env.ProgramFiles, env["ProgramFiles(x86)"]]) {
+      if (typeof programFiles !== "string" || programFiles === "") continue;
+      roots.push(posix.join(programFiles.replaceAll("\\", "/"), "ZCode"));
+    }
+    for (const localAppData of [
+      env.LOCALAPPDATA,
+      posix.join(home.replaceAll("\\", "/"), "AppData", "Local"),
+    ]) {
+      if (typeof localAppData !== "string" || localAppData === "") continue;
+      roots.push(posix.join(localAppData.replaceAll("\\", "/"), "Programs", "zcode"));
+    }
+    // The default C: root stays as a last resort for a machine whose
+    // environment does not export ProgramFiles.
+    roots.push("C:/Program Files/ZCode");
+    const seen = new Set<string>();
+    return roots
+      .map((root) => posix.join(root, "resources", "glm", "zcode.cjs"))
+      .filter((path) => {
+        if (seen.has(path)) return false;
+        seen.add(path);
+        return true;
+      });
   }
   if (plat !== "darwin") return [];
   return [
@@ -64,7 +92,7 @@ export async function resolveZcodeCli(
 ): Promise<ZcodeCli | null> {
   const override = env.AWEFORK_ZCODE_CLI;
   if (override && existsSync(override)) return scriptRunner(override, execFn);
-  const bundled = bundleCandidates(home, plat).find((path) => existsSync(path));
+  const bundled = bundleCandidates(home, plat, env).find((path) => existsSync(path));
   if (bundled) return scriptRunner(bundled, execFn);
   // A PATH install (future CLI distribution): let the loader find it.
   try {
@@ -101,10 +129,17 @@ function builtinProviderEnv(scriptPath: string): Record<string, string> {
   // AWEFORK_ZCODE_CLI override survive posix.dirname.
   const script = scriptPath.replaceAll("\\", "/");
   const dir = posix.dirname(script);
+  // posix.join, not posix.resolve: resolve treats a Windows drive path
+  // ("C:/Program Files/…") as relative and prefixes the cwd, so the
+  // "one level up" candidate never lands on the real Resources/config
+  // folder on Windows. join folds ".." without a cwd, and keeps the drive
+  // prefix intact.
+  const up = (levels: number): string =>
+    posix.join(dir, ...Array.from({ length: levels }, () => ".."));
   const candidates = [
     posix.join(dir, "provider", "zcode-builtin.json"),
-    posix.resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
-    posix.resolve(dir, "../config/provider/zcode-builtin.json"),
+    posix.join(up(5), "config/provider/zcode-builtin.json"),
+    posix.join(up(1), "config/provider/zcode-builtin.json"),
   ];
   const found = candidates.find((path) => existsSync(path));
   return found ? { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: found } : {};
@@ -250,6 +285,9 @@ export async function ensureZcodeServer(
       lastExitDetail = detail
         ? ` (${detail})`
         : ` (code=${code} signal=${signal}, no stderr output)`;
+      // cmd.exe reports a missing command as exit code 9009 and never
+      // surfaces the child's own ENOENT (the shim runs under shell:true).
+      lastExitCode = code;
       console.error(
         `zcode app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
       );
@@ -260,6 +298,8 @@ export async function ensureZcodeServer(
 
   /** stderr tail from the most recent child exit, for the throw sites below. */
   let lastExitDetail = "";
+  /** Exit code of the most recent child exit, for the 9009 diagnosis. */
+  let lastExitCode: number | null = null;
 
   const slotOf = (child: ChildProcess): ServerSlot | null => (slot?.child === child ? slot : null);
 
@@ -274,6 +314,17 @@ export async function ensureZcodeServer(
   // of letting the first request time out against a dead pipe.
   await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
   if (!slot.alive) {
+    // A missing CLI on Windows exits 9009 under cmd.exe; name that instead
+    // of the generic "exited right after launch", which reads like a broken
+    // install rather than an absent command.
+    if (isCmdNotFound(lastExitCode)) {
+      throw new Error(
+        missingCliMessage(
+          "zcode",
+          "Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs.",
+        ),
+      );
+    }
     throw new Error(
       `zcode app-server exited right after launch${lastExitDetail}. Make sure the ZCode desktop app is installed correctly (AWEFORK_ZCODE_CLI can point at zcode.cjs).`,
     );

@@ -10,7 +10,7 @@
       @click="toggle"
     >
       <span class="vp-label">{{ label }}</span>
-      <span v-if="!disabled" class="vp-chev">{{ open ? "⌃" : "⌄" }}</span>
+      <span v-if="!disabled" class="vp-chev">{{ open ? "▾" : "▸" }}</span>
     </button>
     <!-- teleport out: the panel and the canvas viewport both have overflow:hidden /
          transform, so a popover left in the component tree gets clipped or scaled -->

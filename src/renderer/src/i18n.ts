@@ -20,6 +20,7 @@ import { dict as dictMessages } from "./i18n-messages";
 import { dict as dictPanels } from "./i18n-panels";
 import { dict as dictShell } from "./i18n-shell";
 import { dict as dictState } from "./i18n-state";
+import { modKey } from "./platform-key";
 
 export type Locale = "zh" | "en";
 
@@ -173,12 +174,17 @@ const PLACEHOLDER = /\{(\w+)\}/g;
  * permission title, an opencode field title): they pass through `t()` and
  * render unchanged, so bilingualizing this feature's surface never regresses
  * the surfaces that are still Chinese by origin.
+ *
+ * `{mod}` always resolves to the platform's primary modifier ("⌘" on macOS,
+ * "Ctrl+" elsewhere) — a hint that says "⌘Z" on Windows names a key the
+ * user's keyboard does not have. The placeholder is available in every
+ * string, so no call site has to know about the platform.
  */
 export function t(key: string, vars?: Record<string, string | number>): string {
   const entry = DICT[key];
   const template = entry ? entry[locale.value] : key;
-  if (!vars) return template;
+  const values: Record<string, string | number> = { mod: modKey, ...vars };
   return template.replace(PLACEHOLDER, (_, name: string) =>
-    vars[name] !== undefined ? String(vars[name]) : `{${name}}`,
+    values[name] !== undefined ? String(values[name]) : `{${name}}`,
   );
 }

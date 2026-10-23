@@ -21,7 +21,7 @@
              range still runs, but never silently — the full text sits in the
              title so one hover explains a misbehaving run. -->
         <span v-if="activeVersionWarning" class="backend-warn" :title="activeVersionWarning" role="status">⚠</span>
-        <span class="chev">{{ backendOpen ? "⌃" : "⌄" }}</span>
+        <span class="chev">{{ backendOpen ? "▾" : "▸" }}</span>
       </button>
       <div v-if="backendOpen" class="backend-menu" role="menu" :aria-label="t('topbar.backends')">
         <button
@@ -49,7 +49,7 @@
       <button type="button" class="project-pill" @click.stop="toggleOpen">
         <span>📁</span>
         <b>{{ shortPath(currentDirectory) }}</b>
-        <span class="chev">{{ open ? "⌃" : "⌄" }}</span>
+        <span class="chev">{{ open ? "▾" : "▸" }}</span>
       </button>
       <div v-if="open" class="project-menu">
         <button
@@ -165,6 +165,7 @@ import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
 import { togglePalette } from "../layout";
+import { modWith } from "../platform-key";
 import {
   checkForUpdates,
   directories,
@@ -204,7 +205,7 @@ const activeLabel = computed(
 // placeholder stands in until the first check fills the real version in.
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
 // The palette shortcut shows the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere.
-const paletteKeyLabel = navigator.platform.toLowerCase().includes("mac") ? "⌘K" : "Ctrl+K";
+const paletteKeyLabel = modWith("K");
 
 function toggleOpen(): void {
   open.value = !open.value;
