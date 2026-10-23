@@ -34,4 +34,19 @@ describe("compare card fold isolation", () => {
     expect(context).toMatch(/const side = sides\[ci\];/);
     expect(context).toMatch(/id: `\$\{side\}:\$\{id\}:\$\{turn\.messageId\}`/);
   });
+
+  it("lets both compare modes flow as independent columns", async () => {
+    const context = await readFile(CONTEXT_PATH, "utf8");
+
+    // The aligned mode used to bind left[i] and right[i] into one grid row,
+    // which forced both cells to share the row's height: an open card then
+    // left a wall of dead space under its folded neighbour and pushed that
+    // column's next turn out of sight. Both modes now render the same two
+    // independently scrolling columns.
+    expect(context).toMatch(/v-for="\(col, ci\) in pairColumns"/);
+    expect(context).toMatch(/v-for="cell in col\.cells"/);
+    expect(context).not.toMatch(/v-for="\(row, i\) in pairRows"/);
+    expect(context).not.toMatch(/class="pair"/);
+    expect(context).not.toMatch(/stepPager/);
+  });
 });

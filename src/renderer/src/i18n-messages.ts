@@ -200,8 +200,6 @@ export const dict: Record<string, { zh: string; en: string }> = {
   // ── branch-context.vue + branch-digest.vue ─────────────────────────────
   "branch.compareTitle": { zh: "⇄ 分支对比", en: "⇄ Branch compare" },
   "branch.freeTitle": { zh: "⇄ 自由并排", en: "⇄ Free side-by-side" },
-  "branch.prevPair": { zh: "上一对（←）", en: "Previous pair (←)" },
-  "branch.nextPair": { zh: "下一对（→）", en: "Next pair (→)" },
   "branch.exitCompare": { zh: "退出对比（Esc）", en: "Exit compare (Esc)" },
   "branch.current": { zh: "当前", en: "Current" },
   "branch.commonPrefix": { zh: "共同前缀 · {n} 个回合", en: "Common prefix · {n} turns" },
