@@ -170,6 +170,7 @@ describe("renderer message updates", () => {
     { completedAt: 3 },
     { finish: "tool-calls" },
     { outputTokens: 42 },
+    { contextTokens: 42 },
     { error: "failed" },
     { compaction: true },
     { id: "replacement" },

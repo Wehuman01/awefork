@@ -133,6 +133,7 @@ export function sameMessages(
       a.completedAt === b.completedAt &&
       a.finish === b.finish &&
       a.outputTokens === b.outputTokens &&
+      a.contextTokens === b.contextTokens &&
       a.error === b.error &&
       a.compaction === b.compaction &&
       a.toolNames.length === b.toolNames.length &&
