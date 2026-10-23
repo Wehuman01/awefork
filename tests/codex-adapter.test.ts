@@ -329,6 +329,79 @@ describe("createCodexAdapter messages()", () => {
     expect(callsOf("thread/read")).toHaveLength(0);
     expect(rows[0]).toMatchObject({ modelId: "gpt-5-codex" });
   });
+
+  it("reports the turn's context tokens when the turn carries usage", async () => {
+    // codex 0.163's turns/list omits usage today (it only arrives live via
+    // thread/tokenUsage/updated), so this fixture is the shape a build that
+    // projects usage onto the turn would serve — the mapping must already be
+    // able to read it. `last` is the turn's own step; `total` accumulates the
+    // whole thread and must not win.
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () =>
+        turnPageFixture([
+          {
+            ...TURN_FIXTURE,
+            usage: {
+              total: { totalTokens: 54559, inputTokens: 54549, outputTokens: 10 },
+              last: {
+                totalTokens: 30351,
+                inputTokens: 30346,
+                cachedInputTokens: 24064,
+                outputTokens: 5,
+              },
+            },
+          },
+        ]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const rows = await adapter.messages("s1");
+    expect(rows[1]).toMatchObject({ role: "assistant", contextTokens: 30351 });
+    // The user row never carries a footprint.
+    expect(rows[0].contextTokens).toBeUndefined();
+  });
+
+  it("sums the usage parts when the backend reports no total", async () => {
+    // Same rule as opencode/zcode: no total → input + output + reasoning +
+    // cacheRead + cacheWrite, where codex spells the cache pair
+    // cachedInputTokens / cacheWriteInputTokens.
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () =>
+        turnPageFixture([
+          {
+            ...TURN_FIXTURE,
+            usage: {
+              last: {
+                inputTokens: 30346,
+                cachedInputTokens: 24064,
+                cacheWriteInputTokens: 0,
+                outputTokens: 5,
+                reasoningOutputTokens: 0,
+              },
+            },
+          },
+        ]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const rows = await adapter.messages("s1");
+    expect(rows[1]).toMatchObject({ contextTokens: 30346 + 24064 + 0 + 5 + 0 });
+  });
+
+  it("omits contextTokens when the turn reports no usage (codex 0.163)", async () => {
+    // Regression guard for the real shape: 0.163's turns/list carries no usage
+    // at all, and the context meter must read that as "unknown", not zero.
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () => turnPageFixture([TURN_FIXTURE]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const rows = await adapter.messages("s1");
+    expect(rows[1].contextTokens).toBeUndefined();
+  });
 });
 
 describe("createCodexAdapter prompt()", () => {

@@ -110,12 +110,14 @@ export function backendCapabilities(
         exportBranch: false,
       };
     case "zcode":
-      // The app-server protocol has no message/session delete; fork linkage
-      // lives in zcode's own store (forkedSessionId + parentSessionId), so a
-      // detached copy is not offered.
+      // Rename and whole-session delete ride the v4 command channel
+      // (`v4/command`), which the legacy session/* surface lacks; no
+      // single-message delete. Fork linkage lives in zcode's own store
+      // (forkedSessionId + parentSessionId), so a detached copy is not
+      // offered.
       return {
         deleteMessage: false,
-        deleteSession: false,
+        deleteSession: true,
         attachments: false,
         fileChanges: false,
         compress: false,

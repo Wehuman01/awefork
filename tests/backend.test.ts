@@ -34,6 +34,17 @@ describe("backendCapabilities", () => {
       exportBranch: false,
     });
   });
+
+  it("gives zcode session delete through the v4 command channel", () => {
+    expect(backendCapabilities("zcode")).toEqual({
+      deleteMessage: false,
+      deleteSession: true,
+      attachments: false,
+      fileChanges: false,
+      compress: false,
+      exportBranch: false,
+    });
+  });
 });
 
 describe("resolveStorePath", () => {
