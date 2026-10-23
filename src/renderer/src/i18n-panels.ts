@@ -508,43 +508,4 @@ Fix item 1 first: register the middleware once on the route group; one line clos
     zh: "demo 不支持应用内更新",
     en: "In-app updates are not supported in the demo",
   },
-
-  // ── file-lens.vue ──────────────────────────────────────────────────────
-  "lens.title": { zh: "文件", en: "Files" },
-  "lens.close": { zh: "关闭文件面板", en: "Close the files panel" },
-  "lens.back": { zh: "上一个目录", en: "Previous directory" },
-  "lens.forward": { zh: "下一个目录", en: "Next directory" },
-  "lens.showIgnored": { zh: "忽略项", en: "Ignored" },
-  "lens.showIgnoredTitle": {
-    zh: "显示 node_modules、.git、dist 等默认隐藏的目录",
-    en: "Show node_modules, .git, dist and other hidden-by-default directories",
-  },
-  "lens.loading": { zh: "读取中…", en: "Reading…" },
-  "lens.empty": { zh: "这个目录是空的", en: "This directory is empty" },
-  "lens.truncated": {
-    zh: "条目过多，只显示前 2000 项",
-    en: "Too many entries; showing the first 2000",
-  },
-  "lens.truncatedNote": { zh: "已截断", en: "truncated" },
-  "lens.lines": { zh: "行", en: "lines" },
-  "lens.pickFile": { zh: "选一个文件查看", en: "Pick a file to view" },
-  "lens.binary": {
-    zh: "二进制文件（{mime}，{size}），无法在此显示。",
-    en: "Binary file ({mime}, {size}) — not viewable here.",
-  },
-  "lens.tooLarge": { zh: "{size}，太大不读入预览。", en: "{size} — too large to preview." },
-  "lens.missing": { zh: "文件已不存在", en: "The file is gone" },
-  "lens.isDir": { zh: "这是一个目录", en: "This is a directory" },
-  "lens.insert": { zh: "插入路径", en: "Insert path" },
-  "lens.insertTitle": {
-    zh: "把相对路径插到输入框光标处（@路径 形式）",
-    en: "Splice the relative path (@path form) at the composer caret",
-  },
-  "lens.copy": { zh: "复制路径", en: "Copy path" },
-  "lens.copied": { zh: "已复制", en: "Copied" },
-  "lens.copyTitle": { zh: "复制相对路径到剪贴板", en: "Copy the relative path to the clipboard" },
-  "lens.reveal": { zh: "Finder", en: "Finder" },
-  "lens.revealTitle": { zh: "在文件管理器中显示", en: "Show in the file manager" },
-  "lens.open": { zh: "打开", en: "Open" },
-  "lens.openTitle": { zh: "用系统默认程序打开", en: "Open with the system default app" },
 };
