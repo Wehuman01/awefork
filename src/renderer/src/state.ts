@@ -181,6 +181,10 @@ interface AppState {
   activeBackend: BackendId;
   /** Switcher data from main (installed probe + persisted selection). */
   backendList: BackendInfo[];
+  /** The agent whose one-click install is running; null = none. */
+  installingBackend: BackendId | null;
+  /** First-run agent-install guide; shows until installed, skipped, or the flag persists. */
+  onboardingVisible: boolean;
   /** Feature surface of the active backend; hides affordances it lacks. */
   capabilities: BackendCapabilities;
   sessions: SessionSummary[];
@@ -381,6 +385,8 @@ const state = reactive<AppState>({
   booted: false,
   activeBackend: "opencode",
   backendList: [],
+  installingBackend: null,
+  onboardingVisible: false,
   capabilities: {
     deleteMessage: true,
     deleteSession: true,
@@ -1149,6 +1155,20 @@ export async function init(): Promise<void> {
     ];
   }
   state.activeBackend = backend;
+  // First-run guide: main window only (an agent window proves its agent
+  // works), never twice, and only while the recommended CLI is missing.
+  if (!agentFromHash(currentHash())) {
+    try {
+      if (
+        !(await window.awefork.onboardingDone()) &&
+        !state.backendList.some((b) => b.id === "opencode" && b.installed)
+      ) {
+        state.onboardingVisible = true;
+      }
+    } catch {
+      // The guide is a nicety; a failed flag read must never block boot.
+    }
+  }
   // The page's <title> overrides the BrowserWindow title on load, so the
   // agent window names its agent here rather than only at creation.
   if (agentFromHash(currentHash())) document.title = `awefork — ${backend}`;
@@ -1184,6 +1204,40 @@ export async function refreshBackendList(): Promise<void> {
     state.backendList = backends;
   } catch {
     // Best-effort probe; the last known list stays.
+  }
+}
+
+/**
+ * One-click install of an agent CLI's latest version. On success the fresh
+ * probe fills backendList right away (main dropped its cached "not
+ * installed"); a failure surfaces through the shared toast slot.
+ */
+export async function installBackend(backend: BackendId): Promise<void> {
+  if (state.installingBackend !== null) return;
+  state.installingBackend = backend;
+  state.actionError = null;
+  try {
+    const result = await window.awefork.installBackend(backend);
+    if (!result.ok) {
+      state.actionError = result.error ?? t("state.installFailed", { backend });
+      return;
+    }
+    await refreshBackendList();
+  } catch (error) {
+    state.actionError =
+      error instanceof Error ? error.message : t("state.installFailed", { backend });
+  } finally {
+    state.installingBackend = null;
+  }
+}
+
+/** Hide the first-run guide and persist "do not show again". */
+export async function dismissOnboarding(): Promise<void> {
+  state.onboardingVisible = false;
+  try {
+    await window.awefork.finishOnboarding();
+  } catch {
+    // A failed write only risks the guide reappearing after a restart.
   }
 }
 

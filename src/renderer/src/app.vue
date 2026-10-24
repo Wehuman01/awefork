@@ -106,6 +106,7 @@
     <CommandPalette />
     <ForkTagDialog />
     <CompressDialog />
+    <WelcomeDialog />
     <HistoryPanel />
     <FileMenu />
     <SettingsPage />
@@ -161,6 +162,7 @@ import SessionCanvas from "./components/session-canvas.vue";
 import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
+import WelcomeDialog from "./components/welcome-dialog.vue";
 import { isPathDrag } from "./files";
 import {
   history as historyStore,

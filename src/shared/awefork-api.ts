@@ -241,6 +241,16 @@ export interface AweforkApi {
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /**
+   * One-click install of a supported agent CLI's latest version (npm -g).
+   * {ok:false,error} when the backend has no one-command install (zcode) or
+   * the install command failed; on success a backends() re-probe sees it.
+   */
+  installBackend(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
+  /** Whether the first-run agent-install guide already ran (persisted). */
+  onboardingDone(): Promise<boolean>;
+  /** Mark the first-run guide as run — shown or skipped, it never returns. */
+  finishOnboarding(): Promise<void>;
+  /**
    * Whether quitting keeps the spawned backends alive so in-flight turns
    * finish in the background (persisted in settings.json; default false).
    */

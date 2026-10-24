@@ -462,6 +462,36 @@ describe("switcher data and selection", () => {
     expect(backends[0]).toMatchObject({ installed: true, version: null, versionWarning: null });
   });
 
+  it("reprobe drops the cached opencode probe after a mid-session install", async () => {
+    const notInstalled = (
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(new Error("ENOENT"), "", "");
+    };
+    const installed = (
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(null, "1.18.30\n", "");
+    };
+    mocks.execFile.mockImplementation(notInstalled);
+    expect((await registry.listBackends()).backends[0]).toMatchObject({ installed: false });
+    // The session probe is cached — an install landing mid-session stays
+    // invisible until reprobe() (what the install IPC fires) drops the cache.
+    mocks.execFile.mockImplementation(installed);
+    expect((await registry.listBackends()).backends[0]).toMatchObject({ installed: false });
+    registry.reprobe();
+    expect((await registry.listBackends()).backends[0]).toMatchObject({
+      installed: true,
+      version: "1.18.30",
+    });
+  });
+
   it("select probes before persisting; a missing CLI keeps the old selection", async () => {
     const settingsPath = join(userDataDir, "settings.json");
     mocks.isCodexInstalled.mockResolvedValue(false);

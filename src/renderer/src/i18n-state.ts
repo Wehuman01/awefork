@@ -161,6 +161,10 @@ export const dict: Record<string, Entry> = {
     zh: "无法切换到 {backend}。",
     en: "Couldn't switch to {backend}.",
   },
+  "state.installFailed": {
+    zh: "安装 {backend} 失败。",
+    en: "Couldn't install {backend}.",
+  },
   "state.updaterLaunched": {
     zh: "更新安装器已启动，按提示完成安装",
     en: "Update installer launched — follow the prompts to finish",

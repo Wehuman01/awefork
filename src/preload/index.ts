@@ -173,6 +173,10 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:openAgentWindow", backend),
   capabilities: (backend: BackendId): Promise<BackendCapabilities> =>
     ipcRenderer.invoke("awefork:capabilities", backend),
+  installBackend: (backend: BackendId): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:installBackend", backend),
+  onboardingDone: (): Promise<boolean> => ipcRenderer.invoke("awefork:onboardingDone"),
+  finishOnboarding: (): Promise<void> => ipcRenderer.invoke("awefork:finishOnboarding"),
   quitKeepAlive: (): Promise<boolean> => ipcRenderer.invoke("awefork:quitKeepAlive"),
   setQuitKeepAlive: (value: boolean): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:setQuitKeepAlive", value),

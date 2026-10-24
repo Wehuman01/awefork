@@ -157,6 +157,36 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "settings.backendWarn": { zh: "版本警告", en: "Version warning" },
   "settings.backendCurrent": { zh: "当前", en: "Active" },
   "settings.switchBackend": { zh: "切换到 {label}", en: "Switch to {label}" },
+  "settings.installLatest": { zh: "安装最新版 {label}", en: "Install latest {label}" },
+  "settings.installingBackend": { zh: "安装中…", en: "Installing…" },
+
+  // ── first-run agent guide ────────────────────────────────────────────
+  "onboard.kicker": { zh: "👋 欢迎使用 awefork", en: "👋 Welcome to awefork" },
+  "onboard.title": { zh: "先装一个编码智能体", en: "Install a coding agent first" },
+  "onboard.lede": {
+    zh: "awefork 需要本机装有至少一个 agent CLI。推荐 opencode —— 开箱即用、功能支持最全。",
+    en: "awefork drives local agent CLIs. opencode is recommended — ready out of the box with the fullest feature support.",
+  },
+  "onboard.recommended": { zh: "推荐", en: "Recommended" },
+  "onboard.desc.opencode": {
+    zh: "开源编码智能体，awefork 的默认后端，功能支持最全。",
+    en: "Open-source coding agent; awefork's default backend with the fullest support.",
+  },
+  "onboard.desc.codex": {
+    zh: "OpenAI 的 Codex CLI。",
+    en: "OpenAI's Codex CLI.",
+  },
+  "onboard.desc.pi": {
+    zh: "轻量的 pi 编码智能体。",
+    en: "The lightweight pi coding agent.",
+  },
+  "onboard.install": { zh: "安装最新版", en: "Install latest" },
+  "onboard.installing": { zh: "安装中…", en: "Installing…" },
+  "onboard.skip": { zh: "稍后再说", en: "Later" },
+  "onboard.esc": {
+    zh: "点击「稍后再说」或按 Esc 跳过；之后可在设置 → 智能体里随时安装。",
+    en: "Skip with “Later” or Esc; install anytime later in Settings → Agents.",
+  },
 
   // ── models ───────────────────────────────────────────────────────────
   "settings.favoriteModels": { zh: "收藏的模型", en: "Favorite models" },
