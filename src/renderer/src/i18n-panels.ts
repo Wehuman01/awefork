@@ -593,6 +593,10 @@ Fix item 1 first: register the middleware once on the route group; one line clos
   "files.errTooLarge": { zh: "文件过大，无法预览", en: "File too large to preview" },
   "files.errNotADirectory": { zh: "这不是一个目录", en: "Not a directory" },
   "files.errBinary": { zh: "二进制文件，无法作为文本预览", en: "Binary file; no text preview" },
+  "files.errImageDecode": {
+    zh: "图片无法解码，可能已损坏或扩展名不对",
+    en: "This image could not be decoded; it may be corrupt or misnamed",
+  },
   "files.errUnknown": { zh: "读取失败", en: "Could not read this" },
   "files.previewEmpty": { zh: "选择文件即可预览", en: "Select a file to preview it" },
   "files.previewLoading": { zh: "正在预览…", en: "Loading preview…" },

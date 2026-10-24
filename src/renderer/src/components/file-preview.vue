@@ -21,7 +21,7 @@
         }}</span>
         <span v-if="preview.status === 'image'" class="fp-lang">{{ t("files.kindImage") }}</span>
         <button
-          v-if="preview.status !== 'error'"
+          v-if="preview.status !== 'error' && !imageBroken"
           type="button"
           class="fp-open"
           :class="{ on: zoomed }"
@@ -41,8 +41,8 @@
           >✕</button
         >
       </div>
-      <div v-if="preview.status === 'image'" class="fp-image-wrap">
-        <img class="fp-image" :src="preview.dataUrl" :alt="preview.path" />
+      <div v-if="preview.status === 'image' && !imageBroken" class="fp-image-wrap">
+        <img class="fp-image" :src="preview.dataUrl" :alt="preview.path" @error="imageBroken = true" />
       </div>
       <template v-else-if="preview.status === 'text'">
         <MarkdownView v-if="isMarkdown" class="fp-markdown" :source="preview.text ?? ''" />
@@ -51,7 +51,7 @@
         </div>
       </template>
       <div v-else class="fp-error">
-        <p class="fp-error-title">{{ errorText }}</p>
+        <p class="fp-error-title">{{ imageBroken ? t("files.errImageDecode") : errorText }}</p>
         <p class="fp-error-sub">{{ preview.path }}</p>
         <button
           v-if="canOpen"
@@ -76,6 +76,19 @@ import { MarkdownView } from "./markdown-view";
 const props = defineProps<{ preview: PreviewState | null }>();
 
 const preview = computed(() => props.preview);
+
+/**
+ * The bytes read fine but the browser could not decode them (a corrupt PNG,
+ * an extension that lies about its format). That is not a read error, so it
+ * is tracked here and shown through the error pane, which offers system open.
+ */
+const imageBroken = ref(false);
+watch(
+  () => props.preview?.path,
+  () => {
+    imageBroken.value = false;
+  },
+);
 
 /** Space (or the ⤢ button) enlarges the current preview; Esc steps back. */
 const zoomed = ref(false);
