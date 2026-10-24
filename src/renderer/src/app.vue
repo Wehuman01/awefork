@@ -171,8 +171,8 @@ import {
 } from "./history";
 import { t } from "./i18n";
 import {
-  type MainView,
   fileBrowserEnabled,
+  type MainView,
   mainView,
   PANEL_LIMITS,
   panelStyle,
