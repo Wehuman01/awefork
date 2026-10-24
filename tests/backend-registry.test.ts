@@ -41,6 +41,8 @@ const mocks = vi.hoisted(() => ({
   isPiInstalled: vi.fn(),
   piNodeSeams: vi.fn(),
   stopPiChildren: vi.fn(),
+  probeClaude: vi.fn(),
+  claudeNodeSeams: vi.fn(),
 }));
 
 vi.mock("../src/main/codex-server.js", () => ({
@@ -60,6 +62,11 @@ vi.mock("../src/main/pi-server.js", () => ({
   isPiInstalled: mocks.isPiInstalled,
   piNodeSeams: mocks.piNodeSeams,
   stopPiChildren: mocks.stopPiChildren,
+}));
+
+vi.mock("../src/main/claude-server.js", () => ({
+  probeClaude: mocks.probeClaude,
+  claudeNodeSeams: mocks.claudeNodeSeams,
 }));
 
 // Keep home discovery synthetic: the real probe would pick up whatever
@@ -158,6 +165,9 @@ beforeEach(async () => {
       callback(null, "1.18.30\n", "");
     },
   );
+  // The claude probe is a separate spawn; default it to "not installed" so
+  // the switcher list stays deterministic unless a test says otherwise.
+  mocks.probeClaude.mockResolvedValue({ installed: false, version: null });
 });
 
 afterEach(async () => {
@@ -421,6 +431,13 @@ describe("switcher data and selection", () => {
           versionWarning: null,
         },
         { id: "codex", label: "codex", installed: false, version: null, versionWarning: null },
+        {
+          id: "claudecode",
+          label: "claude code",
+          installed: false,
+          version: null,
+          versionWarning: null,
+        },
         { id: "pi", label: "pi", installed: false, version: null, versionWarning: null },
         { id: "zcode", label: "zcode", installed: false, version: null, versionWarning: null },
       ],

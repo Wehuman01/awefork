@@ -120,7 +120,9 @@ export function sessionScriptBody(request: SessionTerminalRequest): string {
         ? `exec pi --session ${shellQuote(request.sessionFile ?? "")}`
         : request.backend === "zcode"
           ? `exec node ${shellQuote(request.zcodeCli ?? "")} --resume ${shellQuote(request.sessionId)}`
-          : `exec opencode -s ${shellQuote(request.sessionId)}`,
+          : request.backend === "claudecode"
+            ? `exec claude --resume ${shellQuote(request.sessionId)}`
+            : `exec opencode -s ${shellQuote(request.sessionId)}`,
   );
   return `${lines.join("\n")}\n`;
 }
@@ -148,7 +150,9 @@ export function sessionBatchBody(request: SessionTerminalRequest): string {
         ? `pi --session ${batchQuote(request.sessionFile ?? "")}`
         : request.backend === "zcode"
           ? `node ${batchQuote(request.zcodeCli ?? "")} --resume ${request.sessionId}`
-          : `opencode -s ${request.sessionId}`,
+          : request.backend === "claudecode"
+            ? `claude --resume ${request.sessionId}`
+            : `opencode -s ${request.sessionId}`,
   );
   // Self-clean once the TUI exits: the parenthesized (goto) closes cmd's
   // batch context so the running file can be deleted, while /k keeps the

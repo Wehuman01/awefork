@@ -17,6 +17,7 @@ const NPM_PACKAGES: Partial<Record<BackendId, string>> = {
   opencode: "opencode-ai",
   codex: "@openai/codex",
   pi: "@mariozechner/pi-coding-agent",
+  claudecode: "@anthropic-ai/claude-code",
 };
 
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
