@@ -634,7 +634,7 @@ Fix item 1 first: register the middleware once on the route group; one line clos
     en: "{cols} columns · {rows} rows in this preview",
   },
   "files.openFailed": { zh: "系统无法打开这个文件", en: "The system could not open this file" },
-  "files.quickOpen": { zh: "在当前项目里快速查找文件", en: "Quick-find a file in this project" },
+  "files.quickOpen": { zh: "在当前目录里快速查找文件", en: "Quick-find a file in this directory" },
   "files.quickPlaceholder": {
     zh: "快速打开：文件名 / 路径…",
     en: "Quick open: file name / path…",

@@ -243,6 +243,7 @@ import {
   resetAllSettings,
   resetSection as resetSettingsSection,
   type Settings,
+  sanitizeIgnorePatterns,
   settings,
   type ThemePreference,
   type TimeStyle,
@@ -753,7 +754,7 @@ function filesSection(): SectionDef {
             .split(",")
             .map((name) => name.trim())
             .filter((name) => name !== "");
-          settings.files.ignore = [...new Set(list)];
+          settings.files.ignore = sanitizeIgnorePatterns(list);
         },
         "node_modules, dist",
       ),

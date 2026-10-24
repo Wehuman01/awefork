@@ -145,6 +145,12 @@
     <div v-if="historyStore.toast" class="toast banner-update" role="status" aria-live="polite">
       {{ historyStore.toast }}
     </div>
+    <!-- The files notice is flashed from the canvas drop handler as often as
+         from the browser, so it lives here rather than inside the panel —
+         a notice nobody can see is not a notice. -->
+    <div v-if="files.notice" class="toast banner-files" role="status" aria-live="polite">
+      {{ files.notice }}
+    </div>
   </div>
 </template>
 
@@ -163,7 +169,7 @@ import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
 import WelcomeDialog from "./components/welcome-dialog.vue";
-import { isPathDrag } from "./files";
+import { files, isPathDrag } from "./files";
 import {
   history as historyStore,
   redoSteps,

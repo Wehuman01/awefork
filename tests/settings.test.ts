@@ -147,6 +147,34 @@ describe("normalizeSettings", () => {
       DEFAULT_SETTINGS.files.ignore,
     );
   });
+
+  it("drops an ignore pattern that is too long to be one", () => {
+    const huge = "a".repeat(129);
+    const result = normalizeSettings({
+      files: { ignore: ["dist", huge, "out"] },
+    });
+    expect(result.files.ignore).toEqual(["dist", "out"]);
+  });
+
+  it("caps the ignore list at the documented maximum", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `dir-${i}`);
+    expect(normalizeSettings({ files: { ignore: many } }).files.ignore).toHaveLength(32);
+  });
+});
+
+describe("sanitizeIgnorePatterns", () => {
+  it("cleans a settings-page write the same way the load path does", async () => {
+    const module = await boot();
+    const cleaned = module.sanitizeIgnorePatterns([" node_modules ", "node_modules", "", "dist"]);
+    expect(cleaned).toEqual(["node_modules", "dist"]);
+  });
+
+  it("caps an over-long paste on the spot rather than at the next boot", async () => {
+    const module = await boot();
+    const many = Array.from({ length: 40 }, (_, i) => `dir-${i}`);
+    expect(module.sanitizeIgnorePatterns(many)).toHaveLength(32);
+    expect(module.sanitizeIgnorePatterns(["a".repeat(500)])).toEqual([]);
+  });
 });
 
 describe("migrateLegacy", () => {

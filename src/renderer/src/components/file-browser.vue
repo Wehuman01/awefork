@@ -278,8 +278,6 @@
         <FilePreview :preview="tab.preview" :reading="tab.reading" @toggle-reading="toggleReading" />
       </aside>
     </div>
-
-    <p v-if="files.notice" class="fb-notice">{{ files.notice }}</p>
   </div>
 </template>
 
@@ -316,6 +314,7 @@ import {
   setQuickIncludeHidden,
   setView,
   startPathDrag,
+  stepReading,
   toggleHidden,
   toggleReading,
   visibleEntries,
@@ -353,22 +352,44 @@ const narrow = ref(false);
 let narrowObserver: ResizeObserver | null = null;
 onMounted(() => {
   const host = document.querySelector(".main-col");
-  if (!host) return;
-  narrowObserver = new ResizeObserver((entries) => {
-    const width = entries[0]?.contentRect.width ?? 0;
-    narrow.value = width > 0 && width < 640;
-  });
-  narrowObserver.observe(host);
+  if (host) {
+    narrowObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      narrow.value = width > 0 && width < 640;
+    });
+    narrowObserver.observe(host);
+  }
+  window.addEventListener("keydown", onReadingKeys);
 });
 onBeforeUnmount(() => {
   narrowObserver?.disconnect();
   narrowObserver = null;
+  window.removeEventListener("keydown", onReadingKeys);
   if (splitDrag) {
     window.removeEventListener("mousemove", splitDrag.move);
     window.removeEventListener("mouseup", splitDrag.up);
     splitDrag = null;
   }
 });
+
+/**
+ * Reading mode owns the arrows while it is on. The listing it folded away
+ * held the only arrow handlers, and once its rows are display:none the focus
+ * sits on the document — so the keys are caught at the window instead. The
+ * boxes that use the arrows themselves (quick filter, path box) keep theirs.
+ */
+function onReadingKeys(event: KeyboardEvent): void {
+  if (!tab.value?.reading) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, [contenteditable]")) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    stepReading(1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    stepReading(-1);
+  }
+}
 
 /**
  * Drag the divider between the listing and the preview. The width is held

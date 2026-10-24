@@ -173,7 +173,12 @@ const reading = computed(() => props.reading);
 const pdf = computed(() => {
   const p = props.preview;
   if (p?.status !== "pdf" || p.pages === undefined || p.pageCount === undefined) return null;
-  return { pages: p.pages, page: p.page ?? 0, pageCount: p.pageCount, path: p.path };
+  // Only the first pages are rasterized (pdf-preview.ts), so the toolbar
+  // walks the rendered ones: paging past them would show the "could not be
+  // rendered" pane for a page that was never asked for. The full document
+  // is one system-open away.
+  const rendered = Math.min(p.pageCount, p.pages.length);
+  return { pages: p.pages, page: p.page ?? 0, pageCount: rendered, path: p.path };
 });
 
 function toggleReading(): void {
@@ -194,6 +199,9 @@ watch(
   () => {
     imageBroken.value = false;
     imageScale.value = 1;
+    // The badge describes the image that just loaded; a text, CSV or PDF
+    // preview must not inherit the previous file's pixel size.
+    imageSize.value = "";
   },
 );
 
@@ -314,7 +322,8 @@ const csvTable = computed(() => {
     head,
     rows: rows.slice(1, 101),
     cols: head.length,
-    total: rows.length,
+    // Data rows in the previewed text — the header is the head, not a row.
+    total: rows.length - 1,
   };
 });
 
@@ -366,9 +375,12 @@ function splitRows(text: string, delimiter: string): string[][] {
 
 function turnPage(delta: number): void {
   const p = preview.value;
-  if (p?.status !== "pdf" || p.pageCount === undefined) return;
+  if (p?.status !== "pdf" || p.pages === undefined || p.pageCount === undefined) return;
   const current = p.page ?? 0;
-  const next = Math.min(p.pageCount - 1, Math.max(0, current + delta));
+  // Bounded by the pages actually rendered, which the toolbar's disabled
+  // state already reflects — this is the guard for a key or a stale click.
+  const last = Math.min(p.pageCount, p.pages.length) - 1;
+  const next = Math.min(last, Math.max(0, current + delta));
   if (next === current) return;
   // The rendered pages live on the preview object; a shallow copy keeps the
   // reactive readers (page indicator, <img>) in sync without re-rendering.

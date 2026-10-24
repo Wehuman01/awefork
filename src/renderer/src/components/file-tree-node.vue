@@ -43,7 +43,6 @@ import { openFileMenu } from "../file-menu";
 import {
   browseTo,
   browsingDir,
-  files,
   isTreeNodeExpanded,
   startPathDrag,
   toggleTreeNode,

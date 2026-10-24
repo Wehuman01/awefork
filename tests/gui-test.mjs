@@ -162,6 +162,17 @@ try {
   await cdp.open();
   await cdp.send("Runtime.enable");
 
+  // 0. The file browser is a labs experiment, off by default, and its main
+  //    column and sidebar tabs only exist behind that gate. Seed the switch
+  //    on and reload once so every section below runs against the same app
+  //    a user who flipped it would have.
+  await cdp.evaluate(
+    `localStorage.setItem("awefork:settings", ${JSON.stringify(
+      JSON.stringify({ labs: { fileBrowser: true } }),
+    )})`,
+  );
+  await cdp.evaluate(`location.reload()`);
+
   // 1. Boot: mock adapter answers, canvas and sidebar actually rendered.
   await retry(async () => {
     const boot = await cdp.evaluate(`({
@@ -237,7 +248,9 @@ try {
   // 4b. File browser panel: the tabs switch the middle column and the
   //     sidebar, and the panel mounts with its states. The demo adapter has
   //     no filesystem, so the listing answers "not found" — the panel must
-  //     phrase that, not crash or spin.
+  //     phrase that, not crash or spin. The preview pane is on demand (it
+  //     mounts for a previewed file, and every demo read answers
+  //     not-found), so its absence is the correct state here.
   await retry(() => cdp.evaluate(`(() => {
     const tab = [...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("文件"));
     if (!tab) throw new Error("files tab missing");
@@ -251,9 +264,10 @@ try {
       error: document.querySelector(".fb-state.err")?.textContent ?? "",
       crumbs: document.querySelectorAll(".fb-crumb").length,
       quick: Boolean(document.querySelector(".fb-quick-input")),
+      tabs: document.querySelectorAll(".fb-tab:not(.fb-tab-new)").length,
       preview: Boolean(document.querySelector(".fb-preview")),
     })`);
-    if (!state.visible || !state.canvasHidden || !state.quick || !state.preview) {
+    if (!state.visible || !state.canvasHidden || !state.quick || state.tabs < 1) {
       throw new Error(`file panel incomplete: ${JSON.stringify(state)}`);
     }
     return state;
@@ -261,6 +275,7 @@ try {
   check("files tab shows the browser and hides the canvas", true);
   check("a missing listing is phrased, not spun", fbStates.error.length > 0, fbStates.error);
   check("path breadcrumbs render for the landing directory", fbStates.crumbs >= 1, `${fbStates.crumbs} crumbs`);
+  check("the preview pane waits for a file instead of squatting", fbStates.preview === false);
 
   await retry(() => cdp.evaluate(`(() => {
     const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));
@@ -367,7 +382,7 @@ try {
     if (!result.ok) throw new Error(result.why);
   }, 5000, "external drop");
   const notice = await retry(async () => {
-    const text = await cdp.evaluate(`document.querySelector(".fb-notice")?.textContent ?? ""`);
+    const text = await cdp.evaluate(`document.querySelector(".banner-files")?.textContent ?? ""`);
     if (text === "") throw new Error("no notice after the drop");
     return text;
   }, 5000, "unnamed-drop notice");

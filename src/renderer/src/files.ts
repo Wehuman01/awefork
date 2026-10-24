@@ -375,9 +375,11 @@ async function load(tab: FileTab, dir: string, forPreview = false): Promise<void
     tab.error = result.error;
     tab.capped = false;
     // The failed listing shows no rows, so the old selection and preview
-    // would describe entries the user cannot see.
+    // would describe entries the user cannot see. Reading dies with the
+    // preview it was reading — the folded-away listing must come back.
     tab.selectedPath = null;
     tab.preview = null;
+    tab.reading = false;
     return;
   }
   tab.browsing = result.value.path;
@@ -394,6 +396,7 @@ async function load(tab: FileTab, dir: string, forPreview = false): Promise<void
   ) {
     tab.selectedPath = null;
     tab.preview = null;
+    tab.reading = false;
   }
 }
 
@@ -469,7 +472,6 @@ export function entryFromPath(target: string): FileEntry {
  * keeps a failed file jump out of the navigation history.
  */
 export async function goToPath(input: string): Promise<void> {
-  const tab = requireTab();
   let target = input.trim();
   if (target === "") return;
   if (target === "~") target = files.homePath ?? target;
@@ -480,6 +482,9 @@ export async function goToPath(input: string): Promise<void> {
     flashNotice(t("files.pathNotAbsolute"));
     return;
   }
+  // Only now is a jump certain: a rejected path must not leave behind the
+  // blank tab requireTab would have created for it.
+  const tab = requireTab();
   const stat = await window.awefork.statFile(target).catch(() => null);
   if (stat?.ok && stat.value.exists && !stat.value.isDir) {
     const parent = parentOf(target);
@@ -551,6 +556,27 @@ export function toggleReading(): void {
     return;
   }
   if (tab.preview !== null) tab.reading = true;
+}
+
+/**
+ * Step the preview to the next or previous file while reading. Directories
+ * are skipped and the filter and ignore list still apply, so the reader
+ * walks exactly the rows the listing shows. The reader keeps reading —
+ * `reading` lives on the tab, not on the preview, which is the one case
+ * that flag was built for. The preview is forced: a step is a request to
+ * read the neighbour, whatever openOnDouble says about a plain click.
+ */
+export function stepReading(delta: number): void {
+  const tab = activeTab();
+  if (!tab || !tab.reading) return;
+  const filesOnly = visibleEntries().filter((entry) => !entry.isDir);
+  if (filesOnly.length === 0) return;
+  const current = filesOnly.findIndex((entry) => entry.path === tab.selectedPath);
+  const next = Math.min(Math.max((current < 0 ? 0 : current) + delta, 0), filesOnly.length - 1);
+  const target = filesOnly[next];
+  if (!target) return;
+  tab.selectedPath = target.path;
+  void previewOnTab(tab, target);
 }
 
 export function setFilter(value: string): void {
@@ -639,7 +665,7 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     if (tab.error?.code === "not-a-directory") {
       tab.error = null;
       await previewOnTab(tab, entry);
-      tab.reading = true;
+      if (tab.preview?.status !== "error") tab.reading = true;
     }
     return;
   }
@@ -654,9 +680,10 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     }
   }
   // A double-click is a request to read, not just to peek: the listing
-  // folds away and the preview owns the middle column.
+  // folds away and the preview owns the middle column. An error pane is
+  // not something to read — it keeps the listing up instead.
   await previewOnTab(tab, entry);
-  tab.reading = true;
+  if (tab.preview?.status !== "error") tab.reading = true;
 }
 
 /**
@@ -671,11 +698,13 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   // list the project root while the parent listing is still in flight.
   tab.selectedPath = entry.path;
   // A jump from a surface outside the browser (dock click, context menu) can
-  // reach a tab that has never listed a directory. Land on the file's parent
-  // first so the listing underneath describes what the preview shows.
-  if (tab.browsing === null) {
-    const parent = parentOf(entry.path);
-    if (parent !== null) await browseTabTo(tab, parent, true);
+  // reach a tab that lists another directory — or none at all. Land on the
+  // file's parent either way, so the listing underneath describes what the
+  // preview shows; without it a refresh would drop the preview as a
+  // selection that is not in the listing.
+  const parent = parentOf(entry.path);
+  if (parent !== null && !samePath(parent, tab.browsing ?? "")) {
+    await browseTabTo(tab, parent, true);
   }
   await previewOnTab(tab, entry);
 }
@@ -803,7 +832,10 @@ export async function quickSearch(root: string, query: string): Promise<void> {
     tab.quickError = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  tab.quickResults = result.value;
+  // The ignore list hides names from the browser's own surfaces — the
+  // listing, the tree and the dock — so the quick box honours it too, or an
+  // ignored name could be opened into a preview with no visible row.
+  tab.quickResults = result.value.filter((entry) => !isIgnoredName(entry.name));
 }
 
 export function setQuickIncludeHidden(value: boolean): void {

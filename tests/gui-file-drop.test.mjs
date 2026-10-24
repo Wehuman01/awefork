@@ -201,7 +201,7 @@ try {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
       vp.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
       await new Promise((resolve) => setTimeout(resolve, 80));
-      return document.querySelector(".fb-notice")?.textContent ?? "";
+      return document.querySelector(".banner-files")?.textContent ?? "";
     })()`);
     if (text === "") throw new Error("no notice after the drop");
     return text;

@@ -158,8 +158,11 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** Most models one multi-model round may address. */
 export const MAX_PARALLEL_TARGETS = 4;
-/** Longest ignore list; each entry is capped on its own too. */
+/** Longest ignore list. */
 const MAX_IGNORE_PATTERNS = 32;
+/** Longest single pattern: a paste longer than this is an accident, and a
+ *  giant pattern compiles into a giant regex. */
+const MAX_IGNORE_PATTERN_CHARS = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -180,20 +183,34 @@ function pickNumber(value: unknown, fallback: number, min: number, max: number):
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-/** Trimmed, de-duplicated, capped; a malformed list falls back wholesale. */
-function pickStringList(value: unknown, fallback: readonly string[], max: number): string[] {
+/**
+ * Ignore patterns, cleaned the one way both entry points need: trimmed,
+ * de-duplicated, length-capped and count-capped; a malformed list falls
+ * back wholesale.
+ */
+function pickIgnorePatterns(value: unknown, fallback: readonly string[]): string[] {
   if (!Array.isArray(value)) return [...fallback];
   const seen = new Set<string>();
   const list: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
     const name = item.trim();
-    if (name === "" || seen.has(name)) continue;
+    if (name === "" || name.length > MAX_IGNORE_PATTERN_CHARS || seen.has(name)) continue;
     seen.add(name);
     list.push(name);
-    if (list.length >= max) break;
+    if (list.length >= MAX_IGNORE_PATTERNS) break;
   }
   return list;
+}
+
+/**
+ * The settings page edits the live reactive object instead of going through
+ * normalizeSettings, so its writes run through the same rules here — an
+ * over-long paste is capped on the spot rather than silently trimmed on the
+ * next boot.
+ */
+export function sanitizeIgnorePatterns(value: readonly string[]): string[] {
+  return pickIgnorePatterns(value, DEFAULT_SETTINGS.files.ignore);
 }
 
 /** A stored model pick, or null when the entry is unusable. */
@@ -263,7 +280,7 @@ export function normalizeSettings(raw: unknown): Settings {
       view: pickEnum(files.view, ["list", "grid"] as const, d.files.view),
       previewCapKb: pickNumber(files.previewCapKb, d.files.previewCapKb, 1, 512),
       imageCapMb: pickNumber(files.imageCapMb, d.files.imageCapMb, 1, 8),
-      ignore: pickStringList(files.ignore, d.files.ignore, MAX_IGNORE_PATTERNS),
+      ignore: pickIgnorePatterns(files.ignore, d.files.ignore),
       openOnDouble: pickEnum(
         files.openOnDouble,
         ["system", "preview"] as const,

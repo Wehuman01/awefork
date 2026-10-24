@@ -12,7 +12,8 @@
  * of hanging the preview.
  */
 
-/** Pages rendered per preview; the toolbar pages through the rest. */
+/** Pages rendered per preview; the rest of the document stays in the app
+ *  that owns it (the preview offers the system open). */
 const MAX_PAGES = 3;
 /** Raster width in device pixels; the pane scales it down to fit. */
 const PAGE_WIDTH = 1240;

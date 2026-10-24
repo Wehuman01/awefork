@@ -107,6 +107,9 @@ function active(mod: { files: { tabs: unknown[]; activeTabId: string | null } })
     quickResults: { name: string }[];
     quickLoading: boolean;
     quickError: { code: string } | null;
+    reading: boolean;
+    previewWidth: number;
+    scrollTop: number;
     preview: { path: string; status: string; text?: string; error?: { code: string } } | null;
   };
 }
@@ -496,14 +499,91 @@ describe("preview", () => {
     const h = await bootFiles({
       listings: { "/a": listing("/a", [entry("gone.md")]) },
     });
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "preview";
     await h.mod.browseTo("/a");
-    await h.mod.previewEntry(entry("gone.md"));
-    expect(active(h.mod).preview).not.toBeNull();
+    await h.mod.openEntry(entry("gone.md"));
+    expect(active(h.mod).reading).toBe(true);
     h.api.listDir.mockResolvedValueOnce({ ok: false, error: { code: "permission" } });
     await h.mod.refresh();
     expect(active(h.mod).error?.code).toBe("permission");
     expect(active(h.mod).selectedPath).toBeNull();
     expect(active(h.mod).preview).toBeNull();
+    // The folded-away listing must come back with the preview it was reading.
+    expect(active(h.mod).reading).toBe(false);
+    settings.files.openOnDouble = "system";
+  });
+
+  it("drops reading mode when a navigation loses the previewed file", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", [entry("b", true), entry("readme.md")]),
+        "/a/b": listing("/a/b", []),
+      },
+    });
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "preview";
+    await h.mod.browseTo("/a");
+    await h.mod.openEntry(entry("readme.md"));
+    expect(active(h.mod).reading).toBe(true);
+    // The new directory does not list the file, so the preview goes — and
+    // the reader with it, or the middle column would hold neither.
+    await h.mod.browseTo("/a/b");
+    expect(active(h.mod).preview).toBeNull();
+    expect(active(h.mod).reading).toBe(false);
+    settings.files.openOnDouble = "system";
+  });
+
+  it("a dock jump lands the listing on the file's own directory", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", []),
+        "/proj/docs": listing("/proj/docs", [
+          { ...entry("readme.md"), path: "/proj/docs/readme.md" },
+        ]),
+      },
+    });
+    // The tab browses /a; the dock click names a file in /proj/docs.
+    await h.mod.browseTo("/a");
+    await h.mod.previewEntry({ ...entry("readme.md"), path: "/proj/docs/readme.md" });
+    // The listing underneath describes the previewed file, so a refresh
+    // cannot drop the preview as a selection the listing never had.
+    expect(active(h.mod).browsing).toBe("/proj/docs");
+    expect(active(h.mod).selectedPath).toBe("/proj/docs/readme.md");
+    await h.mod.refresh();
+    expect(active(h.mod).preview?.path).toBe("/proj/docs/readme.md");
+  });
+
+  it("steps the reader to the next file and keeps reading", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", [entry("one.md"), entry("sub", true), entry("two.md")]),
+      },
+    });
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "preview";
+    await h.mod.browseTo("/a");
+    await h.mod.openEntry(entry("one.md"));
+    expect(active(h.mod).reading).toBe(true);
+    // Directories are skipped and the reader keeps reading.
+    h.mod.stepReading(1);
+    expect(active(h.mod).selectedPath).toBe("/root/two.md");
+    expect(active(h.mod).reading).toBe(true);
+    await vi.waitFor(() => expect(active(h.mod).preview?.path).toBe("/root/two.md"));
+    // The last file stays put, and stepping back returns to the first.
+    h.mod.stepReading(1);
+    expect(active(h.mod).selectedPath).toBe("/root/two.md");
+    h.mod.stepReading(-1);
+    expect(active(h.mod).selectedPath).toBe("/root/one.md");
+    // A step reads the neighbour even when a plain click would only select.
+    settings.files.openOnDouble = "system";
+    h.mod.stepReading(1);
+    await vi.waitFor(() => expect(active(h.mod).preview?.path).toBe("/root/two.md"));
+    // Outside reading mode the keys belong to the listing, not the reader.
+    h.mod.exitReading();
+    h.mod.stepReading(-1);
+    expect(active(h.mod).selectedPath).toBe("/root/two.md");
+    settings.files.openOnDouble = "preview";
   });
 });
 
@@ -633,6 +713,17 @@ describe("typed paths", () => {
     expect(h.files.notice).not.toBeNull();
     expect(h.api.listDir).not.toHaveBeenCalled();
   });
+
+  it("refuses a relative path without opening a tab for it", async () => {
+    const h = await bootFiles();
+    // No tab at all: the path box is reachable before the first landing, and
+    // a rejected jump must not leave a blank tab behind.
+    h.files.tabs.length = 0;
+    h.files.activeTabId = null;
+    await h.mod.goToPath("docs");
+    expect(h.files.tabs).toHaveLength(0);
+    expect(h.files.notice).not.toBeNull();
+  });
 });
 
 describe("quick search", () => {
@@ -657,6 +748,18 @@ describe("quick search", () => {
     h.api.searchFiles.mockResolvedValueOnce({ ok: false, error: { code: "permission" } });
     await h.mod.quickSearch("/project", "x");
     expect(active(h.mod).quickError?.code).toBe("permission");
+  });
+
+  it("keeps ignored names out of the results", async () => {
+    const h = await bootFiles();
+    // The listing and the tree hide these; the quick box sits in the same
+    // panel, so an ignored hit would open into a preview with no visible row.
+    h.api.searchFiles.mockResolvedValueOnce({
+      ok: true,
+      value: [entry("keep.md"), entry("node_modules"), entry("dist", true)],
+    });
+    await h.mod.quickSearch("/project", "k");
+    expect(active(h.mod).quickResults.map((e) => e.name)).toEqual(["keep.md"]);
   });
 });
 
@@ -766,26 +869,26 @@ describe("tabs", () => {
   it("keeps each tab's position, selection and preview apart", async () => {
     const h = await bootFiles({
       listings: {
-        "/a": listing("/a", [entry("readme.md")]),
-        "/b": listing("/b", [entry("other.md")]),
+        "/a": listing("/a", [{ ...entry("readme.md"), path: "/a/readme.md" }]),
+        "/b": listing("/b", [{ ...entry("other.md"), path: "/b/other.md" }]),
       },
     });
     await h.mod.browseTo("/a");
-    await h.mod.previewEntry(entry("readme.md"));
+    await h.mod.previewEntry({ ...entry("readme.md"), path: "/a/readme.md" });
 
     await h.mod.openFileTab("/b");
     // The new tab starts empty: no inherited selection or preview.
     expect(active(h.mod).selectedPath).toBeNull();
     expect(active(h.mod).preview).toBeNull();
-    await h.mod.previewEntry(entry("other.md"));
-    expect(active(h.mod).preview?.path).toBe("/root/other.md");
+    await h.mod.previewEntry({ ...entry("other.md"), path: "/b/other.md" });
+    expect(active(h.mod).preview?.path).toBe("/b/other.md");
 
     // Switching back restores the first tab exactly as it was left.
     await h.mod.activateFileTab(h.files.tabs[0].id);
     expect(active(h.mod).browsing).toBe("/a");
-    expect(active(h.mod).selectedPath).toBe("/root/readme.md");
-    expect(active(h.mod).preview?.path).toBe("/root/readme.md");
-    expect(active(h.mod).preview?.text).toBe("text of /root/readme.md");
+    expect(active(h.mod).selectedPath).toBe("/a/readme.md");
+    expect(active(h.mod).preview?.path).toBe("/a/readme.md");
+    expect(active(h.mod).preview?.text).toBe("text of /a/readme.md");
   });
 
   it("walks each tab's own back and forward stacks", async () => {

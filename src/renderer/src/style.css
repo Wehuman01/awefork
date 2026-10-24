@@ -5518,6 +5518,17 @@ code.md-code {
 }
 
 /* Version-channel toast: same anatomy as the undo toast, text-only. */
+.banner-files {
+  padding: 9px 16px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-border);
+  color: var(--primary-deep);
+  cursor: default;
+}
+
 .banner-update {
   padding: 9px 16px;
   border-radius: 12px;
@@ -7586,17 +7597,6 @@ html[data-theme="dark"] ::selection {
   margin-top: 6px;
   font-size: 11.5px;
   color: var(--ink-faint);
-  word-break: break-all;
-}
-
-.fb-notice {
-  flex: 0 0 auto;
-  padding: 6px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--primary-soft);
-  color: var(--primary-deep);
-  font-size: 12px;
-  font-weight: 700;
   word-break: break-all;
 }
 
