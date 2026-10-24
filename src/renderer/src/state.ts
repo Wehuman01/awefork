@@ -1371,20 +1371,18 @@ export async function activateCanvasTab(tabId: string): Promise<void> {
 /**
  * Open a story in a tab: dedupes on the story root (one story, one tab —
  * activating an existing tab just moves its selection), else spawns a new
- * tab next to the active one. null asks for a blank tab (the ＋ button).
+ * tab next to the active one.
  */
-export async function openCanvasTab(sessionId: string | null): Promise<void> {
+export async function openCanvasTab(sessionId: string): Promise<void> {
   syncActiveTab();
-  if (sessionId) {
-    const root = storyRootOf(visibleSessions.value, state.lineage, sessionId);
-    const existing = root ? state.canvasTabs.find((t) => t.rootId === root) : undefined;
-    if (existing) {
-      await activateCanvasTab(existing.id);
-      if (existing.id === state.activeCanvasTabId && state.selectedId !== sessionId) {
-        await selectSession(sessionId, { focus: true });
-      }
-      return;
+  const root = storyRootOf(visibleSessions.value, state.lineage, sessionId);
+  const existing = root ? state.canvasTabs.find((t) => t.rootId === root) : undefined;
+  if (existing) {
+    await activateCanvasTab(existing.id);
+    if (existing.id === state.activeCanvasTabId && state.selectedId !== sessionId) {
+      await selectSession(sessionId, { focus: true });
     }
+    return;
   }
   canvasTabSeq += 1;
   activeTabStoryDied = false;
@@ -1399,8 +1397,22 @@ export async function openCanvasTab(sessionId: string | null): Promise<void> {
   state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at + 1, 0, tab);
   state.activeCanvasTabId = tab.id;
   state.canvasTabRestoreRequest = { tabId: tab.id, nonce: Date.now() };
-  if (sessionId) {
-    await selectSession(sessionId, { focus: true });
+  await selectSession(sessionId, { focus: true });
+}
+
+/**
+ * Open a session the way the tab preference asks: sessionsInNewTab routes
+ * through a tab (openCanvasTab still switches in place when the session
+ * belongs to a story a tab already shows), off keeps the plain in-tab switch.
+ */
+export async function openSession(
+  sessionId: string,
+  options: { focus?: boolean } = {},
+): Promise<void> {
+  if (settings.canvas.sessionsInNewTab) {
+    await openCanvasTab(sessionId);
+  } else {
+    await selectSession(sessionId, options);
   }
 }
 
@@ -3359,6 +3371,16 @@ export async function createSession(directory?: string): Promise<void> {
     return;
   }
   const box = { id: created.id };
+  // The setting decides whether the new session lands in a fresh tab
+  // (keeping the active tab's story untouched) or switches in place; redo
+  // repeats the same landing so undo/redo never hijack a tab either way.
+  const land = async (id: string, focus: boolean): Promise<void> => {
+    if (settings.canvas.sessionsInNewTab) {
+      await openCanvasTab(id);
+    } else {
+      await selectSession(id, focus ? { focus: true } : {});
+    }
+  };
   track({
     backend,
     kind: "createSession",
@@ -3371,18 +3393,12 @@ export async function createSession(directory?: string): Promise<void> {
       const s = await window.awefork.createSession(backend, target);
       box.id = s.id;
       await refreshSessions();
-      if (backend === state.activeBackend) await selectSession(s.id);
+      if (backend === state.activeBackend) await land(s.id, false);
       return true;
     },
   });
   await refreshSessions();
-  // The setting decides whether the new session lands in a fresh tab
-  // (keeping the active tab's story untouched) or switches in place.
-  if (settings.canvas.newSessionInTab) {
-    await openCanvasTab(created.id);
-  } else {
-    await selectSession(created.id, { focus: true });
-  }
+  await land(created.id, true);
   state.composerFocusRequest = Date.now();
 }
 

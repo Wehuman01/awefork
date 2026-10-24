@@ -45,7 +45,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
   // ── session-canvas.vue ─────────────────────────────────────────────────
   "canvas.tabsLabel": { zh: "画板故事标签", en: "Canvas story tabs" },
   "canvas.tabClose": { zh: "关闭标签", en: "Close tab" },
-  "canvas.tabNewTitle": { zh: "新建画板标签", en: "New canvas tab" },
+  "canvas.tabNewSession": { zh: "在当前文件夹新建会话", en: "New session in this folder" },
   "canvas.tabBlank": { zh: "新画板", en: "New canvas" },
   "canvas.deleteTurnTitle": {
     zh: "删除这个回合（更早的对话保留）",

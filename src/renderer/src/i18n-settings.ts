@@ -143,6 +143,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "CLI 版本超出已测试区间时，在后端名旁显示 ⚠（不拦截使用）。",
     en: "Shows a ⚠ next to the backend when its CLI leaves the tested range (never blocks).",
   },
+  "settings.quitKeepAlive": { zh: "退出保留后台", en: "Keep on quit" },
+  "settings.quitKeepAliveDesc": {
+    zh: "开启后，退出 awefork 时后端继续在后台运行，进行中的任务会跑完并写入会话记录；退出确认弹窗里也能勾选打开。",
+    en: "With this on, quitting leaves the backends running so in-flight turns finish and land in their session files; the quit dialog's checkbox can also turn it on.",
+  },
   "settings.backendSwitchNote": {
     zh: "切换会重塑整个工作区，因此每次切换都会先确认；已有会话仍保留在历史记录里。安装探针只跑 --version，不会启动服务。",
     en: "A switch reshapes the workspace, so every pick confirms first; existing sessions stay in history. The install probe only runs --version.",
@@ -180,10 +185,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Whether the middle column opens on the canvas or the file browser.",
   },
   "settings.autoFit": { zh: "打开时自动适配视图", en: "Fit view on open" },
-  "settings.newSessionInTab": { zh: "新会话开新标签", en: "New session in new tab" },
-  "settings.newSessionInTabDesc": {
-    zh: "开启后，新建会话会打开一个新的标签页，而不是切换当前标签里的会话。",
-    en: "With this on, creating a session opens it in a fresh tab instead of switching the active tab.",
+  "settings.sessionsInNewTab": { zh: "在新标签打开会话", en: "Open sessions in new tabs" },
+  "settings.sessionsInNewTabDesc": {
+    zh: "开启后，新建会话或在列表里点击其他会话，都会打开一个新的标签页，而不是替换当前标签里的内容。",
+    en: "With this on, creating a session or clicking another one in a list opens it in a fresh tab instead of replacing the active tab.",
   },
   "settings.autoFitDesc": {
     zh: "选中会话或切换故事标签时，把整棵分支树缩放进视口。",

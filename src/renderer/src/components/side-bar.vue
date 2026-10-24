@@ -847,6 +847,7 @@ import {
   isTurnMarked,
   jumpToMessage,
   openCanvasTab,
+  openSession,
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
@@ -854,7 +855,6 @@ import {
   renameSession,
   restoreDirectory,
   restoreSession,
-  selectSession,
   sessionGroups,
   setForkTagPref,
   setSessionTags,
@@ -1296,7 +1296,7 @@ function compareFromMenu(): void {
 function onRowClick(sessionId: string): void {
   const from = store.comparePickFrom;
   if (from == null || !directorySessions.value.some((s) => s.id === sessionId)) {
-    void selectSession(sessionId, { focus: true });
+    void openSession(sessionId, { focus: true });
     return;
   }
   if (sessionId === from) {
@@ -1710,7 +1710,7 @@ function beginArchive(): void {
 }
 
 /** Right-click create: the new session lands in this directory and becomes
- * the open project — selectSession inside createSession switches to it. */
+ * the open project — createSession's landing logic opens it on screen. */
 function beginDirCreate(): void {
   const active = dirMenu.value;
   if (!active) return;
@@ -1748,8 +1748,9 @@ function beginDirArchive(): void {
 const favOpen = ref(true);
 
 function openFavorite(session: SessionSummary): void {
-  // selectSession switches directory itself when the star lives elsewhere.
-  void selectSession(session.id, { focus: true });
+  // Both paths under openSession switch the directory themselves when the
+  // star lives elsewhere.
+  void openSession(session.id, { focus: true });
 }
 
 function unpinFavorite(sessionId: string): void {

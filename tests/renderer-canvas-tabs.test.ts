@@ -209,17 +209,15 @@ describe("canvas tabs", () => {
     expect(survivor).toBeDefined();
   });
 
-  it("a blank tab opened after a story died can adopt a NEW story on refresh", async () => {
+  it("a blank tab can adopt a NEW story on refresh", async () => {
     const state = await bootState();
-    await state.openCanvasTab("story-a");
-    apiSessions = [STORY_B]; // story-a deleted server-side
-    await state.refreshSessions();
+    // What closing the last tab leaves (formerly the ＋ button's blank tab):
+    // a blank active tab with the story-died flag cleared…
+    await state.closeCanvasTab(state.store.activeCanvasTabId);
     expect(state.store.selectedId).toBeNull();
 
-    // The user opens a fresh blank tab (the ＋ button)…
-    await state.openCanvasTab(null);
     // …and a new story appears: the refresh may adopt it into that tab.
-    apiSessions = [STORY_B, STORY_C];
+    apiSessions = [STORY_A, STORY_B, STORY_C];
     await state.refreshSessions();
     expect(state.store.selectedId).toBe("story-c");
     expect(state.activeCanvasTab.value?.rootId).toBe("story-c");

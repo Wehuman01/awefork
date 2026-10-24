@@ -306,6 +306,13 @@ const themeOptions = computed(() => [
   { value: "dark" as const, label: t("settings.themeDark") },
 ]);
 
+// The quit keep-alive preference is main's business (see backendSection);
+// the async read fills the row in shortly after the panel first opens.
+const quitKeepAlive = ref(false);
+void window.awefork?.quitKeepAlive().then((value) => {
+  quitKeepAlive.value = value;
+});
+
 // ── helpers ─────────────────────────────────────────────────────────
 
 /** A settings section that is not (yet) persisted anywhere; disabled reset. */
@@ -404,6 +411,19 @@ function backendSection(): SectionDef {
         settings.backend.warnRange = next;
       },
     ),
+    // Quit keep-alive lives in main's settings.json (the quit dialog's
+    // checkbox writes it too), so this row reads and writes over IPC —
+    // demo mode flips the switch but persists nowhere.
+    toggle(
+      "backend.quitKeepAlive",
+      t("settings.quitKeepAlive"),
+      t("settings.quitKeepAliveDesc"),
+      quitKeepAlive.value,
+      (next) => {
+        quitKeepAlive.value = next;
+        void window.awefork?.setQuitKeepAlive(next);
+      },
+    ),
     button(
       "backend.reprobe",
       t("settings.backend"),
@@ -421,7 +441,8 @@ function backendSection(): SectionDef {
     ...APP_STORE(),
     resettable: true,
     rows,
-    keywords: "backend agent opencode codex pi zcode 后端 智能体 cli 切换",
+    keywords:
+      "backend agent opencode codex pi zcode 后端 智能体 cli 切换 退出 保留 后台 quit keep-alive",
   };
 }
 
@@ -484,12 +505,12 @@ function canvasSection(): SectionDef {
         },
       ),
       toggle(
-        "canvas.newSessionInTab",
-        t("settings.newSessionInTab"),
-        t("settings.newSessionInTabDesc"),
-        settings.canvas.newSessionInTab,
+        "canvas.sessionsInNewTab",
+        t("settings.sessionsInNewTab"),
+        t("settings.sessionsInNewTabDesc"),
+        settings.canvas.sessionsInNewTab,
         (next) => {
-          settings.canvas.newSessionInTab = next;
+          settings.canvas.sessionsInNewTab = next;
         },
       ),
       segment(
@@ -980,6 +1001,7 @@ const sections = computed<SectionDef[]>(() => {
   void locale.value;
   void theme.value;
   void themePreference.value;
+  void quitKeepAlive.value;
   return [
     appearanceSection(),
     languageSection(),

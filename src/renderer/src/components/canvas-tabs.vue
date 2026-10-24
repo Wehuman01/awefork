@@ -25,9 +25,9 @@
     <button
       type="button"
       class="story-tab story-tab-new"
-      :title="t('canvas.tabNewTitle')"
-      :aria-label="t('canvas.tabNewTitle')"
-      @click="open()"
+      :title="t('canvas.tabNewSession')"
+      :aria-label="t('canvas.tabNewSession')"
+      @click="newSession()"
       >＋</button
     >
   </div>
@@ -40,7 +40,7 @@ import {
   activateCanvasTab,
   type CanvasTab,
   closeCanvasTab,
-  openCanvasTab,
+  createSession,
   store,
   tabRootSession,
 } from "../state";
@@ -49,7 +49,8 @@ import {
  * Browser-style story tabs over the canvas: one tab per fork-tree story. The
  * bar stays hidden while there is exactly one blank tab (a fresh install
  * looks unchanged) and appears as soon as a second story — or any story at
- * all — is open.
+ * all — is open. ＋ starts a new session in the open project — the same
+ * createSession path the sidebar's per-directory new session uses.
  */
 const visible = computed(() => {
   const tabs = store.canvasTabs;
@@ -70,8 +71,8 @@ async function close(id: string): Promise<void> {
   await closeCanvasTab(id);
 }
 
-async function open(): Promise<void> {
-  await openCanvasTab(null);
+async function newSession(): Promise<void> {
+  await createSession();
 }
 
 /** Middle-click closes, like a browser tab. */
