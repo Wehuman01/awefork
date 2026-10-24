@@ -1,7 +1,7 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
 import { CODEX_NOT_LOGGED_IN_MESSAGE } from "../shared/codex-adapter.js";
 import { type CodexJsonRpc, createCodexJsonRpc } from "./codex-jsonrpc.js";
 import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
@@ -137,6 +137,9 @@ export async function ensureCodexServer(
   const client = createCodexJsonRpc(child.stdin, child.stdout, {
     onNotification: () => {},
     onDisconnect: markDead,
+    // The backstop declines an unanswered ask only once no renderer window
+    // can show it; a live window owns the ask for as long as the user needs.
+    rendererAlive: () => BrowserWindow.getAllWindows().some((win) => !win.isDestroyed()),
   });
 
   const deadline = Date.now() + handshakeTimeoutMs;

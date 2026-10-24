@@ -29,6 +29,13 @@ export interface CodexJsonRpcOptions {
   onRequest?: CodexRequestHandler;
   /** Safe-reply deadline for a server request. */
   requestTimeoutMs?: number;
+  /**
+   * While this returns true, the safe-reply backstop keeps re-arming instead
+   * of firing: a live renderer owns the ask (its auto-deny setting decides,
+   * including "never"), and codex holds the turn open meanwhile. The backstop
+   * exists for a renderer that is gone.
+   */
+  rendererAlive?: () => boolean;
 }
 
 export interface CodexJsonRpc {
@@ -60,11 +67,10 @@ const SAFE_REPLIES: Record<string, unknown> = {
 
 const KNOWN_REQUESTS = new Set([...Object.keys(SAFE_REPLIES), "item/tool/requestUserInput"]);
 /**
- * Backstop only: the renderer arms its own (30s) auto-decline when the event
- * arrives — strictly after this timer would start at equal timeouts, so the
- * backstop would decline first and silently swallow a user "allow" clicked in
- * that gap. Staying well above the renderer's deadline lets its visible
- * decline always land; this guard fires only when the renderer is gone.
+ * Backstop only, and it re-arms while a renderer window is alive (see
+ * `rendererAlive`): a live renderer owns the ask — its auto-deny setting
+ * decides, including "never" — so this guard declines only once no window
+ * can show the ask anymore.
  */
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -138,11 +144,20 @@ export function createCodexJsonRpc(
       if (error) replyError(id, -32000, error instanceof Error ? error.message : String(error));
       else replyResult(id, result);
     };
-    const timer = setTimeout(() => {
-      const fallback = safeReply(method);
-      if (fallback === undefined) finish(null, "awefork got no user input, the request timed out");
-      else finish(fallback);
-    }, requestTimeoutMs);
+    const armBackstop = () => {
+      timer = setTimeout(() => {
+        if (options.rendererAlive?.()) {
+          armBackstop();
+          return;
+        }
+        const fallback = safeReply(method);
+        if (fallback === undefined)
+          finish(null, "awefork got no user input, the request timed out");
+        else finish(fallback);
+      }, requestTimeoutMs);
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    armBackstop();
     // Disconnect settles the request here (the reply write is a guarded
     // no-op), so neither the timer above nor a late handler resolution can
     // reach the dead stdin.

@@ -2162,26 +2162,6 @@ html[data-density="compact"] .ft-row {
   fill: var(--lavender-deep);
 }
 
-/* the ✂ badge filling a severed edge's gap. It lives in the world layer, so
-   it scales with the canvas and stays put however the branch grows. */
-.edge-cut-badge {
-  position: absolute;
-  width: 21px;
-  height: 21px;
-  border-radius: 50%;
-  background: var(--card);
-  border: 1.5px solid var(--ask-border);
-  color: var(--ask-deep);
-  font-size: 10.5px;
-  font-weight: 800;
-  display: grid;
-  place-items: center;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 2px 7px rgba(196, 138, 92, 0.22);
-  cursor: default;
-  z-index: 2;
-}
-
 .edge-dot {
   fill: var(--edge);
   transition: fill-opacity 0.15s;
@@ -2481,6 +2461,18 @@ html[data-density="compact"] .ft-row {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ctx-origin-tag {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .turn-time {
@@ -5410,6 +5402,15 @@ code.md-code {
   margin-top: 6px;
   text-align: right;
   color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* codex asks auto-deny after the safe-reply window; same copy as the modal's
+ * countdown, hung off the inline card. */
+.inline-interaction-timeout {
+  margin-top: 6px;
+  text-align: right;
+  color: var(--warn-ink, var(--ink-soft));
   font-size: 12px;
 }
 

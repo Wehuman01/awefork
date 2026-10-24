@@ -759,7 +759,11 @@ export interface LivePart {
   partId: string;
   /** Assistant message (run step) the part belongs to. */
   messageId: string;
-  kind: "text" | "thinking";
+  /**
+   * text/thinking stream the part's content; tool (codex tool items) carries
+   * just the chip label so the pane can show what the turn is doing live.
+   */
+  kind: "text" | "thinking" | "tool";
   text: string;
   /** Part snapshot times in ms; endedAt stays null until the part finishes. */
   startedAt: number | null;
@@ -868,7 +872,7 @@ function applyPartFrame(
         type: "snapshot";
         messageId: string;
         partId: string;
-        kind: "text" | "thinking";
+        kind: "text" | "thinking" | "tool";
         text: string;
         startedAt: number | null;
         endedAt: number | null;

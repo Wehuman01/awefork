@@ -103,8 +103,9 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   // Glyphs live in the templates, not here — a label is text in either language.
   "canvas.ctxNoneLabel": { zh: "空上下文", en: "Empty context" },
+  "canvas.ctxNoneOriginLabel": { zh: "未继承上文", en: "No inherited history" },
   "canvas.ctxInheritLabel": { zh: "带历史", en: "With history" },
-  // The static ✂ marker (sidebar / digest / compare column / canvas edge):
+  // The static ✂ marker (sidebar / digest / compare column):
   // it must never read as the draft's clickable toggle, hence its own strings.
   "cut.markerTitle": {
     zh: "空上下文分支：不带母本历史，从自己的第一句话开始",

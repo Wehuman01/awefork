@@ -1330,6 +1330,80 @@ describe("createCodexAdapter notification mapping", () => {
     ]);
   });
 
+  it("streams tool items as live tool parts", async () => {
+    const { notify, events } = await subscribedAdapter({});
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-5",
+      itemId: "it-1",
+      startedAtMs: 1000,
+      item: { type: "commandExecution", id: "it-1", command: "npm test" },
+    });
+    notify("item/completed", {
+      threadId: "s1",
+      turnId: "turn-5",
+      itemId: "it-1",
+      completedAtMs: 2000,
+      item: { type: "commandExecution", id: "it-1", command: "npm test" },
+    });
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-5",
+      itemId: "it-2",
+      startedAtMs: 3000,
+      item: { type: "fileChange", id: "it-2" },
+    });
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-5",
+      itemId: "it-3",
+      startedAtMs: 4000,
+      // An item kind with no chip mapping streams nothing.
+      item: { type: "unknownKind", id: "it-3" },
+    });
+    expect(events.filter((e) => e.type === "message.part")).toEqual([
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-5",
+        partId: "it-1",
+        kind: "tool",
+        text: "shell",
+        startedAt: 1000,
+        endedAt: null,
+      },
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-5",
+        partId: "it-1",
+        kind: "tool",
+        text: "shell",
+        startedAt: null,
+        endedAt: 2000,
+      },
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-5",
+        partId: "it-2",
+        kind: "tool",
+        text: "patch",
+        startedAt: 3000,
+        endedAt: null,
+      },
+    ]);
+  });
+
+  it("announces auto compaction like a finished summarize", async () => {
+    const { notify, events } = await subscribedAdapter({});
+    notify("thread/compacted", { threadId: "s1" });
+    expect(events).toEqual([
+      { type: "session.updated", sessionId: "s1" },
+      { type: "session.compressed", sessionId: "s1" },
+    ]);
+  });
+
   it("surfaces fatal error notifications but skips ones codex will retry", async () => {
     const { notify, events } = await subscribedAdapter({});
     notify("error", { threadId: "s1", willRetry: true, error: { message: "transient" } });
