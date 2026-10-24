@@ -6784,16 +6784,18 @@ html[data-theme="dark"] ::selection {
 
 /* ── story tabs: one canvas tab per fork-tree story ─────────────────── */
 
+/* Tabs wrap into stacked rows rather than overflowing: the old hidden
+   horizontal scroll (overflow-x + scrollbar-width: none) let extra tabs
+   slide under the context panel where they could not be reached at all. */
 .story-tabs-slot {
   flex: 0 0 auto;
   padding: 6px 10px 0;
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
 .story-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
   min-width: 0;
