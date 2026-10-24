@@ -18,27 +18,33 @@ import { computed, ref } from "vue";
 import { dict as dictDialogs } from "./i18n-dialogs";
 import { dict as dictMessages } from "./i18n-messages";
 import { dict as dictPanels } from "./i18n-panels";
+import { dict as dictSettings } from "./i18n-settings";
 import { dict as dictShell } from "./i18n-shell";
 import { dict as dictState } from "./i18n-state";
 import { modKey } from "./platform-key";
+import { settings } from "./settings";
 
 export type Locale = "zh" | "en";
 
-const STORAGE_KEY = "awefork:locale";
-
-function readStored(): Locale {
-  if (typeof localStorage === "undefined") return "zh";
-  return localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "zh";
-}
-
-export const locale = ref<Locale>(readStored());
+export const locale = ref<Locale>(settings.language.locale);
 
 /** List separator matching the locale's typographic convention (、 vs ", "). */
 export const listSep = computed(() => (locale.value === "zh" ? "、" : ", "));
 
+/**
+ * Mirror the locale onto <html lang>. Screen readers, spellcheck and the
+ * browser's own CJK font fallback all key off it, and the settings page is
+ * the first place a user can change the language without a restart.
+ */
+function stampLang(next: Locale): void {
+  if (typeof document !== "undefined") document.documentElement.lang = next;
+}
+stampLang(locale.value);
+
 export function setLocale(next: Locale): void {
   locale.value = next;
-  if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, next);
+  settings.language.locale = next;
+  stampLang(next);
 }
 
 type Entry = { zh: string; en: string };
@@ -191,7 +197,7 @@ const DICT: Dict = {
 // sibling i18n-*.ts modules and are merged in here so every call site uses
 // the single `t()` below. The fragments import nothing from this file, so
 // the merge stays cycle-free.
-Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels);
+Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels, dictSettings);
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 

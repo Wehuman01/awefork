@@ -411,6 +411,7 @@ import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import { joinPaths } from "../path-insert";
+import { settings } from "../settings";
 import {
   activeChain,
   cancelComparePick,
@@ -825,7 +826,11 @@ function onDraftEsc(event: KeyboardEvent): void {
  */
 function removeNode(node: TurnNode): void {
   if (isTurnDelete(node)) {
-    const ok = window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
+    // Turn deletes have no undo, so the confirmation is on by default; the
+    // settings page can turn it off for people who prefer the speed.
+    const ok =
+      !settings.canvas.confirmDelete ||
+      window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
     if (ok) void deleteTurn(node);
     return;
   }
@@ -998,7 +1003,10 @@ function nodesOf(sessionId: string | null): TurnNode[] {
 
 function openInitialView(): void {
   if (graph.value.nodes.length === 0) return;
-  if (graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
+  // "Fit view on open" off: open on the selected branch's latest card at the
+  // current zoom instead of shrinking the whole tree into the viewport.
+  const fits = settings.canvas.autoFit;
+  if (fits && graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
     fitView();
     overviewShown = true;
     overviewProvisional = store.loadingCanvas;
@@ -1229,7 +1237,7 @@ watch(graph, (g) => {
   }
 });
 
-const showMinimap = computed(() => graph.value.nodes.length > 0);
+const showMinimap = computed(() => settings.canvas.minimap && graph.value.nodes.length > 0);
 
 const minimapGeometry = computed(() => {
   const nodes = graph.value.nodes;

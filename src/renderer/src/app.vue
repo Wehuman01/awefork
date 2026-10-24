@@ -107,6 +107,7 @@
     <CompressDialog />
     <HistoryPanel />
     <FileMenu />
+    <SettingsPage />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -156,6 +157,7 @@ import FileMenu from "./components/file-menu.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
 import SessionCanvas from "./components/session-canvas.vue";
+import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
 import { isPathDrag } from "./files";
@@ -176,6 +178,7 @@ import {
   persistLayout,
   setMainView,
   togglePanel,
+  toggleSettings,
 } from "./layout";
 import {
   dismissActionError,
@@ -219,6 +222,13 @@ onUnmounted(() => {
 function onKeydown(event: KeyboardEvent): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();
+  // ⌘, is the platform convention for settings and works from anywhere,
+  // including while the panel's own search box has focus.
+  if (key === ",") {
+    event.preventDefault();
+    toggleSettings();
+    return;
+  }
   if (key === "h" && event.shiftKey) {
     event.preventDefault();
     toggleHistoryPanel();
