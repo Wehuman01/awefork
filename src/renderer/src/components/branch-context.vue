@@ -161,7 +161,7 @@
       <div class="ctx-head">
         <span class="ctx-icon">💬</span>
         <div class="ctx-headings">
-          <div class="ctx-title">{{ t("branch.contextTitle") }}</div>
+          <div class="ctx-title">{{ currentParallelGroup && showParallelResults ? pt("title") : t("branch.contextTitle") }}</div>
           <div class="ctx-sub" :title="selectedSession?.title ?? ''">
             <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || t("branch.pickNode") }}
           </div>
@@ -235,17 +235,32 @@
       <!-- The marker's meaning in words, on its own row: the head is already
            tight with the nav buttons, and squeezing this in turned the title
            into a vertical strip on a narrow pane. -->
-      <div v-if="isEmptyContext(store.selectedId)" class="ctx-cut-note">
+      <div v-if="isEmptyContext(store.selectedId) && !(currentParallelGroup && showParallelResults)" class="ctx-cut-note">
         <span class="ctx-cut-glyph">✂</span>
         <span>{{ t("cut.paneNote") }}</span>
       </div>
 
       <div v-if="store.messagesError" class="banner banner-error">{{ store.messagesError }}</div>
 
+      <div v-if="currentParallelGroup" class="parallel-reading-tabs">
+        <button type="button" :class="{ on: showParallelResults }" :aria-pressed="showParallelResults" @click="showParallelResults = true">✦ {{ pt("summaryTab") }}</button>
+        <button type="button" :class="{ on: !showParallelResults }" :aria-pressed="!showParallelResults" @click="showParallelResults = false">{{ pt("conversationTab") }}</button>
+      </div>
+      <ParallelResults
+        v-if="currentParallelGroup && showParallelResults"
+        :group="currentParallelGroup"
+        :summary-model-label="parallelSummaryModelLabel"
+        @open="openParallelSource"
+        @compare="compareParallelSources"
+        @summarize="summarizeCurrentGroup"
+        @retry="retryParallelSource"
+      />
       <MessageList
-        v-if="selectedSession"
+        v-else-if="selectedSession"
         :session="selectedSession"
         :messages="paneMessages"
+        :collapsed-user-message-id="parallelSummaryInputId"
+        :collapsed-user-message-label="pt('summaryInput')"
         :running="isRunning"
         :stream-parts="store.streamParts"
         :error="null"
@@ -311,6 +326,8 @@
         v-if="selectedSession"
         ref="chatInputEl"
         :running="isRunning"
+        :parallel-sending="parallelSending || (showParallelResults && parallelRoundBusy)"
+        :backend="store.activeBackend"
         :model="paneModel"
         :models="store.models"
         :favorite-models="store.favoriteModels"
@@ -318,6 +335,7 @@
         :allow-attachments="store.capabilities.attachments"
         :context="paneContextUsage"
         :can-compress="store.capabilities.compress"
+        :send-parallel="sendParallel"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
@@ -335,6 +353,8 @@ import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
+import { parallelGroupBusy } from "../parallel-groups";
+import { pt } from "../parallel-i18n";
 import {
   abortRun,
   abortRunFor,
@@ -344,6 +364,7 @@ import {
   compareWithParent,
   composerModelFor,
   compressSession,
+  enterCompare,
   exitCompare,
   exportBranchMarkdown,
   inlineHostVisible,
@@ -353,15 +374,19 @@ import {
   paneContextUsage,
   paneMessages,
   paneTurn,
+  parallelGroupForSession,
+  retryParallelTarget,
   retryTurn,
   selectedSession,
   selectSession,
   selectTurn,
   sendComparePrompt,
   sendPanePrompt,
+  sendParallelPrompt,
   setPaneModel,
   stepTurn,
   store,
+  summarizeParallelGroup,
   tagBg,
   tagColor,
   tagsOf,
@@ -375,6 +400,7 @@ import CompareComposer from "./compare-composer.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import InteractionInline from "./interaction-inline.vue";
 import MessageList from "./message-list.vue";
+import ParallelResults from "./parallel-results.vue";
 
 const pane = computed(() => paneTurn.value);
 
@@ -395,6 +421,58 @@ function toggleMark(): void {
 const selectedTags = computed(() => (store.selectedId ? tagsOf(store.selectedId) : []));
 
 const chatInputEl = ref<{ focus: () => void } | null>(null);
+const parallelSending = ref(false);
+const currentParallelGroup = computed(() =>
+  parallelGroupForSession(store.activeBackend, store.selectedId),
+);
+const showParallelResults = ref(true);
+const parallelSummaryInputId = computed(() => {
+  const group = currentParallelGroup.value;
+  if (!group?.summarySessionId || group.summarySessionId !== store.selectedId) return null;
+  return (
+    store.messagesBySession[group.summarySessionId]?.find((message) => message.role === "user")
+      ?.id ?? null
+  );
+});
+const parallelRoundBusy = computed(() =>
+  Boolean(currentParallelGroup.value && parallelGroupBusy(currentParallelGroup.value)),
+);
+const parallelSummaryModelLabel = computed(() => {
+  const model = currentParallelGroup.value?.settings.model;
+  if (!model) return t("input.parallelDefaultSummaryModel");
+  return (
+    store.models.find(
+      (item) => item.providerId === model.providerId && item.modelId === model.modelId,
+    )?.modelName ?? model.modelId
+  );
+});
+watch(
+  () => [store.selectedId, currentParallelGroup.value?.id] as const,
+  () => {
+    const group = currentParallelGroup.value;
+    showParallelResults.value = Boolean(
+      group &&
+        (store.selectedId === group.anchorSessionId || store.selectedId === group.summarySessionId),
+    );
+  },
+  { immediate: true },
+);
+async function openParallelSource(sessionId: string): Promise<void> {
+  const summary = currentParallelGroup.value?.summarySessionId === sessionId;
+  await selectSession(sessionId);
+  showParallelResults.value = summary;
+}
+function compareParallelSources(sessionIds: [string, string]): void {
+  void enterCompare(sessionIds[0], sessionIds[1]);
+}
+function summarizeCurrentGroup(): void {
+  const group = currentParallelGroup.value;
+  if (group) void summarizeParallelGroup(group.id);
+}
+function retryParallelSource(targetId: string): void {
+  const group = currentParallelGroup.value;
+  if (group) void retryParallelTarget(group.id, targetId);
+}
 // a new conversation landed: the fresh session is selected and mounted by now — put the
 // caret in the pane composer so its first prompt starts with a keystroke.
 watch(
@@ -709,6 +787,21 @@ const turnMeta = computed(() => {
 
 function send(text: string, attachments: PromptAttachment[]): void {
   void sendPanePrompt(text, attachments);
+}
+
+async function sendParallel(
+  text: string,
+  attachments: PromptAttachment[],
+  targets: readonly (ModelChoice | null)[],
+  summary: { model: ModelChoice | null; length: "brief" | "standard" },
+): Promise<boolean> {
+  if (parallelSending.value) return false;
+  parallelSending.value = true;
+  try {
+    return await sendParallelPrompt(targets, text, attachments, summary);
+  } finally {
+    parallelSending.value = false;
+  }
 }
 
 function abort(): void {

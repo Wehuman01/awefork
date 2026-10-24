@@ -49,7 +49,87 @@
         :title="previewing ? t('input.backToEdit') : t('input.previewTitle')"
         @click="togglePreview"
         >{{ previewing ? t("input.edit") : t("input.preview") }}</button>
+      <button
+        type="button"
+        v-if="canUseParallelModels"
+        class="parallel-toggle"
+        :class="{ on: parallelMode }"
+        :disabled="busy"
+        :aria-pressed="parallelMode"
+        @click="toggleParallelMode"
+      >⇄ {{ t("input.parallelMode") }}</button>
     </div>
+    <fieldset v-if="parallelMode && canUseParallelModels" class="parallel-panel parallel-composer" :disabled="busy">
+      <div class="parallel-target-list">
+        <span v-for="(choice, index) in parallelModels" :key="modelKey(choice)" class="parallel-model-chip">
+          <button
+            type="button"
+            class="parallel-target-settings"
+            :title="t('input.parallelModelSettings')"
+            :aria-expanded="editingTarget === index"
+            @click="editingTarget = editingTarget === index ? null : index"
+          >
+            <span class="parallel-model-index">{{ index + 1 }}</span>
+            <span class="parallel-model-name" :title="modelLabel(choice)">{{ modelLabel(choice) }}</span>
+            <span class="parallel-target-variant">{{ choice?.variant || t('input.parallelDefaultVariant') }}</span>
+          </button>
+          <button
+            v-if="parallelModels.length > 1"
+            type="button"
+            :title="t('input.parallelRemoveModel')"
+            @click="removeParallelModel(index)"
+          >×</button>
+        </span>
+        <button
+          v-if="parallelModels.length < 4"
+          type="button"
+          class="parallel-add-model"
+          :aria-expanded="modelMenuOpen"
+          @click="modelMenuOpen = !modelMenuOpen"
+        >＋ {{ t("input.parallelAddModel") }}</button>
+      </div>
+      <div v-if="editingTarget !== null && !busy" class="parallel-target-options">
+        <span>{{ modelLabel(parallelModels[editingTarget] ?? null) }}</span>
+        <VariantPicker
+          :model="parallelModels[editingTarget] ?? null"
+          :models="models"
+          @select="setParallelVariant(editingTarget, $event)"
+        />
+      </div>
+      <div v-if="modelMenuOpen && !busy" class="parallel-model-menu">
+        <input v-model="modelSearch" type="search" :placeholder="t('input.parallelSearchModel')" :aria-label="t('input.parallelSearchModel')" />
+        <button
+          v-for="option in availableParallelModels"
+          :key="`${option.providerId}:${option.modelId}`"
+          type="button"
+          @click="addParallelModel(option)"
+        ><strong>{{ option.modelName || option.modelId }}</strong><span class="parallel-provider">{{ option.providerName }}</span></button>
+        <p v-if="availableParallelModels.length === 0">{{ t("input.parallelNoModels") }}</p>
+      </div>
+      <button
+        type="button"
+        class="parallel-summary-entry"
+        :aria-expanded="summaryOptionsOpen"
+        @click="summaryOptionsOpen = !summaryOptionsOpen"
+      >
+        <span class="parallel-summary-current" :title="modelLabel(summaryModel)">✦ {{ t("input.parallelSummaryWith") }} · {{ modelLabel(summaryModel) }}</span>
+        <span>{{ t("input.parallelSummarySettings") }} {{ summaryOptionsOpen ? "▴" : "▾" }}</span>
+      </button>
+      <div v-if="summaryOptionsOpen && !busy" class="parallel-summary-options">
+        <ModelPicker
+          :model-value="summaryModel"
+          :models="models"
+          :favorite-models="favoriteModels"
+          :recent-models="recentModels"
+          :title="t('input.parallelSummaryWith')"
+          @update:model-value="setSummaryModel"
+          @toggle-favorite="$emit('toggle-favorite', $event)"
+        />
+        <span class="parallel-summary-label">{{ t("input.parallelSummaryLength") }}</span>
+        <button type="button" :class="{ on: summaryLength === 'brief' }" @click="summaryLength = 'brief'">{{ t("input.parallelBrief") }}</button>
+        <button type="button" :class="{ on: summaryLength === 'standard' }" @click="summaryLength = 'standard'">{{ t("input.parallelStandard") }}</button>
+      </div>
+    </fieldset>
     <div v-if="attachments.length > 0 || notice" class="chat-input-atts">
       <span v-for="a in attachments" :key="a.id" class="att-chip">
         <img v-if="a.mime.startsWith('image/')" :src="a.dataUrl" class="att-thumb" alt="" />
@@ -64,7 +144,7 @@
       ref="textareaEl"
       v-model="text"
       :placeholder="inputPlaceholder"
-      :disabled="running"
+      :disabled="busy"
       rows="2"
       @keydown.enter.exact="onEnterKey"
       @keydown.tab.prevent="onTabKey"
@@ -75,6 +155,7 @@
       <p v-else class="chat-input-preview-empty">{{ t("input.previewEmpty") }}</p>
     </div>
     <div class="chat-input-foot">
+      <template v-if="!parallelMode">
       <ModelPicker
         :model-value="model"
         :models="models"
@@ -85,7 +166,9 @@
         @toggle-favorite="$emit('toggle-favorite', $event)"
       />
       <VariantPicker :model="model" :models="models" @select="onVariantPicked" />
-      <button v-if="!running" type="submit" class="send" :disabled="!text.trim()">{{ t("input.send") }}</button>
+      </template>
+      <span v-else class="parallel-send-hint">{{ t("input.parallelSendCount", { n: parallelModels.length }) }}</span>
+      <button v-if="!running" type="submit" class="send" :disabled="!text.trim() || busy || (parallelMode && parallelModels.length < 2)">{{ parallelMode ? t("input.parallelSend", { n: parallelModels.length }) : t("input.send") }}</button>
       <button v-else type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
     </div>
   </form>
@@ -94,6 +177,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
+import type { BackendId } from "../../../shared/backend";
 import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
 import type { ContextUsage } from "../context-usage";
@@ -106,6 +190,7 @@ import {
   type TextEdit,
   wrapCodeFence,
 } from "../input-editing";
+import type { ParallelSummarySettings } from "../state";
 import { MarkdownView } from "./markdown-view";
 import ModelPicker from "./model-picker.vue";
 import VariantPicker from "./variant-picker.vue";
@@ -113,10 +198,20 @@ import VariantPicker from "./variant-picker.vue";
 const props = withDefaults(
   defineProps<{
     running: boolean;
+    parallelSending?: boolean;
+    sendParallel?: (
+      text: string,
+      attachments: PromptAttachment[],
+      targets: readonly (ModelChoice | null)[],
+      summary: ParallelSummarySettings,
+    ) => Promise<boolean>;
+    backend: BackendId;
     model: ModelChoice | null;
     models: readonly ModelOption[];
     /** Backend capability gate: codex takes no attachments at all. */
     allowAttachments?: boolean;
+    /** Hide parallel prompting when the backend cannot select models. */
+    allowModelPicker?: boolean;
     /** Starred models for the picker's Favorites group. */
     favoriteModels?: readonly ModelChoice[];
     /** Recent hand-picked models for the picker's Recent group. */
@@ -128,10 +223,12 @@ const props = withDefaults(
   }>(),
   {
     allowAttachments: true,
+    allowModelPicker: true,
     favoriteModels: () => [],
     recentModels: () => [],
     context: null,
     canCompress: false,
+    parallelSending: false,
   },
 );
 const emit = defineEmits<{
@@ -149,7 +246,33 @@ const attachments = ref<DraftAttachment[]>([]);
 const dragOver = ref(false);
 const notice = ref("");
 const previewing = ref(false);
+const parallelMode = ref(false);
+const parallelModels = ref<(ModelChoice | null)[]>([]);
+const modelMenuOpen = ref(false);
+const modelSearch = ref("");
+const summaryOptionsOpen = ref(false);
+const summaryModel = ref<ModelChoice | null>(null);
+const editingTarget = ref<number | null>(null);
+const summaryLength = ref<ParallelSummarySettings["length"]>("brief");
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+let preferenceBackend: BackendId | null = null;
+
+const busy = computed(() => props.running || props.parallelSending);
+const canUseParallelModels = computed(
+  () => props.allowModelPicker && !!props.sendParallel && props.models.length > 0,
+);
+const availableParallelModels = computed(() => {
+  const query = modelSearch.value.trim().toLocaleLowerCase();
+  return props.models.filter((option) => {
+    const key = modelKey(option);
+    if (parallelModels.value.some((choice) => choice !== null && modelKey(choice) === key))
+      return false;
+    if (!query) return true;
+    return `${option.modelName} ${option.modelId} ${option.providerName}`
+      .toLocaleLowerCase()
+      .includes(query);
+  });
+});
 
 // Grow the box with the draft instead of scrolling inside it; two rows is the
 // floor and roughly a half pane the ceiling.
@@ -165,7 +288,108 @@ function fitTextarea(): void {
 watch(text, () => {
   void nextTick(fitTextarea);
 });
-onMounted(fitTextarea);
+function loadParallelPreferences(): void {
+  preferenceBackend = props.backend;
+  try {
+    const raw = localStorage.getItem(`awefork:parallel:${props.backend}`);
+    if (!raw) {
+      summaryModel.value = null;
+      summaryLength.value = "brief";
+      return;
+    }
+    const saved = JSON.parse(raw) as { model?: ModelChoice | null; length?: string };
+    summaryModel.value = saved.model ?? null;
+    summaryLength.value = saved.length === "standard" ? "standard" : "brief";
+  } catch {
+    summaryModel.value = null;
+    summaryLength.value = "brief";
+  }
+}
+
+function persistParallelPreferences(): void {
+  if (preferenceBackend !== props.backend) return;
+  try {
+    localStorage.setItem(
+      `awefork:parallel:${props.backend}`,
+      JSON.stringify({
+        model: summaryModel.value,
+        length: summaryLength.value,
+      }),
+    );
+  } catch {
+    // Settings remain available for this window when local storage is unavailable.
+  }
+}
+
+onMounted(() => {
+  loadParallelPreferences();
+  fitTextarea();
+});
+watch(
+  () => props.backend,
+  () => {
+    parallelMode.value = false;
+    parallelModels.value = [];
+    modelMenuOpen.value = false;
+    loadParallelPreferences();
+  },
+);
+watch([summaryModel, summaryLength], persistParallelPreferences);
+watch(canUseParallelModels, (available) => {
+  if (!available) parallelMode.value = false;
+});
+watch(busy, (value) => {
+  if (!value) return;
+  modelMenuOpen.value = false;
+  editingTarget.value = null;
+});
+
+function modelKey(model: ModelChoice | ModelOption | null): string {
+  return model ? `${model.providerId}:${model.modelId}` : "default";
+}
+
+function modelLabel(model: ModelChoice | null): string {
+  if (!model) return t("input.parallelDefaultModel");
+  const option = props.models.find((item) => modelKey(item) === modelKey(model));
+  return option?.modelName || option?.modelId || model.modelId;
+}
+
+function toggleParallelMode(): void {
+  if (busy.value || !canUseParallelModels.value) return;
+  parallelMode.value = !parallelMode.value;
+  modelMenuOpen.value = false;
+  if (parallelMode.value && parallelModels.value.length === 0) {
+    parallelModels.value = [props.model ? { ...props.model } : null];
+  }
+}
+
+function addParallelModel(option: ModelOption): void {
+  if (busy.value || parallelModels.value.length >= 4) return;
+  parallelModels.value.push({ providerId: option.providerId, modelId: option.modelId });
+  modelMenuOpen.value = false;
+  modelSearch.value = "";
+}
+
+function removeParallelModel(index: number): void {
+  if (busy.value) return;
+  parallelModels.value.splice(index, 1);
+  editingTarget.value = null;
+}
+
+function setParallelVariant(index: number | null, variant: string | null): void {
+  if (busy.value || index === null) return;
+  const model = parallelModels.value[index];
+  if (!model) return;
+  const next = { ...model };
+  if (variant) next.variant = variant;
+  else delete next.variant;
+  parallelModels.value[index] = next;
+}
+
+function setSummaryModel(model: ModelChoice | null): void {
+  if (busy.value) return;
+  summaryModel.value = model ? { ...model } : null;
+}
 
 const inputPlaceholder = computed(() => {
   if (props.running) return t("input.placeholderRunning");
@@ -206,11 +430,14 @@ const contextMeter = computed(() => {
 
 /** The selected model's capability, when the catalog already knows it. */
 const canAttach = computed(() => {
-  if (!props.model) return true;
-  const option = props.models.find(
-    (m) => m.providerId === props.model?.providerId && m.modelId === props.model?.modelId,
-  );
-  return option ? option.attachment : true;
+  const choices = parallelMode.value ? parallelModels.value : [props.model];
+  return choices.every((choice) => {
+    if (!choice) return true;
+    const option = props.models.find(
+      (item) => item.providerId === choice.providerId && item.modelId === choice.modelId,
+    );
+    return option ? option.attachment : true;
+  });
 });
 
 function flashNotice(message: string): void {
@@ -365,10 +592,42 @@ function onEnterKey(event: KeyboardEvent): void {
   submit();
 }
 
-function submit(): void {
+async function submit(): Promise<void> {
   const value = text.value.trim();
-  if (!value || props.running) return;
-  emit("send", value, toPromptAttachments(attachments.value));
+  if (!value || busy.value) return;
+  if (
+    parallelMode.value &&
+    !canAttach.value &&
+    attachments.value.some((attachment) => attachment.mime.startsWith("image/"))
+  ) {
+    flashNotice(t("input.parallelNoImageSupport"));
+    return;
+  }
+  const promptAttachments = toPromptAttachments(attachments.value);
+  if (parallelMode.value) {
+    if (parallelModels.value.length < 2) {
+      flashNotice(t("input.parallelNeedTwo"));
+      return;
+    }
+    if (!props.sendParallel) return;
+    try {
+      const accepted = await props.sendParallel(
+        value,
+        promptAttachments,
+        [...parallelModels.value],
+        {
+          model: summaryModel.value ? { ...summaryModel.value } : null,
+          length: summaryLength.value,
+        },
+      );
+      if (!accepted) return;
+    } catch (error) {
+      flashNotice(error instanceof Error ? error.message : String(error));
+      return;
+    }
+  } else {
+    emit("send", value, promptAttachments);
+  }
   text.value = "";
   attachments.value = [];
   previewing.value = false;
@@ -381,3 +640,107 @@ function focus(): void {
 
 defineExpose({ focus });
 </script>
+
+<style scoped>
+.parallel-composer {
+  margin: 0;
+  min-width: 0;
+  padding: 8px;
+}
+
+.parallel-composer .parallel-target-list {
+  gap: 5px;
+}
+
+.parallel-composer .parallel-model-chip {
+  max-width: 100%;
+  gap: 0;
+  padding: 0 4px 0 0;
+}
+
+.parallel-composer .parallel-model-chip .parallel-target-settings {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  width: auto;
+  height: auto;
+  border-radius: 999px;
+  gap: 5px;
+  padding: 4px 5px;
+  color: inherit;
+}
+
+.parallel-composer .parallel-model-chip .parallel-target-settings:hover {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.parallel-target-variant {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.parallel-target-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 2px 0;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.parallel-target-options > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parallel-summary-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 7px;
+  border-top: 1px solid var(--line);
+  padding: 7px 1px 0;
+  text-align: left;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+}
+
+.parallel-summary-entry > span:last-child {
+  flex: 0 0 auto;
+  color: var(--primary-deep);
+}
+
+.parallel-summary-current {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.parallel-composer .parallel-summary-options {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.parallel-composer .parallel-summary-options :deep(.mp) {
+  flex-basis: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.parallel-composer .parallel-summary-options :deep(.mp-btn) {
+  max-width: 100%;
+}
+
+.parallel-composer:disabled {
+  opacity: 0.65;
+}
+</style>
