@@ -157,7 +157,7 @@ describe("createCodexAdapter messages()", () => {
       role: "assistant",
       text: "登录接口在 src/auth.ts",
       thinking: "先读代码\n\n规划步骤",
-      toolNames: ["shell", "aweshelf/search"],
+      toolNames: ["shell · rg login", "aweshelf/search"],
       createdAt: 1726000000000,
       completedAt: 1726000042000,
       finish: "stop",
@@ -1368,7 +1368,7 @@ describe("createCodexAdapter notification mapping", () => {
         messageId: "turn-5",
         partId: "it-1",
         kind: "tool",
-        text: "shell",
+        text: "shell · npm test",
         startedAt: 1000,
         endedAt: null,
       },
@@ -1378,7 +1378,7 @@ describe("createCodexAdapter notification mapping", () => {
         messageId: "turn-5",
         partId: "it-1",
         kind: "tool",
-        text: "shell",
+        text: "shell · npm test",
         startedAt: null,
         endedAt: 2000,
       },
@@ -1389,6 +1389,69 @@ describe("createCodexAdapter notification mapping", () => {
         partId: "it-2",
         kind: "tool",
         text: "patch",
+        startedAt: 3000,
+        endedAt: null,
+      },
+    ]);
+  });
+
+  it("previews the command in shell chips: argv array, missing command, truncation", async () => {
+    const { notify, events } = await subscribedAdapter({});
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-6",
+      itemId: "c1",
+      startedAtMs: 1000,
+      // Some codex builds send argv words, not a joined line.
+      item: { type: "commandExecution", id: "c1", command: ["rg", "rate", "limit"] },
+    });
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-6",
+      itemId: "c2",
+      startedAtMs: 2000,
+      // No readable command falls back to the bare tool name.
+      item: { type: "commandExecution", id: "c2" },
+    });
+    notify("item/started", {
+      threadId: "s1",
+      turnId: "turn-6",
+      itemId: "c3",
+      startedAtMs: 3000,
+      item: {
+        type: "commandExecution",
+        id: "c3",
+        command: "rg --json --hidden -g '!node_modules' pattern src/shared",
+      },
+    });
+    expect(events.filter((e) => e.type === "message.part")).toEqual([
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-6",
+        partId: "c1",
+        kind: "tool",
+        text: "shell · rg rate limit",
+        startedAt: 1000,
+        endedAt: null,
+      },
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-6",
+        partId: "c2",
+        kind: "tool",
+        text: "shell",
+        startedAt: 2000,
+        endedAt: null,
+      },
+      {
+        type: "message.part",
+        sessionId: "s1",
+        messageId: "turn-6",
+        partId: "c3",
+        kind: "tool",
+        text: "shell · rg --json --hidden -g '!…",
         startedAt: 3000,
         endedAt: null,
       },

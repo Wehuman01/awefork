@@ -139,7 +139,8 @@ interface CodexItem {
    */
   content?: (string | { text?: string; type?: string; path?: string })[];
   summary?: string[];
-  command?: string;
+  /** Joined command line, or argv words — codex builds differ. */
+  command?: string | string[];
   server?: string;
   tool?: string;
 }
@@ -1163,12 +1164,14 @@ function emitCodexNotification(
 
 /**
  * Tool chip names for ChatMessage.toolNames (first-seen order) and for the
- * live tool parts streamed while a turn runs.
+ * live tool parts streamed while a turn runs. commandExecution carries a
+ * short command preview — a stack of identical "shell" chips says nothing
+ * about what the turn is doing.
  */
 function toolNameOfItem(item: CodexItem): string | null {
   switch (item.type) {
     case "commandExecution":
-      return "shell";
+      return commandChipLabel(item.command);
     case "fileChange":
       return "patch";
     case "mcpToolCall":
@@ -1185,6 +1188,19 @@ function toolNameOfItem(item: CodexItem): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * "shell · rg login" — the command collapsed to one line, truncated to a
+ * pill-sized preview. Some codex builds send argv as string[], others as a
+ * joined string; either is accepted. No readable command falls back to the
+ * bare tool name.
+ */
+function commandChipLabel(command?: string | string[]): string {
+  const raw = Array.isArray(command) ? command.join(" ") : command;
+  const line = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  if (!line) return "shell";
+  return `shell · ${line.length > 24 ? `${line.slice(0, 24)}…` : line}`;
 }
 
 /**
