@@ -92,6 +92,15 @@ export interface Settings {
   updates: {
     checkOnLaunch: boolean;
   };
+  /**
+   * Experiments: features that work but may still change shape or be pulled
+   * back. Defaults are off; a feature graduates by moving its rows into the
+   * regular sections and deleting the switch here.
+   */
+  labs: {
+    /** The file browsing system: middle-column browser, sidebar tree, dock jumps. */
+    fileBrowser: boolean;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -116,6 +125,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },
+  labs: { fileBrowser: false },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,6 +162,7 @@ export function normalizeSettings(raw: unknown): Settings {
   const search = isRecord(root.search) ? root.search : {};
   const scopes = isRecord(search.scopes) ? search.scopes : {};
   const updates = isRecord(root.updates) ? root.updates : {};
+  const labs = isRecord(root.labs) ? root.labs : {};
   const d = DEFAULT_SETTINGS;
   return {
     appearance: {
@@ -202,6 +213,7 @@ export function normalizeSettings(raw: unknown): Settings {
       cap: pickNumber(search.cap, d.search.cap, 0, 10_000),
     },
     updates: { checkOnLaunch: pickBool(updates.checkOnLaunch, d.updates.checkOnLaunch) },
+    labs: { fileBrowser: pickBool(labs.fileBrowser, d.labs.fileBrowser) },
   };
 }
 

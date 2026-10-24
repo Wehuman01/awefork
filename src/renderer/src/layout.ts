@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { settings } from "./settings";
 
 /**
@@ -73,11 +73,25 @@ export const paletteOpen = ref(false);
 /** True while the floating settings page is up. */
 export const settingsOpen = ref(false);
 
-/** Which surface the middle column shows; the settings page owns the default. */
-export const mainView = ref<MainView>(settings.canvas.defaultView);
+/** Labs gate for the file browsing system; every files entry consults it. */
+export const fileBrowserEnabled = computed(() => settings.labs.fileBrowser);
+
+/** Which surface the middle column shows; the settings page owns the default,
+ *  and the files option only applies while the labs gate is on. */
+export const mainView = ref<MainView>(
+  fileBrowserEnabled.value && settings.canvas.defaultView === "files" ? "files" : "canvas",
+);
 
 /** Which surface the sidebar shows. */
 export const sidebarView = ref<SidebarView>("sessions");
+
+// Turning the experiment off mid-session folds every files surface back to
+// its session counterpart, so no dead view can stay on screen.
+watch(fileBrowserEnabled, (on) => {
+  if (on) return;
+  if (mainView.value === "files") mainView.value = "canvas";
+  if (sidebarView.value === "files") sidebarView.value = "sessions";
+});
 
 export function togglePalette(): void {
   paletteOpen.value = !paletteOpen.value;
@@ -97,7 +111,10 @@ export function setMainView(view: MainView): void {
   mainView.value = view;
 }
 
+/** No-op while the labs gate is off: dock/tree jump-ins must not resurrect
+ *  a hidden view. */
 export function openFilesView(): void {
+  if (!fileBrowserEnabled.value) return;
   mainView.value = "files";
 }
 

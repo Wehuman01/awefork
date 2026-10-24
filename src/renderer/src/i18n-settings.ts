@@ -42,6 +42,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "settings.groupAgents": { zh: "智能体", en: "Agents" },
   "settings.groupWorkbench": { zh: "工作台", en: "Workbench" },
   "settings.groupSystem": { zh: "系统", en: "System" },
+  "settings.groupLabs": { zh: "实验室", en: "Labs" },
 
   // ── section titles / descriptions ────────────────────────────────────
   "settings.appearance": { zh: "外观", en: "Appearance" },
@@ -323,6 +324,23 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Reset every setting to its default? Sessions, tags and pins are untouched.",
   },
   "settings.resetDone": { zh: "已恢复全部默认", en: "All settings reset" },
+
+  // ── labs ─────────────────────────────────────────────────────────────
+  "settings.labs": { zh: "实验室", en: "Labs" },
+  "settings.labsDesc": {
+    zh: "还在打磨的新功能。默认关闭，随时可能调整或下线。",
+    en: "New features still taking shape. Off by default; may change or be pulled back.",
+  },
+  "settings.labsFileBrowser": { zh: "文件浏览", en: "File browsing" },
+  "settings.labsFileBrowserDesc": {
+    zh: "中列文件浏览器、侧栏文件树和文件坞跳转。关闭时回到会话视图。",
+    en: "Middle-column browser, sidebar file tree and dock jumps. Off falls back to session views.",
+  },
+  "settings.labsNote": { zh: "关于实验室", en: "About Labs" },
+  "settings.labsNoteDesc": {
+    zh: "功能稳定后会从实验室毕业，进入正式分区；关闭开关不会丢失相关偏好。",
+    en: "Features graduate into the regular sections once stable; turning a switch off keeps its preferences.",
+  },
   "settings.sectionReset": { zh: "已恢复本节默认", en: "Section reset" },
   "settings.saved": { zh: "已保存", en: "Saved" },
 

@@ -10,6 +10,7 @@
         >{{ t("files.tabSessions") }}</button
       >
       <button
+        v-if="fileBrowserEnabled"
         type="button"
         class="side-tab"
         :class="{ on: sidebarView === 'files' }"
@@ -820,7 +821,7 @@ import {
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { listSep, t } from "../i18n";
-import { panels, persistLayout, setSidebarView, sidebarView } from "../layout";
+import { fileBrowserEnabled, panels, persistLayout, setSidebarView, sidebarView } from "../layout";
 import { settings } from "../settings";
 import {
   addDirectory,

@@ -941,6 +941,31 @@ function languageSection(): SectionDef {
   };
 }
 
+function labsSection(): SectionDef {
+  return {
+    id: "labs",
+    icon: "⚗",
+    group: t("settings.groupLabs"),
+    title: t("settings.labs"),
+    desc: t("settings.labsDesc"),
+    ...LOCAL_STORE(),
+    resettable: true,
+    rows: [
+      toggle(
+        "labs.fileBrowser",
+        t("settings.labsFileBrowser"),
+        t("settings.labsFileBrowserDesc"),
+        settings.labs.fileBrowser,
+        (next) => {
+          settings.labs.fileBrowser = next;
+        },
+      ),
+      info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""),
+    ],
+    keywords: "labs experiment 实验室 实验 experimental beta",
+  };
+}
+
 // ── assembled view ──────────────────────────────────────────────────
 
 const sections = computed<SectionDef[]>(() => {
@@ -966,6 +991,7 @@ const sections = computed<SectionDef[]>(() => {
     shortcutsSection(),
     storageSection(),
     updatesSection(),
+    labsSection(),
   ];
 });
 
@@ -992,6 +1018,7 @@ const navGroups = computed(() => {
     t("settings.groupAgents"),
     t("settings.groupWorkbench"),
     t("settings.groupSystem"),
+    t("settings.groupLabs"),
   ];
   const counts = new Map<string, number>();
   for (const section of sections.value) {
