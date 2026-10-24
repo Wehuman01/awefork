@@ -7036,9 +7036,18 @@ html[data-theme="dark"] ::selection {
 
 .fb-entries {
   flex: 1;
-  min-width: 0;
+  /* The listing keeps a floor even when the stored preview width is wider
+     than the shrunken body allows; the preview clamps to what is left. */
+  min-width: 240px;
+  flex-shrink: 0;
   overflow-y: auto;
   padding: 6px;
+}
+
+/* Keyboard walking needs a focus target; the rows are buttons already. */
+.fb-entries:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: -2px;
 }
 
 .fb-entries.grid {

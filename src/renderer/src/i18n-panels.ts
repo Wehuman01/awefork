@@ -612,9 +612,10 @@ Fix item 1 first: register the middleware once on the route group; one line clos
   "files.openFailed": { zh: "系统无法打开这个文件", en: "The system could not open this file" },
   "files.quickOpen": { zh: "在当前项目里快速查找文件", en: "Quick-find a file in this project" },
   "files.quickPlaceholder": {
-    zh: "快速打开：项目内的文件名 / 路径…",
-    en: "Quick open: file name / path in this project…",
+    zh: "快速打开：文件名 / 路径…",
+    en: "Quick open: file name / path…",
   },
+  "files.quickScope": { zh: "搜索范围：{dir}", en: "Search scope: {dir}" },
   "files.quickNoProject": { zh: "先选择一个项目", en: "Pick a project first" },
   "files.quickIncludeHidden": { zh: "搜索结果包含隐藏文件", en: "Include hidden files in results" },
   "files.quickHiddenShort": { zh: "隐藏", en: "hidden" },

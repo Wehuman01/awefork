@@ -1,6 +1,6 @@
 <template>
   <div v-if="tab" class="fb">
-    <div v-if="files.tabs.length > 1" class="fb-tabs" role="tablist" :aria-label="t('files.tabsLabel')">
+    <div class="fb-tabs" role="tablist" :aria-label="t('files.tabsLabel')">
       <button
         v-for="entry in files.tabs"
         :key="entry.id"
@@ -150,6 +150,12 @@
           @change="runQuickSearch"
         />{{ t("files.quickHiddenShort") }}
       </label>
+      <span
+        v-if="quickScopeLabel"
+        class="fb-quick-status"
+        :title="quickScope ?? undefined"
+        >{{ t("files.quickScope", { dir: quickScopeLabel }) }}</span
+      >
       <span v-if="tab.quickLoading" class="fb-quick-status">{{ t("files.searching") }}</span>
       <span v-else-if="quickErrorText" class="fb-quick-status err">{{ quickErrorText }}</span>
       <span v-else-if="tab.quickResults.length > 0" class="fb-quick-status">{{
@@ -176,7 +182,15 @@
     </div>
 
     <div class="fb-body" :class="{ 'fb-body-narrow': narrow }">
-      <div class="fb-entries" :class="files.view" @contextmenu.prevent>
+      <div
+        ref="entriesEl"
+        class="fb-entries"
+        :class="files.view"
+        tabindex="0"
+        @contextmenu.prevent
+        @keydown="onEntriesKeydown"
+        @scroll="onEntriesScroll"
+      >
         <p v-if="tab.loading" class="fb-state">{{ t("files.loading") }}</p>
         <p v-else-if="listError" class="fb-state err">{{ listError }}</p>
         <p v-else-if="tab.entries.length === 0" class="fb-state">{{ t("files.dirEmpty") }}</p>
@@ -276,9 +290,9 @@ import {
   quickSearch,
   refresh,
   revealEntry,
-  selectEntry,
   selectOrPreviewEntry,
   setFilter,
+  setListingScroll,
   setPreviewWidth,
   setQuickIncludeHidden,
   setView,
@@ -338,7 +352,9 @@ onBeforeUnmount(() => {
 
 /**
  * Drag the divider between the listing and the preview. The width is held
- * by the tab, so a tab comes back at the width it was left at.
+ * by the tab, so a tab comes back at the width it was left at. The body
+ * width is measured live so the listing keeps its floor however the window
+ * is resized mid-drag.
  */
 interface SplitDrag {
   move: (event: MouseEvent) => void;
@@ -356,11 +372,9 @@ function startSplitDrag(event: MouseEvent): void {
   event.preventDefault();
   const body = (event.currentTarget as HTMLElement).parentElement;
   if (!body) return;
-  // The rect is captured once: the body's right edge is fixed for the drag,
-  // so a window resize mid-drag cannot make the width jump.
   const rect = body.getBoundingClientRect();
   const move = (moveEvent: MouseEvent): void => {
-    setPreviewWidth(Math.round(rect.right - moveEvent.clientX));
+    setPreviewWidth(Math.round(rect.right - moveEvent.clientX), rect.width);
   };
   const up = (): void => {
     window.removeEventListener("mousemove", move);
@@ -387,11 +401,67 @@ function stepSelection(offset: number): void {
   if (target) selectOrPreviewEntry(target);
 }
 
+const entriesEl = ref<HTMLDivElement | null>(null);
+
+/** ↑/↓ walk the rows, Enter opens the selection, Backspace goes up. */
+function onEntriesKeydown(event: KeyboardEvent): void {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    stepSelection(1);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    stepSelection(-1);
+    return;
+  }
+  if (event.key === "Enter") {
+    const selected = tab.value?.selectedPath;
+    const entry = rows.value.find((row) => row.path === selected);
+    if (entry) {
+      event.preventDefault();
+      void openEntry(entry);
+    }
+    return;
+  }
+  if (event.key === "Backspace") {
+    event.preventDefault();
+    void goUp();
+  }
+}
+
+/** The listing's scroll offset, parked on the tab so switching restores it. */
+function onEntriesScroll(event: Event): void {
+  const el = event.target as HTMLElement | null;
+  if (el) setListingScroll(el.scrollTop);
+}
+
 // The path box mirrors the browsing directory until the user edits it.
 watch(
   () => tab.value?.browsing,
   (dir) => {
     pathInput.value = dir ?? "";
+  },
+);
+
+// A tab switch must also bring its own filter and quick-query text back to
+// the boxes — otherwise the listing is filtered by one tab while the box
+// still shows the other's text, and the filter looks broken.
+watch(
+  () => files.activeTabId,
+  () => {
+    filterInput.value = tab.value?.filter ?? "";
+    quickInput.value = tab.value?.quickQuery ?? "";
+  },
+);
+
+// The listing scrolls back where the tab left it once its rows are rendered.
+watch(
+  () => tab.value?.id,
+  async () => {
+    const top = tab.value?.scrollTop ?? 0;
+    await nextTick();
+    if (entriesEl.value) entriesEl.value.scrollTop = top;
   },
 );
 
@@ -459,17 +529,22 @@ const quickErrorText = computed(() => {
   }
 });
 
-/** Quick search is scoped to the project, never to the browsing directory. */
-const projectRoot = computed(() => store.selectedDirectory);
+/**
+ * Quick search is scoped to the tab's own browsing directory — the person is
+ * looking at one directory, and the search box should say so. The project
+ * root only fills in before the first browse has landed.
+ */
+const quickScope = computed(() => tab.value?.browsing ?? store.selectedDirectory);
+const quickScopeLabel = computed(() => (quickScope.value ? displayName(quickScope.value) : ""));
 
 const quickPlaceholder = computed(() =>
-  projectRoot.value ? t("files.quickPlaceholder") : t("files.quickNoProject"),
+  quickScope.value ? t("files.quickPlaceholder") : t("files.quickNoProject"),
 );
 
 const quickOpen = computed(() => (tab.value?.quickQuery ?? "").trim() !== "");
 
 function runQuickSearch(): void {
-  const root = projectRoot.value;
+  const root = quickScope.value;
   if (!root) {
     flashNotice(t("files.quickNoProject"));
     return;

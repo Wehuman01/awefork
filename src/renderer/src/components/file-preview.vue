@@ -81,10 +81,13 @@ const preview = computed(() => props.preview);
  * The bytes read fine but the browser could not decode them (a corrupt PNG,
  * an extension that lies about its format). That is not a read error, so it
  * is tracked here and shown through the error pane, which offers system open.
+ * The preview object is a fresh one on every request — re-clicking the same
+ * file after fixing it must clear the mark, so the watch keys on identity,
+ * not on the path (which would not change).
  */
 const imageBroken = ref(false);
 watch(
-  () => props.preview?.path,
+  () => props.preview,
   () => {
     imageBroken.value = false;
   },
@@ -97,9 +100,9 @@ function toggleZoom(): void {
   zoomed.value = !zoomed.value;
 }
 
-// A new file replaces the preview, so the enlargement cannot outlive it.
+// A new preview replaces the old one, so the enlargement cannot outlive it.
 watch(
-  () => props.preview?.path,
+  () => props.preview,
   () => {
     zoomed.value = false;
   },
