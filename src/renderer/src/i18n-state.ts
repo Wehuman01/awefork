@@ -33,6 +33,10 @@ export const dict: Record<string, Entry> = {
     zh: "所选模型重复，请调整后再发送。",
     en: "The selected models include a duplicate. Adjust the list and try again.",
   },
+  "state.parallelGroupBusy": {
+    zh: "这个会话上一轮多模型发送还没有结束，稍后再试。",
+    en: "A parallel round from this session is still running. Try again once it settles.",
+  },
   "state.parallelForkFailed": {
     zh: "无法为所选模型创建回答分支。",
     en: "Could not create answer branches for the selected models.",

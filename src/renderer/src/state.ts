@@ -4547,7 +4547,11 @@ export async function sendParallelPrompt(
   const prompt = text.trim();
   if (!anchorSessionId || !prompt || targets.length < 2 || targets.length > 4) return false;
   const existing = parallelGroupForSession(backend, anchorSessionId);
-  if (existing && parallelGroupBusy(existing)) return false;
+  if (existing && parallelGroupBusy(existing)) {
+    // Without this the composer's send just does nothing while a round is in flight.
+    state.actionError = t("state.parallelGroupBusy");
+    return false;
+  }
   if (
     new Set(targets.map((model) => (model ? modelKey(model) : "default"))).size !== targets.length
   ) {
