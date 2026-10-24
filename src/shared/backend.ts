@@ -73,6 +73,48 @@ export function isBackendId(value: unknown): value is BackendId {
 }
 
 /**
+ * The npm package that ships each CLI's latest version — the one source the
+ * one-click installer and every missing-CLI hint quote. zcode ships with the
+ * ZCode desktop app, so it has no entry.
+ *
+ * pi moved scopes: @mariozechner/pi-coding-agent froze at 0.73.1
+ * (2026-05-07) and the project publishes @earendil-works/pi-coding-agent
+ * (1.x, node ≥ 22.19) instead — "latest" lives there now. The old scope
+ * stays as `legacyPkg` because a global swap must uninstall it first: two
+ * packages both providing the `pi` bin would fight over the symlink, which
+ * is why `pi update --self` uninstalls before it installs too.
+ */
+export interface AgentPackage {
+  /** What `npm install -g <pkg>@latest` pulls. */
+  readonly pkg: string;
+  /** Old scope to uninstall before installing `pkg`, when the CLI moved. */
+  readonly legacyPkg?: string;
+}
+
+export const AGENT_PACKAGES: Partial<Record<BackendId, AgentPackage>> = {
+  opencode: { pkg: "opencode-ai" },
+  codex: { pkg: "@openai/codex" },
+  pi: {
+    pkg: "@earendil-works/pi-coding-agent",
+    legacyPkg: "@mariozechner/pi-coding-agent",
+  },
+};
+
+/** The npm package for a backend, or null when it has no one-click install. */
+export function agentPackage(backend: BackendId): AgentPackage | null {
+  return AGENT_PACKAGES[backend] ?? null;
+}
+
+/**
+ * "Install it with: npm install -g <pkg>" — the hint every missing-CLI
+ * message quotes. null for the backends npm cannot install (zcode).
+ */
+export function agentInstallHint(backend: BackendId): string | null {
+  const agent = agentPackage(backend);
+  return agent === null ? null : `Install it with: npm install -g ${agent.pkg}`;
+}
+
+/**
  * Per-backend feature surface. The renderer hides affordances the backend
  * lacks (attach button, turn delete) instead of surfacing errors on click.
  * opencode's flags live in the agent descriptor the probed CLI version

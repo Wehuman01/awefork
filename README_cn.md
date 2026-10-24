@@ -122,7 +122,7 @@ opencode 的易变协议事实保存在 `src/shared/agents/opencode.json`（1.18
 | opencode 1.18–1.19 | HTTP + SSE | 支持 | 支持 | 支持 | descriptor 驱动的 v1 协议 |
 | opencode 2.0–2.1 | 鉴权 `/api` + events | 支持 | 支持 | 支持 | 不支持删除单条消息 |
 | Codex | `codex app-server` JSON-RPC | 支持 | 支持 | 不支持 | 合并 aweswitch 的多账号 home |
-| pi | JSONL sessions + RPC | 支持 | 不支持 | 不支持 | `npm install -g @mariozechner/pi-coding-agent` |
+| pi | JSONL sessions + RPC | yes | no | no | `npm install -g @earendil-works/pi-coding-agent` |
 | ZCode | app-server / v4 commands | 支持 | 支持（软删除） | 不支持 | 自动发现 macOS 应用，或设置 `AWEFORK_ZCODE_CLI` |
 
 四个后端都支持分叉、续聊、流式回复和会话压缩。图片、文本与文档附件按后端能力显示；逐回合文件改动仍只支持 opencode。opencode 版本不在 `≥1.18.0, <1.19.0` 与 `≥2.0.0, <2.2.0` 区间时，切换器会显示警告。

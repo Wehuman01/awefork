@@ -2,12 +2,15 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { app, BrowserWindow } from "electron";
+import { agentInstallHint } from "../shared/backend.js";
 import { CODEX_NOT_LOGGED_IN_MESSAGE } from "../shared/codex-adapter.js";
 import { type CodexJsonRpc, createCodexJsonRpc } from "./codex-jsonrpc.js";
 import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 
 const execFileAsync = promisify(execFile);
+
+const CODEX_INSTALL_HINT = agentInstallHint("codex") ?? "";
 
 const NOT_LOGGED_IN_MESSAGE = CODEX_NOT_LOGGED_IN_MESSAGE;
 
@@ -147,7 +150,7 @@ export async function ensureCodexServer(
     if (spawnFailure.error) {
       client.dispose();
       throw new Error(
-        `Could not start codex app-server: ${spawnFailure.error.message}. Is the "codex" CLI on PATH? Install it with: npm install -g @openai/codex`,
+        `Could not start codex app-server: ${spawnFailure.error.message}. Is the "codex" CLI on PATH? ${CODEX_INSTALL_HINT}`,
       );
     }
     if (child.exitCode !== null || !slot.alive) {
@@ -157,9 +160,7 @@ export async function ensureCodexServer(
       // Without this the handshake below would first wait out its 5s
       // initialize timeout before the loop noticed the dead child.
       if (isCmdNotFound(child.exitCode)) {
-        throw new Error(
-          missingCliMessage("codex app-server", "Install it with: npm install -g @openai/codex"),
-        );
+        throw new Error(missingCliMessage("codex app-server", CODEX_INSTALL_HINT));
       }
       const detail = stderrTail.trim();
       throw new Error(
@@ -212,9 +213,7 @@ export async function ensureCodexServer(
         client.dispose();
         killChild(child);
         markDead();
-        throw new Error(
-          missingCliMessage("codex app-server", "Install it with: npm install -g @openai/codex"),
-        );
+        throw new Error(missingCliMessage("codex app-server", CODEX_INSTALL_HINT));
       }
       // Handshake-level failures (timeout while the CLI warms up) retry until
       // the deadline; the spawn/exit checks above break the loop early.

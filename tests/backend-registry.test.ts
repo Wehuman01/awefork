@@ -38,7 +38,7 @@ const mocks = vi.hoisted(() => ({
   ensureZcodeServer: vi.fn(),
   stopZcodeServer: vi.fn(),
   readZcodeProviderConfig: vi.fn(),
-  isPiInstalled: vi.fn(),
+  probePi: vi.fn(),
   piNodeSeams: vi.fn(),
   stopPiChildren: vi.fn(),
 }));
@@ -57,7 +57,7 @@ vi.mock("../src/main/zcode-server.js", () => ({
 }));
 
 vi.mock("../src/main/pi-server.js", () => ({
-  isPiInstalled: mocks.isPiInstalled,
+  probePi: mocks.probePi,
   piNodeSeams: mocks.piNodeSeams,
   stopPiChildren: mocks.stopPiChildren,
 }));
@@ -408,7 +408,7 @@ describe("switcher data and selection", () => {
     await writeBackendSelection(join(userDataDir, "settings.json"), "codex");
     mocks.isCodexInstalled.mockResolvedValue(false);
     mocks.probeZcode.mockResolvedValue({ installed: false, version: null });
-    mocks.isPiInstalled.mockResolvedValue(false);
+    mocks.probePi.mockResolvedValue({ installed: false, version: null });
 
     await expect(registry.listBackends()).resolves.toEqual({
       selected: "codex",
@@ -424,6 +424,30 @@ describe("switcher data and selection", () => {
         { id: "pi", label: "pi", installed: false, version: null, versionWarning: null },
         { id: "zcode", label: "zcode", installed: false, version: null, versionWarning: null },
       ],
+    });
+  });
+
+  it("carries pi's probed version and warns when it predates the verified RPC surface", async () => {
+    mocks.probeZcode.mockResolvedValue({ installed: false, version: null });
+    const piRow = async () =>
+      (await registry.listBackends()).backends.find((entry) => entry.id === "pi");
+
+    mocks.probePi.mockResolvedValue({ installed: true, version: "0.55.3" });
+    expect(await piRow()).toMatchObject({
+      installed: true,
+      version: "0.55.3",
+      versionWarning: null,
+    });
+
+    mocks.probePi.mockResolvedValue({ installed: true, version: "0.40.0" });
+    expect((await piRow())?.versionWarning).toMatch(/older than 0\.55\.3/);
+
+    // The 1.x line under the new scope is the current latest: no warning.
+    mocks.probePi.mockResolvedValue({ installed: true, version: "1.4.0" });
+    expect(await piRow()).toMatchObject({
+      installed: true,
+      version: "1.4.0",
+      versionWarning: null,
     });
   });
 
@@ -496,7 +520,7 @@ describe("switcher data and selection", () => {
     const settingsPath = join(userDataDir, "settings.json");
     mocks.isCodexInstalled.mockResolvedValue(false);
     mocks.probeZcode.mockResolvedValue({ installed: false, version: null });
-    mocks.isPiInstalled.mockResolvedValue(false);
+    mocks.probePi.mockResolvedValue({ installed: false, version: null });
 
     const failed = await registry.select("codex");
     expect(failed.ok).toBe(false);

@@ -123,7 +123,7 @@ opencode's drift-prone protocol facts live in `src/shared/agents/opencode.json` 
 | opencode 1.18–1.19 | HTTP + SSE | yes | yes | yes | descriptor-driven v1 protocol |
 | opencode 2.0–2.1 | authenticated `/api` + events | yes | yes | yes | single-message delete is unavailable |
 | Codex | `codex app-server` JSON-RPC | yes | yes | no | aweswitch account homes are merged |
-| pi | JSONL sessions + RPC | yes | no | no | `npm install -g @mariozechner/pi-coding-agent` |
+| pi | JSONL sessions + RPC | yes | no | no | `npm install -g @earendil-works/pi-coding-agent` |
 | ZCode | app-server / v4 commands | yes | yes (soft) | no | macOS app discovery or `AWEFORK_ZCODE_CLI` |
 
 All four backends support forks, continuation, streaming replies, and session compaction. Image, text, and document attachments are capability-gated; per-turn file-change snapshots remain opencode-only. opencode versions outside `≥1.18.0, <1.19.0` and `≥2.0.0, <2.2.0` show a warning in the switcher.

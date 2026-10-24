@@ -8,6 +8,7 @@ import {
   opencodeVersionWarning,
   parseOpenCodeDescriptor,
   parseVersion,
+  piVersionWarning,
   readPath,
   selectOpencodeDescriptor,
   versionInRange,
@@ -425,5 +426,24 @@ describe("version warning", () => {
 
   it("stays silent when the probe could not read a version", () => {
     expect(opencodeVersionWarning(null)).toBeNull();
+  });
+});
+
+describe("pi version warning", () => {
+  it("stays silent at or above the verified RPC surface", () => {
+    expect(piVersionWarning("0.55.3")).toBeNull();
+    expect(piVersionWarning("0.73.1")).toBeNull();
+    // The 1.x line under the new npm scope is the current latest.
+    expect(piVersionWarning("1.4.0")).toBeNull();
+  });
+
+  it("names the floor for an older pi", () => {
+    const warning = piVersionWarning("0.40.0");
+    expect(warning).toContain("0.40.0");
+    expect(warning).toContain("0.55.3");
+  });
+
+  it("stays silent when the probe could not read a version", () => {
+    expect(piVersionWarning(null)).toBeNull();
   });
 });

@@ -8,9 +8,11 @@ import {
   type OpenCodeDescriptor,
   opencodeVersionWarning,
   parseVersion,
+  piVersionWarning,
   selectOpencodeDescriptor,
 } from "../shared/agent-descriptor.js";
 import {
+  agentInstallHint,
   BACKEND_LABELS,
   type BackendCapabilities,
   type BackendEventEnvelope,
@@ -34,7 +36,7 @@ import {
   stopManagedServer,
   tryReuseOpencodeServer,
 } from "./opencode-server.js";
-import { isPiInstalled, piNodeSeams, stopPiChildren } from "./pi-server.js";
+import { piNodeSeams, probePi, stopPiChildren } from "./pi-server.js";
 import {
   readBackendSelection,
   readOpencodePort,
@@ -427,7 +429,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
         readBackendSelection(settingsPath),
         probeOpencodeCached(),
         isCodexInstalled(),
-        isPiInstalled(),
+        probePi(),
         probeZcode(),
       ]);
       return {
@@ -450,9 +452,9 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
           {
             id: "pi",
             label: BACKEND_LABELS.pi,
-            installed: pi,
-            version: null,
-            versionWarning: null,
+            installed: pi.installed,
+            version: pi.version,
+            versionWarning: piVersionWarning(pi.version),
           },
           {
             id: "zcode",
@@ -475,17 +477,19 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
           : backend === "zcode"
             ? (await probeZcode()).installed
             : backend === "pi"
-              ? await isPiInstalled()
+              ? (await probePi()).installed
               : (await reprobeOpencode()).installed;
       if (!installed) {
+        // zcode ships with its desktop app, so its hint is bespoke; opencode
+        // can also be run by hand as a server; every other CLI quotes the
+        // shared package table.
+        const install = agentInstallHint(backend) ?? "Install it and retry.";
+        const manualServe =
+          backend === "opencode" ? " You can also run `opencode serve` manually and retry." : "";
         const hint =
-          backend === "codex"
-            ? "codex CLI not found on PATH. Install: npm install -g @openai/codex"
-            : backend === "zcode"
-              ? "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs."
-              : backend === "pi"
-                ? "pi CLI not found on PATH. Install: npm install -g @mariozechner/pi-coding-agent"
-                : "opencode CLI not found on PATH. Install it and retry, or run opencode serve manually.";
+          backend === "zcode"
+            ? "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs."
+            : `${BACKEND_LABELS[backend]} CLI not found on PATH. ${install}${manualServe}`;
         return { ok: false, error: hint };
       }
       await writeBackendSelection(settingsPath, backend);

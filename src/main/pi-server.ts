@@ -4,6 +4,8 @@ import { readdir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { parseVersion } from "../shared/agent-descriptor.js";
+import { agentInstallHint, agentPackage } from "../shared/backend.js";
 import {
   PI_SDK_IMPORT,
   PI_SPAWN_DEFAULT_CWD,
@@ -14,7 +16,17 @@ import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 
 const execFileAsync = promisify(execFile);
-const PI_PACKAGE_NAME = "@mariozechner/pi-coding-agent";
+const PI_INSTALL_HINT = agentInstallHint("pi") ?? "";
+
+/**
+ * Package roots that can provide the `pi` bin — the current scope first, the
+ * legacy one while older global installs are still around (the POSIX branch
+ * resolves through the symlink and needs no list; win32 has to guess).
+ */
+function piPackageNames(): string[] {
+  const agent = agentPackage("pi");
+  return [agent?.pkg, agent?.legacyPkg].filter((name): name is string => name !== undefined);
+}
 
 /**
  * Real process wiring for the pi adapter (main scope only). Everything an
@@ -26,14 +38,16 @@ const PI_PACKAGE_NAME = "@mariozechner/pi-coding-agent";
 
 /**
  * Probe whether `pi` is on PATH without starting anything — the backend
- * switcher calls this for every candidate on boot and on switch.
+ * switcher calls this for every candidate on boot and on switch. The
+ * `--version` output doubles as the row's version, so an install too old
+ * for awefork's RPC driving shows up here instead of at the first run.
  */
-export async function isPiInstalled(
+export async function probePi(
   execFn: typeof execFileAsync = execFileAsync,
   platform: NodeJS.Platform = process.platform,
-): Promise<boolean> {
+): Promise<{ installed: boolean; version: string | null }> {
   try {
-    await execFn("pi", ["--version"], {
+    const { stdout } = await execFn("pi", ["--version"], {
       timeout: 5000,
       env: await resolveSpawnEnv(process.env, homedir(), undefined, platform),
       // npm's .cmd shims only run under cmd.exe — without shell the probe
@@ -41,15 +55,16 @@ export async function isPiInstalled(
       // below carry the same branch).
       ...(platform === "win32" ? { shell: true, windowsHide: true } : {}),
     });
-    return true;
+    return { installed: true, version: parseVersion(stdout) };
   } catch {
-    return false;
+    return { installed: false, version: null };
   }
 }
 
 /**
  * The package root on whose PATH `pi` lives. On POSIX the bin is a symlink to
- * dist/cli.js; npm's Windows bin is a .cmd shim beside node_modules.
+ * dist/bundle/cli.js; npm's Windows bin is a .cmd shim beside node_modules,
+ * so the root is found by package name beside it.
  */
 export async function resolvePiPackageRoot(
   env: NodeJS.ProcessEnv = process.env,
@@ -63,8 +78,10 @@ export async function resolvePiPackageRoot(
     const bin = join(dir, platform === "win32" ? "pi.cmd" : "pi");
     if (platform === "win32") {
       if (!existsSync(bin)) continue;
-      const root = join(dir, "node_modules", PI_PACKAGE_NAME);
-      if (existsSync(root)) return root;
+      for (const name of piPackageNames()) {
+        const root = join(dir, "node_modules", name);
+        if (existsSync(root)) return root;
+      }
       continue;
     }
     try {
@@ -174,7 +191,7 @@ async function runNodeScript(code: string): Promise<string> {
   const root = await resolvePiPackageRoot();
   if (!root) {
     throw new Error(
-      `pi runtime not found: install ${PI_PACKAGE_NAME} and make sure \`pi\` is on PATH`,
+      `pi runtime not found: install ${piPackageNames()[0] ?? "pi"} and make sure \`pi\` is on PATH`,
     );
   }
   const script = code.split(PI_SDK_IMPORT).join(root);
@@ -235,7 +252,7 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
   };
   const exitDetail = (): string =>
     isCmdNotFound(exitCode)
-      ? missingCliMessage("pi", "Install it with: npm install -g @mariozechner/pi-coding-agent")
+      ? missingCliMessage("pi", PI_INSTALL_HINT)
       : "pi RPC child process has exited";
   child.on("exit", (code) => {
     exitCode = code;

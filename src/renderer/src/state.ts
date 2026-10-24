@@ -183,6 +183,12 @@ interface AppState {
   backendList: BackendInfo[];
   /** The agent whose one-click install is running; null = none. */
   installingBackend: BackendId | null;
+  /**
+   * Seconds the running install has been going. npm works silently for
+   * minutes on a cold cache; without this the install button looks frozen
+   * and gets clicked again, which the guard swallows — nothing happens.
+   */
+  installElapsedSec: number;
   /** First-run agent-install guide; shows until installed, skipped, or the flag persists. */
   onboardingVisible: boolean;
   /** Feature surface of the active backend; hides affordances it lacks. */
@@ -393,6 +399,7 @@ const state = reactive<AppState>({
   activeBackend: "opencode",
   backendList: [],
   installingBackend: null,
+  installElapsedSec: 0,
   onboardingVisible: false,
   capabilities: {
     deleteMessage: true,
@@ -1291,6 +1298,7 @@ export async function init(): Promise<void> {
  * backend is not touched — only the probes refresh.
  */
 export async function refreshBackendList(): Promise<void> {
+  lastBackendRefreshAt = Date.now();
   try {
     const { backends } = await window.awefork.backends();
     state.backendList = backends;
@@ -1299,15 +1307,43 @@ export async function refreshBackendList(): Promise<void> {
   }
 }
 
+/** Alt-tabbing back into the app must not spawn a probe storm. */
+const BACKEND_REFRESH_MIN_INTERVAL_MS = 30_000;
+let lastBackendRefreshAt = 0;
+
+/**
+ * Probe refresh for the moments nobody thinks to open the switcher: the
+ * settings page opening, the window regaining focus after a CLI was
+ * installed in a terminal. Throttled, so focus churn costs one probe per
+ * half minute at most.
+ */
+export async function refreshBackendListIfStale(): Promise<void> {
+  if (Date.now() - lastBackendRefreshAt < BACKEND_REFRESH_MIN_INTERVAL_MS) return;
+  await refreshBackendList();
+}
+
+/** The in-flight install label, with elapsed seconds once npm has been
+ *  running long enough that a bare "installing…" reads as frozen. */
+export function installingLabel(base: string): string {
+  return state.installElapsedSec > 0 ? `${base} ${state.installElapsedSec}s` : base;
+}
+
+let installTimer: ReturnType<typeof setInterval> | null = null;
+
 /**
  * One-click install of an agent CLI's latest version. On success the fresh
  * probe fills backendList right away (main dropped its cached "not
- * installed"); a failure surfaces through the shared toast slot.
+ * installed"); a failure surfaces through the shared toast slot, with the
+ * npm error mapped to the action that fixes it where main can tell.
  */
 export async function installBackend(backend: BackendId): Promise<void> {
   if (state.installingBackend !== null) return;
   state.installingBackend = backend;
   state.actionError = null;
+  state.installElapsedSec = 0;
+  installTimer = setInterval(() => {
+    state.installElapsedSec += 1;
+  }, 1000);
   try {
     const result = await window.awefork.installBackend(backend);
     if (!result.ok) {
@@ -1319,6 +1355,11 @@ export async function installBackend(backend: BackendId): Promise<void> {
     state.actionError =
       error instanceof Error ? error.message : t("state.installFailed", { backend });
   } finally {
+    if (installTimer !== null) {
+      clearInterval(installTimer);
+      installTimer = null;
+    }
+    state.installElapsedSec = 0;
     state.installingBackend = null;
   }
 }
