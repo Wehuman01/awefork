@@ -10,6 +10,7 @@ import type {
   PromptAttachment,
   SessionSummary,
 } from "../shared/types.js";
+import { stageCodexImages } from "./codex-attachments.js";
 import {
   type CodexHome,
   DEFAULT_HOME_ID,
@@ -17,6 +18,7 @@ import {
   discoverCodexHomes,
   findRolloutRelPath,
 } from "./codex-homes.js";
+import { readTurnContexts } from "./codex-rollout.js";
 import { ensureCodexServer } from "./codex-server.js";
 
 export interface CodexMultiHomeOptions {
@@ -105,6 +107,12 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       lineagePath: options.lineagePath,
       cliVersion: version,
       authMessage: home.id === DEFAULT_HOME_ID ? authMessage : null,
+      // Images ride turn/start's localImage items, which take file paths —
+      // main stages the staged data URLs as files codex can read.
+      stageImages: stageCodexImages,
+      // Each home reads its own rollouts: the per-turn model settings live
+      // beside the session they belong to.
+      turnContexts: (sessionId) => readTurnContexts(home.path, sessionId),
     });
   };
 

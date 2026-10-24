@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.2
+
+- **Parallel prompt groups, behind a Labs toggle** — a new Labs switch (off by default) unlocks the composer's parallel mode: stage one prompt, pick several targets (native sessions or models), send it to all of them at once, and read the answers side by side in a results panel. A group is a reading group — it references native sessions and never changes their history; each target's reply is matched to the exact request by its baseline message ids and the prompt text, so only the latest step of that request counts, never a completed intermediate tool step. Targets report preparing / running / done / failed, and a group can optionally run a summary session over the collected answers (brief or standard, on a chosen model).
+- **Sending into a busy group says so instead of silently doing nothing** — a prompt aimed at a group whose targets or summary are still running surfaces a busy-group message rather than a no-op send.
+- **Mid-story compression lands in a fresh fork** — compressing a session that already has branches no longer rewrites the branch the canvas is showing: the compression runs on a fresh fork that carries the whole story, the original branch keeps its history untouched, the fork is recorded in the lineage so the canvas nests it, and the toast names it. A double-compress is guarded through the fork await itself.
+- **codex image attachments actually arrive** — codex's turn input takes a filesystem path, not a payload, so staged images are now written to a fresh temp dir (named after the attachment, deduped, extension guaranteed) and sent as `localImage` turn input, aligned with how opencode sends attachments; the staging dir is removed when the turn that read the files ends, or on prompt failure, and the rollout's echoed basename is what the session history shows as the attachment name.
+- **codex turns are attributed the model they actually ran on** — `thread/read` carries only the session's current model settings, so a mid-session model switch relabeled every earlier turn. Each home's rollout files are parsed for per-turn `turn_context` and those take precedence, falling back to thread settings when a turn has none.
+- **The prompt-text inlining of non-image attachments moved to a shared module** (pi's inline-files helper now lives in `inline-attachments.ts`), and the i18n dictionaries cover all the new panels in both languages.
+
+### Install
+
+Installer attached: `awefork-0.4.2-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`). This release ships macOS only.
+
 ## v0.4.1
 
 - **A settings page, and the top bar it emptied** — ⌘, (Ctrl+, off macOS) or the new ⚙ button opens a floating panel over the workbench: grouped navigation, a search box that filters sections and rows, and eleven sections covering appearance, language, agents, models, canvas, files, search, shortcuts, storage, updates and labs. Rows are built as data, so every control writes the preference directly and a deep watcher persists it — there is no save button and no path where a control changes a value and forgets to store it. Each section names where it lives (this machine, the app's settings file, or per backend), a section can be reset on its own, Esc or a click on the dimmed backdrop returns to the workbench, and the panel layers above the interaction backdrop. The top bar's multi-window toggle, ⌘K palette button and quit keep-alive toggle are gone from the bar — they are rows in here now, and keep-alive no longer asks for the in-flight count when turned on, because quitting with runs going still asks at the quit gate.

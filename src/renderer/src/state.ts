@@ -306,10 +306,17 @@ interface AppState {
   /**
    * The open session-compression ask: which model should write the summary.
    * The compress modal resolves it through answerCompressAsk; null = none
-   * pending. `model` is the preselected default (last turn's model →
-   * lastModel → catalog head).
+   * pending. `model` is the preselected default (the compress position's
+   * turn model → lastModel → catalog head). `viaFork` marks the mid-story
+   * case: the summary will land in a freshly forked branch, not on the
+   * session itself.
    */
-  compressAsk: { sessionId: string; title: string; model: ModelChoice | null } | null;
+  compressAsk: {
+    sessionId: string;
+    title: string;
+    model: ModelChoice | null;
+    viaFork: boolean;
+  } | null;
   /** Latest compaction completion notice; drives the 🗜 toast, auto-clears. */
   compressedToast: string | null;
   /** Model the pane composer will use next, per session; null = agent default. */
@@ -3887,8 +3894,12 @@ let compressAskAnswer: ((model: ModelChoice | null) => void) | null = null;
  * compaction does. Resolves with the chosen model, null when canceled; the
  * modal's single exit is answerCompressAsk.
  */
-function askCompressModel(sessionId: string, preset: ModelChoice): Promise<ModelChoice | null> {
-  state.compressAsk = { sessionId, title: titleOf(sessionId), model: preset };
+function askCompressModel(
+  sessionId: string,
+  preset: ModelChoice,
+  viaFork: boolean,
+): Promise<ModelChoice | null> {
+  state.compressAsk = { sessionId, title: titleOf(sessionId), model: preset, viaFork };
   return new Promise((resolve) => {
     compressAskAnswer = resolve;
   });
@@ -3903,14 +3914,40 @@ export function answerCompressAsk(model: ModelChoice | null): void {
 }
 
 /**
+ * Whether any rendered session forks from this one (subagents don't count —
+ * they never draw as branches). Parents resolve lineage-first, matching the
+ * canvas graph and the sidebar tree. A fork anywhere on the session counts:
+ * a summary must not extend a trunk other branches still grow from.
+ */
+function hasForkChildren(sessionId: string): boolean {
+  return visibleSessions.value.some((session) => {
+    if (session.origin === "subagent") return false;
+    const parent = state.lineage[session.id]?.parentId ?? session.parentSessionId;
+    return parent === sessionId;
+  });
+}
+
+/**
  * Fold a session's history into a summary through the backend's compaction
- * primitive (capability-gated; codex/pi/zcode offer none). Non-destructive:
- * the marker row + summary land as a new turn, history stays readable, and
- * later prompts carry summary + recent turns instead of the whole log.
+ * primitive (capability-gated). Non-destructive: the marker row + summary
+ * land as a new turn, history stays readable, and later prompts carry
+ * summary + recent turns instead of the whole log.
+ *
+ * Compression happens at a position — the pane's current turn, or the
+ * session tip when `atMessageId` is null. When anything lives after that
+ * position (this branch's own later turns, or forks growing from the
+ * session), the summary gets a fresh fork cut at the position: the fork
+ * inherits the story up to here, so the backend summarizes the same
+ * context, while the original branch stays exactly as it was. Only the
+ * bare tip of an unbranched story compresses in place.
+ *
  * Fire-and-forget like prompt — the summary streams in on the event feed and
  * session.compressed announces completion.
  */
-export async function compressSession(sessionId: string): Promise<void> {
+export async function compressSession(
+  sessionId: string,
+  atMessageId?: string | null,
+): Promise<void> {
   const backend = state.activeBackend;
   if (!state.capabilities.compress) return;
   if (isSessionRunning(backend, sessionId)) {
@@ -3926,12 +3963,15 @@ export async function compressSession(sessionId: string): Promise<void> {
     return;
   }
   const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
-  const preset = turns[turns.length - 1]?.model ??
+  const preset = turns.find((turn) => turn.messageId === atMessageId)?.model ??
+    turns[turns.length - 1]?.model ??
     state.lastModel ?? {
       providerId: catalogFirst.providerId,
       modelId: catalogFirst.modelId,
     };
-  const model = await askCompressModel(sessionId, preset);
+  const tipId = turns[turns.length - 1]?.messageId ?? null;
+  const viaFork = (atMessageId != null && atMessageId !== tipId) || hasForkChildren(sessionId);
+  const model = await askCompressModel(sessionId, preset, viaFork);
   if (!model) return;
   if (isSessionRunning(backend, sessionId)) {
     state.actionError = t("state.sessionRunningCompress");
@@ -3942,17 +3982,41 @@ export async function compressSession(sessionId: string): Promise<void> {
   // summarize request resolves only when the whole compaction is done, so
   // without this the session stays actionable until the server's first stream
   // frame lands (and forever on a build that publishes none) — leaving a
-  // window where a second compress races the first.
+  // window where a second compress races the first. The parent wears the flag
+  // through the fork await too, as its own double-compress guard; the fork
+  // path clears it once the target moves.
   setRunning(backend, sessionId, true);
   const sentAt = Date.now();
+  let targetId = sessionId;
   try {
-    await window.awefork.compressSession(backend, sessionId, plainModel(model) ?? preset);
-    watchCompletion(backend, sessionId, sentAt);
+    if (viaFork) {
+      const forked = await window.awefork.fork(backend, sessionId, atMessageId ?? tipId);
+      await inheritTagsOnFork(backend, forked.id, tagsOf(sessionId));
+      targetId = forked.id;
+      setRunning(backend, forked.id, true);
+      try {
+        await window.awefork.renameSession(
+          backend,
+          forked.id,
+          t("state.compressForkTitle", { title: titleOf(sessionId) }),
+        );
+      } catch {
+        /* A title is optional; the compressed fork stays usable without one. */
+      }
+      await refreshSessions();
+      // No focus request: the new branch materializes right next to the cut
+      // point, in sight; re-centering would only yank the view.
+      await selectSession(forked.id);
+    }
+    await window.awefork.compressSession(backend, targetId, plainModel(model) ?? preset);
+    watchCompletion(backend, targetId, sentAt);
   } catch (error) {
-    setRunning(backend, sessionId, false);
+    setRunning(backend, targetId, false);
     state.actionError = t("state.compressFailed", {
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    if (targetId !== sessionId) setRunning(backend, sessionId, false);
   }
 }
 

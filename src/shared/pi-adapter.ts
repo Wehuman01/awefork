@@ -1,4 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
+import { withInlineFiles } from "./inline-attachments.js";
 import { readLineage, recordFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
@@ -869,34 +870,6 @@ function toPiImage(attachment: PromptAttachment): {
     data: comma === -1 ? attachment.dataUrl : attachment.dataUrl.slice(comma + 1),
     mimeType: attachment.mime,
   };
-}
-
-/**
- * Append non-image attachments to the prompt text as named sections. pi's
- * prompt has no file part to hang them on, and silently dropping a staged
- * document would be worse than a slightly verbose message.
- */
-function withInlineFiles(text: string, files: readonly PromptAttachment[]): string {
-  if (files.length === 0) return text;
-  const sections = files.map((file) => {
-    const at = file.dataUrl.indexOf(",");
-    const payload = at === -1 ? "" : file.dataUrl.slice(at + 1);
-    return `--- ${file.filename} ---\n${decodeBase64Utf8(payload)}`;
-  });
-  return [text, ...sections].join("\n\n");
-}
-
-/**
- * base64 → UTF-8, without node's Buffer: this module is shared with the
- * renderer build (which has no node types), so the decoder is hand-rolled.
- * A malformed payload decodes to "" — the caller's server.error path then
- * names the failure rather than silently shipping a truncated document.
- */
-function decodeBase64Utf8(base64: string): string {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
 }
 
 function emitPiEvent(sessionId: string, event: unknown, emit: (event: AgentEvent) => void): void {

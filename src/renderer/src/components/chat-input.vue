@@ -226,7 +226,7 @@ const props = withDefaults(
     backend: BackendId;
     model: ModelChoice | null;
     models: readonly ModelOption[];
-    /** Backend capability gate: codex takes no attachments at all. */
+    /** Backend capability gate: a backend that takes no attachments at all. */
     allowAttachments?: boolean;
     /** Hide parallel prompting when the backend cannot select models. */
     allowModelPicker?: boolean;

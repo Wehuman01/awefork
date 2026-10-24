@@ -62,6 +62,10 @@ export const dict: Record<string, Entry> = {
     zh: "汇总 · {prompt} · {time}",
     en: "Summary · {prompt} · {time}",
   },
+  "state.compressForkTitle": {
+    zh: "🧹 压缩 · {title}",
+    en: "🧹 Compact · {title}",
+  },
 
   // ── history labels: pins / marks / tags ────────────────────────────────
   "state.pinLabel": { zh: "置顶「{title}」", en: 'Pinned "{title}"' },

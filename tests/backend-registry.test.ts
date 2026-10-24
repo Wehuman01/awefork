@@ -573,7 +573,7 @@ describe("capabilities and store paths", () => {
     expect(await registry.capabilities("codex")).toEqual({
       deleteMessage: false,
       deleteSession: true,
-      attachments: false,
+      attachments: true,
       fileChanges: false,
       compress: true,
       exportBranch: false,

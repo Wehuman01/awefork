@@ -87,12 +87,14 @@ export function backendCapabilities(
   switch (backend) {
     case "codex":
       // codex records fork parents itself, so no detached export; no
-      // single-message delete; no image round-trip. Compaction is
-      // thread/compact/start (a turn of its own, streamed like any run).
+      // single-message delete. Compaction is thread/compact/start (a turn of
+      // its own, streamed like any run). Images ride turn/start's localImage
+      // input items (staged as files by main); non-image attachments have no
+      // file part, so the adapter inlines them into the prompt text.
       return {
         deleteMessage: false,
         deleteSession: true,
-        attachments: false,
+        attachments: true,
         fileChanges: false,
         compress: true,
         exportBranch: false,
