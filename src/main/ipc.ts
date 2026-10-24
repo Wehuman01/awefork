@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import {
   app,
   BrowserWindow,
@@ -58,6 +59,7 @@ import type {
   PersistedComposer,
   PromptAttachment,
 } from "../shared/types.js";
+import { installBackend } from "./agent-installer.js";
 import type { BackendRegistry } from "./backend-registry.js";
 import {
   codexHomeForSession,
@@ -76,6 +78,7 @@ import {
 import { createMessageSearcher, type MessageSearcher } from "./message-search.js";
 import { findPiSessionFile } from "./pi-server.js";
 import { openSessionInTerminal } from "./session-terminal.js";
+import { readOnboardingDone, writeOnboardingDone } from "./settings-store.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
 import { downloadAndInstallUpdate } from "./update-install.js";
 import { resolveZcodeCli } from "./zcode-server.js";
@@ -120,6 +123,10 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
  *   capabilities  -> { deleteMessage, attachments }
+ * Agent install + first-run guide:
+ *   installBackend -> { ok, error? }   npm -g latest; drops the cached probe
+ *   onboardingDone -> boolean          first-run guide already ran (persisted)
+ *   finishOnboarding -> void           mark the guide as run, never show again
  * App-level (backend-free): openExternal, openPath, pickDirectory,
  * convertDocument, checkUpdates, skipUpdate, openRelease, downloadUpdate.
  * File browser (also backend-free, read-only): listDir, statFile,
@@ -133,6 +140,7 @@ import { resolveZcodeCli } from "./zcode-server.js";
 export function registerIpc(
   registry: BackendRegistry,
   openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
+  userDataDir = app.getPath("userData"),
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
@@ -657,6 +665,22 @@ export function registerIpc(
   ipcMain.handle("awefork:capabilities", (_event: IpcMainInvokeEvent, backend: BackendId) =>
     registry.capabilities(storeBackend(backend)),
   );
+
+  // ── agent install + first-run guide ────────────────────────────────────
+
+  // One-click CLI install (npm -g, latest). The cached opencode probe would
+  // keep answering "not installed" after a successful install, so drop it on
+  // success and let the renderer's refresh re-read the truth.
+  ipcMain.handle("awefork:installBackend", async (_event: IpcMainInvokeEvent, backend: unknown) => {
+    if (!isBackendId(backend)) return { ok: false, error: `unknown backend: ${String(backend)}` };
+    const result = await installBackend(backend);
+    if (result.ok) registry.reprobe();
+    return result;
+  });
+
+  const onboardingPath = join(userDataDir, "settings.json");
+  ipcMain.handle("awefork:onboardingDone", () => readOnboardingDone(onboardingPath));
+  ipcMain.handle("awefork:finishOnboarding", () => writeOnboardingDone(onboardingPath));
 
   // Quit behavior: whether quitting leaves the spawned backends running so
   // in-flight turns finish in the background. Read is served from the

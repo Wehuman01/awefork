@@ -92,3 +92,16 @@ export async function readQuitKeepAlive(filePath: string): Promise<boolean> {
 export async function writeQuitKeepAlive(filePath: string, value: boolean): Promise<void> {
   await patchSettings(filePath, { quitKeepAlive: value });
 }
+
+/**
+ * Whether the first-run agent-install guide already ran (shown or skipped).
+ * Once true the welcome dialog never comes back — the settings page's
+ * per-agent install button covers later installs.
+ */
+export async function readOnboardingDone(filePath: string): Promise<boolean> {
+  return (await readSettings(filePath)).onboardingDone === true;
+}
+
+export async function writeOnboardingDone(filePath: string): Promise<void> {
+  await patchSettings(filePath, { onboardingDone: true });
+}

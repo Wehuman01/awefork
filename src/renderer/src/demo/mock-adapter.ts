@@ -1003,6 +1003,10 @@ export function installMockAdapter(): void {
       ],
     }),
     selectBackend: async () => ({ ok: true }),
+    // Demo mode has no real CLIs to install; the guide stays dismissed.
+    installBackend: async () => ({ ok: false, error: "demo mode cannot install agents" }),
+    onboardingDone: async () => true,
+    finishOnboarding: async () => {},
     openAgentWindow: async () => ({ ok: true }),
     capabilities: async () => ({
       deleteMessage: true,

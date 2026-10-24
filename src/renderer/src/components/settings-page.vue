@@ -251,6 +251,7 @@ import {
   archivedDirectoryViews,
   archivedSessionViews,
   checkForUpdates,
+  installBackend,
   refreshBackendList,
   store,
   switchBackend,
@@ -443,16 +444,41 @@ function backendSection(): SectionDef {
         ? t("settings.backendWarn")
         : t("settings.backendReady");
     const desc = `${entry.version ? `v${entry.version}` : "—"} · ${status}`;
+    // zcode rides along with the ZCode desktop app — no one-click install, so
+    // its missing row stays a plain hint; the npm-shipped CLIs get a button.
+    const installable = entry.id !== "zcode";
+    const installing = store.installingBackend === entry.id;
     // The active backend is a read-only row; every other installed one is a
     // switch button — same confirm-first flow the top bar uses, so a click
     // here cannot skip the reshape warning.
-    if (entry.id === active || !entry.installed) {
+    if (entry.id === active) {
       return {
         kind: "info",
         key: `backend:${entry.id}`,
         title: entry.label,
         desc,
-        info: entry.id === active ? t("settings.backendCurrent") : "",
+        info: t("settings.backendCurrent"),
+      };
+    }
+    if (!entry.installed && installable) {
+      return {
+        kind: "button",
+        key: `backend:${entry.id}`,
+        title: entry.label,
+        desc,
+        buttonLabel: installing
+          ? t("settings.installingBackend")
+          : t("settings.installLatest", { label: entry.label }),
+        apply: () => void installBackend(entry.id as BackendId),
+      };
+    }
+    if (!entry.installed) {
+      return {
+        kind: "info",
+        key: `backend:${entry.id}`,
+        title: entry.label,
+        desc,
+        info: "",
       };
     }
     return {

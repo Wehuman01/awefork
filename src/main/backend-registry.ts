@@ -80,6 +80,11 @@ export interface BackendRegistry {
   select(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
   /** Feature surface for one backend; opencode's depends on the probed CLI version. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
+  /**
+   * Drop the cached opencode probe so the next listBackends sees an install
+   * (or removal) that landed while the app was running.
+   */
+  reprobe(): void;
   /** Per-backend overlay-store paths (legacy bare files stay on opencode). */
   storePaths(backend: BackendId): StorePaths;
   /** Root of the per-session file-change sidecar directories. */
@@ -496,6 +501,10 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     },
 
     storePaths,
+
+    reprobe: () => {
+      opencodeProbe = null;
+    },
 
     forward(send) {
       forwardEvent = send;
