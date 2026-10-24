@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Composer drops now separate folders from files** — a drop or paste batch turns directories into absolute paths inserted as editable draft text, one per line, while files keep the attachment route. Folder paths work even on a backend that accepts no attachments, mixed batches preserve order, and edits remain on the native undo stack.
+- **A locked Codex thread continues in a visible fork** — when Codex's app-server reports that another writer owns the thread, the prompt now continues on a full-history fork. The optimistic prompt survives, the run and watchdog move to the fork, and the pane follows it instead of settling the original as failed and stranding the reply on a hidden branch.
+- **Codex snapshots no longer make a sent prompt disappear** — while a run is active, a lagging thread snapshot keeps unsent local rows pinned at the tip until the server carries the same text. A briefly missing selected thread now has an eight-second grace window, so a refresh does not blank the tab and discard the composer draft.
+- **Many story tabs wrap instead of hiding** — open fork-tree tabs stack into rows rather than sliding under the context panel through a hidden horizontal scroll.
+- **File tabs and previews keep their state coherent** — reading mode survives arrow-key file changes and ends with the preview it belongs to; dock and context-menu jumps land on the file's real directory; PDF paging stops at the pages actually rendered; quick search honors the ignore list; failed previews keep the listing visible; CSV row counts exclude the header; and the image-size badge resets between files.
+
 ## v0.4.3
 
 - **Multi-model rounds get a picker dialog, a canvas entry, and Labs defaults** — the composer's inline flat model list is replaced by a dialog that groups models the same way the single-model picker does (favorites/recent/all), the round seeds from the settings' defaults (falling back to the current model), and the summary length gains "none": a round without a summary lands as "skipped" and the results panel offers one on demand. With the multi-model Labs switch on, the labs section grows a "default models & summary" row that writes the same dialog's choices straight into the settings blob, and the files section grows a text row for the ignore list. The canvas draft card's foot gains a ⇄ switch too, so a round can fork from the draft's own session and turn — including its ✂ empty-context mode — and a successful send spends the draft exactly like a single-model send.

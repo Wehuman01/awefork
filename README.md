@@ -30,11 +30,11 @@
 
 > Fork any turn. Keep every branch.
 
-awefork is a non-linear workbench for local coding agents. Today it supports [opencode](https://opencode.ai) and is built around one move: **node-level forking** — pick any user message in a session, branch a new session from that exact turn, and continue in a fresh context while the original stays untouched.
+awefork is a non-linear workbench for local coding agents, currently supporting [opencode](https://opencode.ai), Codex, [pi](https://github.com/badlogic/pi-mono), and ZCode. It is built around one move: **node-level forking** — pick any user message in a session, branch a new session from that exact turn, and continue in a fresh context while the original stays untouched.
 
-It is intentionally scoped: read-only projection of your real agent sessions, fork/continue through the agent's native API, nothing invented in between. No storage hacking, no lock-in — every session it creates is a plain opencode session you can keep using anywhere.
+It is intentionally scoped: project your real agent sessions, fork and continue through each agent's native API, and keep backend-specific data out of the renderer. No session-format rewrite and no lock-in — every session it creates stays native to the selected agent.
 
-The idea of treating sessions as a branching graph originates from [PiX](https://github.com/huang-sh/PiX), which first explored this non-linear interaction model for AI agent workbenches. awefork adapts it for opencode: read-only projection, native fork API, zero storage lock-in.
+The idea of treating sessions as a branching graph originates from [PiX](https://github.com/huang-sh/PiX), which first explored this non-linear interaction model for AI agent workbenches. awefork adapts it to several agent backends through one normalized adapter surface.
 
 ## How It Works
 
@@ -51,28 +51,35 @@ The idea of treating sessions as a branching graph originates from [PiX](https:/
 └──────────────┴──────────────────────────────────┘
 ```
 
-- **Navigator** — all opencode sessions grouped by project directory (folders fold); forks nest under their parent, and any branch's subtree folds from the caret on its row (folds suspend while searching). Star a session to bookmark it — stars gather in the ★ favorites shelf at the sidebar's top, across projects, and never touch the canvas (it draws the selected story only). Right-click a row to rename (`PATCH /session`) or archive it; right-click a directory to archive the whole project. Archived items hide from every view (search, palette, canvas included) and restore from the archive section at the sidebar's bottom — sessions created under an archived directory stay hidden until the directory comes back.
+- **Navigator** — sessions from the selected agent grouped by project directory (folders fold); forks nest under their parent, and any branch's subtree folds from the caret on its row (folds suspend while searching). Star a session to bookmark it — stars gather in the ★ favorites shelf at the sidebar's top, across projects, and never touch the canvas (it draws the selected story only). Right-click a row to rename or archive it; right-click a directory to archive the whole project. Archived items hide from every view (search, palette, canvas included) and restore from the archive section at the sidebar's bottom — sessions created under an archived directory stay hidden until the directory comes back.
 - **Enhanced search** — the ✦ button next to the search box opens scope checkboxes (title / tags / body), a project picker (default: all projects, or scope to one), and a search cap (default 1000; choose 100 / 300 / 500 / 1000 / all). The same powers live in the box as syntax: `body:word` scans conversation bodies case-insensitively (results stream in with highlighted snippets; click one to land on that turn on the canvas), `#tag`, `title:`, `dir:`, `is:starred` / `is:fork` / `is:running`, `"exact phrase"`, and `-word` to exclude. Full-width colons and a space after a prefix work too.
 - **Turn pane** — the right panel shows one turn: its prompt and reply, with run duration and output tokens in the header. Click a canvas card or a sidebar session and the pane jumps there; while a new turn runs, it follows along. Walk turns with ‹ › or ←/→.
 - **Fork here** — any user turn can seed a new branch. The new session keeps that full turn (question + answer), and awefork lands you in it.
 - **Model choice** — a searchable picker (70+ models is fine) when starting a branch, plus a per-session picker beside the composer. ★ pins models into a Favorites group and recent picks feed Recent, both at the picker's top.
 - **Thinking effort** — pick the run's reasoning variant (minimal/low/medium/high…) next to the model; canvas cards show `model · variant` for what each turn actually used.
-- **Image attachments** — paste or drop images into either composer (capability-gated per model); sent rows carry 📎 chips.
+- **Approvals and forms** — Codex approvals and opencode permission/form requests appear at the end of the relevant session's conversation, with an auto-deny setting and no default-allow fallback. Asks for background sessions wait on their own pane.
+- **Files and folders in the composer** — paste or drop files into either composer (capability-gated per backend/model); images, text, and Word/RTF documents become bounded attachments, while a folder becomes its absolute path as editable draft text. Sent rows carry attachment chips.
 - **Retry failed turns** — the ↻ on a failed turn (card or pane header) reopens its prompt prefilled with the original text and model; edit and resend — mid-story turns retry as a fresh fork, the failed original stays untouched.
 - **File changes per turn** — as edit/write tool events stream in, awefork snapshots the touched files on the spot; the turn carries a file card with status, +/− line counts, the saved diff (unchanged by later edits), and an open-file action. Turns that ran outside awefork — forked or offline — say "not recorded" instead of guessing. opencode only.
 - **Continue** — send messages from awefork; replies stream in live. Replying while an older turn is selected branches from that turn.
 - **Canvas** — selecting a turn highlights its full path from the root and dims the rest; fit view, and an always-on minimap with a live viewport rectangle.
+- **Compare and export** — compare a fork with its parent or two independent sessions, or export the selected branch as Markdown with model, duration, and token metadata. Right-click a session to reopen it in the agent's terminal.
 - **Key turn marks** — star any turn with ★ (card chip, pane header, or the turn's right-click menu). Marked turns get a rose ring on the canvas, a rose dot on the minimap, and a Key turns panel listing them for one-click jump. Pure overlay (`marks.json`), never touches agent storage.
 - **Command palette** — ⌘K / Ctrl+K to jump between sessions and fire actions; drag the column handles to resize, double-click to fold.
-- **Native sessions** — forking calls `opencode serve`'s fork API; the result is a real session (open it in the TUI anytime).
+- **Native sessions** — forking calls the selected agent's native fork primitive; the result is a real session you can reopen in that agent's own tools.
+- **Multiple agents** — switch agents in place, or enable separate windows and keep one window per agent. Background runs and their event streams continue while you view another backend.
+- **Settings and Labs** — ⌘, / Ctrl+, opens settings for appearance, language, agents, models, canvas, files, search, shortcuts, storage, updates, and Labs. Labs currently gates the read-only file browser and multi-model rounds, both off by default.
+- **File browser** — with the Labs switch on, browse local files from the middle column or sidebar, preview Markdown, source, images, CSV/TSV, and the first pages of PDFs, then quote a file into the canvas draft. Reads are local, read-only, bounded, and ignore configured names.
+- **Multi-model rounds** — with the Labs switch on, send one prompt to up to four models, each running on its own fork, read the answers side by side, and optionally add a summary branch over the completed answers.
+- **Story tabs** — open independent fork trees in browser-style tabs; tabs wrap instead of disappearing, keep their own canvas viewport, and can be opened from the sidebar or command palette.
 
 ## Install
 
 **Download** — grab `awefork-<version>-arm64.dmg` (macOS, Apple Silicon) from the [latest release](https://github.com/wehuman01/awefork/releases/latest) and drag it into Applications. The build is unsigned: on first launch, right-click the app and choose Open (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
 
-**Windows** — build it from source with `npm run dist:win` (NSIS installer). The `opencode` CLI must be on PATH; npm-style installs (`.cmd` shims) are picked up automatically.
+**Windows** — build it from source with `npm run dist:win` (NSIS installer). The selected agent CLI must be on PATH; npm-style installs (`.cmd` shims) are picked up automatically.
 
-**From source** — requires Node.js ≥ 22 and the `opencode` CLI on PATH.
+**From source** — requires Node.js ≥ 22 and at least one supported agent CLI on PATH: `opencode`, `codex`, `pi`, or ZCode. The in-app agent picker reports missing CLIs and can install opencode, Codex, and pi.
 
 ```bash
 git clone https://github.com/wehuman01/awefork.git
@@ -80,7 +87,7 @@ cd awefork
 npm install
 ```
 
-awefork reuses a running `opencode serve` on port 4096, or starts one for you when the app launches.
+opencode reuses a compatible running server or starts one lazily. Codex, pi, and ZCode use their own app-server or RPC lifecycles; selecting an installed agent materializes it only when needed.
 
 ## Quick Start (from source)
 
@@ -88,31 +95,42 @@ awefork reuses a running `opencode serve` on port 4096, or starts one for you wh
 npm run dev
 ```
 
-1. Pick a session from the left tree.
-2. Find the turn you want to branch from → click **⎇ fork here**.
-3. The new branch opens; type in the input to continue it.
-4. Original session untouched — switch back anytime.
+1. Pick an installed agent in the top bar.
+2. Pick a session from the left tree.
+3. Find the turn you want to branch from → click **⎇ fork here**.
+4. The new branch opens; type in the input to continue it.
+5. Original session untouched — switch back anytime.
 
 ## Config
 
-No config file. Two facts drive everything:
+The app stores its own state under Electron's `userData` directory; it never rewrites an agent's session store.
 
 | Fact | Value |
 |---|---|
-| opencode server | `http://127.0.0.1:4096` (reused if running, else spawned) |
-| fork lineage | `<userData>/lineage.json` (records which session forked from which) |
+| app selection and server facts | `<userData>/settings.json` (selected backend, last opencode port, quit behavior, onboarding) |
+| renderer preferences | `awefork:settings` and `awefork:layout` in renderer storage (theme, language, layout, files, Labs) |
+| per-backend overlays | `<userData>/*-<backend>.json` (lineage, pins, marks, tags, trash, archive, composer, directories) |
+| file-change snapshots | `<userData>/file-changes/<backend>/<sessionId>/` |
 
-Lineage is stored by awefork because opencode's fork API copies messages without recording a parent link. Delete the file and you only lose fork nesting in the tree — sessions keep working.
+The sidecars hold only facts awefork adds around native sessions. Legacy unsuffixed opencode stores remain readable, and new backends use suffixed files. Deleting an overlay can lose its tree linkage, marks, or UI state; it does not delete the agent's session. opencode is probed across its recorded port, `AWEFORK_OPENCODE_PORT`, classic candidates, and a registered v2 background service rather than assuming port 4096 is always available.
 
 ## Compatibility
 
-Per-backend facts live in data, not code: `src/shared/agents/opencode.json` (the 1.18–1.19 API) and `src/shared/agents/opencode-v2.json` (the v2 `/api` server) declare the endpoints, SSE event names, field paths, fork cut translation, capability flags, and the tested version range — one file per protocol, chosen at runtime from the probed CLI version. The adapter is a generic interpreter over those files, and the vocabulary is closed — the validator (`src/shared/agent-descriptor.ts`) rejects unknown keys at every level, so a typo in a descriptor fails loudly at startup instead of degrading silently at runtime.
+opencode's drift-prone protocol facts live in `src/shared/agents/opencode.json` (the 1.18–1.19 API) and `src/shared/agents/opencode-v2.json` (the v2 `/api` server): endpoints, SSE event names, field paths, fork-cut translation, capability flags, and tested version ranges. The adapter interprets those closed-vocabulary descriptors, and the validator rejects unknown keys at every level. Codex, pi, and ZCode keep their backend-specific lifecycle and protocol mapping in adapters and main-process facades.
 
-awefork supports **opencode** (both the 1.18–1.19 API it was built on and the v2 `/api` server — the probed CLI version picks the protocol; v2 servers are adopted from the CLI's background service or spawned with a password awefork pins, and v2's single-message delete is hidden since that endpoint is gone), **Codex** (spawned via app-server protocol), **pi** (`npm install -g @mariozechner/pi-coding-agent`; resume uses `pi --session <jsonl>`), and **ZCode**. On macOS, awefork locates ZCode's bundled `zcode.cjs` from `/Applications` or `~/Applications`; on Windows, set `AWEFORK_ZCODE_CLI` unless `zcode` is already on PATH. pi and ZCode do not support branch export; ZCode renames and deletes sessions through its `v4/command` channel (a soft delete server-side, which drops the row from the session list) and reads its model directory from the v2 config. The install probe checks each CLI on PATH; a missing binary bounces back with a notice instead of failing silently. A CLI version outside the tested ranges (opencode ≥1.18.0 <1.19.0, or ≥2.0.0 <2.2.0) carries a ⚠ warning on the switcher — visible, not blocking.
+| Backend | Native protocol | Rename | Delete session | Branch export | Notes |
+|---|---|---:|---:|---:|---|
+| opencode 1.18–1.19 | HTTP + SSE | yes | yes | yes | descriptor-driven v1 protocol |
+| opencode 2.0–2.1 | authenticated `/api` + events | yes | yes | yes | single-message delete is unavailable |
+| Codex | `codex app-server` JSON-RPC | yes | yes | no | aweswitch account homes are merged |
+| pi | JSONL sessions + RPC | yes | no | no | `npm install -g @mariozechner/pi-coding-agent` |
+| ZCode | app-server / v4 commands | yes | yes (soft) | no | macOS app discovery or `AWEFORK_ZCODE_CLI` |
+
+All four backends support forks, continuation, streaming replies, and session compaction. Image, text, and document attachments are capability-gated; per-turn file-change snapshots remain opencode-only. opencode versions outside `≥1.18.0, <1.19.0` and `≥2.0.0, <2.2.0` show a warning in the switcher.
 
 ## Multi-Agent Roadmap
 
-The core is the `AgentAdapter` protocol (`src/shared/types.ts`): listSessions / messages / fork / prompt / abort / subscribe. opencode, codex, pi, and ZCode are implemented (opencode's drift-prone facts live in `src/shared/agents/opencode.json`; the other backends stay literal in code for now). Planned next: Claude Code (JSONL with `parentUuid` + `--resume`).
+The core is the `AgentAdapter` protocol (`src/shared/types.ts`): session listing, messages, models, create, fork/export, delete, rename, prompt/abort, compaction, interactions, and normalized event subscription. opencode, Codex, pi, and ZCode are implemented. A main-process backend registry owns lazy lifecycle and capability routing. Planned next: Claude Code (JSONL with `parentUuid` + `--resume`).
 
 ## Support
 
@@ -133,7 +151,8 @@ If awefork helps you, consider supporting its development:
 ```bash
 npm run typecheck   # tsc + vue-tsc
 npm run lint        # biome
-npm test            # vitest (fake opencode server, no real agent needed)
+npm test            # vitest (fake HTTP/stdio/RPC agents; no real agent needed)
+npm run test:gui    # real Electron + mock adapter interaction checks
 ```
 
 See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for architecture and design constraints.
