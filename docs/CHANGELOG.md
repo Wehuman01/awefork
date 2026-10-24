@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.6
+
+- **A turn's tool calls fold into one grouped chip** — a settled turn no longer stacks a wall of near-identical pills: the chips collapse into a single grouped count following opencode's TUI ("shell ×8 · read · edit"), codex's command previews group on the family before " · ", a lone call keeps its full label (that command preview is the whole point of a single chip), the full list rides in the chip's title attribute, and an overlong line cuts at a group boundary so the ellipsis never lands mid tool name. Canvas cards drop their per-turn tool chips — the pane already tells that story.
+- **The installer lands the latest CLI and says why an install failed** — pi moved npm scopes: `@mariozechner/pi-coding-agent` froze at 0.73.1, so installs now target `@earendil-works/pi-coding-agent` (1.x) and uninstall the legacy global package first, because it still owns the `pi` bin symlink. An install cut short (the 5-minute timeout, a killed app) leaves npm's retire dir behind and every retry then dies ENOTEMPTY on the same deterministic name — it is cleared and retried once. npm's failure codes map to the action that fixes them (write access, missing npm, unreachable registry) instead of the raw wall of text, and the install button counts elapsed seconds, so minutes of silent npm no longer read as a frozen app. `probePi` returns the version the `--version` probe already produced, pi rows older than 0.55.3 (the verified RPC surface) warn instead of failing at the first run, backend rows re-probe when settings open and the window refocuses (throttled to one probe per 30s), and one shared `AGENT_PACKAGES` table replaces the install command duplicated across the installer, the registry hints, and CLI messages.
+
+### Install
+
+Installer attached: `awefork-0.4.6-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`). This release ships macOS only.
+
 ## v0.4.5
 
 - **Composer drops now separate folders from files** — a drop or paste batch turns directories into absolute paths inserted as editable draft text, one per line, while files keep the attachment route. Folder paths work even on a backend that accepts no attachments, mixed batches preserve order, the drop highlight appears wherever a drop will land something, and edits remain on the native undo stack.
