@@ -1,7 +1,7 @@
 # 文件浏览：预览布局、目录多标签与预览能力扩展 — 设计
 
 Date: 2026-10-24
-Status: 阶段一、二已实现并通过验证；阶段三做了图片解码失败态
+Status: 阶段一、二、三已实现；首轮落地后经两轮审阅发现接线缺口，已补齐并复验（见 §12、§13）
 依据：2026-10-23 拖放 / 引用交互审阅（`todo/2026-10-23-file-browser-delivery.md` 的后续）+ 本轮用户反馈
 适用范围：`awefork2`，文件浏览实验（Labs 门控）
 
@@ -243,3 +243,48 @@ localStorage。
   （损坏文件、扩展名撒谎）不再卡在图片态，落到错误面板并保留“用系统应用打开”；
   放大按钮在图片损坏时隐藏；新增 `files.errImageDecode` 文案。
 - 未做：CSV/TSV 表格、PDF、Office 预览，以及分栏宽度与标签的持久化。
+
+## 12. 审阅修复记录（2026-10-24 第二轮）
+
+第一轮落地后两轮独立审阅（代码走查 + 状态模拟复现）发现：部分功能"函数写好了但没接到
+界面"，以及 spec 计划项与实现不符。本轮把状态字段、函数、界面接线一起补齐。
+
+正确性（P0）：
+
+- `previewEntry` / `revealEntry` / `goToPath` / `openEntry` / `selectOrPreviewEntry`
+  全部改为**入口即绑定标签**：在第一个 `await` 之前捕获 `tab`，之后不再重读
+  `activeTab()`。修复"在 A 点击搜索结果、目录读取完成前切到 B，文件却出现在 B 的
+  预览里"的串标签问题。
+- 新增 `requireTab()`：侧栏 dock、右键菜单等外部入口在文件视图挂载前（`tabs` 为空）
+  不再静默丢弃点击；parked 标签会先落到文件的父目录，保证列表与预览描述同一处。
+- `ensureBrowsing` 增加守卫：parked 标签已有选中时不抢跑落到项目根，避免 dock 首次
+  点击被随后的默认落位冲掉。
+- `file-preview.vue`：`imageBroken` / `zoomed` 的复位 watch 从 `preview?.path` 改为
+  `preview` 对象本身。同路径文件修复后再次点击不再卡在旧错误态。
+
+一致性（P1）：
+
+- 标签切换时 `filterInput` / `quickInput` 随活动标签回填（列表按 md 过滤、输入框仍
+  显示 json 的错位消失）；`pathInput` 沿用原有的 `browsing` 镜像。
+- `setPreviewWidth(width, bodyWidth)`：分栏上限按实测 body 宽度钳制，列表保留 240px
+  地板，`.fb-entries` 同步 `min-width: 240px`。660px 宽 body 拖到 640px 预览的场景
+  不再把列表压成十几像素。
+- `↑`/`↓` 走列表并同步预览（接上原为死代码的 `stepSelection`），`Enter` 打开选中项，
+  `Backspace` 回上一级；`.fb-entries` 加 `tabindex` 与 focus-visible 样式。
+- `scrollTop` 记录（`@scroll`）与恢复（切标签后 `nextTick` 回写）接上，原为死字段。
+
+可发现性（P2）：
+
+- 文件标签栏（含 `＋` 新建）不再要求 `tabs.length > 1` 才渲染，单标签时也能开新标签。
+- 快速搜索从"固定查项目根"改为跟随当前标签的浏览目录，工具栏显示"搜索范围：<目录>"
+  （`files.quickScope`），与"只过滤当前目录"的过滤框区分。
+- 移除 `file-browser.vue` 中未使用的 `selectEntry` 导入。
+
+## 13. 本轮验证
+
+- `tests/renderer-files-store.test.ts`：新增 5 例——dock 首点（无标签时创建并预览）、
+  reveal 在途切标签不回填到新标签、输入镜像、宽度钳制下限、损坏图片同路径重试复位；
+  与既有用例合计 45 通过。
+- `vue-tsc`（tsconfig.web）+ `tsc`（tsconfig.node）无错误；`biome check .` 与改动前
+  同为 6 个 warning（均为存量，非本批引入）。
+- 未做 Electron 视觉验证（布局类改动以 DOM 结构 + store 测试为准，见后续 GUI 用例）。
