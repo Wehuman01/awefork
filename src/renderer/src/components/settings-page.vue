@@ -154,6 +154,16 @@
                         </select>
                       </label>
                     </template>
+                    <template v-else-if="row.kind === 'text'">
+                      <input
+                        class="settings-text"
+                        type="text"
+                        :value="row.value"
+                        :placeholder="row.placeholder"
+                        :aria-label="row.title"
+                        @change="row.apply(($event.target as HTMLInputElement).value)"
+                      />
+                    </template>
                     <template v-else-if="row.kind === 'button'">
                       <button type="button" class="settings-btn" @click="row.apply()">
                         {{ row.buttonLabel }}
@@ -189,6 +199,21 @@
           {{ t("settings.done") }}
         </button>
       </footer>
+      <ParallelModelDialog
+        v-model:open="parallelDefaultsOpen"
+        :models="store.models"
+        :favorite-models="store.favoriteModels"
+        :recent-models="store.recentModels"
+        :max="MAX_PARALLEL_TARGETS"
+        :targets="settings.labs.parallel.targets"
+        :summary="{
+          model: settings.labs.parallel.summaryModel,
+          length: settings.labs.parallel.summaryLength,
+        }"
+        @update:targets="applyParallelDefaults"
+        @update:summary="applyParallelSummary"
+        @toggle-favorite="toggleFavoriteModel"
+      />
     </section>
   </div>
 </template>
@@ -207,12 +232,14 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { BackendId } from "../../../shared/backend";
+import type { ModelChoice, ParallelSummaryLength } from "../../../shared/types";
 import { locale, setLocale, t } from "../i18n";
 import { resetLayout, settingsOpen, toggleSettings } from "../layout";
 import { modWith } from "../platform-key";
 import {
   type Density,
   type FileOpenTarget,
+  MAX_PARALLEL_TARGETS,
   resetAllSettings,
   resetSection as resetSettingsSection,
   type Settings,
@@ -230,6 +257,7 @@ import {
   toggleFavoriteModel,
 } from "../state";
 import { theme, themePreference } from "../theme";
+import ParallelModelDialog from "./parallel-model-dialog.vue";
 
 // ── row model ───────────────────────────────────────────────────────
 
@@ -266,6 +294,13 @@ interface SelectRow extends RowBase {
   apply: (next: string) => void;
 }
 
+interface TextRow extends RowBase {
+  kind: "text";
+  value: string;
+  placeholder?: string;
+  apply: (next: string) => void;
+}
+
 interface ButtonRow extends RowBase {
   kind: "button" | "link";
   buttonLabel: string;
@@ -277,7 +312,7 @@ interface InfoRow extends RowBase {
   info: string;
 }
 
-type Row = ToggleRow | SegmentRow | ThemeRow | SelectRow | ButtonRow | InfoRow;
+type Row = ToggleRow | SegmentRow | ThemeRow | SelectRow | TextRow | ButtonRow | InfoRow;
 
 interface SectionDef {
   id: string;
@@ -298,7 +333,24 @@ const contentEl = ref<HTMLElement | null>(null);
 const searchEl = ref<HTMLInputElement | null>(null);
 const query = ref("");
 const activeSection = ref("appearance");
+/** The labs row's multi-model defaults dialog. */
+const parallelDefaultsOpen = ref(false);
 let backdropDown = false;
+
+/** Defaults are stored as concrete picks; the dialog's "agent default" row never persists. */
+function applyParallelDefaults(targets: (ModelChoice | null)[]): void {
+  settings.labs.parallel.targets = targets
+    .filter((choice): choice is ModelChoice => choice !== null)
+    .slice(0, MAX_PARALLEL_TARGETS);
+}
+
+function applyParallelSummary(summary: {
+  model: ModelChoice | null;
+  length: ParallelSummaryLength;
+}): void {
+  settings.labs.parallel.summaryModel = summary.model ? { ...summary.model } : null;
+  settings.labs.parallel.summaryLength = summary.length;
+}
 
 const themeOptions = computed(() => [
   { value: "system" as const, label: t("settings.themeSystem") },
@@ -366,6 +418,17 @@ function button(
 
 function info(key: string, title: string, desc: string, text: string): InfoRow {
   return { kind: "info", key, title, desc, info: text };
+}
+
+function text(
+  key: string,
+  title: string,
+  desc: string,
+  value: string,
+  apply: (next: string) => void,
+  placeholder?: string,
+): TextRow {
+  return { kind: "text", key, title, desc, value, apply, placeholder };
 }
 
 // ── section builders ────────────────────────────────────────────────
@@ -654,8 +717,22 @@ function filesSection(): SectionDef {
         },
         true,
       ),
+      text(
+        "files.ignore",
+        t("settings.filesIgnore"),
+        t("settings.filesIgnoreDesc"),
+        settings.files.ignore.join(", "),
+        (next) => {
+          const list = next
+            .split(",")
+            .map((name) => name.trim())
+            .filter((name) => name !== "");
+          settings.files.ignore = [...new Set(list)];
+        },
+        "node_modules, dist",
+      ),
     ],
-    keywords: "files preview hidden grid 文件 预览 隐藏 网格",
+    keywords: "files preview hidden grid ignore 文件 预览 隐藏 网格 忽略",
   };
 }
 
@@ -963,6 +1040,44 @@ function languageSection(): SectionDef {
 }
 
 function labsSection(): SectionDef {
+  const rows: Row[] = [
+    toggle(
+      "labs.fileBrowser",
+      t("settings.labsFileBrowser"),
+      t("settings.labsFileBrowserDesc"),
+      settings.labs.fileBrowser,
+      (next) => {
+        settings.labs.fileBrowser = next;
+      },
+    ),
+    toggle(
+      "labs.parallelModels",
+      t("settings.labsParallelModels"),
+      t("settings.labsParallelModelsDesc"),
+      settings.labs.parallelModels,
+      (next) => {
+        settings.labs.parallelModels = next;
+      },
+    ),
+  ];
+  // The multi-model defaults only matter once the feature is on; hiding them
+  // keeps the section about switches, not about a disabled feature's knobs.
+  if (settings.labs.parallelModels) {
+    rows.push(
+      button(
+        "labs.parallelDefaults",
+        t("settings.parallelDefaults"),
+        t("settings.parallelDefaultsDesc"),
+        settings.labs.parallel.targets.length > 0
+          ? t("settings.parallelDefaultsCount", { n: settings.labs.parallel.targets.length })
+          : t("settings.parallelDefaultsEmpty"),
+        () => {
+          parallelDefaultsOpen.value = true;
+        },
+      ),
+    );
+  }
+  rows.push(info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""));
   return {
     id: "labs",
     icon: "⚗",
@@ -971,28 +1086,8 @@ function labsSection(): SectionDef {
     desc: t("settings.labsDesc"),
     ...LOCAL_STORE(),
     resettable: true,
-    rows: [
-      toggle(
-        "labs.fileBrowser",
-        t("settings.labsFileBrowser"),
-        t("settings.labsFileBrowserDesc"),
-        settings.labs.fileBrowser,
-        (next) => {
-          settings.labs.fileBrowser = next;
-        },
-      ),
-      toggle(
-        "labs.parallelModels",
-        t("settings.labsParallelModels"),
-        t("settings.labsParallelModelsDesc"),
-        settings.labs.parallelModels,
-        (next) => {
-          settings.labs.parallelModels = next;
-        },
-      ),
-      info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""),
-    ],
-    keywords: "labs experiment 实验室 实验 experimental beta",
+    rows,
+    keywords: "labs experiment 实验室 实验 experimental beta parallel 并行 多模型",
   };
 }
 
