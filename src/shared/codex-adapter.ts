@@ -1,4 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
+import { withInlineFiles } from "./inline-attachments.js";
 import { recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
@@ -41,6 +42,19 @@ export interface CodexAdapterOptions {
   cliVersion?: string | null;
   /** One-time auth banner (codex installed but not logged in). */
   authMessage?: string | null;
+  /**
+   * Stage image attachments as files and hand back the paths codex's
+   * `localImage` turn input reads. Injected from main — shared/ imports no
+   * node built-ins. Absent means images cannot be staged and are skipped.
+   */
+  stageImages?: (images: readonly PromptAttachment[]) => StagedCodexImages;
+}
+
+/** Image attachments written as files for one turn's `localImage` items. */
+export interface StagedCodexImages {
+  paths: string[];
+  /** Removes the staged files; safe to call more than once. */
+  cleanup: () => void;
 }
 
 interface CodexThread {
@@ -105,7 +119,7 @@ interface CodexItem {
    * Reasoning/userMessage content. Codex 0.154 sends reasoning content as
    * plain string[]; some builds wrap it as {text}[] — both are accepted.
    */
-  content?: (string | { text?: string })[];
+  content?: (string | { text?: string; type?: string; path?: string })[];
   summary?: string[];
   command?: string;
   server?: string;
@@ -161,10 +175,51 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   /** threadId → itemId → containing turn id, rebuilt whenever turns load. */
   const turnIndex = new Map<string, Map<string, string>>();
   const pendingInteractions = new Map<string, PendingInteraction>();
+  /**
+   * threadId → image files staged for the thread's in-flight turn. codex
+   * reads them while the turn runs; they are released when it ends. A second
+   * prompt on the same thread replaces (and releases) the previous staging.
+   */
+  const stagedByThread = new Map<string, StagedCodexImages>();
   let nextInteractionId = 1;
   let forkFallbackLogged = false;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
+
+  const releaseStaging = (threadId: string): void => {
+    const staged = stagedByThread.get(threadId);
+    if (!staged) return;
+    stagedByThread.delete(threadId);
+    staged.cleanup();
+  };
+
+  /** Replace any staging this thread still holds, then take the new one. */
+  const registerStaging = (threadId: string, staged: StagedCodexImages): void => {
+    releaseStaging(threadId);
+    stagedByThread.set(threadId, staged);
+  };
+
+  /**
+   * turn/start's input items: staged images first as `localImage` paths, the
+   * prompt text last with non-image attachments inlined — codex has no file
+   * part to hang them on, the same trade pi makes.
+   */
+  const buildTurnInput = (
+    text: string,
+    attachments: readonly PromptAttachment[] | undefined,
+  ): { input: Record<string, unknown>[]; staged: StagedCodexImages | null } => {
+    const images = (attachments ?? []).filter((a) => a.mime.startsWith("image/"));
+    const staged = images.length > 0 ? (options.stageImages?.(images) ?? null) : null;
+    const imageItems = (staged?.paths ?? []).map((path) => ({ type: "localImage", path }));
+    const textItem = {
+      type: "text",
+      text: withInlineFiles(
+        text,
+        (attachments ?? []).filter((a) => !a.mime.startsWith("image/")),
+      ),
+    };
+    return { input: [...imageItems, textItem], staged };
+  };
 
   /**
    * A failed turn/start may be auth, but the RPC error text can't say which.
@@ -375,7 +430,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         modelId,
         providerId: "codex",
         variant,
-        attachmentNames: [],
+        attachmentNames: imageNamesOf(userItem.content),
         createdAt: startedAt,
         completedAt: null,
         finish: null,
@@ -718,16 +773,20 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       await client.request("thread/name/set", { threadId: sessionId, name: title });
     },
 
-    async prompt(sessionId, text, model) {
+    async prompt(sessionId, text, model, attachments) {
+      const { input, staged } = buildTurnInput(text, attachments);
       const turnParams = (threadId: string) => {
         const params: Record<string, unknown> = {
           threadId,
-          input: [{ type: "text", text }],
+          input,
         };
         if (model?.modelId) params.model = model.modelId;
         if (model?.variant) params.effort = model.variant;
         return params;
       };
+      // Claim the slot before the call: a staging this thread still holds
+      // belongs to a finished turn (its end frame may have been dropped).
+      if (staged) registerStaging(sessionId, staged);
       try {
         // turn/start only sees threads this server has loaded, and reading a
         // thread no longer loads it (readThread deliberately avoids the
@@ -745,7 +804,12 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
           "turn/start",
           turnParams(sessionId),
         );
-        if (response?.turn?.id) activeTurns.set(sessionId, response.turn.id);
+        if (response?.turn?.id) {
+          activeTurns.set(sessionId, response.turn.id);
+          return;
+        }
+        // No turn came back: nothing will ever read the staged files.
+        releaseStaging(sessionId);
       } catch (error) {
         // Request-level failures (auth, unknown thread) have no notification;
         // surface them with the session id so the renderer settles the run —
@@ -764,7 +828,18 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
           // the locked thread held.
           const forked = await forkForContinuation(sessionId);
           if (forked) {
-            await client.request("turn/start", turnParams(forked.id));
+            try {
+              await client.request("turn/start", turnParams(forked.id));
+            } catch (forkError) {
+              releaseStaging(sessionId);
+              throw forkError instanceof Error ? forkError : new Error(String(forkError));
+            }
+            // The turn now runs on the fork, so the staged files outlive the
+            // fork's turn end, not the locked thread's.
+            if (staged) {
+              stagedByThread.delete(sessionId);
+              registerStaging(forked.id, staged);
+            }
             emit({
               type: "server.error",
               sessionId,
@@ -773,6 +848,8 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
             return;
           }
         }
+        // The turn never started: nothing will read the staged files.
+        releaseStaging(sessionId);
         const authDetail = await authFailureDetail();
         emit({
           type: "server.error",
@@ -804,7 +881,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         if (!stopped.flag) handler(event);
       };
       client.setNotificationHandler((method, params) => {
-        emitCodexNotification(method, params, emit, activeTurns, usageByThread);
+        emitCodexNotification(method, params, emit, activeTurns, usageByThread, (threadId) =>
+          releaseStaging(threadId),
+        );
       });
       client.setRequestHandler?.((method, params) => {
         const requestId = `codex-interaction-${nextInteractionId++}`;
@@ -838,6 +917,8 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     dispose() {
       emitEvent = null;
       pendingInteractions.clear();
+      for (const staged of stagedByThread.values()) staged.cleanup();
+      stagedByThread.clear();
       client.setNotificationHandler(() => {});
       client.setRequestHandler?.(undefined);
     },
@@ -879,6 +960,8 @@ function emitCodexNotification(
   emit: (event: AgentEvent) => void,
   activeTurns: Map<string, string>,
   usageByThread: Map<string, { turnId: string; usage: CodexTokenUsage }>,
+  /** Fires where a thread's turn is over — success, idle twin, or failure. */
+  onTurnEnd?: (threadId: string) => void,
 ): void {
   const p = (params ?? {}) as {
     threadId?: string;
@@ -900,6 +983,8 @@ function emitCodexNotification(
       if (p.willRetry) break;
       const message = p.error?.message ?? "unknown codex error";
       emit({ type: "server.error", sessionId: threadId, message: `codex: ${message}` });
+      // A fatal error ends the turn too — its staged files are done for.
+      if (threadId) onTurnEnd?.(threadId);
       break;
     }
     case "turn/started": {
@@ -919,6 +1004,7 @@ function emitCodexNotification(
           message: `codex: ${p.turn.error.message}`,
         });
       }
+      onTurnEnd?.(threadId);
       emit({ type: "session.idle", sessionId: threadId });
       break;
     }
@@ -933,6 +1019,7 @@ function emitCodexNotification(
         // completed frame leaves a stale turnId that a later abort would
         // interrupt (and surface as a raw codex error).
         activeTurns.delete(threadId);
+        onTurnEnd?.(threadId);
         emit({ type: "session.idle", sessionId: threadId });
       }
       break;
@@ -1060,6 +1147,23 @@ function reasoningSummaryOf(item: CodexItem): string {
 
 function reasoningTextOf(item: CodexItem): string {
   return [reasoningContentOf(item), reasoningSummaryOf(item)].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Filenames of the images a user turn carried. codex echoes each back as a
+ * `localImage` part holding the staged file's path; staging names files
+ * after the originals, so the path's basename is the name the composer
+ * showed and history shows the same chip.
+ */
+function imageNamesOf(content: CodexItem["content"]): string[] {
+  const names: string[] = [];
+  for (const part of content ?? []) {
+    if (typeof part === "string" || part.type !== "localImage") continue;
+    if (typeof part.path !== "string") continue;
+    const name = part.path.split(/[\\/]/).pop();
+    if (name) names.push(name);
+  }
+  return names;
 }
 
 function interactionRequest(

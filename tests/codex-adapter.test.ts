@@ -8,7 +8,7 @@ import {
   createCodexAdapter,
   OWNED_ELSEWHERE_MESSAGE,
 } from "../src/shared/codex-adapter";
-import type { AgentEvent, AgentInteractionRequest } from "../src/shared/types";
+import type { AgentEvent, AgentInteractionRequest, PromptAttachment } from "../src/shared/types";
 
 /**
  * Scripted JSON-RPC stand-in: one handler per method (keyed on params when a
@@ -149,6 +149,43 @@ describe("createCodexAdapter messages()", () => {
       createdAt: 1726000000000,
       completedAt: 1726000042000,
       finish: "stop",
+    });
+  });
+
+  it("surfaces staged image names as the user row's attachment names", async () => {
+    // codex echoes each sent image back as a localImage part holding the
+    // staged file's path; the basename is the filename the user attached.
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () =>
+        turnPageFixture([
+          {
+            ...TURN_FIXTURE,
+            items: [
+              {
+                type: "userMessage",
+                id: "u1",
+                content: [
+                  { type: "text", text: "看看这个报错", text_elements: [] },
+                  {
+                    type: "localImage",
+                    detail: null,
+                    path: "/var/folders/tmp/awefork-codex-att-9f2/screenshot.png",
+                  },
+                ],
+              },
+              ...TURN_FIXTURE.items.slice(1),
+            ],
+          },
+        ]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const rows = await adapter.messages("s1");
+    expect(rows[0]).toMatchObject({
+      role: "user",
+      text: "看看这个报错",
+      attachmentNames: ["screenshot.png"],
     });
   });
 
@@ -514,6 +551,168 @@ describe("createCodexAdapter prompt()", () => {
     expect(callsOf("turn/start")).toHaveLength(0);
     const error = events.find((e) => e.type === "server.error");
     expect(error).toMatchObject({ sessionId: "s1", message: OWNED_ELSEWHERE_MESSAGE });
+  });
+});
+
+describe("createCodexAdapter prompt() attachments", () => {
+  const image = (filename: string): PromptAttachment => ({
+    mime: "image/png",
+    filename,
+    dataUrl: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`,
+  });
+  const textFile = (filename: string, body: string): PromptAttachment => ({
+    mime: "text/plain",
+    filename,
+    dataUrl: `data:text/plain;base64,${Buffer.from(body).toString("base64")}`,
+  });
+
+  /** Records what main's real stager would do, without touching the disk. */
+  function fakeStager() {
+    const state = { calls: [] as PromptAttachment[][], cleanups: 0 };
+    const stageImages = (images: readonly PromptAttachment[]) => {
+      state.calls.push([...images]);
+      return {
+        paths: images.map((_, index) => `/staged/image-${index}.png`),
+        cleanup: () => {
+          state.cleanups += 1;
+        },
+      };
+    };
+    return { state, stageImages };
+  }
+
+  const promptClient = () =>
+    fakeClient({
+      "thread/resume": () => ({ thread: THREAD_FIXTURE }),
+      "turn/start": () => ({ turn: { id: "turn-9" } }),
+      "account/read": () => ({ account: { type: "chatgpt" } }),
+    });
+
+  it("sends images as localImage items and inlines text attachments", async () => {
+    // Verified against codex 0.164's app-server: turn/start's input takes
+    // {type:"localImage", path} for images; non-image files have no input
+    // item, so they ride the prompt text as named sections (pi's trade).
+    const { client, callsOf } = promptClient();
+    const { state, stageImages } = fakeStager();
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      stageImages,
+    });
+
+    await adapter.prompt("s1", "看看这两张图", null, [
+      image("one.png"),
+      textFile("notes.txt", "第一行\n第二行"),
+      image("two.png"),
+    ]);
+
+    expect(state.calls).toHaveLength(1);
+    expect(state.calls[0]?.map((a) => a.filename)).toEqual(["one.png", "two.png"]);
+    expect(callsOf("turn/start")[0]?.params).toEqual({
+      threadId: "s1",
+      input: [
+        { type: "localImage", path: "/staged/image-0.png" },
+        { type: "localImage", path: "/staged/image-1.png" },
+        { type: "text", text: "看看这两张图\n\n--- notes.txt ---\n第一行\n第二行" },
+      ],
+    });
+  });
+
+  it("skips images when no stager is injected (tests, degraded mains)", async () => {
+    const { client, callsOf } = promptClient();
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    await adapter.prompt("s1", "只有文字", null, [image("one.png")]);
+
+    expect(callsOf("turn/start")[0]?.params).toEqual({
+      threadId: "s1",
+      input: [{ type: "text", text: "只有文字" }],
+    });
+  });
+
+  it("releases the staged files when the turn ends", async () => {
+    const { client, notify } = promptClient();
+    const { state, stageImages } = fakeStager();
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      stageImages,
+    });
+    await adapter.subscribe(() => {});
+
+    await adapter.prompt("s1", "看图", null, [image("one.png")]);
+    expect(state.cleanups).toBe(0);
+
+    notify("turn/completed", { threadId: "s1", turn: { id: "turn-9" } });
+    expect(state.cleanups).toBe(1);
+  });
+
+  it("releases the staged files on the idle status twin too", async () => {
+    // A dropped turn/completed must not leak the temp dir until the next
+    // prompt; the idle twin is the second end-of-turn signal.
+    const { client, notify } = promptClient();
+    const { state, stageImages } = fakeStager();
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      stageImages,
+    });
+    await adapter.subscribe(() => {});
+
+    await adapter.prompt("s1", "看图", null, [image("one.png")]);
+    notify("thread/status/changed", { threadId: "s1", status: { type: "idle" } });
+    expect(state.cleanups).toBe(1);
+  });
+
+  it("releases the staged files when turn/start fails", async () => {
+    // No turn means nothing will ever read the files.
+    const { client } = fakeClient({
+      "thread/resume": () => ({ thread: THREAD_FIXTURE }),
+      "turn/start": () => {
+        throw new Error("codex prompt failed: nope");
+      },
+      "account/read": () => ({ account: { type: "chatgpt" } }),
+    });
+    const { state, stageImages } = fakeStager();
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      stageImages,
+    });
+
+    await expect(adapter.prompt("s1", "看图", null, [image("one.png")])).rejects.toThrow(/nope/);
+    expect(state.cleanups).toBe(1);
+  });
+
+  it("re-keys the staged files to the fork when the writer is refused", async () => {
+    // The recovery fork is where the turn actually runs, so the files must
+    // outlive THAT thread's turn end — not the locked one's.
+    const { client, notify } = fakeClient({
+      "thread/resume": () => {
+        throw new Error("thread s1 already has an active writer");
+      },
+      "thread/fork": () => ({
+        thread: { id: "fork-9", forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 1 },
+      }),
+      "turn/start": () => ({ turn: { id: "turn-fork" } }),
+    });
+    const { state, stageImages } = fakeStager();
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      cliVersion: "0.163.0",
+      stageImages,
+    });
+    await adapter.subscribe(() => {});
+
+    await adapter.prompt("s1", "看图", null, [image("one.png")]);
+
+    // The locked thread's end frame is not the fork's: files stay.
+    notify("turn/completed", { threadId: "s1", turn: { id: "turn-9" } });
+    expect(state.cleanups).toBe(0);
+
+    notify("turn/completed", { threadId: "fork-9", turn: { id: "turn-fork" } });
+    expect(state.cleanups).toBe(1);
   });
 });
 
