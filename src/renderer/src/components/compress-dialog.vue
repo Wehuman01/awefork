@@ -15,6 +15,7 @@
       <p class="interaction-kicker">{{ t("compress.kicker") }}</p>
       <h2>{{ t("compress.title", { title: ask.title }) }}</h2>
       <ul class="compress-points">
+        <li v-if="ask.viaFork">{{ t("compress.forkPoint") }}</li>
         <li>{{ t("compress.point1") }}</li>
         <li>{{ t("compress.point2") }}</li>
         <li>{{ t("compress.point3") }}</li>

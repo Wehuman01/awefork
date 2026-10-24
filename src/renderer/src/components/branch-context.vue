@@ -820,7 +820,10 @@ function exportMd(): void {
 
 function compress(): void {
   const id = store.selectedId;
-  if (id) void compressSession(id);
+  if (!id) return;
+  // Compress at the viewed position: the pane's current turn decides whether
+  // the summary forks off or lands in place (null = stub view, treated as tip).
+  void compressSession(id, pane.value?.turn.messageId ?? null);
 }
 
 const paneModel = paneComposerModel;
