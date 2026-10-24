@@ -145,8 +145,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "settings.quitKeepAlive": { zh: "退出保留后台", en: "Keep on quit" },
   "settings.quitKeepAliveDesc": {
-    zh: "开启后，退出 awefork 时后端继续在后台运行，进行中的任务会跑完并写入会话记录；退出确认弹窗里也能勾选打开。",
-    en: "With this on, quitting leaves the backends running so in-flight turns finish and land in their session files; the quit dialog's checkbox can also turn it on.",
+    zh: "开启后，退出 awefork 时保留可后台运行的后端；Pi 依赖本应用内的 RPC 子进程，会随退出停止。",
+    en: "With this on, quitting keeps backends that can run detached; Pi uses app-owned RPC children and stops on quit.",
   },
   "settings.backendSwitchNote": {
     zh: "切换会重塑整个工作区，因此每次切换都会先确认；已有会话仍保留在历史记录里。安装探针只跑 --version，不会启动服务。",

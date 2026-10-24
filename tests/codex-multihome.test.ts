@@ -371,6 +371,22 @@ describe("codex multi-home facade", () => {
     expect(existsSync(join(defaultHome, rel, `rollout-${threadId}.jsonl`))).toBe(true);
   });
 
+  it("continues a foreign empty-context fork in its own home without importing a rollout", async () => {
+    const { facade, byHome } = makeFacade({ default: [], cxo: ["parent"] });
+    const foreign = homeAdapter(byHome, "cxo");
+    foreign.fork.mockResolvedValue({
+      ...makeSummary("forked-empty", 300),
+      origin: "fork",
+      parentSessionId: "parent",
+    });
+
+    const forked = await facade.fork("parent", "turn", { context: "none" });
+    await facade.prompt(forked.id, "第一条消息", null);
+
+    expect(foreign.prompt).toHaveBeenCalledWith("forked-empty", "第一条消息", null, []);
+    expect(homeAdapter(byHome, "default").prompt).not.toHaveBeenCalled();
+  });
+
   it("deletes an imported session's account-home original too, so it stays deleted", async () => {
     // Regression: deleteSession only hit the owning (default) home, so the
     // aweswitch account home's original rollout re-listed the session on

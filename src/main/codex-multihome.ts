@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { readLineage } from "../shared/lineage-store.js";
 import { createCodexAdapter } from "../shared/codex-adapter.js";
 import type {
   AgentAdapter,
@@ -342,8 +343,12 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     },
 
     async prompt(sessionId, text, model, attachments) {
-      // Continuing a foreign session switches it to the default account.
-      importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+      const lineage = await readLineage(options.lineagePath);
+      if (lineage[sessionId]?.context !== "none") {
+        // Foreign history must move to the default account before a turn.
+        // An empty-context fork has no rollout yet and stays in its home.
+        importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+      }
       await (await adapterFor(sessionId)).prompt(sessionId, text, model, attachments);
     },
 

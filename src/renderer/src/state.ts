@@ -4665,7 +4665,6 @@ export async function sendDraftParallel(
   const draft = state.draft;
   if (!draft?.text.trim() || state.draftSending) return false;
   const backend = state.activeBackend;
-  const generation = workspaceGeneration;
   const sentDraft = plainPersistedDraft();
   state.draftSending = true;
   try {
@@ -4681,25 +4680,22 @@ export async function sendDraftParallel(
       summary,
     );
     if (!accepted) return false;
-    if (generation === workspaceGeneration && backend === state.activeBackend) {
-      // The round is out, so the draft is spent — same ending as a single
-      // send: drop it, take its parked copy with it, and clear the sidecar.
-      state.draft = null;
-      unstashDraft(draft.sessionId, draft.atMessageId);
-      void flushComposer(backend);
-    } else if (backend === state.activeBackend) {
+    if (backend === state.activeBackend) {
       const currentDraft = plainPersistedDraft();
-      if (
-        !currentDraft ||
-        (sentDraft && JSON.stringify(currentDraft) === JSON.stringify(sentDraft))
-      ) {
-        if (currentDraft) {
-          state.draft = null;
-          unstashDraft(draft.sessionId, draft.atMessageId);
-          void flushComposer(backend);
-        } else {
-          void clearComposerDraft(backend, sentDraft ?? undefined).catch(() => {});
-        }
+      const unchanged =
+        currentDraft !== null &&
+        sentDraft !== null &&
+        JSON.stringify(currentDraft) === JSON.stringify(sentDraft);
+      if (unchanged) {
+        // The round is out and the user did not touch the draft: drop it,
+        // take its parked copy with it, and clear the sidecar.
+        state.draft = null;
+        unstashDraft(draft.sessionId, draft.atMessageId);
+        void flushComposer(backend);
+      } else if (currentDraft === null) {
+        // The draft was closed while the round was accepted. Clear only the
+        // sent snapshot from the sidecar; a newer draft must survive.
+        void clearComposerDraft(backend, sentDraft ?? undefined).catch(() => {});
       }
     } else {
       // The run belongs to the parked backend; clear its saved draft without
@@ -4937,6 +4933,16 @@ async function collectParallelTarget(group: ParallelGroup, target: ParallelTarge
         // own; say why the answer is missing rather than leaving it blank.
         target.error =
           result.error ?? (result.status === "unknown" ? t("state.parallelTargetTimeout") : null);
+        if (result.status === "unknown" && !target.stopping) {
+          // The watchdog can settle a silent run while the backend is still
+          // working. Give the attempt up on the backend too, so retry cannot
+          // stack a second native run behind the first.
+          try {
+            await window.awefork.abort(group.backend, sessionId);
+          } catch {
+            // The answer is already unknown; a failed cancel changes nothing.
+          }
+        }
         return;
       }
     } catch (error) {
@@ -5010,6 +5016,7 @@ export async function stopParallelTarget(groupId: string, targetId: string): Pro
     await window.awefork.abort(group.backend, target.sessionId);
   } catch (error) {
     target.stopping = false;
+    stoppingRequested.delete(`${groupId}:${targetId}`);
     state.actionError = error instanceof Error ? error.message : String(error);
     return;
   }

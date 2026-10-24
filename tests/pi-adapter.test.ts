@@ -556,6 +556,21 @@ describe("createPiAdapter idle child reaping", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops children on keep-alive dispose because quitting also exits awefork", async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, rpc } = await makeHarness(["s1-mixed"]);
+      await adapter.prompt("s1-mixed", "hi", null);
+      rpc.children[0]?.fire({ type: "agent_end" });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      adapter.dispose({ keepAlive: true });
+      expect(rpc.children[0]?.killed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── fork() ───────────────────────────────────────────────────────────────────

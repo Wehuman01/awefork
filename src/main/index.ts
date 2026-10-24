@@ -162,8 +162,8 @@ app.on("before-quit", (event) => {
         type: "warning",
         message: `${running.length} 个会话仍在运行 / ${running.length} session(s) still running`,
         detail:
-          "退出会中断这些任务。/ Quitting interrupts them." +
-          "\n后台保留时，任务会在后台完成并写入会话记录。/ With keep-alive they finish in the background.",
+          "退出会中断 Pi 任务。/ Quitting interrupts Pi tasks." +
+          "\n后台保留时，其他后端的任务会在后台完成。/ With keep-alive, other backends finish in the background.",
         buttons: ["退出并中断 / Quit and interrupt", "取消 / Cancel"],
         defaultId: 1,
         cancelId: 1,

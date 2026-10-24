@@ -68,6 +68,8 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
   const counts: Record<string, number> = {};
   const key = (backend: BackendId, id: string) => `${backend}:${id}`;
   const promptFailures = new Set<string>();
+  let forkDeferred: ((session: SessionSummary) => void) | null = null;
+  const abort = vi.fn(async () => {});
   const tagStore: TagStore = {
     sessions: options.tags ? { [ANCHOR.id]: [...options.tags] } : {},
     colors: {},
@@ -79,14 +81,23 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     tagStore.sessions[args.id] = args.tags;
     return structuredClone(tagStore);
   });
-  const fork = vi.fn(async (backend: BackendId, _id: string) => {
-    counts[backend] = (counts[backend] ?? 0) + 1;
-    const id = `fork-${counts[backend]}`;
+  const fork = vi.fn(
+    (_backend: BackendId, _id: string) =>
+      new Promise<SessionSummary>((resolve) => {
+        forkDeferred = resolve;
+      }),
+  );
+  const saveComposer = vi.fn(async () => {});
+  const resolveFork = (): void => {
+    counts.codex = (counts.codex ?? 0) + 1;
+    const id = `fork-${counts.codex}`;
     const session = { ...ANCHOR, id, parentSessionId: ANCHOR.id, origin: "fork" as const };
-    required(sessions[backend]).push(session);
-    histories.set(key(backend, id), structuredClone(options.inheritedRows ?? []));
-    return session;
-  });
+    required(sessions.codex).push(session);
+    histories.set(key("codex", id), structuredClone(options.inheritedRows ?? []));
+    const resolve = forkDeferred;
+    forkDeferred = null;
+    resolve?.(session);
+  };
   const prompt = vi.fn(
     async (
       backend: BackendId,
@@ -116,7 +127,7 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     prompt,
     deleteSession: async () => [],
     deleteMessage: async () => {},
-    abort: async () => {},
+    abort,
     respondInteraction: async () => {},
     renameSession: async () => {},
     openSessionTerminal: async () => ({ ok: true }),
@@ -135,7 +146,7 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     archiveAdd: async () => ({ sessions: [], directories: [] }),
     archiveRemove: async () => ({ sessions: [], directories: [] }),
     composer: async () => null,
-    saveComposer: async () => {},
+    saveComposer,
     backends: async () => ({
       selected: "codex",
       backends: ["codex", "opencode"].map((id) => ({
@@ -168,12 +179,15 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
   await state.selectSession(ANCHOR.id);
   return {
     state,
+    saveComposer,
     fork,
+    resolveFork,
     prompt,
     setSessionTags,
     histories,
     key,
     promptFailures,
+    abort,
     emit: (event: AgentEvent, backend: BackendId = "codex") => handler?.({ backend, event }),
     append(id: string, answer: ChatMessage, backend: BackendId = "codex") {
       const k = key(backend, id);
@@ -489,6 +503,40 @@ describe("parallel reading groups", () => {
     expect(h.state.store.draft).toBeNull();
   });
 
+  it("keeps draft edits made while a parallel send is accepting", async () => {
+    const h = await bootState();
+    h.state.openDraft({
+      id: `${ANCHOR.id}:m1`,
+      kind: "turn",
+      sessionId: ANCHOR.id,
+      messageId: "m1",
+      title: "一轮",
+      preview: "",
+      toolNames: [],
+      modelIds: [],
+      model: null,
+      createdAt: 1,
+      durationMs: null,
+      outputTokens: 0,
+      error: null,
+      col: 0,
+      row: 0,
+      x: 0,
+      y: 0,
+      height: 100,
+    });
+    h.state.setDraftText("旧问题");
+    const sending = h.state.sendDraftParallel(MODELS.slice(0, 2), SETTINGS);
+    await vi.advanceTimersByTimeAsync(0);
+    h.state.setDraftText("继续编辑的问题");
+    h.resolveFork();
+    h.resolveFork();
+    await sending;
+
+    expect(h.state.store.draft?.text).toBe("继续编辑的问题");
+    expect(h.saveComposer).not.toHaveBeenCalledWith("codex", null);
+  });
+
   it("forks a ✂ draft's round with no ancestor history", async () => {
     const h = await bootState();
     h.state.openDraft({
@@ -557,6 +605,18 @@ describe("parallel reading groups", () => {
     // The round still finished: the usable answer was summarized.
     expect(group.summaryStatus).not.toBe("waiting");
     expect(group.summaryStatus).not.toBe("running");
+  });
+
+  it("cancels a silent target when the watchdog gives up on it", async () => {
+    const h = await bootState();
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const target = required(group.targets[0]);
+    await settle(h, "fork-2", "另一份回答");
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    expect(target.status).toBe("unknown");
+    expect(h.abort).toHaveBeenCalledWith("codex", "fork-1");
   });
 
   it("does not start two retries for the same target", async () => {
