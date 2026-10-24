@@ -1,9 +1,15 @@
 import type { BackendId } from "../../shared/backend";
-import type { ChatMessage, ModelChoice, PromptAttachment } from "../../shared/types";
+import type {
+  ChatMessage,
+  ModelChoice,
+  ParallelSummaryLength,
+  PromptAttachment,
+} from "../../shared/types";
 
 export interface ParallelSummarySettings {
   model: ModelChoice | null;
-  length: "brief" | "standard";
+  /** "none" leaves the round's answers unsummarized. */
+  length: ParallelSummaryLength;
 }
 
 export interface ParallelTarget {
@@ -39,13 +45,16 @@ export interface ParallelGroup {
   directory: string;
   anchorSessionId: string;
   anchorMessageId: string | null;
+  /** "none" forks the targets with no ancestor history (canvas ✂ drafts). */
+  contextMode: "inherit" | "none";
   prompt: string;
   attachments: PromptAttachment[];
   inheritedTags: string[];
   createdAt: number;
   targets: ParallelTarget[];
   summarySessionId: string | null;
-  summaryStatus: "waiting" | "running" | "done" | "failed" | "unknown";
+  /** "skipped" = the round asked for no summary; the panel offers one on demand. */
+  summaryStatus: "waiting" | "running" | "done" | "failed" | "unknown" | "skipped";
   summaryText: string;
   summaryError: string | null;
   summarySourceIds: string[];

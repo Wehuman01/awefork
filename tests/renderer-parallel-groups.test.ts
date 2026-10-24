@@ -422,4 +422,100 @@ describe("parallel reading groups", () => {
     expect(group.summaryStatus).toBe("done");
     expect(group.summaryText).toBe("重试后汇总成功");
   });
+
+  it("leaves the round unsummarized when the summary length is none", async () => {
+    const h = await bootState();
+    const noSummary = { model: SETTINGS.model, length: "none" as const };
+    expect(await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], noSummary)).toBe(
+      true,
+    );
+    const group = required(h.state.parallelGroups[0]);
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, "fork-2", "回答乙");
+    expect(group.targets.map((target) => target.text)).toEqual(["回答甲", "回答乙"]);
+    expect(group.summaryStatus).toBe("skipped");
+    expect(group.summarySessionId).toBeNull();
+    expect(group.summaryText).toBe("");
+    // Only the two source forks exist — no summary session was created.
+    expect(h.fork).toHaveBeenCalledTimes(2);
+  });
+
+  it("summarizes a skipped round on demand", async () => {
+    const h = await bootState();
+    const noSummary = { model: SETTINGS.model, length: "none" as const };
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], noSummary);
+    const group = required(h.state.parallelGroups[0]);
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, "fork-2", "回答乙");
+    const onDemand = h.state.summarizeParallelGroup(group.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(group.summaryStatus).toBe("running");
+    await settle(h, required(group.summarySessionId), "事后汇总");
+    await onDemand;
+    expect(group.summaryStatus).toBe("done");
+    expect(group.summaryText).toBe("事后汇总");
+  });
+
+  it("anchors a canvas draft's round at the draft's own fork point", async () => {
+    const h = await bootState();
+    h.state.openDraft({
+      id: `${ANCHOR.id}:m1`,
+      kind: "turn",
+      sessionId: ANCHOR.id,
+      messageId: "m1",
+      title: "一轮",
+      preview: "",
+      toolNames: [],
+      modelIds: [],
+      model: null,
+      createdAt: 1,
+      durationMs: null,
+      outputTokens: 0,
+      error: null,
+      col: 0,
+      row: 0,
+      x: 0,
+      y: 0,
+      height: 100,
+    });
+    h.state.setDraftText("草稿里的问题");
+    expect(await h.state.sendDraftParallel(MODELS.slice(0, 2), SETTINGS)).toBe(true);
+    const group = required(h.state.parallelGroups[0]);
+    expect(group.anchorSessionId).toBe(ANCHOR.id);
+    expect(group.anchorMessageId).toBe("m1");
+    // Both source forks inherit the draft's turn — not the pane's selection.
+    expect(h.fork).toHaveBeenCalledWith("codex", ANCHOR.id, "m1", undefined);
+    // The round is out, so the draft is spent.
+    expect(h.state.store.draft).toBeNull();
+  });
+
+  it("forks a ✂ draft's round with no ancestor history", async () => {
+    const h = await bootState();
+    h.state.openDraft({
+      id: `${ANCHOR.id}:m1`,
+      kind: "turn",
+      sessionId: ANCHOR.id,
+      messageId: "m1",
+      title: "一轮",
+      preview: "",
+      toolNames: [],
+      modelIds: [],
+      model: null,
+      createdAt: 1,
+      durationMs: null,
+      outputTokens: 0,
+      error: null,
+      col: 0,
+      row: 0,
+      x: 0,
+      y: 0,
+      height: 100,
+    });
+    h.state.setDraftContextMode("none");
+    h.state.setDraftText("切断上下文的问题");
+    expect(await h.state.sendDraftParallel(MODELS.slice(0, 2), SETTINGS)).toBe(true);
+    const group = required(h.state.parallelGroups[0]);
+    expect(group.contextMode).toBe("none");
+    expect(h.fork).toHaveBeenCalledWith("codex", ANCHOR.id, "m1", { context: "none" });
+  });
 });

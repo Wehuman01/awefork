@@ -23,6 +23,11 @@ const dictionary = {
   partial: { zh: "部分完成", en: "Partly complete" },
   summaryReady: { zh: "汇总已就绪", en: "Summary ready" },
   waitingSummary: { zh: "等待汇总", en: "Ready to summarize" },
+  notSummarized: { zh: "未汇总", en: "Not summarized" },
+  skippedHint: {
+    zh: "本轮选择不汇总；可随时把已完成的回答汇总成一份。",
+    en: "This round asked for no summary; summarize the completed answers whenever you like.",
+  },
   waitingHint: {
     zh: "回答完成后，汇总会显示在这里。",
     en: "The summary will appear here when answers are ready.",

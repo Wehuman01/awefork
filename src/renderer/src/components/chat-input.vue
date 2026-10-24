@@ -81,11 +81,11 @@
           >×</button>
         </span>
         <button
-          v-if="parallelModels.length < 4"
+          v-if="parallelModels.length < MAX_PARALLEL_TARGETS"
           type="button"
           class="parallel-add-model"
-          :aria-expanded="modelMenuOpen"
-          @click="modelMenuOpen = !modelMenuOpen"
+          :aria-expanded="modelDialogOpen"
+          @click="modelDialogOpen = true"
         >＋ {{ t("input.parallelAddModel") }}</button>
       </div>
       <div v-if="editingTarget !== null && !busy" class="parallel-target-options">
@@ -96,23 +96,15 @@
           @select="setParallelVariant(editingTarget, $event)"
         />
       </div>
-      <div v-if="modelMenuOpen && !busy" class="parallel-model-menu">
-        <input v-model="modelSearch" type="search" :placeholder="t('input.parallelSearchModel')" :aria-label="t('input.parallelSearchModel')" />
-        <button
-          v-for="option in availableParallelModels"
-          :key="`${option.providerId}:${option.modelId}`"
-          type="button"
-          @click="addParallelModel(option)"
-        ><strong>{{ option.modelName || option.modelId }}</strong><span class="parallel-provider">{{ option.providerName }}</span></button>
-        <p v-if="availableParallelModels.length === 0">{{ t("input.parallelNoModels") }}</p>
-      </div>
       <button
         type="button"
         class="parallel-summary-entry"
         :aria-expanded="summaryOptionsOpen"
         @click="summaryOptionsOpen = !summaryOptionsOpen"
       >
-        <span class="parallel-summary-current" :title="modelLabel(summaryModel)">✦ {{ t("input.parallelSummaryWith") }} · {{ modelLabel(summaryModel) }}</span>
+        <span class="parallel-summary-current" :title="modelLabel(summaryModel)">
+          ✦ {{ t("input.parallelSummaryWith") }} · {{ modelLabel(summaryModel) }} · {{ summaryLengthLabel }}
+        </span>
         <span>{{ t("input.parallelSummarySettings") }} {{ summaryOptionsOpen ? "▴" : "▾" }}</span>
       </button>
       <div v-if="summaryOptionsOpen && !busy" class="parallel-summary-options">
@@ -128,8 +120,20 @@
         <span class="parallel-summary-label">{{ t("input.parallelSummaryLength") }}</span>
         <button type="button" :class="{ on: summaryLength === 'brief' }" @click="summaryLength = 'brief'">{{ t("input.parallelBrief") }}</button>
         <button type="button" :class="{ on: summaryLength === 'standard' }" @click="summaryLength = 'standard'">{{ t("input.parallelStandard") }}</button>
+        <button type="button" :class="{ on: summaryLength === 'none' }" @click="summaryLength = 'none'">{{ t("input.parallelNone") }}</button>
+        <p v-if="summaryLength === 'none'" class="parallel-summary-note">{{ t("input.parallelNoneHint") }}</p>
       </div>
     </fieldset>
+    <ParallelModelDialog
+      v-model:open="modelDialogOpen"
+      :models="models"
+      :favorite-models="favoriteModels"
+      :recent-models="recentModels"
+      :max="MAX_PARALLEL_TARGETS"
+      :targets="parallelModels"
+      @update:targets="parallelModels = $event"
+      @toggle-favorite="$emit('toggle-favorite', $event)"
+    />
     <div v-if="attachments.length > 0 || notice" class="chat-input-atts">
       <span v-for="a in attachments" :key="a.id" class="att-chip">
         <img v-if="a.mime.startsWith('image/')" :src="a.dataUrl" class="att-thumb" alt="" />
@@ -168,7 +172,13 @@
       <VariantPicker :model="model" :models="models" @select="onVariantPicked" />
       </template>
       <span v-else class="parallel-send-hint">{{ t("input.parallelSendCount", { n: parallelModels.length }) }}</span>
-      <button v-if="!running" type="submit" class="send" :disabled="!text.trim() || busy || (parallelMode && parallelModels.length < 2)">{{ parallelMode ? t("input.parallelSend", { n: parallelModels.length }) : t("input.send") }}</button>
+      <button
+        v-if="!running"
+        type="submit"
+        class="send"
+        :disabled="!text.trim() || busy || (parallelMode && parallelModels.length < 2)"
+        :title="parallelMode && parallelModels.length < 2 ? t('input.parallelNeedTwo') : undefined"
+        >{{ parallelMode ? t("input.parallelSend", { n: parallelModels.length }) : t("input.send") }}</button>
       <button v-else type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
     </div>
   </form>
@@ -178,7 +188,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
 import type { BackendId } from "../../../shared/backend";
-import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
+import type {
+  ModelChoice,
+  ModelOption,
+  ParallelSummaryLength,
+  PromptAttachment,
+} from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
 import type { ContextUsage } from "../context-usage";
 import { formatTokenCount } from "../format";
@@ -190,9 +205,12 @@ import {
   type TextEdit,
   wrapCodeFence,
 } from "../input-editing";
+import { MAX_PARALLEL_TARGETS, settings } from "../settings";
 import type { ParallelSummarySettings } from "../state";
+import { defaultParallelTargets } from "../state";
 import { MarkdownView } from "./markdown-view";
 import ModelPicker from "./model-picker.vue";
+import ParallelModelDialog from "./parallel-model-dialog.vue";
 import VariantPicker from "./variant-picker.vue";
 
 const props = withDefaults(
@@ -248,31 +266,17 @@ const notice = ref("");
 const previewing = ref(false);
 const parallelMode = ref(false);
 const parallelModels = ref<(ModelChoice | null)[]>([]);
-const modelMenuOpen = ref(false);
-const modelSearch = ref("");
+const modelDialogOpen = ref(false);
 const summaryOptionsOpen = ref(false);
 const summaryModel = ref<ModelChoice | null>(null);
 const editingTarget = ref<number | null>(null);
-const summaryLength = ref<ParallelSummarySettings["length"]>("brief");
+const summaryLength = ref<ParallelSummaryLength>("brief");
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-let preferenceBackend: BackendId | null = null;
 
 const busy = computed(() => props.running || props.parallelSending);
 const canUseParallelModels = computed(
   () => props.allowModelPicker && !!props.sendParallel && props.models.length > 0,
 );
-const availableParallelModels = computed(() => {
-  const query = modelSearch.value.trim().toLocaleLowerCase();
-  return props.models.filter((option) => {
-    const key = modelKey(option);
-    if (parallelModels.value.some((choice) => choice !== null && modelKey(choice) === key))
-      return false;
-    if (!query) return true;
-    return `${option.modelName} ${option.modelId} ${option.providerName}`
-      .toLocaleLowerCase()
-      .includes(query);
-  });
-});
 
 // Grow the box with the draft instead of scrolling inside it; two rows is the
 // floor and roughly a half pane the ceiling.
@@ -288,41 +292,16 @@ function fitTextarea(): void {
 watch(text, () => {
   void nextTick(fitTextarea);
 });
-function loadParallelPreferences(): void {
-  preferenceBackend = props.backend;
-  try {
-    const raw = localStorage.getItem(`awefork:parallel:${props.backend}`);
-    if (!raw) {
-      summaryModel.value = null;
-      summaryLength.value = "brief";
-      return;
-    }
-    const saved = JSON.parse(raw) as { model?: ModelChoice | null; length?: string };
-    summaryModel.value = saved.model ?? null;
-    summaryLength.value = saved.length === "standard" ? "standard" : "brief";
-  } catch {
-    summaryModel.value = null;
-    summaryLength.value = "brief";
-  }
-}
 
-function persistParallelPreferences(): void {
-  if (preferenceBackend !== props.backend) return;
-  try {
-    localStorage.setItem(
-      `awefork:parallel:${props.backend}`,
-      JSON.stringify({
-        model: summaryModel.value,
-        length: summaryLength.value,
-      }),
-    );
-  } catch {
-    // Settings remain available for this window when local storage is unavailable.
-  }
+/** Summary defaults live in the settings blob; the composer starts from them. */
+function initParallelDefaults(): void {
+  const defaults = settings.labs.parallel;
+  summaryModel.value = defaults.summaryModel ? { ...defaults.summaryModel } : null;
+  summaryLength.value = defaults.summaryLength;
 }
 
 onMounted(() => {
-  loadParallelPreferences();
+  initParallelDefaults();
   fitTextarea();
 });
 watch(
@@ -330,17 +309,16 @@ watch(
   () => {
     parallelMode.value = false;
     parallelModels.value = [];
-    modelMenuOpen.value = false;
-    loadParallelPreferences();
+    modelDialogOpen.value = false;
   },
 );
-watch([summaryModel, summaryLength], persistParallelPreferences);
 watch(canUseParallelModels, (available) => {
   if (!available) parallelMode.value = false;
 });
 watch(busy, (value) => {
   if (!value) return;
-  modelMenuOpen.value = false;
+  modelDialogOpen.value = false;
+  summaryOptionsOpen.value = false;
   editingTarget.value = null;
 });
 
@@ -357,17 +335,13 @@ function modelLabel(model: ModelChoice | null): string {
 function toggleParallelMode(): void {
   if (busy.value || !canUseParallelModels.value) return;
   parallelMode.value = !parallelMode.value;
-  modelMenuOpen.value = false;
+  modelDialogOpen.value = false;
   if (parallelMode.value && parallelModels.value.length === 0) {
-    parallelModels.value = [props.model ? { ...props.model } : null];
+    // The settings' default models first; the composer's own model when
+    // nothing survives (no defaults, or the catalog dropped them all).
+    const seeds = defaultParallelTargets(props.models);
+    parallelModels.value = seeds.length > 0 ? seeds : [props.model ? { ...props.model } : null];
   }
-}
-
-function addParallelModel(option: ModelOption): void {
-  if (busy.value || parallelModels.value.length >= 4) return;
-  parallelModels.value.push({ providerId: option.providerId, modelId: option.modelId });
-  modelMenuOpen.value = false;
-  modelSearch.value = "";
 }
 
 function removeParallelModel(index: number): void {
@@ -391,8 +365,17 @@ function setSummaryModel(model: ModelChoice | null): void {
   summaryModel.value = model ? { ...model } : null;
 }
 
+const summaryLengthLabel = computed(() => {
+  if (summaryLength.value === "standard") return t("input.parallelStandard");
+  if (summaryLength.value === "none") return t("input.parallelNone");
+  return t("input.parallelBrief");
+});
+
 const inputPlaceholder = computed(() => {
   if (props.running) return t("input.placeholderRunning");
+  if (parallelMode.value) {
+    return t("input.parallelPlaceholder", { n: parallelModels.value.length });
+  }
   return t("input.placeholder");
 });
 

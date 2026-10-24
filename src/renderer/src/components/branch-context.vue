@@ -353,7 +353,7 @@ import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
-import { parallelGroupBusy } from "../parallel-groups";
+import { type ParallelSummarySettings, parallelGroupBusy } from "../parallel-groups";
 import { pt } from "../parallel-i18n";
 import { settings } from "../settings";
 import {
@@ -794,7 +794,7 @@ async function sendParallel(
   text: string,
   attachments: PromptAttachment[],
   targets: readonly (ModelChoice | null)[],
-  summary: { model: ModelChoice | null; length: "brief" | "standard" },
+  summary: ParallelSummarySettings,
 ): Promise<boolean> {
   if (parallelSending.value) return false;
   parallelSending.value = true;

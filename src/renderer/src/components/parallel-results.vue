@@ -40,16 +40,24 @@ const phase = computed(() => {
     return doneTargets.value.length ? pt("partial") : pt("unknown");
   if (props.group.summaryStatus === "done") return pt("summaryReady");
   if (props.group.summaryStatus === "failed") return pt("summaryFailed");
+  if (props.group.summaryStatus === "skipped") return pt("notSummarized");
   if (props.group.summaryStatus === "unknown") return pt("unknown");
   return pt("waitingSummary");
 });
 const summaryHint = computed(() => {
   if (summaryRunning.value) return pt("summaryRunning");
+  if (props.group.summaryStatus === "skipped") return pt("skippedHint");
   if (props.group.summaryStatus === "failed") return pt("summaryFailed");
   if (props.group.summaryStatus === "unknown") return pt("summaryUnknown");
   if (props.group.summaryStatus === "done") return pt("noSummaryText");
   if (!sourcesRunning.value && doneTargets.value.length === 0) return pt("noSuccess");
   return pt("waitingHint");
+});
+const summaryMetaText = computed(() => {
+  if (props.group.summaryStatus === "skipped") return pt("notSummarized");
+  return props.group.summarySourceIds.length
+    ? pt("summaryBy", { model: props.summaryModelLabel, n: props.group.summarySourceIds.length })
+    : pt("pendingBy", { model: props.summaryModelLabel });
 });
 const summaryAction = computed(() => {
   if (stale.value) return pt("updateSummary");
@@ -127,7 +135,7 @@ function excerpt(target: ParallelTarget): string {
     <section class="summary-card" :aria-label="pt('summary')" :aria-busy="summaryRunning">
       <div class="summary-heading"><strong>{{ pt('summary') }}</strong><span v-if="summaryRunning" class="running-dot" aria-hidden="true"></span></div>
       <p class="summary-meta">
-        {{ group.summarySourceIds.length ? pt('summaryBy', { model: summaryModelLabel, n: group.summarySourceIds.length }) : pt('pendingBy', { model: summaryModelLabel }) }}
+        {{ summaryMetaText }}
         <span v-if="group.summaryVersions.length"> · {{ pt('version', { n: group.summaryVersions[group.summaryVersions.length - 1]?.version ?? group.summaryVersions.length }) }}</span>
       </p>
       <p v-if="group.summarySourceIds.length && group.summarySourceIds.length < group.targets.length" class="partial-note">{{ pt('partialSummary') }}</p>

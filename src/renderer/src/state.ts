@@ -60,14 +60,14 @@ import { panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 import {
   type ParallelGroup,
-  type ParallelSummarySource,
   type ParallelSummarySettings,
+  type ParallelSummarySource,
   type ParallelTarget,
   parallelGroupBusy,
   parallelReply,
 } from "./parallel-groups";
 import { insertPathText } from "./path-insert";
-import { settings } from "./settings";
+import { MAX_PARALLEL_TARGETS, settings } from "./settings";
 
 /** One canvas tab: a story (fork tree) parked next to the active one. */
 export interface CanvasTab {
@@ -4537,6 +4537,15 @@ export async function sendComparePrompt(
   return Promise.all(targets.map((id) => sendPromptTo(id, text, models[id] ?? null, attachments)));
 }
 
+/** Where a multi-model round forks from: the pane's selection or a canvas draft. */
+export interface ParallelAnchor {
+  sessionId: string;
+  /** Turn the forks inherit up to; null forks at the session tip. */
+  messageId: string | null;
+  /** "none" forks with no ancestor history (canvas ✂ drafts). */
+  contextMode?: "inherit" | "none";
+}
+
 /** Send one prompt to independent forks and expose the whole round as a reading group. */
 export async function sendParallelPrompt(
   targets: readonly (ModelChoice | null)[],
@@ -4544,11 +4553,74 @@ export async function sendParallelPrompt(
   attachments: PromptAttachment[],
   summary: ParallelSummarySettings,
 ): Promise<boolean> {
-  const anchorSessionId = state.selectedId;
+  if (!state.selectedId) return false;
+  return startParallelRound(
+    { sessionId: state.selectedId, messageId: paneTurn.value?.turn.messageId ?? null },
+    targets,
+    text,
+    attachments,
+    summary,
+  );
+}
+
+/** The canvas draft's multi-model send: same round, anchored at the draft. */
+export async function sendDraftParallel(
+  targets: readonly (ModelChoice | null)[],
+  summary: ParallelSummarySettings,
+): Promise<boolean> {
+  const draft = state.draft;
+  if (!draft?.text.trim() || state.draftSending) return false;
+  const backend = state.activeBackend;
+  state.draftSending = true;
+  try {
+    const accepted = await startParallelRound(
+      {
+        sessionId: draft.sessionId,
+        messageId: draft.atMessageId,
+        contextMode: draft.contextMode,
+      },
+      targets,
+      draft.text,
+      toPromptAttachments(draft.attachments),
+      summary,
+    );
+    if (!accepted) return false;
+    // The round is out, so the draft is spent — same ending as a single
+    // send: drop it, take its parked copy with it, and clear the sidecar.
+    state.draft = null;
+    unstashDraft(draft.sessionId, draft.atMessageId);
+    void flushComposer(backend);
+    return true;
+  } finally {
+    state.draftSending = false;
+  }
+}
+
+/** The settings' default parallel targets that the current catalog still lists. */
+export function defaultParallelTargets(models: readonly ModelOption[]): ModelChoice[] {
+  const seen = new Set<string>();
+  const seeds: ModelChoice[] = [];
+  for (const choice of settings.labs.parallel.targets) {
+    const key = `${choice.providerId}:${choice.modelId}`;
+    if (seen.has(key)) continue;
+    if (!models.some((option) => `${option.providerId}:${option.modelId}` === key)) continue;
+    seen.add(key);
+    seeds.push({ ...choice });
+  }
+  return seeds;
+}
+
+async function startParallelRound(
+  anchor: ParallelAnchor,
+  targets: readonly (ModelChoice | null)[],
+  text: string,
+  attachments: PromptAttachment[],
+  summary: ParallelSummarySettings,
+): Promise<boolean> {
   const backend = state.activeBackend;
   const prompt = text.trim();
-  if (!anchorSessionId || !prompt || targets.length < 2 || targets.length > 4) return false;
-  const existing = parallelGroupForSession(backend, anchorSessionId);
+  if (!prompt || targets.length < 2 || targets.length > MAX_PARALLEL_TARGETS) return false;
+  const existing = parallelGroupForSession(backend, anchor.sessionId);
   if (existing && parallelGroupBusy(existing)) {
     // Without this the composer's send just does nothing while a round is in flight.
     state.actionError = t("state.parallelGroupBusy");
@@ -4560,8 +4632,9 @@ export async function sendParallelPrompt(
     state.actionError = t("state.parallelDuplicateModels");
     return false;
   }
-  const anchorMessageId = paneTurn.value?.turn.messageId ?? null;
-  const directory = selectedSession.value?.directory ?? "";
+  const anchorSessionId = anchor.sessionId;
+  const directory =
+    state.sessions.find((session) => session.id === anchorSessionId)?.directory ?? "";
   const anchorTags = [...tagsOf(anchorSessionId)];
   const tagDecision = await askForkTags(anchorSessionId);
   if (tagDecision.canceled) return false;
@@ -4571,7 +4644,8 @@ export async function sendParallelPrompt(
     backend,
     directory,
     anchorSessionId,
-    anchorMessageId,
+    anchorMessageId: anchor.messageId,
+    contextMode: anchor.contextMode ?? "inherit",
     prompt,
     attachments: attachments.map((attachment) => ({ ...attachment })),
     inheritedTags: tagDecision.inherit ? anchorTags : [],
@@ -4629,6 +4703,7 @@ async function startParallelTarget(group: ParallelGroup, target: ParallelTarget)
       group.backend,
       group.anchorSessionId,
       group.anchorMessageId,
+      group.contextMode === "none" ? { context: "none" } : undefined,
     );
     target.sessionId = session.id;
     await inheritTagsOnFork(group.backend, session.id, group.inheritedTags);
@@ -4707,6 +4782,9 @@ async function finishParallelRound(group: ParallelGroup): Promise<void> {
   if (sources.length === 0) {
     group.summaryStatus = "failed";
     group.summaryError = t("state.parallelNoReplies");
+  } else if (group.settings.length === "none") {
+    // The round asked for no summary; the panel offers one on demand instead.
+    group.summaryStatus = "skipped";
   } else if (
     sources.map((source) => source.id).join() !== group.summarySourceIds.join() ||
     group.summaryStatus === "waiting"
@@ -4760,7 +4838,9 @@ async function createParallelSummary(
   const sourceText = sources
     .map((answer, index) => `【${index + 1} · ${answer.label}】\n${answer.text}`)
     .join("\n\n");
-  const brief = group.settings.length === "brief";
+  // A round that asked for no summary still gets one on demand; brief is the
+  // cheap default for that manual run.
+  const brief = group.settings.length !== "standard";
   const summaryPrompt =
     locale.value === "en"
       ? [
