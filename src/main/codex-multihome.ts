@@ -296,10 +296,13 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     async fork(sessionId, atMessageId, forkOptions) {
       // An empty-context fork copies nothing, so there is no rollout to
       // import into the default home — it starts wherever its parent lives.
+      let ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
       if (forkOptions?.context !== "none") {
-        importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+        importToDefault(sessionId, ownerId);
+        ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
       }
       const forked = await (await adapterFor(sessionId)).fork(sessionId, atMessageId, forkOptions);
+      owners.set(forked.id, ownerId);
       unlistedSessions.set(forked.id, { summary: forked, createdAt: Date.now() });
       return forked;
     },
