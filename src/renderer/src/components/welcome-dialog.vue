@@ -53,7 +53,11 @@ import { AgentInstallButton } from "./agent-install-button";
 // installed CLI needs nothing.
 const others = computed(() =>
   store.backendList.filter(
-    (entry) => entry.id !== "opencode" && entry.id !== "zcode" && !entry.installed,
+    (entry) =>
+      entry.id !== "opencode" &&
+      entry.id !== "zcode" &&
+      entry.id !== "claudecode" &&
+      !entry.installed,
   ),
 );
 

@@ -127,6 +127,13 @@ const DICT: Dict = {
   },
   "opencode.formTitleFallback": { zh: "需要你的输入", en: "Your input is needed" },
 
+  // ── claude adapter interaction titles/details ───────────────────────────
+  "claude.permissionTitle": { zh: "允许这次操作？", en: "Allow this action?" },
+  "claude.permissionDetail": {
+    zh: "Claude Code 请求使用 {tool} 工具，等待你决定。",
+    en: "Claude Code wants to use the {tool} tool; awaiting your decision.",
+  },
+
   // ── demo (mock-adapter) form + permission asks ─────────────────────────
   "mock.githubMcpTitle": { zh: "连接 GitHub MCP", en: "Connect GitHub MCP" },
   "mock.githubMcpDetail": {
