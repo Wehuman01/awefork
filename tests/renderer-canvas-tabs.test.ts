@@ -202,6 +202,10 @@ describe("canvas tabs", () => {
     // can omit a fresh thread for a moment — so the tab keeps its selection
     // (and the pane its composer) until the session stays missing.
     expect(state.store.selectedId).toBe("story-a");
+    // The pane gates its composer and message list on selectedSession, which
+    // resolves through visibleSessions: a bare selectedId would still unmount
+    // them and take the typed draft with it.
+    expect(state.selectedSession.value?.id).toBe("story-a");
 
     vi.advanceTimersByTime(9_000);
     await state.refreshSessions();

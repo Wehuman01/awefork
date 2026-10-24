@@ -279,6 +279,74 @@ describe("renderer message updates", () => {
     expect(h.store.selectedId).toBe("fork-1");
   });
 
+  it("follows a fork that thread/list has not listed yet", async () => {
+    // codex omits a fork carrying only copied prefix turns from thread/list
+    // until its first own turn. The run still moved there, so the pane must
+    // follow it — otherwise the reply streams into a branch nobody can see.
+    const h = await bootState();
+    await h.state.selectSession("s1");
+    await h.state.sendPromptTo("s1", "继续");
+
+    h.send({
+      type: "session.branchContinued",
+      sessionId: "s1",
+      forkedSessionId: "fork-unlisted",
+      message: "codex: continued in the new branch fork-unlisted",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.store.selectedId).toBe("fork-unlisted");
+    expect(h.store.running.s1).toBeFalsy();
+    expect(h.store.running["fork-unlisted"]).toBe(true);
+  });
+
+  it("keeps a repeated prompt's row until its own server copy lands", async () => {
+    // Sending the same text twice is ordinary use. Matching local rows to
+    // server rows by text alone dropped the second send's row the moment the
+    // first send's copy was already on the server.
+    const h = await bootState();
+    await h.state.selectSession("s1");
+    await h.state.sendPromptTo("s1", "继续");
+    h.setRows([USER_ROW, assistantRow(null), { ...USER_ROW, id: "m3", text: "继续" }]);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.store.messagesBySession.s1?.some((m) => m.id.startsWith("local_"))).toBe(false);
+
+    // Same text again; the store has not projected this one yet.
+    await h.state.sendPromptTo("s1", "继续");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.store.messagesBySession.s1?.at(-1)?.id).toMatch(/^local_/);
+
+    // Its own copy arrives: now the local stand-in is spent.
+    h.setRows([
+      USER_ROW,
+      assistantRow(null),
+      { ...USER_ROW, id: "m3", text: "继续" },
+      { ...USER_ROW, id: "m4", text: "继续" },
+    ]);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.store.messagesBySession.s1?.some((m) => m.id.startsWith("local_"))).toBe(false);
+    expect(h.store.messagesBySession.s1?.at(-1)?.id).toBe("m4");
+  });
+
+  it("survives the send's success path with the continuation notice intact", async () => {
+    // The event arrives inside prompt(), and the send clears actionError when
+    // it resolves — so the notice needs a home the success path does not own.
+    const h = await bootState();
+    await h.state.selectSession("s1");
+    h.api.prompt = vi.fn(async () => {
+      h.send({
+        type: "session.branchContinued",
+        sessionId: "s1",
+        forkedSessionId: "fork-2",
+        message: "codex: continued in the new branch fork-2",
+      });
+      await Promise.resolve();
+    });
+    await h.state.sendPrompt("继续");
+    expect(h.store.infoToast).toContain("fork-2");
+    expect(h.store.actionError).toBeNull();
+  });
+
   it("does not settle a resend from the old poll while prompt acknowledgement is pending", async () => {
     const h = await bootState();
     let finishPoll!: (rows: ChatMessage[]) => void;

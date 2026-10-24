@@ -66,6 +66,14 @@ export interface CodexAdapterOptions {
    * the thread's settings.
    */
   turnContexts?: (sessionId: string) => Promise<Record<string, CodexTurnSettings>>;
+  /**
+   * A fork this adapter cut on its own (the writer-conflict continuation),
+   * reported so the host can list it before codex's `thread/list` projects
+   * it. A fork carrying only copied prefix turns is absent from that listing
+   * until its first own turn, which would leave the renderer unable to select
+   * the branch the run just moved to.
+   */
+  forkCreated?: (forked: SessionSummary) => void;
 }
 
 /** Image attachments written as files for one turn's `localImage` items. */
@@ -555,7 +563,13 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         atMessageId: null,
         createdAt: secToMs(thread.createdAt) ?? Date.now(),
       });
-      return mapThread(thread);
+      const forked = mapThread(thread);
+      // Report the fork before the turn starts on it: the caller emits
+      // session.branchContinued right after, and the renderer selects the
+      // fork it names — a branch thread/list has not projected yet would
+      // otherwise be unselectable, hiding the reply the run just moved there.
+      options.forkCreated?.(forked);
+      return forked;
     } catch {
       return null;
     }

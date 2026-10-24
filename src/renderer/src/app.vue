@@ -142,6 +142,9 @@
     <div v-if="store.compressedToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.compressedToast }}
     </div>
+    <div v-if="store.infoToast" class="toast banner-update" role="status" aria-live="polite">
+      {{ store.infoToast }}
+    </div>
     <div v-if="historyStore.toast" class="toast banner-update" role="status" aria-live="polite">
       {{ historyStore.toast }}
     </div>

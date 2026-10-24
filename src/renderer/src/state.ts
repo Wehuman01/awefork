@@ -323,6 +323,13 @@ interface AppState {
   } | null;
   /** Latest compaction completion notice; drives the 🗜 toast, auto-clears. */
   compressedToast: string | null;
+  /**
+   * Notice for something the app did on the user's behalf that is neither a
+   * failure nor a compaction — the run continuing in a new branch after a
+   * writer lock. It rides its own toast because the send that produced it
+   * resolves successfully and clears actionError on the way out.
+   */
+  infoToast: string | null;
   /** Model the pane composer will use next, per session; null = agent default. */
   paneModels: Record<string, ModelChoice | null>;
   /**
@@ -436,6 +443,7 @@ const state = reactive<AppState>({
   forkTagAsk: null,
   compressAsk: null,
   compressedToast: null,
+  infoToast: null,
   paneModels: {},
   lastModel: null,
   favoriteModels: [],
@@ -654,9 +662,35 @@ export const childTurnIds = computed<Set<string>>(() => {
   return ids;
 });
 
-export const selectedSession = computed<SessionSummary | null>(
-  () => visibleSessions.value.find((s) => s.id === state.selectedId) ?? null,
-);
+/** Last summary the live selection resolved to; the grace window's stand-in. */
+let lastSelectedSummary: SessionSummary | null = null;
+
+/**
+ * The selected session's summary. A refresh can briefly omit it (codex's
+ * thread/list hides a fresh thread until its first rollout lands) while the
+ * selection itself survives on purpose — see SELECTION_PRUNE_GRACE_MS. The
+ * pane's composer and message list gate on this value, so a null here would
+ * unmount them and take the typed draft with it; the last summary this same
+ * selection was seen with stands in until it comes back. A real removal ends
+ * the stand-in by clearing selectedId, so nothing lingers.
+ */
+export const selectedSession = computed<SessionSummary | null>(() => {
+  const id = state.selectedId;
+  if (!id) {
+    lastSelectedSummary = null;
+    return null;
+  }
+  const live = visibleSessions.value.find((s) => s.id === id);
+  if (live) {
+    lastSelectedSummary = live;
+    return live;
+  }
+  // A computed is lazy: it may first run after the refresh that dropped the
+  // session, so refreshSessions records the outgoing summary before it
+  // overwrites the list. A selection whose summary was never recorded has
+  // nothing to stand in with.
+  return lastSelectedSummary?.id === id ? lastSelectedSummary : null;
+});
 
 /**
  * Sessions forked from the selected one — its whole subtree. No longer a
@@ -953,25 +987,59 @@ const messageLoads = createMessageLoader({
     // local rows at the tip until the server's copy of the same text lands;
     // settled reloads (idle, a real failure) still replace wholesale because
     // the run flag is down by then.
-    if (isRunning(backend, sessionId)) messages = mergeOptimisticRows(cached, messages);
+    if (isRunning(backend, sessionId))
+      messages = mergeOptimisticRows(backend, sessionId, cached, messages);
     return publishMessages(backend, sessionId, messages);
   },
 });
 
 /**
- * Keep cached `local_*` prompt rows whose text the server snapshot does not
- * carry yet, appended after the snapshot so they render at the story's tip.
+ * Server user rows already spent standing in for a local prompt, per session
+ * and prompt text. Repeating a prompt ("继续" twice) is ordinary use and
+ * legitimately yields two server rows with the same text, so a membership
+ * test cannot tell the second send's copy from the first one's: it dropped
+ * the fresh local row the moment the first send's row landed, and the prompt
+ * flashed out again. This ledger remembers which copies are spoken for.
+ */
+const spentServerRows = new Map<string, Map<string, number>>();
+
+/**
+ * Keep cached `local_*` prompt rows the server snapshot does not carry yet,
+ * appended after the snapshot so they render at the story's tip.
  */
 function mergeOptimisticRows(
+  backend: BackendId,
+  sessionId: string,
   cached: readonly ChatMessage[] | undefined,
   incoming: readonly ChatMessage[],
 ): ChatMessage[] {
   const locals = (cached ?? []).filter((message) => message.id.startsWith("local_"));
   if (locals.length === 0) return [...incoming];
-  const serverTexts = new Set(
-    incoming.filter((message) => message.role === "user").map((message) => message.text),
-  );
-  const pending = locals.filter((message) => !serverTexts.has(message.text));
+  const key = streamKey(backend, sessionId);
+  let spent = spentServerRows.get(key);
+  if (!spent) {
+    spent = new Map();
+    spentServerRows.set(key, spent);
+  }
+  const serverCounts = new Map<string, number>();
+  for (const message of incoming) {
+    if (message.role !== "user") continue;
+    serverCounts.set(message.text, (serverCounts.get(message.text) ?? 0) + 1);
+  }
+  const pending: ChatMessage[] = [];
+  for (const local of locals) {
+    const total = serverCounts.get(local.text) ?? 0;
+    // A deleted turn shrinks the server's count below what an older snapshot
+    // spent; clamping back on every pass keeps the ledger from staying high
+    // and swallowing a later prompt's row.
+    const already = Math.min(spent.get(local.text) ?? 0, total);
+    if (already < total) {
+      spent.set(local.text, already + 1);
+      continue;
+    }
+    spent.set(local.text, already);
+    pending.push(local);
+  }
   return pending.length === 0 ? [...incoming] : [...incoming, ...pending];
 }
 
@@ -1623,6 +1691,10 @@ export async function selectSession(
   exitCompare();
   state.selectedDirectory = session.directory;
   state.selectedId = session.id;
+  // Record the summary now: selectedSession's grace-window stand-in reads it
+  // when a later refresh drops the session, and a computed that never ran
+  // before that refresh would have nothing to fall back on.
+  lastSelectedSummary = session;
   state.selectedTurnId = null;
   state.streamParts = [...(streamBuffers.get(streamKey(state.activeBackend, sessionId)) ?? [])];
   state.messagesError = null;
@@ -2322,6 +2394,42 @@ function handleEnvelope(envelope: BackendEventEnvelope): void {
   handleEvent(envelope.backend, envelope.event);
 }
 
+/** Show a non-error notice; the timer only clears it while it is still current. */
+function flashInfoToast(message: string): void {
+  state.infoToast = message;
+  setTimeout(() => {
+    if (state.infoToast === message) state.infoToast = null;
+  }, TOAST_MS);
+}
+
+/**
+ * Move the pane onto the branch a writer-locked run continued in. The fork is
+ * normally unlisted in codex's thread/list until its first own turn lands, so
+ * selectSession's visibleSessions lookup would silently refuse it and the
+ * reply would stream into a branch nobody is looking at. Register the summary
+ * the event named first, so the selection resolves the moment it runs.
+ */
+async function followContinuedBranch(lockedId: string, forkedId: string): Promise<void> {
+  if (!state.sessions.some((s) => s.id === forkedId)) {
+    const parent = state.sessions.find((s) => s.id === lockedId);
+    if (parent) {
+      state.sessions = [
+        ...state.sessions,
+        {
+          ...parent,
+          id: forkedId,
+          title: parent.title,
+          parentSessionId: lockedId,
+          origin: "fork",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ];
+    }
+  }
+  await selectSession(forkedId, { focus: true });
+}
+
 function handleEvent(backend: BackendId, event: AgentEvent): void {
   switch (event.type) {
     case "interaction.requested": {
@@ -2433,7 +2541,12 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // prompt row survives, the run and watchdog transfer to the fork, and
       // the pane follows the fork so the reply streams where the user is
       // looking instead of on a hidden branch.
-      state.actionError = event.message;
+      //
+      // The notice rides infoToast, not actionError: this event arrives
+      // inside prompt(), and the send's own success path clears actionError
+      // on the way out — an error banner here would be wiped before it ever
+      // painted. Nothing failed, either.
+      flashInfoToast(event.message);
       stopWatch(backend, event.sessionId);
       setRunning(backend, event.sessionId, false);
       dropSessionInteractions(backend, event.sessionId);
@@ -2442,9 +2555,8 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // the fork's copied history all completed minutes before "now".
       watchCompletion(backend, event.forkedSessionId, Date.now() - 5_000);
       void refreshSessions().then(() => {
-        if (backend === state.activeBackend && state.selectedId === event.sessionId) {
-          void selectSession(event.forkedSessionId, { focus: true });
-        }
+        if (backend !== state.activeBackend || state.selectedId !== event.sessionId) return;
+        void followContinuedBranch(event.sessionId, event.forkedSessionId);
       });
       break;
     }
@@ -4661,6 +4773,9 @@ export async function sendDraft(): Promise<void> {
   }
 }
 
+/** Distinguishes two prompts sent inside the same millisecond. */
+let localRowSeq = 0;
+
 /**
  * Show a sent prompt immediately; the next server refresh replaces it with
  * the real message row. `model` seeds the canvas card's model chip so the
@@ -4680,7 +4795,7 @@ function appendLocalMessage(
   state.messagesBySession[sessionId] = [
     ...(state.messagesBySession[sessionId] ?? []),
     {
-      id: `local_${Date.now()}`,
+      id: `local_${Date.now()}_${localRowSeq++}`,
       role: "user",
       text,
       thinking: "",

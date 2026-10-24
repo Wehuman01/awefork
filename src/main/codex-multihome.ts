@@ -114,6 +114,14 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       // Each home reads its own rollouts: the per-turn model settings live
       // beside the session they belong to.
       turnContexts: (sessionId) => readTurnContexts(home.path, sessionId),
+      // A fork cut inside prompt()'s writer-conflict recovery is registered
+      // here, not through the facade's fork() — without this the new branch
+      // stays absent from thread/list (it carries only copied prefix turns)
+      // and the renderer cannot select the session its run moved to.
+      forkCreated: (forked) => {
+        owners.set(forked.id, home.id);
+        unlistedSessions.set(forked.id, { summary: forked, createdAt: Date.now() });
+      },
     });
   };
 

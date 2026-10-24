@@ -584,7 +584,13 @@ describe("createCodexAdapter prompt()", () => {
       "turn/start": (params) => ({ turn: { id: `turn-${params.threadId}` } }),
     });
     const lineagePath = await tempLineagePath();
-    const adapter = createCodexAdapter({ client, lineagePath, cliVersion: "0.163.0" });
+    const created: string[] = [];
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath,
+      cliVersion: "0.163.0",
+      forkCreated: (forked) => created.push(forked.id),
+    });
 
     const events: AgentEvent[] = [];
     await adapter.subscribe((event) => events.push(event));
@@ -606,6 +612,10 @@ describe("createCodexAdapter prompt()", () => {
     expect(continued?.message).toContain(OWNED_ELSEWHERE_MESSAGE);
     expect(continued?.message).toContain("fork-9");
     expect(events.find((e) => e.type === "server.error")).toBeUndefined();
+    // The host learns the fork here: it is the only notice a branch cut
+    // inside prompt() gives, and thread/list will not carry it until its
+    // first own turn.
+    expect(created).toEqual(["fork-9"]);
   });
 
   it("reports the writer conflict when the recovery fork is refused too", async () => {

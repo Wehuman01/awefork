@@ -1,7 +1,7 @@
 <template>
   <form
     class="chat-input"
-    :class="{ dragging: dragOver && allowAttachments }"
+    :class="{ dragging: dragOver }"
     @submit.prevent="submit"
     @dragover.prevent="onDragOver"
     @dragleave="dragOver = false"
@@ -571,7 +571,10 @@ function togglePreview(): void {
 }
 
 function onDragOver(): void {
-  if (props.allowAttachments) dragOver.value = true;
+  // A drop always lands something: files stage as attachments where the
+  // backend takes them, and folders become path text everywhere — so the
+  // highlight must not depend on the attachment capability.
+  dragOver.value = true;
 }
 
 async function onDrop(event: DragEvent): Promise<void> {
