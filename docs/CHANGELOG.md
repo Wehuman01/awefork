@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.4.5
 
 - **Composer drops now separate folders from files** — a drop or paste batch turns directories into absolute paths inserted as editable draft text, one per line, while files keep the attachment route. Folder paths work even on a backend that accepts no attachments, mixed batches preserve order, the drop highlight appears wherever a drop will land something, and edits remain on the native undo stack.
 - **A locked Codex thread continues in a visible fork** — when Codex's app-server reports that another writer owns the thread, the prompt now continues on a full-history fork. The optimistic prompt survives, the run and watchdog move to the fork, and the pane follows it instead of settling the original as failed and stranding the reply on a hidden branch. The fork is registered with the session list the moment it is cut, because `thread/list` omits a branch carrying only copied prefix turns — without that the pane could not select the branch the run moved to. The continuation notice rides its own toast, since the send that produced it resolves successfully and clears the error banner on the way out.
 - **Codex snapshots no longer make a sent prompt disappear** — while a run is active, a lagging thread snapshot keeps unsent local rows pinned at the tip until the server carries the same text, and sending the same prompt twice now keeps the second row too: matching is per server copy, not per text. A briefly missing selected thread has an eight-second grace window, and the pane keeps showing the session's last known summary throughout, so a refresh no longer unmounts the composer and discards the draft.
 - **Many story tabs wrap instead of hiding** — open fork-tree tabs stack into rows rather than sliding under the context panel through a hidden horizontal scroll.
 - **File tabs and previews keep their state coherent** — reading mode survives arrow-key file changes and ends with the preview it belongs to; dock and context-menu jumps land on the file's real directory; PDF paging stops at the pages actually rendered; quick search honors the ignore list; failed previews keep the listing visible; CSV row counts exclude the header; and the image-size badge resets between files.
+
+### Install
+
+Installer attached: `awefork-0.4.5-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`). This release ships macOS only.
 
 ## v0.4.3
 
