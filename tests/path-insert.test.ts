@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Caret } from "../src/renderer/src/path-insert";
 import { insertPathText, joinPaths } from "../src/renderer/src/path-insert";
 
 /**

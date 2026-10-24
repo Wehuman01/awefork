@@ -151,7 +151,10 @@ try {
   check("production preload exposes the file bridge", true);
 
   // 2. The shell mounted (the canvas viewport is the drop surface).
-  await retry(() => cdp.evaluate(`Boolean(document.querySelector(".viewport"))`), 30_000, "shell boot");
+  await retry(async () => {
+    const booted = await cdp.evaluate(`Boolean(document.querySelector(".viewport"))`);
+    if (!booted) throw new Error("shell not mounted yet");
+  }, 30_000, "shell boot");
   check("renderer booted with the real preload", true);
 
   // 3. A real File, injected the only way CDP can hand the renderer one
@@ -205,7 +208,7 @@ try {
   }, 10_000, "drop notice");
   check(
     "a real file drop reaches the canvas handler with its real path",
-    !notice.includes("拿不到"),
+    notice.includes("请把文件放到") || notice.includes("Drop onto"),
     notice,
   );
 

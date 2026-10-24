@@ -173,17 +173,23 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:openAgentWindow", backend),
   capabilities: (backend: BackendId): Promise<BackendCapabilities> =>
     ipcRenderer.invoke("awefork:capabilities", backend),
+  quitKeepAlive: (): Promise<boolean> => ipcRenderer.invoke("awefork:quitKeepAlive"),
+  setQuitKeepAlive: (value: boolean): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:setQuitKeepAlive", value),
+  runningSessionCount: (): Promise<number> => ipcRenderer.invoke("awefork:runningSessionCount"),
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
+  openAppData: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:openAppData"),
   listDir: (target: string): Promise<FsResult<DirListing>> =>
     ipcRenderer.invoke("awefork:listDir", target),
   statFile: (target: string): Promise<FsResult<FileStat>> =>
     ipcRenderer.invoke("awefork:statFile", target),
   readTextPreview: (target: string, maxBytes?: number): Promise<FsResult<TextPreview>> =>
     ipcRenderer.invoke("awefork:readTextPreview", target, maxBytes),
-  readImagePreview: (target: string): Promise<FsResult<ImagePreview>> =>
-    ipcRenderer.invoke("awefork:readImagePreview", target),
+  readImagePreview: (target: string, maxBytes?: number): Promise<FsResult<ImagePreview>> =>
+    ipcRenderer.invoke("awefork:readImagePreview", target, maxBytes),
   relativeToRoot: (root: string, target: string): Promise<FsResult<string | null>> =>
     ipcRenderer.invoke("awefork:relativeToRoot", root, target),
   searchFiles: (

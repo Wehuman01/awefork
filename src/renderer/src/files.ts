@@ -9,7 +9,7 @@
  * is stored as { code } here, so the components phrase failures per locale
  * instead of catching throws.
  */
-import { reactive } from "vue";
+import { reactive, watch } from "vue";
 import {
   displayName,
   isAbsolutePath,
@@ -26,6 +26,7 @@ import type {
   TextPreview,
 } from "../../shared/file-types";
 import { t } from "./i18n";
+import { settings } from "./settings";
 
 export type FileView = "list" | "grid";
 
@@ -55,10 +56,11 @@ export const files = reactive({
   capped: false,
   /** Selected entry path — the preview and the context menu both act on it. */
   selectedPath: null as string | null,
-  view: "list" as FileView,
+  /** Seeded from the settings page's default view; the toolbar overrides it. */
+  view: settings.files.view as FileView,
   /** Name filter for the current directory only — never a project search. */
   filter: "",
-  showHidden: false,
+  showHidden: settings.files.showHidden,
   quickQuery: "",
   quickResults: [] as FileEntry[],
   quickLoading: false,
@@ -133,6 +135,10 @@ async function load(dir: string): Promise<void> {
     files.entries = [];
     files.error = result.error;
     files.capped = false;
+    // The failed listing shows no rows, so the old selection and preview
+    // would describe entries the user cannot see.
+    files.selectedPath = null;
+    files.preview = null;
     return;
   }
   files.browsing = result.value.path;
@@ -235,11 +241,31 @@ export function setFilter(value: string): void {
 
 export function setView(view: FileView): void {
   files.view = view;
+  // The toolbar choice doubles as the default for the next boot, so the
+  // settings row and the toggle never disagree.
+  settings.files.view = view;
 }
 
 export function toggleHidden(): void {
   files.showHidden = !files.showHidden;
+  settings.files.showHidden = files.showHidden;
 }
+
+// The settings page writes settings.files.view/showHidden directly; without
+// this mirror the toolbar keeps this boot's seed until a restart, and the
+// toolbar toggle then writes that stale seed back over the settings change.
+watch(
+  () => settings.files.view,
+  (view) => {
+    files.view = view as FileView;
+  },
+);
+watch(
+  () => settings.files.showHidden,
+  (showHidden) => {
+    files.showHidden = showHidden;
+  },
+);
 
 /** Directories shown by the current filter and hidden-files setting. */
 export function visibleEntries(): FileEntry[] {
@@ -266,6 +292,16 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     }
     return;
   }
+  // "System app" hands the file to the OS instead of the in-app preview; a
+  // failure (no handler for the type) falls back to the preview so the click
+  // still does something visible.
+  if (settings.files.openOnDouble === "system") {
+    const result = await window.awefork.openPath(entry.path).catch(() => null);
+    if (result?.ok) {
+      files.selectedPath = entry.path;
+      return;
+    }
+  }
   await previewEntry(entry);
 }
 
@@ -274,7 +310,9 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   const seq = ++previewSeq;
   files.selectedPath = entry.path;
   files.preview = { path: entry.path, status: "loading" };
-  const image = await window.awefork.readImagePreview(entry.path).catch(() => null);
+  const image = await window.awefork
+    .readImagePreview(entry.path, settings.files.imageCapMb * 1024 * 1024)
+    .catch(() => null);
   if (seq !== previewSeq) return;
   if (image?.ok) {
     const value: ImagePreview = image.value;
@@ -286,7 +324,15 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
     };
     return;
   }
-  const text = await window.awefork.readTextPreview(entry.path).catch(() => null);
+  // An image that exists but is too big fails only as an image; surfacing
+  // "binary" from the text fallback below would misname the problem.
+  if (image && !image.ok && image.error.code === "too-large") {
+    files.preview = { path: entry.path, status: "error", error: image.error };
+    return;
+  }
+  const text = await window.awefork
+    .readTextPreview(entry.path, settings.files.previewCapKb * 1024)
+    .catch(() => null);
   if (seq !== previewSeq) return;
   if (text?.ok) {
     const value: TextPreview = text.value;
@@ -308,12 +354,6 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   };
 }
 
-export function clearPreview(): void {
-  previewSeq += 1;
-  files.preview = null;
-  files.selectedPath = null;
-}
-
 /**
  * Locate an entry from elsewhere (quick open, "reveal"): enter its parent
  * directory, select it, and preview it when it is a file.
@@ -321,8 +361,6 @@ export function clearPreview(): void {
 export async function revealEntry(entry: FileEntry): Promise<void> {
   const parent = parentOf(entry.path);
   if (parent !== null && !samePath(parent, files.browsing ?? "")) {
-    await browseTo(parent);
-  } else if (files.browsing === null && parent !== null) {
     await browseTo(parent);
   }
   files.selectedPath = entry.path;
@@ -369,20 +407,28 @@ export function clearQuickSearch(): void {
 
 // ── sidebar tree ───────────────────────────────────────────────────────
 
+/** Bumped per directory on every tree load; stale responses are dropped. */
+const treeSeq: Record<string, number> = {};
+
 export async function loadTreeChildren(dir: string): Promise<void> {
+  treeSeq[dir] = (treeSeq[dir] ?? 0) + 1;
+  const seq = treeSeq[dir];
   files.treeLoading[dir] = true;
   files.treeError[dir] = null;
   const result = await window.awefork.listDir(dir).catch(() => null);
+  // A newer load for the same directory already won; let it finish the job.
+  if (seq !== treeSeq[dir]) return;
   files.treeLoading[dir] = false;
   if (!result?.ok) {
     files.treeChildren[dir] = [];
     files.treeError[dir] = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  // Directories only, dot-prefixed ones left out — a project tree is for
-  // navigating source, not for wading through .git and .cache. The list view
-  // still shows them behind its own hidden-files toggle.
-  files.treeChildren[dir] = result.value.entries.filter((entry) => entry.isDir && !entry.hidden);
+  // Dot-prefixed entries left out — a project tree is for navigating source,
+  // not for wading through .git and .cache. Files are kept alongside
+  // directories: the tree renderers filter to dirs themselves, and the
+  // session file dock shows everything.
+  files.treeChildren[dir] = result.value.entries.filter((entry) => !entry.hidden);
 }
 
 /** Expand a node, loading its children on first open (never recursively). */

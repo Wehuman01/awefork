@@ -68,6 +68,7 @@
             >{{ t("files.tabCanvas") }}</button
           >
           <button
+            v-if="fileBrowserEnabled"
             type="button"
             class="main-tab"
             :class="{ on: mainView === 'files' }"
@@ -80,6 +81,7 @@
             >{{ t("files.tabFiles") }}</button
           >
         </nav>
+        <CanvasTabs v-show="mainView === 'canvas'" class="story-tabs-slot" />
         <SessionCanvas v-show="mainView === 'canvas'" class="main-body" />
         <FileBrowser v-show="mainView === 'files'" class="main-body" />
       </div>
@@ -106,6 +108,7 @@
     <CompressDialog />
     <HistoryPanel />
     <FileMenu />
+    <SettingsPage />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -147,6 +150,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
+import CanvasTabs from "./components/canvas-tabs.vue";
 import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
 import FileBrowser from "./components/file-browser.vue";
@@ -154,6 +158,7 @@ import FileMenu from "./components/file-menu.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
 import SessionCanvas from "./components/session-canvas.vue";
+import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
 import { isPathDrag } from "./files";
@@ -166,6 +171,7 @@ import {
 } from "./history";
 import { t } from "./i18n";
 import {
+  fileBrowserEnabled,
   type MainView,
   mainView,
   PANEL_LIMITS,
@@ -174,6 +180,7 @@ import {
   persistLayout,
   setMainView,
   togglePanel,
+  toggleSettings,
 } from "./layout";
 import {
   dismissActionError,
@@ -217,6 +224,13 @@ onUnmounted(() => {
 function onKeydown(event: KeyboardEvent): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();
+  // ⌘, is the platform convention for settings and works from anywhere,
+  // including while the panel's own search box has focus.
+  if (key === ",") {
+    event.preventDefault();
+    toggleSettings();
+    return;
+  }
   if (key === "h" && event.shiftKey) {
     event.preventDefault();
     toggleHistoryPanel();
@@ -281,7 +295,10 @@ function onTabDragLeave(): void {
   cancelTabHover();
 }
 
-function onTabDrop(): void {
+function onTabDrop(event: DragEvent): void {
+  // The tab declared itself a drop target in dragover; without this the
+  // browser default (open the file) would navigate the renderer away.
+  event.preventDefault();
   cancelTabHover();
 }
 

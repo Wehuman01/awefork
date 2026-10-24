@@ -71,28 +71,10 @@
     </div>
     <button
       type="button"
-      class="icon-btn multiwindow-btn"
-      :class="{ on: multiWindow }"
-      role="switch"
-      :aria-checked="multiWindow"
-      :title="multiWindow ? t('topbar.multiWindowOn') : t('topbar.multiWindowOff')"
-      @click="toggleMultiWindow"
-    >
-      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
-      {{ t("topbar.multiWindowLabel") }}
-    </button>
-    <button
-      type="button"
       class="icon-btn cmdk-btn"
-      :title="t('topbar.commandPalette')"
-      @click="togglePalette()"
-    >{{ paletteKeyLabel }}</button>
-    <button
-      type="button"
-      class="icon-btn cmdk-btn"
-      :title="theme === 'dark' ? t('topbar.themeOff') : t('topbar.themeOn')"
-      @click="toggleTheme"
-    >{{ theme === "dark" ? "☀" : "☾" }}</button>
+      :title="themeTitle"
+      @click="cycleTheme"
+    >{{ themeGlyph() }}</button>
     <div class="lang-switch" role="group" aria-label="Language">
       <button
         type="button"
@@ -112,6 +94,15 @@
       >EN</button>
     </div>
     <HistoryButton />
+    <button
+      type="button"
+      class="icon-btn settings-btn"
+      :class="{ on: settingsOpen }"
+      :title="t('topbar.settings', { mod: modKey })"
+      :aria-label="t('topbar.settings', { mod: modKey })"
+      :aria-expanded="settingsOpen"
+      @click="toggleSettings()"
+    >⚙</button>
     <div class="version-wrap" @click.stop>
       <button type="button" class="version-btn" @click="toggleVersionMenu">
         <span>{{ versionLabel }}</span>
@@ -164,8 +155,9 @@ import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
-import { togglePalette } from "../layout";
-import { modWith } from "../platform-key";
+import { settingsOpen, toggleSettings } from "../layout";
+import { modKey } from "../platform-key";
+import { settings } from "../settings";
 import {
   checkForUpdates,
   directories,
@@ -175,20 +167,16 @@ import {
   switchBackend,
   switchDirectory,
 } from "../state";
-import { theme, toggleTheme } from "../theme";
+import { cycleTheme, theme, themeGlyph } from "../theme";
 import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);
 const backendOpen = ref(false);
-// Shared through localStorage so the preference survives restarts and applies
-// to every window — new agent windows open by the main process read it at
-// their own boot.
-const multiWindow = ref(localStorage.getItem("awefork:multiWindow") === "1");
-function toggleMultiWindow(): void {
-  multiWindow.value = !multiWindow.value;
-  localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
-}
+// Multi-window mode lives in the settings page (canvas section); the top bar
+// only reads it, because the backend-switch confirmation below changes shape
+// with it.
+const multiWindow = computed(() => settings.canvas.multiWindow);
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);
@@ -204,8 +192,13 @@ const activeLabel = computed(
 // The version button is always there (so manual checks stay reachable); a
 // placeholder stands in until the first check fills the real version in.
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
-// The palette shortcut shows the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere.
-const paletteKeyLabel = modWith("K");
+// The theme button cycles light → dark → system, so its hint names the state
+// it is in, not just the state it would switch to.
+const themeTitle = computed(() => {
+  const preference = settings.appearance.theme;
+  if (preference === "system") return t("topbar.themeSystem");
+  return preference === "dark" ? t("topbar.themeOff") : t("topbar.themeOn");
+});
 
 function toggleOpen(): void {
   open.value = !open.value;
@@ -278,7 +271,9 @@ function closeOnOutsideClick(): void {
 }
 
 function closeOnEscape(event: KeyboardEvent): void {
-  if (event.key === "Escape") pendingBackend.value = null;
+  if (event.key === "Escape") {
+    pendingBackend.value = null;
+  }
 }
 
 onMounted(() => {

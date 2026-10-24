@@ -240,10 +240,23 @@ export interface AweforkApi {
   openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
+  /**
+   * Whether quitting keeps the spawned backends alive so in-flight turns
+   * finish in the background (persisted in settings.json; default false).
+   */
+  quitKeepAlive(): Promise<boolean>;
+  setQuitKeepAlive(value: boolean): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Sessions with a run in flight across every backend — what quitting would
+   * interrupt, and what keep-alive would let finish in the background.
+   */
+  runningSessionCount(): Promise<number>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */
   pickDirectory(): Promise<string | null>;
+  /** Open the app data folder (settings storage) in the OS file manager. */
+  openAppData(): Promise<{ ok: boolean; error?: string }>;
   /**
    * File browser surface (read-only, backend-free). Every fallible call
    * answers with an FsResult so the UI can phrase the failure; browsing
@@ -252,7 +265,7 @@ export interface AweforkApi {
   listDir(target: string): Promise<FsResult<DirListing>>;
   statFile(target: string): Promise<FsResult<FileStat>>;
   readTextPreview(target: string, maxBytes?: number): Promise<FsResult<TextPreview>>;
-  readImagePreview(target: string): Promise<FsResult<ImagePreview>>;
+  readImagePreview(target: string, maxBytes?: number): Promise<FsResult<ImagePreview>>;
   /** Project-relative path; value null = no relative path exists (cross-drive). */
   relativeToRoot(root: string, target: string): Promise<FsResult<string | null>>;
   searchFiles(root: string, query: string, options?: SearchOptions): Promise<FsResult<FileEntry[]>>;

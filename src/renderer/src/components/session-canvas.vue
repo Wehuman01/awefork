@@ -460,6 +460,7 @@ import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import { joinPaths } from "../path-insert";
+import { settings } from "../settings";
 import {
   activeChain,
   cancelComparePick,
@@ -482,6 +483,7 @@ import {
   retryNode,
   selectTurn,
   sendDraft,
+  setActiveCanvasTabView,
   setDraftAttachments,
   setDraftContextMode,
   setDraftModel,
@@ -958,7 +960,11 @@ function onDraftEsc(event: KeyboardEvent): void {
  */
 function removeNode(node: TurnNode): void {
   if (isTurnDelete(node)) {
-    const ok = window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
+    // Turn deletes have no undo, so the confirmation is on by default; the
+    // settings page can turn it off for people who prefer the speed.
+    const ok =
+      !settings.canvas.confirmDelete ||
+      window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
     if (ok) void deleteTurn(node);
     return;
   }
@@ -1043,6 +1049,34 @@ function fitView(): void {
   fitTo(graph.value.nodes);
 }
 
+// ── canvas tabs: park / restore the camera ──────────────────────────
+// The live camera is written into the active tab's slot on every change, so
+// switching away never loses it; activation replays the saved transform and
+// hands the camera to the user (no re-fit, no overview flash).
+
+watch([scale, tx, ty], () => {
+  setActiveCanvasTabView({ scale: scale.value, tx: tx.value, ty: ty.value });
+});
+
+watch(
+  () => store.canvasTabRestoreRequest,
+  (request) => {
+    if (!request) return;
+    const view = store.canvasTabViews[request.tabId];
+    if (!view) return;
+    scale.value = view.scale;
+    tx.value = view.tx;
+    ty.value = view.ty;
+    userAdjustedView = true;
+    overviewProvisional = false;
+    overviewShown = true;
+    centeredFor = store.selectedId;
+    pendingFocus = null;
+    pendingJump = null;
+    loadingAnchorId = null;
+  },
+);
+
 /** ⎇ badge click: pull the selected session's whole fork subtree into view. */
 function focusSubtree(): void {
   userAdjustedView = true;
@@ -1103,7 +1137,10 @@ function nodesOf(sessionId: string | null): TurnNode[] {
 
 function openInitialView(): void {
   if (graph.value.nodes.length === 0) return;
-  if (graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
+  // "Fit view on open" off: open on the selected branch's latest card at the
+  // current zoom instead of shrinking the whole tree into the viewport.
+  const fits = settings.canvas.autoFit;
+  if (fits && graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
     fitView();
     overviewShown = true;
     overviewProvisional = store.loadingCanvas;
@@ -1334,7 +1371,7 @@ watch(graph, (g) => {
   }
 });
 
-const showMinimap = computed(() => graph.value.nodes.length > 0);
+const showMinimap = computed(() => settings.canvas.minimap && graph.value.nodes.length > 0);
 
 const minimapGeometry = computed(() => {
   const nodes = graph.value.nodes;

@@ -335,7 +335,7 @@
         :allow-attachments="store.capabilities.attachments"
         :context="paneContextUsage"
         :can-compress="store.capabilities.compress"
-        :send-parallel="sendParallel"
+        :send-parallel="settings.labs.parallelModels ? sendParallel : undefined"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
@@ -355,6 +355,7 @@ import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import { parallelGroupBusy } from "../parallel-groups";
 import { pt } from "../parallel-i18n";
+import { settings } from "../settings";
 import {
   abortRun,
   abortRunFor,

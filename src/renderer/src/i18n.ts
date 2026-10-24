@@ -14,32 +14,50 @@
  * survives restarts and is visible to every window at its own boot. Default
  * is `"zh"` so the UI stays Chinese unless the user picks EN.
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { dict as dictDialogs } from "./i18n-dialogs";
 import { dict as dictMessages } from "./i18n-messages";
 import { dict as dictPanels } from "./i18n-panels";
+import { dict as dictSettings } from "./i18n-settings";
 import { dict as dictShell } from "./i18n-shell";
 import { dict as dictState } from "./i18n-state";
 import { modKey } from "./platform-key";
+import { settings } from "./settings";
 
 export type Locale = "zh" | "en";
 
-const STORAGE_KEY = "awefork:locale";
-
-function readStored(): Locale {
-  if (typeof localStorage === "undefined") return "zh";
-  return localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "zh";
-}
-
-export const locale = ref<Locale>(readStored());
+export const locale = ref<Locale>(settings.language.locale);
 
 /** List separator matching the locale's typographic convention (、 vs ", "). */
 export const listSep = computed(() => (locale.value === "zh" ? "、" : ", "));
 
+/**
+ * Mirror the locale onto <html lang>. Screen readers, spellcheck and the
+ * browser's own CJK font fallback all key off it, and the settings page is
+ * the first place a user can change the language without a restart.
+ */
+function stampLang(next: Locale): void {
+  if (typeof document !== "undefined") document.documentElement.lang = next;
+}
+stampLang(locale.value);
+
 export function setLocale(next: Locale): void {
   locale.value = next;
-  if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, next);
+  settings.language.locale = next;
+  stampLang(next);
 }
+
+// Resetting the language section (or all settings) writes the blob directly
+// without going through setLocale; follow it so the UI language flips too.
+watch(
+  () => settings.language.locale,
+  (next) => {
+    if (next !== locale.value) {
+      locale.value = next;
+      stampLang(next);
+    }
+  },
+);
 
 type Entry = { zh: string; en: string };
 type Dict = Record<string, Entry>;
@@ -134,15 +152,6 @@ const DICT: Dict = {
     en: "Switch to {label} (right-click: open in new window)",
   },
   "topbar.notOnPath": { zh: "未在 PATH 上找到 {label} CLI", en: "{label} CLI not found on PATH" },
-  "topbar.multiWindowOn": {
-    zh: "多窗口已开：点 Agent 会在独立窗口打开（同一 Agent 只聚焦已有窗口）",
-    en: "Multi-window on: clicking an agent opens it in its own window (same agent just focuses the existing one)",
-  },
-  "topbar.multiWindowOff": {
-    zh: "多窗口已关：点 Agent 在当前窗口内切换；打开后点击将新开独立窗口",
-    en: "Multi-window off: clicking an agent switches in place; turn on to open each in its own window",
-  },
-  "topbar.multiWindowLabel": { zh: "独立窗口", en: "Separate windows" },
 
   // ── state.ts visible strings ───────────────────────────────────────────
   "error.openWindowFailed": {
@@ -163,7 +172,7 @@ const DICT: Dict = {
 // sibling i18n-*.ts modules and are merged in here so every call site uses
 // the single `t()` below. The fragments import nothing from this file, so
 // the merge stays cycle-free.
-Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels);
+Object.assign(DICT, dictState, dictShell, dictDialogs, dictMessages, dictPanels, dictSettings);
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 

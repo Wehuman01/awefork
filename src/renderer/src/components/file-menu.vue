@@ -1,7 +1,8 @@
 <template>
   <Teleport to="body">
     <!-- transparent backdrop: any outside click closes, like the sidebar menu -->
-    <div v-if="menu" class="file-menu-backdrop" @click="close" @contextmenu.prevent="close"></div>    <div
+    <div v-if="menu" class="file-menu-backdrop" @click="close" @contextmenu.prevent="close"></div>
+    <div
       v-if="menu"
       ref="menuEl"
       class="file-menu"
@@ -103,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { FileEntry, FileStat } from "../../../shared/file-types";
 import { closeFileMenu, fileMenu } from "../file-menu";
 import { browseTo, flashNotice, previewEntry, revealEntry } from "../files";
@@ -343,5 +344,8 @@ function onKeydown(event: KeyboardEvent): void {
 // A menu that loses the window (alt-tab mid-right-click) must not linger.
 if (typeof window !== "undefined") {
   window.addEventListener("blur", closeFileMenu);
+  onUnmounted(() => {
+    window.removeEventListener("blur", closeFileMenu);
+  });
 }
 </script>

@@ -324,7 +324,9 @@ onUnmounted(() => document.removeEventListener("mousedown", onDocMousedown));
   border-radius: 14px;
   box-shadow: var(--shadow-lift);
   padding: 6px;
-  z-index: 70;
+  /* above the interaction-backdrop (90): the compress dialog hosts a picker,
+     and at 70 its panel opened underneath that dialog */
+  z-index: 95;
 }
 
 .mp-search {

@@ -99,7 +99,6 @@ import type { AgentInteractionRequest } from "../../../shared/types";
 import { listSep, t } from "../i18n";
 import {
   countPendingInline,
-  INTERACTION_TIMEOUT_MS,
   inlineHostVisible,
   pickInlineInteraction,
   respondInteraction,
@@ -193,7 +192,7 @@ watch(
 onUnmounted(stopTicker);
 
 const secondsLeft = computed(() => {
-  if (!request.value) return INTERACTION_TIMEOUT_MS / 1000;
+  if (!request.value) return 0;
   const deadline = store.interactionDeadlines[`${store.activeBackend}:${request.value.requestId}`];
   if (!deadline) return 0;
   return Math.max(0, Math.ceil((deadline - now.value) / 1000));

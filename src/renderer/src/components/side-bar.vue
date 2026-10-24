@@ -10,6 +10,7 @@
         >{{ t("files.tabSessions") }}</button
       >
       <button
+        v-if="fileBrowserEnabled"
         type="button"
         class="side-tab"
         :class="{ on: sidebarView === 'files' }"
@@ -300,6 +301,7 @@
                 }"
                 :title="row.session.title || '(untitled)'"
                 @click="onRowClick(row.session.id)"
+                @auxclick="onRowAuxClick(row.session.id, $event)"
                 @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
               >
                 <span class="dot"></span>
@@ -438,6 +440,8 @@
       </div>
     </div>
 
+    <SessionFileDock />
+
     <div
       v-if="menu"
       class="ctx-menu"
@@ -468,6 +472,9 @@
       </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">{{
         t("sidebar.rename")
+      }}</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInNewTabFromMenu">{{
+        t("sidebar.openInNewTab")
       }}</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">{{
         t("sidebar.setTags")
@@ -814,7 +821,8 @@ import {
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { listSep, t } from "../i18n";
-import { panels, persistLayout, setSidebarView, sidebarView } from "../layout";
+import { fileBrowserEnabled, panels, persistLayout, setSidebarView, sidebarView } from "../layout";
+import { settings } from "../settings";
 import {
   addDirectory,
   allTags,
@@ -838,6 +846,8 @@ import {
   isEmptyContext,
   isTurnMarked,
   jumpToMessage,
+  openCanvasTab,
+  openSession,
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
@@ -845,7 +855,6 @@ import {
   renameSession,
   restoreDirectory,
   restoreSession,
-  selectSession,
   sessionGroups,
   setForkTagPref,
   setSessionTags,
@@ -864,6 +873,7 @@ import {
   visibleSessions,
 } from "../state";
 import FileTree from "./file-tree.vue";
+import SessionFileDock from "./session-file-dock.vue";
 
 const query = ref("");
 const searchInputEl = ref<HTMLInputElement | null>(null);
@@ -882,7 +892,7 @@ function clearQuery(): void {
 // ── enhanced search (✦) ─────────────────────────────────────────────
 
 /** Which surfaces plain terms search; body is opt-in (a scan costs a round-trip per session). */
-const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
+const searchScopes = reactive<ScopeSet>({ ...settings.search.scopes });
 const boostOpen = ref(false);
 
 /** Pin a search to one project directory. Empty = search every project (default). */
@@ -890,7 +900,38 @@ const projectScope = ref<string>("");
 /** Options: every directory the sidebar knows about, in session-recency order. */
 const projectOptions = computed(() => sessionGroups.value.map((group) => group.directory));
 /** How many sessions to scan for body hits; "all" means no cap. */
-const searchLimit = ref<string>("1000");
+const searchLimit = ref<string>(settings.search.cap > 0 ? String(settings.search.cap) : "all");
+
+// The ✦ panel's per-search knobs double as the next search's defaults, so a
+// choice made in the panel and the same row in settings never disagree.
+watch(searchScopes, () => {
+  settings.search.scopes = { ...searchScopes };
+});
+watch(searchLimit, (value) => {
+  settings.search.cap = value === "all" ? 0 : Number(value);
+});
+// The settings page writes settings.search.* directly; without this mirror
+// its changes never reach the live ✦ panel (the sidebar never remounts).
+// Same-value writes don't retrigger the outbound watches, so no loop.
+watch(
+  () => settings.search.cap,
+  (cap) => {
+    searchLimit.value = cap > 0 ? String(cap) : "all";
+  },
+);
+watch(
+  () => ({ ...settings.search.scopes }),
+  (scopes) => {
+    for (const key of Object.keys(scopes) as (keyof ScopeSet)[]) {
+      searchScopes[key] = scopes[key];
+    }
+  },
+);
+
+/** The panel's cap row showing exactly what settings stores (0 renders "all"). */
+const searchLimitDefault = computed(() =>
+  settings.search.cap > 0 ? String(settings.search.cap) : "all",
+);
 
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
@@ -912,7 +953,7 @@ const boostActive = computed(
     boostOpen.value ||
     projectScope.value !== "" ||
     searchScopes.body ||
-    searchLimit.value !== "1000" ||
+    searchLimit.value !== searchLimitDefault.value ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
     parsedQuery.value.includes.some((term) => term.scope !== null),
@@ -934,16 +975,16 @@ const boostOffDefault = computed(
     !searchScopes.title ||
     !searchScopes.tag ||
     searchScopes.body ||
-    searchLimit.value !== "1000",
+    searchLimit.value !== searchLimitDefault.value,
 );
 
-/** One click back to title+tag, all projects, cap 1000. */
+/** One click back to title+tag, all projects, the configured cap. */
 function resetBoost(): void {
   searchScopes.title = true;
   searchScopes.tag = true;
   searchScopes.body = false;
   projectScope.value = "";
-  searchLimit.value = "1000";
+  searchLimit.value = searchLimitDefault.value;
 }
 
 // ── body scan (main-process, two-phase) ─────────────────────────────
@@ -1255,7 +1296,7 @@ function compareFromMenu(): void {
 function onRowClick(sessionId: string): void {
   const from = store.comparePickFrom;
   if (from == null || !directorySessions.value.some((s) => s.id === sessionId)) {
-    void selectSession(sessionId, { focus: true });
+    void openSession(sessionId, { focus: true });
     return;
   }
   if (sessionId === from) {
@@ -1263,6 +1304,19 @@ function onRowClick(sessionId: string): void {
     return;
   }
   void enterCompare(from, sessionId);
+}
+
+/** Middle-click opens the story in a new canvas tab, browser-style. */
+function onRowAuxClick(sessionId: string, event: MouseEvent): void {
+  if (event.button !== 1) return;
+  event.preventDefault();
+  void openCanvasTab(sessionId);
+}
+
+function openInNewTabFromMenu(): void {
+  const id = menu.value?.sessionId;
+  closeMenu();
+  if (id) void openCanvasTab(id);
 }
 
 function toggleMarkFromMenu(): void {
@@ -1656,7 +1710,7 @@ function beginArchive(): void {
 }
 
 /** Right-click create: the new session lands in this directory and becomes
- * the open project — selectSession inside createSession switches to it. */
+ * the open project — createSession's landing logic opens it on screen. */
 function beginDirCreate(): void {
   const active = dirMenu.value;
   if (!active) return;
@@ -1694,8 +1748,9 @@ function beginDirArchive(): void {
 const favOpen = ref(true);
 
 function openFavorite(session: SessionSummary): void {
-  // selectSession switches directory itself when the star lives elsewhere.
-  void selectSession(session.id, { focus: true });
+  // Both paths under openSession switch the directory themselves when the
+  // star lives elsewhere.
+  void openSession(session.id, { focus: true });
 }
 
 function unpinFavorite(sessionId: string): void {

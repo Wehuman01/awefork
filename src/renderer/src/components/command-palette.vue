@@ -59,11 +59,10 @@ import {
   createSession,
   exitCompare,
   isEmptyContext,
+  openSession,
   refreshSessions,
   requestCanvasFit,
-  selectSession,
   store,
-  switchDirectory,
   tagBg,
   tagColor,
   tagsOf,
@@ -195,10 +194,10 @@ function close(): void {
 }
 
 async function jumpToSession(session: SessionSummary): Promise<void> {
-  if (session.directory !== store.selectedDirectory) {
-    await switchDirectory(session.directory);
-  }
-  await selectSession(session.id, { focus: true });
+  // openSession retargets the directory itself (both paths under it do), so
+  // no switchDirectory pre-step — that would park the outgoing tab on the
+  // directory's latest session before the jump lands.
+  await openSession(session.id, { focus: true });
 }
 
 function onInputKeydown(event: KeyboardEvent): void {

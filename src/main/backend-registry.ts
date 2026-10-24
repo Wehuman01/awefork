@@ -38,8 +38,10 @@ import { isPiInstalled, piNodeSeams, stopPiChildren } from "./pi-server.js";
 import {
   readBackendSelection,
   readOpencodePort,
+  readQuitKeepAlive,
   writeBackendSelection,
   writeOpencodePort,
+  writeQuitKeepAlive,
 } from "./settings-store.js";
 import {
   ensureZcodeServer,
@@ -84,7 +86,21 @@ export interface BackendRegistry {
   fileChangesDir(backend: BackendId): string;
   /** Forward every spawned backend's events as tagged envelopes, forever. */
   forward(send: (envelope: BackendEventEnvelope) => void): void;
-  dispose(): void;
+  /**
+   * Sessions with a run in flight right now, tagged by backend — what the
+   * quit confirmation asks about. A session counts from its first
+   * message.started until its session.idle (or a session-scoped error).
+   */
+  runningSessions(): Array<{ backend: BackendId; sessionId: string }>;
+  /** The persisted quitKeepAlive setting, cached for the sync quit path. */
+  quitKeepAlive(): boolean;
+  /** Cache and persist the setting; takes effect on the next quit. */
+  setQuitKeepAlive(value: boolean): void;
+  /**
+   * Drop every adapter and stream. With keepAlive (or the persisted setting)
+   * the spawned servers are left running so their in-flight turns finish.
+   */
+  dispose(options?: { keepAlive?: boolean }): void;
 }
 
 /**
@@ -260,6 +276,19 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const adapters = new Map<BackendId, Promise<AgentAdapter>>();
   const unsubscribers: Array<() => void> = [];
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
+  /** `backend:sessionId` of runs in flight; see runningSessions below. */
+  const running = new Map<string, { backend: BackendId; sessionId: string }>();
+  /**
+   * The persisted quitKeepAlive setting, read once at startup so the sync
+   * before-quit path never awaits a file; setQuitKeepAlive keeps it current.
+   * An explicit set wins over the startup read even if the read is still in
+   * flight — its resolution must not clobber the newer value.
+   */
+  let quitKeepAliveCached = false;
+  let quitKeepAliveSet = false;
+  void readQuitKeepAlive(settingsPath).then((value) => {
+    if (!quitKeepAliveSet) quitKeepAliveCached = value;
+  });
   /**
    * `opencode --version` decides which protocol awefork speaks, so it gates
    * the switcher warning, the capabilities and the adapter itself. One probe
@@ -301,6 +330,15 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const subscribeAdapter = (backend: BackendId, adapter: AgentAdapter): void => {
     void adapter
       .subscribe((event) => {
+        const key = "sessionId" in event ? `${backend}:${event.sessionId}` : null;
+        if (event.type === "message.started" && key) {
+          running.set(key, { backend, sessionId: event.sessionId });
+        } else if (event.type === "session.idle" && key) {
+          running.delete(key);
+        } else if (event.type === "server.error" && "sessionId" in event && event.sessionId) {
+          // A failed prompt settles that session's run just like idle would.
+          running.delete(`${backend}:${event.sessionId}`);
+        }
         forwardEvent?.({ backend, event });
       })
       .then((unsubscribe) => {
@@ -463,7 +501,21 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       forwardEvent = send;
     },
 
-    dispose() {
+    runningSessions: () => [...running.values()],
+
+    quitKeepAlive: () => quitKeepAliveCached,
+
+    setQuitKeepAlive(value) {
+      quitKeepAliveSet = true;
+      quitKeepAliveCached = value;
+      void writeQuitKeepAlive(settingsPath, value).catch(() => {
+        // A failed settings write only loses the preference across restarts;
+        // the cached flag still governs this quit.
+      });
+    },
+
+    dispose(options) {
+      const keepAlive = options?.keepAlive ?? quitKeepAliveCached;
       for (const unsubscribe of unsubscribers.splice(0)) {
         try {
           unsubscribe();
@@ -475,6 +527,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
         void promise.then((adapter) => adapter.dispose()).catch(() => {});
       }
       adapters.clear();
+      if (keepAlive) return;
       stopManagedServer();
       stopCodexServer();
       stopZcodeServer();

@@ -658,6 +658,19 @@ export function registerIpc(
     registry.capabilities(storeBackend(backend)),
   );
 
+  // Quit behavior: whether quitting leaves the spawned backends running so
+  // in-flight turns finish in the background. Read is served from the
+  // registry's cache (persisted-backed); write persists it.
+  ipcMain.handle("awefork:quitKeepAlive", () => registry.quitKeepAlive());
+  ipcMain.handle("awefork:setQuitKeepAlive", (_event: IpcMainInvokeEvent, value: unknown) => {
+    if (typeof value !== "boolean") return { ok: false, error: "expected a boolean" };
+    registry.setQuitKeepAlive(value);
+    return { ok: true };
+  });
+  // Runs in flight across every backend — the top bar counts them before
+  // offering to turn keep-alive on, so the user knows what will survive.
+  ipcMain.handle("awefork:runningSessionCount", () => registry.runningSessions().length);
+
   // ── app-level ────────────────────────────────────────────────────────────
 
   // Local file references in replies (agent output is full of them — Windows
@@ -706,8 +719,10 @@ export function registerIpc(
       readTextPreview(target, maxBytes),
   );
 
-  ipcMain.handle("awefork:readImagePreview", (_event: IpcMainInvokeEvent, target: string) =>
-    readImagePreview(target),
+  ipcMain.handle(
+    "awefork:readImagePreview",
+    (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
+      readImagePreview(target, maxBytes),
   );
 
   ipcMain.handle(
@@ -724,6 +739,13 @@ export function registerIpc(
   // The home directory anchors the file panel's common locations; the
   // renderer has no other way to name it.
   ipcMain.handle("awefork:homePath", () => app.getPath("home"));
+
+  // The settings page's Storage section opens the app data folder; "~" fails
+  // the openPath gate and names the wrong folder anyway.
+  ipcMain.handle("awefork:openAppData", async () => {
+    const error = await shell.openPath(app.getPath("userData"));
+    return error ? { ok: false, error } : { ok: true };
+  });
 
   // Reveal an entry in the OS file manager — the one file action that
   // leaves the app, and the only one routed through shell besides openPath.
