@@ -29,6 +29,35 @@ export const dict: Record<string, Entry> = {
     en: "Model list unavailable right now; can't compress",
   },
   "state.compressFailed": { zh: "压缩失败：{error}", en: "Compress failed: {error}" },
+  "state.parallelDuplicateModels": {
+    zh: "所选模型重复，请调整后再发送。",
+    en: "The selected models include a duplicate. Adjust the list and try again.",
+  },
+  "state.parallelForkFailed": {
+    zh: "无法为所选模型创建回答分支。",
+    en: "Could not create answer branches for the selected models.",
+  },
+  "state.parallelPartialFailure": {
+    zh: "{n} 个回答未能启动；已继续汇总成功的回答。",
+    en: "{n} replies could not start; summarizing the replies that did.",
+  },
+  "state.parallelNoReplies": {
+    zh: "没有收到可汇总的回答。",
+    en: "No usable replies were received to summarize.",
+  },
+  "state.parallelSummaryFailed": {
+    zh: "回答已保留，但汇总失败：{error}",
+    en: "The answers were kept, but summarization failed: {error}",
+  },
+  "state.parallelDefaultModel": { zh: "Agent 默认模型", en: "Agent default model" },
+  "state.parallelBranchSessionTitle": {
+    zh: "同题 · {prompt} · {model} · {time}",
+    en: "Parallel · {prompt} · {model} · {time}",
+  },
+  "state.parallelSummarySessionTitle": {
+    zh: "汇总 · {prompt} · {time}",
+    en: "Summary · {prompt} · {time}",
+  },
 
   // ── history labels: pins / marks / tags ────────────────────────────────
   "state.pinLabel": { zh: "置顶「{title}」", en: 'Pinned "{title}"' },

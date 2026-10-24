@@ -11,7 +11,11 @@
         </div>
         <div v-else class="message-row user-row">
           <div class="user-body">
-            <MarkdownView :source="message.text" user />
+            <details v-if="message.id === collapsedUserMessageId" class="message-source-input">
+              <summary>{{ collapsedUserMessageLabel }}</summary>
+              <MarkdownView :source="message.text" user />
+            </details>
+            <MarkdownView v-else :source="message.text" user />
             <p v-if="message.attachmentNames.length > 0" class="att-row">
               <span v-for="(name, i) in message.attachmentNames" :key="i" class="att-chip">
                 📎 {{ name }}
@@ -117,6 +121,8 @@ const props = defineProps<{
   /** The run's live parts in arrival order — each step's thinking and reply interleaved. */
   streamParts: readonly LivePart[];
   error: string | null;
+  collapsedUserMessageId?: string | null;
+  collapsedUserMessageLabel?: string;
 }>();
 
 /** A failed reply row offers its own retry jump; the host opens the draft. */
@@ -218,3 +224,8 @@ onUnmounted(() => {
   if (copiedTimer) clearTimeout(copiedTimer);
 });
 </script>
+
+<style scoped>
+.message-source-input > summary { cursor: pointer; font-size: 12px; font-weight: 650; }
+.message-source-input[open] > summary { margin-bottom: 10px; }
+</style>

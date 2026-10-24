@@ -576,6 +576,7 @@ export function installMockAdapter(): void {
       defs.set(id, {
         id,
         title: t("demo.forkTitle", { title: parent?.title ?? t("demo.forkFallback") }),
+        directory: parent?.directory ?? DIRECTORY,
         origin: "fork",
         parent: sessionId,
         atMessageId,
