@@ -596,13 +596,16 @@ describe("createCodexAdapter prompt()", () => {
     expect(turnStarts[0]?.params).toMatchObject({ threadId: "fork-9" });
     expect(callsOf("thread/fork")[0]?.params).toMatchObject({ threadId: "s1" });
 
-    // The fork is a real branch in the canvas, and the user is told.
+    // The fork is a real branch in the canvas, and the user is told — as a
+    // continuation, not a failure: the renderer keeps the optimistic prompt
+    // row and follows the fork instead of settling the run as dead.
     const saved = JSON.parse(await readFile(lineagePath, "utf8"));
     expect(saved["fork-9"]).toMatchObject({ parentId: "s1", atMessageId: null });
-    const error = events.find((e) => e.type === "server.error");
-    expect(error?.sessionId).toBe("s1");
-    expect(error?.message).toContain(OWNED_ELSEWHERE_MESSAGE);
-    expect(error?.message).toContain("fork-9");
+    const continued = events.find((e) => e.type === "session.branchContinued");
+    expect(continued).toMatchObject({ sessionId: "s1", forkedSessionId: "fork-9" });
+    expect(continued?.message).toContain(OWNED_ELSEWHERE_MESSAGE);
+    expect(continued?.message).toContain("fork-9");
+    expect(events.find((e) => e.type === "server.error")).toBeUndefined();
   });
 
   it("reports the writer conflict when the recovery fork is refused too", async () => {

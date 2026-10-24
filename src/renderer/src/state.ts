@@ -947,9 +947,33 @@ const messageLoads = createMessageLoader({
       pruneSettledParts(backend, sessionId, messages);
       return;
     }
+    // While the session runs, an interim snapshot can lag the optimistic row
+    // a send just appended (codex's thread store projects rollouts late), and
+    // dropping it makes the prompt flash out until the next poll. Pin unsent
+    // local rows at the tip until the server's copy of the same text lands;
+    // settled reloads (idle, a real failure) still replace wholesale because
+    // the run flag is down by then.
+    if (isRunning(backend, sessionId)) messages = mergeOptimisticRows(cached, messages);
     return publishMessages(backend, sessionId, messages);
   },
 });
+
+/**
+ * Keep cached `local_*` prompt rows whose text the server snapshot does not
+ * carry yet, appended after the snapshot so they render at the story's tip.
+ */
+function mergeOptimisticRows(
+  cached: readonly ChatMessage[] | undefined,
+  incoming: readonly ChatMessage[],
+): ChatMessage[] {
+  const locals = (cached ?? []).filter((message) => message.id.startsWith("local_"));
+  if (locals.length === 0) return [...incoming];
+  const serverTexts = new Set(
+    incoming.filter((message) => message.role === "user").map((message) => message.text),
+  );
+  const pending = locals.filter((message) => !serverTexts.has(message.text));
+  return pending.length === 0 ? [...incoming] : [...incoming, ...pending];
+}
 
 /**
  * Poll-based watchdogs for prompts awefork sent, keyed by backend-scoped
@@ -1329,13 +1353,16 @@ export async function refreshSessions(): Promise<void> {
     }
     // Tabs whose story went away (deleted / archived in the agent's own TUI)
     // park as blank tabs instead of resurrecting dead sessions on activation.
-    pruneCanvasTabs();
+    // A selected session merely missing from this refresh (inside its grace
+    // window) parks nothing and must not be refilled over either.
+    const selectionInGrace = pruneCanvasTabs();
     // Select before the batch load so the initial session's panel and canvas
     // node are ready the moment the working set finishes loading. Skipped
     // while the active tab's story just died — that tab parks blank instead
     // of silently adopting whatever is latest.
     if (
       !activeTabStoryDied &&
+      !selectionInGrace &&
       state.selectedDirectory &&
       (!state.selectedId || !directorySessions.value.some((s) => s.id === state.selectedId))
     ) {
@@ -1419,8 +1446,28 @@ function syncActiveTab(): void {
  */
 let activeTabStoryDied = false;
 
-/** Tabs whose story vanished park as blank tabs; live ones re-resolve roots. */
-function pruneCanvasTabs(): void {
+/** When the selected session last went missing from a refresh; null = present. */
+let selectionMissingSince: number | null = null;
+
+/**
+ * How long a refresh may drop the selected session before its tab is parked
+ * blank. codex's thread/list can briefly omit a thread (a fresh one before
+ * its first rollout lands, or a store rescan): pruning on a single miss
+ * unmounts the pane's composer and loses whatever was typed in it.
+ */
+const SELECTION_PRUNE_GRACE_MS = 8_000;
+
+/** Tabs whose story vanished park as blank tabs; live ones re-resolve roots.
+ * Returns true while the selected session is merely missing from this refresh
+ * but still inside its grace window — the caller then parks nothing and
+ * refills nothing. */
+function pruneCanvasTabs(): boolean {
+  if (state.selectedId !== null && !visibleSessions.value.some((s) => s.id === state.selectedId)) {
+    if (selectionMissingSince === null) selectionMissingSince = Date.now();
+    if (Date.now() - selectionMissingSince < SELECTION_PRUNE_GRACE_MS) return true;
+  } else {
+    selectionMissingSince = null;
+  }
   const visible = new Set(visibleSessions.value.map((s) => s.id));
   for (const tab of state.canvasTabs) {
     if (tab.selectedId !== null && !visible.has(tab.selectedId)) {
@@ -1443,6 +1490,7 @@ function pruneCanvasTabs(): void {
   } else {
     syncActiveTab();
   }
+  return false;
 }
 
 /**
@@ -2377,6 +2425,27 @@ function handleEvent(backend: BackendId, event: AgentEvent): void {
       // the list — every event fired while disconnected was missed.
       state.actionError = null;
       void refreshSessions();
+      break;
+    }
+    case "session.branchContinued": {
+      // The prompt hit a writer-locked thread and now runs on a fresh fork.
+      // Treat it as the run moving house, not a failure: the optimistic
+      // prompt row survives, the run and watchdog transfer to the fork, and
+      // the pane follows the fork so the reply streams where the user is
+      // looking instead of on a hidden branch.
+      state.actionError = event.message;
+      stopWatch(backend, event.sessionId);
+      setRunning(backend, event.sessionId, false);
+      dropSessionInteractions(backend, event.sessionId);
+      setRunning(backend, event.forkedSessionId, true);
+      // Slack covers a turn that completes between prompt and this event;
+      // the fork's copied history all completed minutes before "now".
+      watchCompletion(backend, event.forkedSessionId, Date.now() - 5_000);
+      void refreshSessions().then(() => {
+        if (backend === state.activeBackend && state.selectedId === event.sessionId) {
+          void selectSession(event.forkedSessionId, { focus: true });
+        }
+      });
       break;
     }
     case "server.error": {

@@ -845,8 +845,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
               registerStaging(forked.id, staged);
             }
             emit({
-              type: "server.error",
+              type: "session.branchContinued",
               sessionId,
+              forkedSessionId: forked.id,
               message: `${OWNED_ELSEWHERE_MESSAGE}; continued in the new branch ${forked.id}`,
             });
             return;

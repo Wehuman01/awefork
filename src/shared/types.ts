@@ -351,6 +351,19 @@ export type AgentEvent =
    */
   | { type: "server.error"; message: string; sessionId?: string | null }
   /**
+   * A writer-locked codex thread's prompt was continued in a fresh fork:
+   * `sessionId` is the locked thread, `forkedSessionId` the fork now running
+   * the turn. Not a failure — the renderer transfers the run to the fork and
+   * follows it there instead of settling the original as failed, which used
+   * to wipe the optimistic prompt row and strand the reply on a hidden branch.
+   */
+  | {
+      type: "session.branchContinued";
+      sessionId: string;
+      forkedSessionId: string;
+      message: string;
+    }
+  /**
    * The event stream reconnected after a reported server.error — the renderer
    * should drop the outage toast and refresh, since every event fired while
    * disconnected was missed.
