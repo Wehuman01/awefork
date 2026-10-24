@@ -99,7 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: { locale: "zh", timeStyle: "relative" },
   backend: { warnRange: true },
   canvas: {
-    multiWindow: false,
+    multiWindow: true,
     defaultView: "canvas",
     autoFit: true,
     minimap: true,

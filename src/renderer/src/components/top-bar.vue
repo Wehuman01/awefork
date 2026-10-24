@@ -71,24 +71,6 @@
     </div>
     <button
       type="button"
-      class="icon-btn multiwindow-btn"
-      :class="{ on: multiWindow }"
-      role="switch"
-      :aria-checked="multiWindow"
-      :title="multiWindow ? t('topbar.multiWindowOn') : t('topbar.multiWindowOff')"
-      @click="toggleMultiWindow"
-    >
-      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
-      {{ t("topbar.multiWindowLabel") }}
-    </button>
-    <button
-      type="button"
-      class="icon-btn cmdk-btn"
-      :title="t('topbar.commandPalette')"
-      @click="togglePalette()"
-    >{{ paletteKeyLabel }}</button>
-    <button
-      type="button"
       class="icon-btn cmdk-btn"
       :title="themeTitle"
       @click="cycleTheme"
@@ -222,8 +204,8 @@ import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
-import { settingsOpen, togglePalette, toggleSettings } from "../layout";
-import { modKey, modWith } from "../platform-key";
+import { settingsOpen, toggleSettings } from "../layout";
+import { modKey } from "../platform-key";
 import { settings } from "../settings";
 import {
   checkForUpdates,
@@ -240,13 +222,10 @@ import HistoryButton from "./history-button.vue";
 const open = ref(false);
 const versionOpen = ref(false);
 const backendOpen = ref(false);
-// Shared through the settings blob so the preference survives restarts and
-// applies to every window — new agent windows opened by the main process read
-// it at their own boot.
+// Multi-window mode lives in the settings page (canvas section); the top bar
+// only reads it, because the backend-switch confirmation below changes shape
+// with it.
 const multiWindow = computed(() => settings.canvas.multiWindow);
-function toggleMultiWindow(): void {
-  settings.canvas.multiWindow = !settings.canvas.multiWindow;
-}
 // Quit keep-alive lives in main's settings.json (the quit dialog's checkbox
 // also writes it), so this toggle is a plain IPC call — demo mode has no
 // bridge and keeps the switch inert at its persisted default.
@@ -286,8 +265,6 @@ const activeLabel = computed(
 // The version button is always there (so manual checks stay reachable); a
 // placeholder stands in until the first check fills the real version in.
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
-// The palette shortcut shows the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere.
-const paletteKeyLabel = modWith("K");
 // The theme button cycles light → dark → system, so its hint names the state
 // it is in, not just the state it would switch to.
 const themeTitle = computed(() => {

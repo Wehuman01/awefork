@@ -152,15 +152,6 @@ const DICT: Dict = {
     en: "Switch to {label} (right-click: open in new window)",
   },
   "topbar.notOnPath": { zh: "未在 PATH 上找到 {label} CLI", en: "{label} CLI not found on PATH" },
-  "topbar.multiWindowOn": {
-    zh: "多窗口已开：点 Agent 会在独立窗口打开（同一 Agent 只聚焦已有窗口）",
-    en: "Multi-window on: clicking an agent opens it in its own window (same agent just focuses the existing one)",
-  },
-  "topbar.multiWindowOff": {
-    zh: "多窗口已关：点 Agent 在当前窗口内切换；打开后点击将新开独立窗口",
-    en: "Multi-window off: clicking an agent switches in place; turn on to open each in its own window",
-  },
-  "topbar.multiWindowLabel": { zh: "独立窗口", en: "Separate windows" },
 
   // ── top-bar quit keep-alive toggle ──────────────────────────────────────
   "topbar.quitKeepAliveLabel": { zh: "退出保留后台", en: "Keep on quit" },
