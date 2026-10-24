@@ -71,6 +71,8 @@ export interface Settings {
     autoDenySeconds: number;
     /** Ask before deleting a turn (session deletes ride the undo toast). */
     confirmDelete: boolean;
+    /** New sessions open in a fresh tab instead of replacing the active tab. */
+    newSessionInTab: boolean;
   };
   files: {
     showHidden: boolean;
@@ -103,6 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
     minimap: true,
     autoDenySeconds: 30,
     confirmDelete: true,
+    newSessionInTab: true,
   },
   files: {
     showHidden: false,
@@ -177,6 +180,7 @@ export function normalizeSettings(raw: unknown): Settings {
       minimap: pickBool(canvas.minimap, d.canvas.minimap),
       autoDenySeconds: pickNumber(canvas.autoDenySeconds, d.canvas.autoDenySeconds, 0, 300),
       confirmDelete: pickBool(canvas.confirmDelete, d.canvas.confirmDelete),
+      newSessionInTab: pickBool(canvas.newSessionInTab, d.canvas.newSessionInTab),
     },
     files: {
       showHidden: pickBool(files.showHidden, d.files.showHidden),

@@ -483,6 +483,15 @@ function canvasSection(): SectionDef {
           settings.canvas.multiWindow = next;
         },
       ),
+      toggle(
+        "canvas.newSessionInTab",
+        t("settings.newSessionInTab"),
+        t("settings.newSessionInTabDesc"),
+        settings.canvas.newSessionInTab,
+        (next) => {
+          settings.canvas.newSessionInTab = next;
+        },
+      ),
       segment(
         "canvas.defaultView",
         t("settings.defaultView"),

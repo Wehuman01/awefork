@@ -179,6 +179,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Whether the middle column opens on the canvas or the file browser.",
   },
   "settings.autoFit": { zh: "打开时自动适配视图", en: "Fit view on open" },
+  "settings.newSessionInTab": { zh: "新会话开新标签", en: "New session in new tab" },
+  "settings.newSessionInTabDesc": {
+    zh: "开启后，新建会话会打开一个新的标签页，而不是切换当前标签里的会话。",
+    en: "With this on, creating a session opens it in a fresh tab instead of switching the active tab.",
+  },
   "settings.autoFitDesc": {
     zh: "选中会话或切换故事标签时，把整棵分支树缩放进视口。",
     en: "Zooms the whole branch tree into view when a session or story tab opens.",

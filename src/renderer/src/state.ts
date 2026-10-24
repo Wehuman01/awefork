@@ -3376,7 +3376,13 @@ export async function createSession(directory?: string): Promise<void> {
     },
   });
   await refreshSessions();
-  await selectSession(created.id, { focus: true });
+  // The setting decides whether the new session lands in a fresh tab
+  // (keeping the active tab's story untouched) or switches in place.
+  if (settings.canvas.newSessionInTab) {
+    await openCanvasTab(created.id);
+  } else {
+    await selectSession(created.id, { focus: true });
+  }
   state.composerFocusRequest = Date.now();
 }
 
