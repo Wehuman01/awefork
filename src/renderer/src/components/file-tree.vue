@@ -78,6 +78,7 @@ import {
   isTreeNodeExpanded,
   startPathDrag,
   toggleTreeNode,
+  visibleTreeChildren,
 } from "../files";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
@@ -134,7 +135,7 @@ function expanded(dir: string): boolean {
 }
 
 function childrenOf(dir: string): FileEntry[] {
-  return (files.treeChildren[dir] ?? []).filter((entry) => entry.isDir);
+  return visibleTreeChildren(dir).filter((entry) => entry.isDir);
 }
 
 /** A synthetic row for the root itself, so the menu works there too. */

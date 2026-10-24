@@ -248,6 +248,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "settings.openSystem": { zh: "系统打开", en: "System app" },
   "settings.openPreview": { zh: "应用内预览", en: "In-app preview" },
+  "settings.filesIgnore": { zh: "忽略的目录与文件", en: "Ignored names" },
+  "settings.filesIgnoreDesc": {
+    zh: "文件浏览器和侧栏文件树里隐藏这些名称；支持 * 通配符，用逗号分隔。",
+    en: "Hidden from the file browser and the sidebar tree. Supports * wildcards; separate with commas.",
+  },
 
   // ── search ───────────────────────────────────────────────────────────
   "settings.searchScopes": { zh: "默认搜索范围", en: "Default search scope" },
@@ -346,6 +351,13 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "把同一个问题同时发给多个模型，分支并排阅读，并生成汇总。关闭后回到单模型发送。",
     en: "Send one prompt to several models at once, read the branches side by side, and get a summary. Off falls back to a single model.",
   },
+  "settings.parallelDefaults": { zh: "默认模型与汇总", en: "Default models & summary" },
+  "settings.parallelDefaultsDesc": {
+    zh: "打开多模型模式时预选这些模型（含各自强度）；汇总模型与长度决定每轮结束后的汇总方式，可以选「不汇总」。",
+    en: "Pre-selected when multi-model mode opens, each with its effort; the summary model and length shape every round — pick “No summary” to skip it.",
+  },
+  "settings.parallelDefaultsCount": { zh: "{n} 个模型", en: "{n} models" },
+  "settings.parallelDefaultsEmpty": { zh: "未设置", en: "Not set" },
   "settings.labsNote": { zh: "关于实验室", en: "About Labs" },
   "settings.labsNoteDesc": {
     zh: "功能稳定后会从实验室毕业，进入正式分区；关闭开关不会丢失相关偏好。",

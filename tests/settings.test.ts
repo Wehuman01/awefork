@@ -95,6 +95,58 @@ describe("normalizeSettings", () => {
     expect(result).not.toHaveProperty("future");
     expect(result.appearance.theme).toBe("dark");
   });
+
+  it("keeps usable parallel defaults and repairs the rest", () => {
+    const result = normalizeSettings({
+      labs: {
+        parallel: {
+          targets: [
+            { providerId: "zcode", modelId: "glm-5.3", variant: "high" },
+            { providerId: "", modelId: "no-provider" },
+            { modelId: "no-provider-id" },
+            { providerId: "zcode", modelId: "glm-5.3", variant: "" },
+            "nonsense",
+          ],
+          summaryModel: { providerId: "zcode", modelId: "glm-5.3-flash" },
+          summaryLength: "none",
+        },
+      },
+    });
+    expect(result.labs.parallel.targets).toEqual([
+      { providerId: "zcode", modelId: "glm-5.3", variant: "high" },
+      { providerId: "zcode", modelId: "glm-5.3" },
+    ]);
+    expect(result.labs.parallel.summaryModel).toEqual({
+      providerId: "zcode",
+      modelId: "glm-5.3-flash",
+    });
+    expect(result.labs.parallel.summaryLength).toBe("none");
+  });
+
+  it("falls back to the defaults for a parallel section that is not an object", () => {
+    const result = normalizeSettings({ labs: { parallel: "nonsense" } });
+    expect(result.labs.parallel).toEqual(DEFAULT_SETTINGS.labs.parallel);
+  });
+
+  it("caps the parallel target list at four", () => {
+    const targets = [1, 2, 3, 4, 5, 6].map((n) => ({
+      providerId: "zcode",
+      modelId: `model-${n}`,
+    }));
+    expect(
+      normalizeSettings({ labs: { parallel: { targets } } }).labs.parallel.targets,
+    ).toHaveLength(4);
+  });
+
+  it("trims, de-duplicates and caps the ignore list", () => {
+    const result = normalizeSettings({
+      files: { ignore: [" node_modules ", "node_modules", "", "dist", 42, "out", "build", "x"] },
+    });
+    expect(result.files.ignore).toEqual(["node_modules", "dist", "out", "build", "x"]);
+    expect(normalizeSettings({ files: { ignore: "nonsense" } }).files.ignore).toEqual(
+      DEFAULT_SETTINGS.files.ignore,
+    );
+  });
 });
 
 describe("migrateLegacy", () => {

@@ -20,6 +20,7 @@
  * never blocks boot.
  */
 import { reactive, watch } from "vue";
+import type { ModelChoice, ParallelSummaryLength } from "../../shared/types";
 
 const STORAGE_KEY = "awefork:settings";
 
@@ -84,6 +85,11 @@ export interface Settings {
     previewCapKb: number;
     /** Image preview cap in MB; main clamps to its own ceiling. */
     imageCapMb: number;
+    /**
+     * Names hidden in the browser and the sidebar tree. Plain names match
+     * exactly; `*` is the only wildcard ("*.log", "build-*").
+     */
+    ignore: string[];
     /** Double-click opens the system app or the in-app preview. */
     openOnDouble: FileOpenTarget;
   };
@@ -105,6 +111,16 @@ export interface Settings {
     fileBrowser: boolean;
     /** Multi-model parallel prompts: fork per model, read side by side, summarize. */
     parallelModels: boolean;
+    /**
+     * Defaults for multi-model prompts. Targets are pre-selected when the
+     * mode opens; a pick the current catalog no longer lists is skipped
+     * rather than sent. Summary "none" leaves the round unsummarized.
+     */
+    parallel: {
+      targets: ModelChoice[];
+      summaryModel: ModelChoice | null;
+      summaryLength: ParallelSummaryLength;
+    };
   };
 }
 
@@ -126,12 +142,22 @@ export const DEFAULT_SETTINGS: Settings = {
     view: "list",
     previewCapKb: 512,
     imageCapMb: 8,
+    ignore: ["node_modules", "dist", "out", "build"],
     openOnDouble: "system",
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },
-  labs: { fileBrowser: false, parallelModels: false },
+  labs: {
+    fileBrowser: false,
+    parallelModels: false,
+    parallel: { targets: [], summaryModel: null, summaryLength: "brief" },
+  },
 };
+
+/** Most models one multi-model round may address. */
+export const MAX_PARALLEL_TARGETS = 4;
+/** Longest ignore list; each entry is capped on its own too. */
+const MAX_IGNORE_PATTERNS = 32;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -152,6 +178,32 @@ function pickNumber(value: unknown, fallback: number, min: number, max: number):
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+/** Trimmed, de-duplicated, capped; a malformed list falls back wholesale. */
+function pickStringList(value: unknown, fallback: readonly string[], max: number): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (name === "" || seen.has(name)) continue;
+    seen.add(name);
+    list.push(name);
+    if (list.length >= max) break;
+  }
+  return list;
+}
+
+/** A stored model pick, or null when the entry is unusable. */
+function pickModelChoice(value: unknown): ModelChoice | null {
+  if (!isRecord(value)) return null;
+  const providerId = typeof value.providerId === "string" ? value.providerId.trim() : "";
+  const modelId = typeof value.modelId === "string" ? value.modelId.trim() : "";
+  if (providerId === "" || modelId === "") return null;
+  const variant = typeof value.variant === "string" ? value.variant.trim() : "";
+  return variant === "" ? { providerId, modelId } : { providerId, modelId, variant };
+}
+
 /**
  * Coerce a parsed blob into a total Settings. Every field is validated on
  * its own, so one corrupt key costs only that key — the rest of the file
@@ -168,6 +220,7 @@ export function normalizeSettings(raw: unknown): Settings {
   const scopes = isRecord(search.scopes) ? search.scopes : {};
   const updates = isRecord(root.updates) ? root.updates : {};
   const labs = isRecord(root.labs) ? root.labs : {};
+  const parallel = isRecord(labs.parallel) ? labs.parallel : {};
   const d = DEFAULT_SETTINGS;
   return {
     appearance: {
@@ -208,6 +261,7 @@ export function normalizeSettings(raw: unknown): Settings {
       view: pickEnum(files.view, ["list", "grid"] as const, d.files.view),
       previewCapKb: pickNumber(files.previewCapKb, d.files.previewCapKb, 1, 512),
       imageCapMb: pickNumber(files.imageCapMb, d.files.imageCapMb, 1, 8),
+      ignore: pickStringList(files.ignore, d.files.ignore, MAX_IGNORE_PATTERNS),
       openOnDouble: pickEnum(
         files.openOnDouble,
         ["system", "preview"] as const,
@@ -226,6 +280,20 @@ export function normalizeSettings(raw: unknown): Settings {
     labs: {
       fileBrowser: pickBool(labs.fileBrowser, d.labs.fileBrowser),
       parallelModels: pickBool(labs.parallelModels, d.labs.parallelModels),
+      parallel: {
+        targets: Array.isArray(parallel.targets)
+          ? parallel.targets
+              .map(pickModelChoice)
+              .filter((choice): choice is ModelChoice => choice !== null)
+              .slice(0, MAX_PARALLEL_TARGETS)
+          : [],
+        summaryModel: parallel.summaryModel != null ? pickModelChoice(parallel.summaryModel) : null,
+        summaryLength: pickEnum(
+          parallel.summaryLength,
+          ["brief", "standard", "none"] as const,
+          d.labs.parallel.summaryLength,
+        ),
+      },
     },
   };
 }

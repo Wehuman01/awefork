@@ -261,6 +261,71 @@ describe("filter and view", () => {
   });
 });
 
+describe("ignore list", () => {
+  /** Seed the settings blob before the modules under test boot. */
+  function seedSettings(files: Record<string, unknown>): void {
+    (globalThis as unknown as { localStorage: Storage }).localStorage = {
+      getItem: (key: string) => (key === "awefork:settings" ? JSON.stringify({ files }) : null),
+      setItem: () => {},
+      removeItem: () => {},
+    } as unknown as Storage;
+  }
+
+  afterEach(() => {
+    delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+  });
+
+  it("hides the default build directories from the browser", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", [
+          entry("node_modules", true),
+          entry("dist", true),
+          entry("out", true),
+          entry("build", true),
+          entry("src", true),
+          entry("main.ts"),
+        ]),
+      },
+    });
+    await h.mod.browseTo("/a");
+    expect(h.mod.visibleEntries().map((e) => e.name)).toEqual(["src", "main.ts"]);
+  });
+
+  it("matches the settings' patterns, wildcards included, and keeps everything else", async () => {
+    seedSettings({ ignore: ["vendor", "*.log", "Readme.md"] });
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", [
+          entry("vendor", true),
+          entry("app.log"),
+          entry("logger.logging"),
+          entry("readme.md"),
+          entry("node_modules", true),
+          entry("main.ts"),
+        ]),
+      },
+    });
+    await h.mod.browseTo("/a");
+    // The custom list replaces the defaults, so node_modules shows again;
+    // names match case-insensitively and "*.log" does not catch ".logging".
+    expect(h.mod.visibleEntries().map((e) => e.name)).toEqual([
+      "logger.logging",
+      "node_modules",
+      "main.ts",
+    ]);
+  });
+
+  it("keeps ignored entries in the raw listing so a settings change reaches loaded trees", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", [entry("node_modules", true), entry("src", true)]) },
+    });
+    await h.mod.loadTreeChildren("/a");
+    expect(h.files.treeChildren["/a"].map((e) => e.name)).toEqual(["node_modules", "src"]);
+    expect(h.mod.visibleTreeChildren("/a").map((e) => e.name)).toEqual(["src"]);
+  });
+});
+
 describe("typed paths", () => {
   it("opens a directory", async () => {
     const h = await bootFiles({ listings: { "/a/docs": listing("/a/docs", []) } });

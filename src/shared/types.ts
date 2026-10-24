@@ -108,6 +108,12 @@ export interface ModelChoice {
   variant?: string | null;
 }
 
+/**
+ * How a multi-model round gets summarized once its answers land: "brief" and
+ * "standard" run a summary model, "none" leaves the answers unsummarized.
+ */
+export type ParallelSummaryLength = "brief" | "standard" | "none";
+
 /** An attachment sent with a prompt; `dataUrl` carries the bytes inline. */
 export interface PromptAttachment {
   mime: string;

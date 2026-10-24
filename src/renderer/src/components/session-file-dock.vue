@@ -67,7 +67,14 @@ import { computed, watch } from "vue";
 import { displayName } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
-import { files, initFiles, loadTreeChildren, previewEntry, startPathDrag } from "../files";
+import {
+  files,
+  initFiles,
+  loadTreeChildren,
+  previewEntry,
+  startPathDrag,
+  visibleTreeChildren,
+} from "../files";
 import { t } from "../i18n";
 import { fileDockOpen, openFilesView, toggleFileDock } from "../layout";
 import { store } from "../state";
@@ -80,7 +87,7 @@ void initFiles();
 const root = computed(() => store.selectedDirectory);
 const rootLabel = computed(() => (root.value ? displayName(root.value) : ""));
 const loading = computed(() => root.value !== null && files.treeLoading[root.value] === true);
-const entries = computed(() => (root.value ? (files.treeChildren[root.value] ?? []) : []));
+const entries = computed(() => (root.value ? visibleTreeChildren(root.value) : []));
 const dirEntries = computed(() => entries.value.filter((entry) => entry.isDir));
 const fileEntries = computed(() => entries.value.filter((entry) => !entry.isDir));
 

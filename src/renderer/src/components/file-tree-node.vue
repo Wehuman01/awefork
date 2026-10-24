@@ -40,7 +40,14 @@ import { computed } from "vue";
 import { samePath } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
-import { browseTo, files, isTreeNodeExpanded, startPathDrag, toggleTreeNode } from "../files";
+import {
+  browseTo,
+  files,
+  isTreeNodeExpanded,
+  startPathDrag,
+  toggleTreeNode,
+  visibleTreeChildren,
+} from "../files";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
 
@@ -56,9 +63,7 @@ const isActive = computed(
 );
 
 /** Children load on first expand — never a recursive scan up front. */
-const children = computed(() =>
-  (files.treeChildren[props.entry.path] ?? []).filter((e) => e.isDir),
-);
+const children = computed(() => visibleTreeChildren(props.entry.path).filter((e) => e.isDir));
 
 function toggle(): void {
   void toggleTreeNode(props.entry.path);

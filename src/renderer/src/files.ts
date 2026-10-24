@@ -267,11 +267,38 @@ watch(
   },
 );
 
-/** Directories shown by the current filter and hidden-files setting. */
+/**
+ * Name patterns from the settings' ignore list. `*` is the only wildcard;
+ * everything else matches a name exactly (case-insensitively, like the
+ * filesystems people browse).
+ */
+const ignoreMatchers: RegExp[] = [];
+let ignoreSource = "";
+function ignoreMatchersFor(patterns: readonly string[]): RegExp[] {
+  const key = patterns.join("\n");
+  if (key === ignoreSource) return ignoreMatchers;
+  ignoreSource = key;
+  ignoreMatchers.length = 0;
+  for (const pattern of patterns) {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, (char) =>
+      char === "*" ? ".*" : `\\${char}`,
+    );
+    ignoreMatchers.push(new RegExp(`^${escaped}$`, "i"));
+  }
+  return ignoreMatchers;
+}
+
+export function isIgnoredName(name: string): boolean {
+  const matchers = ignoreMatchersFor(settings.files.ignore);
+  return matchers.some((matcher) => matcher.test(name));
+}
+
+/** Entries shown by the current filter, hidden-files and ignore settings. */
 export function visibleEntries(): FileEntry[] {
   const needle = files.filter.trim().toLowerCase();
   return files.entries.filter((entry) => {
     if (entry.hidden && !files.showHidden) return false;
+    if (isIgnoredName(entry.name)) return false;
     return needle === "" || entry.name.toLowerCase().includes(needle);
   });
 }
@@ -427,8 +454,14 @@ export async function loadTreeChildren(dir: string): Promise<void> {
   // Dot-prefixed entries left out — a project tree is for navigating source,
   // not for wading through .git and .cache. Files are kept alongside
   // directories: the tree renderers filter to dirs themselves, and the
-  // session file dock shows everything.
+  // session file dock shows everything. The ignore list is applied where
+  // the entries are read, so a settings change reaches loaded trees too.
   files.treeChildren[dir] = result.value.entries.filter((entry) => !entry.hidden);
+}
+
+/** A directory's loaded children minus the settings' ignored names. */
+export function visibleTreeChildren(dir: string): FileEntry[] {
+  return (files.treeChildren[dir] ?? []).filter((entry) => !isIgnoredName(entry.name));
 }
 
 /** Expand a node, loading its children on first open (never recursively). */
