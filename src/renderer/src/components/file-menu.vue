@@ -19,6 +19,14 @@
         @click="act(openFolder)"
         >{{ t("files.menuOpenFolder") }}</button
       >
+      <button
+        v-if="menu.entry.isDir"
+        type="button"
+        class="file-menu-item"
+        role="menuitem"
+        @click="act(openInNewTab)"
+        >{{ t("files.openInNewTab") }}</button
+      >
       <button v-else type="button" class="file-menu-item" role="menuitem" @click="act(preview)">{{
         t("files.menuPreview")
       }}</button>
@@ -107,7 +115,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { FileEntry, FileStat } from "../../../shared/file-types";
 import { closeFileMenu, fileMenu } from "../file-menu";
-import { browseTo, flashNotice, previewEntry, revealEntry } from "../files";
+import { browseTo, flashNotice, openFileTabFor, previewEntry, revealEntry } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
@@ -245,6 +253,13 @@ function preview(): void {
   if (!entry || entry.isDir) return;
   openFilesView();
   void previewEntry(entry);
+}
+
+function openInNewTab(): void {
+  const entry = fileMenu.entry;
+  if (!entry) return;
+  openFilesView();
+  void openFileTabFor(entry.path);
 }
 
 function openFolder(): void {

@@ -40,7 +40,14 @@ import { computed } from "vue";
 import { samePath } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
-import { browseTo, files, isTreeNodeExpanded, startPathDrag, toggleTreeNode } from "../files";
+import {
+  browseTo,
+  browsingDir,
+  files,
+  isTreeNodeExpanded,
+  startPathDrag,
+  toggleTreeNode,
+} from "../files";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
 
@@ -52,7 +59,7 @@ const props = defineProps<{
 
 const expanded = computed(() => isTreeNodeExpanded(props.entry.path));
 const isActive = computed(
-  () => files.browsing !== null && samePath(files.browsing, props.entry.path),
+  () => browsingDir.value !== null && samePath(browsingDir.value, props.entry.path),
 );
 
 /** Children load on first expand — never a recursive scan up front. */

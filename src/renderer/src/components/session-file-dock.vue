@@ -38,7 +38,7 @@
             :key="child.path"
             class="ft-node"
           >
-            <div class="ft-row sfd-file-row" :class="{ active: files.selectedPath === child.path }">
+            <div class="ft-row sfd-file-row" :class="{ active: selectedPath === child.path }">
               <span class="sfd-file-leaf" aria-hidden="true"></span>
               <span
                 class="ft-row-label"
@@ -67,7 +67,14 @@ import { computed, watch } from "vue";
 import { displayName } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
-import { files, initFiles, loadTreeChildren, previewEntry, startPathDrag } from "../files";
+import {
+  files,
+  initFiles,
+  loadTreeChildren,
+  previewEntry,
+  selectedPath,
+  startPathDrag,
+} from "../files";
 import { t } from "../i18n";
 import { fileDockOpen, openFilesView, toggleFileDock } from "../layout";
 import { store } from "../state";

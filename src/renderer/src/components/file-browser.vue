@@ -1,11 +1,44 @@
 <template>
-  <div class="fb">
+  <div v-if="tab" class="fb">
+    <div v-if="files.tabs.length > 1" class="fb-tabs" role="tablist" :aria-label="t('files.tabsLabel')">
+      <button
+        v-for="entry in files.tabs"
+        :key="entry.id"
+        type="button"
+        role="tab"
+        class="fb-tab"
+        :class="{ on: entry.id === files.activeTabId }"
+        :aria-selected="entry.id === files.activeTabId"
+        :title="entry.browsing ?? undefined"
+        @click="activateFileTab(entry.id)"
+        @auxclick="onTabAuxClick(entry.id, $event)"
+      >
+        <span class="fb-tab-title">{{ fileTabLabel(entry) }}</span>
+        <span
+          class="fb-tab-x"
+          role="button"
+          :aria-label="t('files.tabClose')"
+          :title="t('files.tabClose')"
+          @click.stop="closeFileTab(entry.id)"
+          >×</span
+        >
+      </button>
+      <button
+        type="button"
+        class="fb-tab fb-tab-new"
+        :title="t('files.tabNew')"
+        :aria-label="t('files.tabNew')"
+        @click="openFileTab()"
+        >
+        ＋</button
+      >
+    </div>
     <div class="fb-toolbar">
       <div class="fb-nav">
         <button
           type="button"
           class="fb-btn"
-          :disabled="files.history.length === 0"
+          :disabled="tab.history.length === 0"
           :title="t('files.back')"
           :aria-label="t('files.back')"
           @click="goBack"
@@ -15,7 +48,7 @@
         <button
           type="button"
           class="fb-btn"
-          :disabled="files.forward.length === 0"
+          :disabled="tab.forward.length === 0"
           :title="t('files.forward')"
           :aria-label="t('files.forward')"
           @click="goForward"
@@ -35,7 +68,7 @@
         <button
           type="button"
           class="fb-btn"
-          :disabled="files.browsing === null"
+          :disabled="tab.browsing === null"
           :title="t('files.refresh')"
           :aria-label="t('files.refresh')"
           @click="refresh"
@@ -117,15 +150,15 @@
           @change="runQuickSearch"
         />{{ t("files.quickHiddenShort") }}
       </label>
-      <span v-if="files.quickLoading" class="fb-quick-status">{{ t("files.searching") }}</span>
+      <span v-if="tab.quickLoading" class="fb-quick-status">{{ t("files.searching") }}</span>
       <span v-else-if="quickErrorText" class="fb-quick-status err">{{ quickErrorText }}</span>
-      <span v-else-if="files.quickResults.length > 0" class="fb-quick-status">{{
-        t("files.quickCount", { n: files.quickResults.length })
+      <span v-else-if="tab.quickResults.length > 0" class="fb-quick-status">{{
+        t("files.quickCount", { n: tab.quickResults.length })
       }}</span>
     </div>
-    <div v-if="quickOpen && files.quickResults.length > 0" class="fb-quick-results">
+    <div v-if="quickOpen && tab.quickResults.length > 0" class="fb-quick-results">
       <button
-        v-for="entry in files.quickResults"
+        v-for="entry in tab.quickResults"
         :key="entry.path"
         ref="quickItems"
         type="button"
@@ -144,9 +177,9 @@
 
     <div class="fb-body" :class="{ 'fb-body-narrow': narrow }">
       <div class="fb-entries" :class="files.view" @contextmenu.prevent>
-        <p v-if="files.loading" class="fb-state">{{ t("files.loading") }}</p>
+        <p v-if="tab.loading" class="fb-state">{{ t("files.loading") }}</p>
         <p v-else-if="listError" class="fb-state err">{{ listError }}</p>
-        <p v-else-if="files.entries.length === 0" class="fb-state">{{ t("files.dirEmpty") }}</p>
+        <p v-else-if="tab.entries.length === 0" class="fb-state">{{ t("files.dirEmpty") }}</p>
         <p v-else-if="rows.length === 0" class="fb-state">
           {{ t("files.noMatch") }}
         </p>
@@ -161,7 +194,7 @@
             :key="entry.path"
             type="button"
             class="fb-row"
-            :class="{ selected: entry.path === files.selectedPath }"
+            :class="{ selected: entry.path === tab.selectedPath }"
             draggable="true"
             @dragstart="startPathDrag($event, [entry.path])"
             @click="selectOrPreviewEntry(entry)"
@@ -187,7 +220,7 @@
             :key="entry.path"
             type="button"
             class="fb-tile"
-            :class="{ selected: entry.path === files.selectedPath }"
+            :class="{ selected: entry.path === tab.selectedPath }"
             draggable="true"
             @dragstart="startPathDrag($event, [entry.path])"
             @click="selectOrPreviewEntry(entry)"
@@ -201,16 +234,16 @@
             <span class="fb-tile-name" :title="entry.path">{{ entry.name }}</span>
           </button>
         </template>
-        <p v-if="files.capped" class="fb-capped">{{ t("files.capped", { n: MAX_ENTRIES }) }}</p>
+        <p v-if="tab.capped" class="fb-capped">{{ t("files.capped", { n: MAX_ENTRIES }) }}</p>
       </div>
-      <div v-if="files.preview !== null && !narrow" class="fb-split" @mousedown="startSplitDrag"></div>
+      <div v-if="tab.preview !== null && !narrow" class="fb-split" @mousedown="startSplitDrag"></div>
       <aside
-        v-if="files.preview !== null"
+        v-if="tab.preview !== null"
         class="fb-preview"
         :class="{ 'fb-preview-overlay': narrow }"
         :style="previewStyle"
       >
-        <FilePreview :preview="files.preview" />
+        <FilePreview :preview="tab.preview" />
       </aside>
     </div>
 
@@ -225,22 +258,28 @@ import type { FileEntry } from "../../../shared/file-types";
 import { MAX_ENTRIES } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
+  activateFileTab,
   browseTo,
   clearQuickSearch,
+  closeFileTab,
   ensureBrowsing,
+  type FileTab,
   files,
+  fileTabLabel,
   flashNotice,
   goBack,
   goForward,
   goToPath,
   goUp,
   openEntry,
+  openFileTab,
   quickSearch,
   refresh,
   revealEntry,
   selectEntry,
   selectOrPreviewEntry,
   setFilter,
+  setPreviewWidth,
   setQuickIncludeHidden,
   setView,
   startPathDrag,
@@ -258,6 +297,15 @@ const filterInput = ref("");
 const quickInput = ref("");
 const quickHiddenInput = ref(false);
 const quickItems = ref<HTMLButtonElement[]>([]);
+
+/**
+ * The tab every read and write below goes through. The browser only renders
+ * while the files view is up, and ensureBrowsing guarantees a tab by then,
+ * so a null here means the labs gate is off rather than a missing row.
+ */
+const tab = computed<FileTab | null>(
+  () => files.tabs.find((entry) => entry.id === files.activeTabId) ?? null,
+);
 
 /**
  * True while the middle column cannot hold a listing and a preview side by
@@ -289,13 +337,9 @@ onBeforeUnmount(() => {
 });
 
 /**
- * Drag the divider between the listing and the preview. The width lives in
- * a CSS variable on the browser root so the pane and the divider read the
- * same number, and it survives view switches within this boot.
+ * Drag the divider between the listing and the preview. The width is held
+ * by the tab, so a tab comes back at the width it was left at.
  */
-const previewWidth = ref(340);
-const PREVIEW_MIN = 220;
-const PREVIEW_MAX = 640;
 interface SplitDrag {
   move: (event: MouseEvent) => void;
   up: () => void;
@@ -303,7 +347,9 @@ interface SplitDrag {
 
 let splitDrag: SplitDrag | null = null;
 
-const previewStyle = computed(() => ({ "--fb-preview-width": `${previewWidth.value}px` }));
+const previewStyle = computed(() => ({
+  "--fb-preview-width": `${tab.value?.previewWidth ?? 340}px`,
+}));
 
 function startSplitDrag(event: MouseEvent): void {
   if (event.button !== 0 || splitDrag) return;
@@ -314,8 +360,7 @@ function startSplitDrag(event: MouseEvent): void {
   // so a window resize mid-drag cannot make the width jump.
   const rect = body.getBoundingClientRect();
   const move = (moveEvent: MouseEvent): void => {
-    const width = Math.round(rect.right - moveEvent.clientX);
-    previewWidth.value = Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, width));
+    setPreviewWidth(Math.round(rect.right - moveEvent.clientX));
   };
   const up = (): void => {
     window.removeEventListener("mousemove", move);
@@ -327,11 +372,16 @@ function startSplitDrag(event: MouseEvent): void {
   splitDrag = { move, up };
 }
 
+/** Middle-click closes, like the canvas tabs. */
+function onTabAuxClick(tabId: string, event: MouseEvent): void {
+  if (event.button === 1) void closeFileTab(tabId);
+}
+
 /** ↑ / ↓ walk the rows and preview the file the focus lands on. */
 function stepSelection(offset: number): void {
   const rowsNow = rows.value;
   if (rowsNow.length === 0) return;
-  const current = rowsNow.findIndex((entry) => entry.path === files.selectedPath);
+  const current = rowsNow.findIndex((entry) => entry.path === tab.value?.selectedPath);
   const next = Math.min(Math.max((current < 0 ? 0 : current) + offset, 0), rowsNow.length - 1);
   const target = rowsNow[next];
   if (target) selectOrPreviewEntry(target);
@@ -339,7 +389,7 @@ function stepSelection(offset: number): void {
 
 // The path box mirrors the browsing directory until the user edits it.
 watch(
-  () => files.browsing,
+  () => tab.value?.browsing,
   (dir) => {
     pathInput.value = dir ?? "";
   },
@@ -366,21 +416,23 @@ watch(
 );
 
 const crumbs = computed(() => {
-  if (files.browsing === null) return [];
-  const segments = pathSegments(files.browsing);
+  if (tab.value === null || tab.value.browsing === null) return [];
+  const segments = pathSegments(tab.value.browsing);
   return segments.map((segment, index) => ({
     label: segment,
     path: joinSegments(segments.slice(0, index + 1)),
   }));
 });
 
-const canGoUp = computed(() => files.browsing !== null && parentOf(files.browsing) !== null);
+const canGoUp = computed(
+  () => tab.value !== null && tab.value.browsing !== null && parentOf(tab.value.browsing) !== null,
+);
 
 /** The rows the list/grid renders — filter and hidden-files applied. */
 const rows = computed(() => visibleEntries());
 
 const listError = computed(() => {
-  const error = files.error;
+  const error = tab.value?.error ?? null;
   if (!error) return null;
   switch (error.code) {
     case "not-found":
@@ -395,7 +447,7 @@ const listError = computed(() => {
 });
 
 const quickErrorText = computed(() => {
-  const error = files.quickError;
+  const error = tab.value?.quickError ?? null;
   if (!error) return "";
   switch (error.code) {
     case "not-found":
@@ -414,7 +466,7 @@ const quickPlaceholder = computed(() =>
   projectRoot.value ? t("files.quickPlaceholder") : t("files.quickNoProject"),
 );
 
-const quickOpen = computed(() => files.quickQuery.trim() !== "");
+const quickOpen = computed(() => (tab.value?.quickQuery ?? "").trim() !== "");
 
 function runQuickSearch(): void {
   const root = projectRoot.value;
@@ -430,7 +482,7 @@ function pickQuick(entry: FileEntry): void {
 }
 
 async function pickFirstQuick(): Promise<void> {
-  const first = files.quickResults[0];
+  const first = tab.value?.quickResults[0];
   if (!first) return;
   await revealEntry(first);
 }

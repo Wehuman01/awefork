@@ -9,7 +9,7 @@
  * is stored as { code } here, so the components phrase failures per locale
  * instead of catching throws.
  */
-import { reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import {
   displayName,
   isAbsolutePath,
@@ -42,31 +42,54 @@ export interface PreviewState {
   error?: FileError;
 }
 
-export const files = reactive({
+/** One browsing position: where it is, how it got there, and what it shows. */
+export interface FileTab {
+  id: string;
   /** Directory currently listed; null before the first browse. */
-  browsing: null as string | null,
+  browsing: string | null;
   /** Back stack of visited directories. */
-  history: [] as string[],
+  history: string[];
   /** Forward stack, cleared by every new navigation. */
-  forward: [] as string[],
-  entries: [] as FileEntry[],
-  loading: false,
-  error: null as FileError | null,
+  forward: string[];
+  entries: FileEntry[];
+  loading: boolean;
+  error: FileError | null;
   /** The listing stopped at the entry cap (giant folder). */
-  capped: false,
+  capped: boolean;
   /** Selected entry path — the preview and the context menu both act on it. */
-  selectedPath: null as string | null,
+  selectedPath: string | null;
+  /** Name filter for the current directory only — never a project search. */
+  filter: string;
+  quickQuery: string;
+  quickResults: FileEntry[];
+  quickLoading: boolean;
+  quickError: FileError | null;
+  preview: PreviewState | null;
+  /** Preview pane width in px; the split drag writes it. */
+  previewWidth: number;
+  /** Listing scroll offset, restored when the tab comes back. */
+  scrollTop: number;
+  /** Per-tab request sequence numbers, so a tab's own responses stay its own. */
+  previewSeq: number;
+  listSeq: number;
+  quickSeq: number;
+}
+
+/**
+ * The browsing state lives on tabs, not on the store. Every field the
+ * browser renders is read from the active tab, so two tabs on two
+ * directories never share a selection, a filter or a preview. The
+ * app-wide preferences (view, hidden files, quick-search hidden toggle,
+ * the sidebar tree and the notice) are deliberately NOT per tab: they are
+ * one user's settings for the whole browser.
+ */
+export const files = reactive({
+  tabs: [] as FileTab[],
+  activeTabId: null as string | null,
   /** Seeded from the settings page's default view; the toolbar overrides it. */
   view: settings.files.view as FileView,
-  /** Name filter for the current directory only — never a project search. */
-  filter: "",
   showHidden: settings.files.showHidden,
-  quickQuery: "",
-  quickResults: [] as FileEntry[],
-  quickLoading: false,
-  quickError: null as FileError | null,
   quickIncludeHidden: false,
-  preview: null as PreviewState | null,
   homePath: null as string | null,
   /** Sidebar tree: children per expanded directory, plus per-node status. */
   treeChildren: {} as Record<string, FileEntry[]>,
@@ -77,13 +100,50 @@ export const files = reactive({
   notice: null as string | null,
 });
 
+/** The tab every browser read and write goes through. */
+function activeTab(): FileTab | null {
+  if (files.activeTabId === null) return null;
+  return files.tabs.find((tab) => tab.id === files.activeTabId) ?? null;
+}
+
+/**
+ * The active tab's browsing directory and selection, for the surfaces that
+ * only need to know where the browser is (the sidebar tree's active row,
+ * the dock's selected row). Null until a tab holds a position.
+ */
+export const browsingDir = computed(() => activeTab()?.browsing ?? null);
+export const selectedPath = computed(() => activeTab()?.selectedPath ?? null);
+
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-/** Bumped on every preview request; stale responses are dropped. */
-let previewSeq = 0;
-/** Bumped on every quick search; stale responses are dropped. */
-let quickSeq = 0;
-/** Bumped on every listing; stale responses are dropped. */
-let listSeq = 0;
+let tabSeq = 0;
+
+function makeTab(dir: string | null): FileTab {
+  tabSeq += 1;
+  return {
+    id: `ftab-${tabSeq}`,
+    browsing: dir,
+    history: [],
+    forward: [],
+    entries: [],
+    loading: false,
+    error: null,
+    capped: false,
+    selectedPath: null,
+    filter: "",
+    quickQuery: "",
+    quickResults: [],
+    quickLoading: false,
+    quickError: null,
+    preview: null,
+    previewWidth: DEFAULT_PREVIEW_WIDTH,
+    scrollTop: 0,
+    previewSeq: 0,
+    listSeq: 0,
+    quickSeq: 0,
+  };
+}
+
+const DEFAULT_PREVIEW_WIDTH = 340;
 
 export function flashNotice(message: string): void {
   files.notice = message;
@@ -105,23 +165,124 @@ export async function initFiles(): Promise<void> {
 
 /**
  * First look at the file view: land on the project root when one is open,
- * else the home directory. A no-op once anything has been browsed — the
- * browsing position survives view switches.
+ * else the home directory. A no-op once a tab already holds a position —
+ * browsing survives view switches.
  */
 export async function ensureBrowsing(root: string | null): Promise<void> {
-  if (files.browsing !== null) return;
   await initFiles();
-  await browseTo(root ?? files.homePath ?? "/");
+  if (files.tabs.length === 0) {
+    const tab = makeTab(null);
+    files.tabs.push(tab);
+    files.activeTabId = tab.id;
+  }
+  const tab = activeTab();
+  if (!tab || tab.browsing !== null) return;
+  await browseTabTo(tab, root ?? files.homePath ?? "/");
 }
 
-async function load(dir: string): Promise<void> {
+// ── tabs ─────────────────────────────────────────────────────────────────
+
+/**
+ * Create a tab parked on no directory. The browser's first paint and tests
+ * both need a tab that has not navigated anywhere, so nothing pollutes the
+ * history before the caller's own first browse.
+ */
+export function parkFileTab(): string {
+  const tab = makeTab(null);
+  files.tabs.push(tab);
+  files.activeTabId = tab.id;
+  return tab.id;
+}
+
+/** Open a new tab on `dir` (a copy of the active position when omitted). */
+export async function openFileTab(dir?: string): Promise<void> {
+  await initFiles();
+  const active = activeTab();
+  const target = dir ?? active?.browsing ?? files.homePath ?? "/";
+  const tab = makeTab(null);
+  files.tabs.push(tab);
+  files.activeTabId = tab.id;
+  await browseTabTo(tab, target);
+}
+
+/** Open `dir` in its own tab unless a tab already shows it. */
+export async function openFileTabFor(dir: string): Promise<void> {
+  const existing = files.tabs.find((tab) => tab.browsing !== null && samePath(tab.browsing, dir));
+  if (existing) {
+    await activateFileTab(existing.id);
+    return;
+  }
+  await openFileTab(dir);
+}
+
+export async function activateFileTab(tabId: string): Promise<void> {
+  if (files.activeTabId === tabId) return;
+  if (!files.tabs.some((tab) => tab.id === tabId)) return;
+  files.activeTabId = tabId;
+}
+
+/**
+ * Close a tab and activate its neighbour, like the canvas tabs do. The last
+ * tab cannot be closed: an empty file view has nothing to show, so closing
+ * it lands on the home directory instead.
+ */
+export async function closeFileTab(tabId: string): Promise<void> {
+  const index = files.tabs.findIndex((tab) => tab.id === tabId);
+  if (index < 0) return;
+  // The closing tab's in-flight reads must not write into a reused slot.
+  const closing = files.tabs[index];
+  if (!closing) return;
+  closing.previewSeq += 1;
+  closing.listSeq += 1;
+  closing.quickSeq += 1;
+  files.tabs.splice(index, 1);
+  if (files.tabs.length === 0) {
+    await initFiles();
+    const tab = makeTab(null);
+    files.tabs.push(tab);
+    files.activeTabId = tab.id;
+    await browseTabTo(tab, files.homePath ?? "/");
+    return;
+  }
+  if (files.activeTabId === tabId) {
+    const neighbour = files.tabs[Math.min(index, files.tabs.length - 1)];
+    if (neighbour) files.activeTabId = neighbour.id;
+  }
+}
+
+/** Tab title: the directory name, or its parent's when two share a name. */
+export function fileTabLabel(tab: FileTab): string {
+  const dir = tab.browsing;
+  if (dir === null) return t("files.tabBlank");
+  const name = displayName(dir);
+  const clashes = files.tabs.some(
+    (other) =>
+      other.id !== tab.id && other.browsing !== null && displayName(other.browsing) === name,
+  );
+  if (!clashes) return name;
+  const parent = parentOf(dir);
+  return parent === null ? name : `${displayName(parent)}/${name}`;
+}
+
+export function setPreviewWidth(width: number): void {
+  const tab = activeTab();
+  if (!tab) return;
+  tab.previewWidth = Math.min(640, Math.max(220, width));
+}
+
+export function setListingScroll(top: number): void {
+  const tab = activeTab();
+  if (tab) tab.scrollTop = top;
+}
+
+async function load(tab: FileTab, dir: string): Promise<void> {
   // Any preview in flight belongs to the directory being left; a listing is
   // a navigation, so the read is retired before the new rows arrive and a
   // late answer cannot describe a file this listing no longer shows.
-  previewSeq += 1;
-  const seq = ++listSeq;
-  files.loading = true;
-  files.error = null;
+  tab.previewSeq += 1;
+  const seq = ++tab.listSeq;
+  tab.loading = true;
+  tab.error = null;
   let result: FsResult<DirListing>;
   try {
     result = await window.awefork.listDir(dir);
@@ -129,66 +290,77 @@ async function load(dir: string): Promise<void> {
     result = { ok: false, error: { code: "unknown" } };
   }
   // A newer navigation (or a refresh of another directory) already won.
-  if (seq !== listSeq) return;
-  files.loading = false;
+  if (seq !== tab.listSeq) return;
+  tab.loading = false;
   // The attempted directory is recorded either way: a failed listing still
   // shows where the user tried to go, so the error has a breadcrumb and a
   // path to correct, and "up" leads somewhere sensible.
-  files.browsing = dir;
+  tab.browsing = dir;
   if (!result.ok) {
-    files.entries = [];
-    files.error = result.error;
-    files.capped = false;
+    tab.entries = [];
+    tab.error = result.error;
+    tab.capped = false;
     // The failed listing shows no rows, so the old selection and preview
     // would describe entries the user cannot see.
-    files.selectedPath = null;
-    files.preview = null;
+    tab.selectedPath = null;
+    tab.preview = null;
     return;
   }
-  files.browsing = result.value.path;
-  files.entries = result.value.entries;
-  files.capped = result.value.capped;
+  tab.browsing = result.value.path;
+  tab.entries = result.value.entries;
+  tab.capped = result.value.capped;
   // A selection that no longer exists in the listed directory is dropped,
   // so the preview never describes a row the user cannot see.
-  if (files.selectedPath && !result.value.entries.some((e) => e.path === files.selectedPath)) {
-    files.selectedPath = null;
-    files.preview = null;
+  if (tab.selectedPath && !result.value.entries.some((e) => e.path === tab.selectedPath)) {
+    tab.selectedPath = null;
+    tab.preview = null;
   }
 }
 
-/** Navigate to a directory, recording history unless this is a redraw. */
+/** Navigate the active tab to a directory, recording history. */
 export async function browseTo(dir: string): Promise<void> {
-  if (files.browsing !== null && samePath(dir, files.browsing)) {
-    await load(files.browsing);
+  const tab = activeTab();
+  if (!tab) return;
+  await browseTabTo(tab, dir);
+}
+
+async function browseTabTo(tab: FileTab, dir: string): Promise<void> {
+  if (tab.browsing !== null && samePath(dir, tab.browsing)) {
+    await load(tab, tab.browsing);
     return;
   }
-  if (files.browsing !== null) {
-    files.history.push(files.browsing);
+  if (tab.browsing !== null) {
+    tab.history.push(tab.browsing);
     // A fresh navigation invalidates the forward stack, like any browser.
-    files.forward = [];
+    tab.forward = [];
   }
-  await load(dir);
+  await load(tab, dir);
 }
 
 export async function goBack(): Promise<void> {
-  const previous = files.history.pop();
+  const tab = activeTab();
+  if (!tab) return;
+  const previous = tab.history.pop();
   if (previous === undefined) return;
-  if (files.browsing !== null) files.forward.push(files.browsing);
-  await load(previous);
+  if (tab.browsing !== null) tab.forward.push(tab.browsing);
+  await load(tab, previous);
 }
 
 export async function goForward(): Promise<void> {
-  const next = files.forward.pop();
+  const tab = activeTab();
+  if (!tab) return;
+  const next = tab.forward.pop();
   if (next === undefined) return;
-  if (files.browsing !== null) files.history.push(files.browsing);
-  await load(next);
+  if (tab.browsing !== null) tab.history.push(tab.browsing);
+  await load(tab, next);
 }
 
 export async function goUp(): Promise<void> {
-  if (files.browsing === null) return;
-  const parent = parentOf(files.browsing);
+  const tab = activeTab();
+  if (!tab || tab.browsing === null) return;
+  const parent = parentOf(tab.browsing);
   if (parent === null) return;
-  await browseTo(parent);
+  await browseTabTo(tab, parent);
 }
 
 /** A minimal entry for a path the user typed (no listing row behind it). */
@@ -210,6 +382,8 @@ export function entryFromPath(target: string): FileEntry {
  * keeps a failed file jump out of the navigation history.
  */
 export async function goToPath(input: string): Promise<void> {
+  const tab = activeTab();
+  if (!tab) return;
   let target = input.trim();
   if (target === "") return;
   if (target === "~") target = files.homePath ?? target;
@@ -223,20 +397,22 @@ export async function goToPath(input: string): Promise<void> {
   const stat = await window.awefork.statFile(target).catch(() => null);
   if (stat?.ok && stat.value.exists && !stat.value.isDir) {
     const parent = parentOf(target);
-    if (parent !== null) await browseTo(parent);
+    if (parent !== null) await browseTabTo(tab, parent);
     await previewEntry(entryFromPath(target));
     return;
   }
-  await browseTo(target);
+  await browseTabTo(tab, target);
 }
 
 export async function refresh(): Promise<void> {
-  if (files.browsing === null) return;
-  await load(files.browsing);
+  const tab = activeTab();
+  if (!tab || tab.browsing === null) return;
+  await load(tab, tab.browsing);
 }
 
 export function selectEntry(entry: FileEntry): void {
-  files.selectedPath = entry.path;
+  const tab = activeTab();
+  if (tab) tab.selectedPath = entry.path;
 }
 
 /**
@@ -247,7 +423,9 @@ export function selectEntry(entry: FileEntry): void {
  * already moved past — that is the same staleness rule as previewEntry's.
  */
 export function selectOrPreviewEntry(entry: FileEntry): void {
-  files.selectedPath = entry.path;
+  const tab = activeTab();
+  if (!tab) return;
+  tab.selectedPath = entry.path;
   if (entry.isDir) return;
   if (settings.files.openOnDouble === "system") return;
   void previewEntry(entry);
@@ -255,12 +433,15 @@ export function selectOrPreviewEntry(entry: FileEntry): void {
 
 /** Drop the current preview without touching the selection. */
 export function clearPreview(): void {
-  previewSeq += 1;
-  files.preview = null;
+  const tab = activeTab();
+  if (!tab) return;
+  tab.previewSeq += 1;
+  tab.preview = null;
 }
 
 export function setFilter(value: string): void {
-  files.filter = value;
+  const tab = activeTab();
+  if (tab) tab.filter = value;
 }
 
 export function setView(view: FileView): void {
@@ -293,8 +474,10 @@ watch(
 
 /** Directories shown by the current filter and hidden-files setting. */
 export function visibleEntries(): FileEntry[] {
-  const needle = files.filter.trim().toLowerCase();
-  return files.entries.filter((entry) => {
+  const tab = activeTab();
+  if (!tab) return [];
+  const needle = tab.filter.trim().toLowerCase();
+  return tab.entries.filter((entry) => {
     if (entry.hidden && !files.showHidden) return false;
     return needle === "" || entry.name.toLowerCase().includes(needle);
   });
@@ -306,12 +489,14 @@ export function visibleEntries(): FileEntry[] {
  * a file is previewed without being executed.
  */
 export async function openEntry(entry: FileEntry): Promise<void> {
+  const tab = activeTab();
+  if (!tab) return;
   if (entry.isDir || entry.isSymlink) {
-    await browseTo(entry.path);
+    await browseTabTo(tab, entry.path);
     // A symlink pointing at a file answers "not a directory"; preview it
     // instead of leaving the user on an error.
-    if (files.error?.code === "not-a-directory") {
-      files.error = null;
+    if (tab.error?.code === "not-a-directory") {
+      tab.error = null;
       await previewEntry(entry);
     }
     return;
@@ -322,7 +507,7 @@ export async function openEntry(entry: FileEntry): Promise<void> {
   if (settings.files.openOnDouble === "system") {
     const result = await window.awefork.openPath(entry.path).catch(() => null);
     if (result?.ok) {
-      files.selectedPath = entry.path;
+      tab.selectedPath = entry.path;
       return;
     }
   }
@@ -331,16 +516,18 @@ export async function openEntry(entry: FileEntry): Promise<void> {
 
 /** Preview a file; responses that lost the race are dropped. */
 export async function previewEntry(entry: FileEntry): Promise<void> {
-  const seq = ++previewSeq;
-  files.selectedPath = entry.path;
-  files.preview = { path: entry.path, status: "loading" };
+  const tab = activeTab();
+  if (!tab) return;
+  const seq = ++tab.previewSeq;
+  tab.selectedPath = entry.path;
+  tab.preview = { path: entry.path, status: "loading" };
   const image = await window.awefork
     .readImagePreview(entry.path, settings.files.imageCapMb * 1024 * 1024)
     .catch(() => null);
-  if (seq !== previewSeq) return;
+  if (seq !== tab.previewSeq) return;
   if (image?.ok) {
     const value: ImagePreview = image.value;
-    files.preview = {
+    tab.preview = {
       path: entry.path,
       status: "image",
       dataUrl: value.dataUrl,
@@ -351,16 +538,16 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   // An image that exists but is too big fails only as an image; surfacing
   // "binary" from the text fallback below would misname the problem.
   if (image && !image.ok && image.error.code === "too-large") {
-    files.preview = { path: entry.path, status: "error", error: image.error };
+    tab.preview = { path: entry.path, status: "error", error: image.error };
     return;
   }
   const text = await window.awefork
     .readTextPreview(entry.path, settings.files.previewCapKb * 1024)
     .catch(() => null);
-  if (seq !== previewSeq) return;
+  if (seq !== tab.previewSeq) return;
   if (text?.ok) {
     const value: TextPreview = text.value;
-    files.preview = {
+    tab.preview = {
       path: entry.path,
       status: "text",
       text: value.text,
@@ -371,7 +558,7 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   }
   // Not an image and not decodable text: binary (or unreadable) — the UI
   // says so and offers the OS open instead of showing an empty file.
-  files.preview = {
+  tab.preview = {
     path: entry.path,
     status: "error",
     error: text && !text.ok ? text.error : { code: "binary" },
@@ -383,38 +570,42 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
  * directory, select it, and preview it when it is a file.
  */
 export async function revealEntry(entry: FileEntry): Promise<void> {
+  const tab = activeTab();
+  if (!tab) return;
   const parent = parentOf(entry.path);
-  if (parent !== null && !samePath(parent, files.browsing ?? "")) {
-    await browseTo(parent);
+  if (parent !== null && !samePath(parent, tab.browsing ?? "")) {
+    await browseTabTo(tab, parent);
   }
-  files.selectedPath = entry.path;
+  tab.selectedPath = entry.path;
   if (!entry.isDir) await previewEntry(entry);
 }
 
 /** Quick search inside one project root (never the browsing directory). */
 export async function quickSearch(root: string, query: string): Promise<void> {
-  const seq = ++quickSeq;
-  files.quickQuery = query;
+  const tab = activeTab();
+  if (!tab) return;
+  const seq = ++tab.quickSeq;
+  tab.quickQuery = query;
   const needle = query.trim();
   if (needle === "" || root === "") {
-    files.quickResults = [];
-    files.quickLoading = false;
-    files.quickError = null;
+    tab.quickResults = [];
+    tab.quickLoading = false;
+    tab.quickError = null;
     return;
   }
-  files.quickLoading = true;
-  files.quickError = null;
+  tab.quickLoading = true;
+  tab.quickError = null;
   const result = await window.awefork
     .searchFiles(root, needle, { includeHidden: files.quickIncludeHidden })
     .catch(() => null);
-  if (seq !== quickSeq) return;
-  files.quickLoading = false;
+  if (seq !== tab.quickSeq) return;
+  tab.quickLoading = false;
   if (!result?.ok) {
-    files.quickResults = [];
-    files.quickError = result && !result.ok ? result.error : { code: "unknown" };
+    tab.quickResults = [];
+    tab.quickError = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  files.quickResults = result.value;
+  tab.quickResults = result.value;
 }
 
 export function setQuickIncludeHidden(value: boolean): void {
@@ -422,11 +613,13 @@ export function setQuickIncludeHidden(value: boolean): void {
 }
 
 export function clearQuickSearch(): void {
-  quickSeq += 1;
-  files.quickQuery = "";
-  files.quickResults = [];
-  files.quickLoading = false;
-  files.quickError = null;
+  const tab = activeTab();
+  if (!tab) return;
+  tab.quickSeq += 1;
+  tab.quickQuery = "";
+  tab.quickResults = [];
+  tab.quickLoading = false;
+  tab.quickError = null;
 }
 
 // ── sidebar tree ───────────────────────────────────────────────────────

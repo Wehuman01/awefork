@@ -1,7 +1,7 @@
 # 文件浏览：预览布局、目录多标签与预览能力扩展 — 设计
 
 Date: 2026-10-24
-Status: 阶段一已实现并通过验证；阶段二、三待做
+Status: 阶段一、二已实现并通过验证；阶段三待做
 依据：2026-10-23 拖放 / 引用交互审阅（`todo/2026-10-23-file-browser-delivery.md` 的后续）+ 本轮用户反馈
 适用范围：`awefork2`，文件浏览实验（Labs 门控）
 
@@ -199,3 +199,40 @@ Status: 阶段一已实现并通过验证；阶段二、三待做
   `CODEX_HOME` 用例，改动前同样失败，与文件浏览无关。
 
 未做（留给后续）：可拖宽度尚未持久化；窄窗口阈值固定在 640px；阶段二、三未开始。
+
+## 10. 阶段二实现记录（2026-10-24）
+
+已落地：
+
+- `src/renderer/src/files.ts`：浏览状态从 store 的单值字段搬到 `FileTab`，store 只保留
+  `tabs` / `activeTabId` 和跨标签共享的偏好（视图、隐藏文件、快速搜索隐藏开关、侧栏树、notice）。
+  每个 tab 自带 `browsing` / `history` / `forward` / `entries` / `error` / `capped` /
+  `selectedPath` / `filter` / `quick*` / `preview` / `previewWidth` / `scrollTop`，
+  以及自己的 `previewSeq` / `listSeq` / `quickSeq`——切标签、关标签、清空都只失效本标签的请求。
+  新增 `parkFileTab` / `openFileTab` / `openFileTabFor`（同目录去重）/ `activateFileTab` /
+  `closeFileTab`（关闭最后一个落在 home，不留空视图）/ `fileTabLabel`（重名补父目录）/
+  `setPreviewWidth` / `setListingScroll`，以及 `browsingDir` / `selectedPath` 两个 computed
+  供侧栏树和 dock 读活动标签。
+- `src/renderer/src/components/file-browser.vue`：模板改读 `tab.*`，`tab` 是解析活动标签的
+  computed；新增标签栏（复用画布标签外观：活动态、× 关闭、中键关闭、＋ 新建），`＋` 复制当前
+  浏览位置；分栏宽度改存到 tab。
+- `src/renderer/src/components/file-menu.vue`：目录右键加“在新标签页中打开”。
+- `src/renderer/src/components/file-tree.vue` / `file-tree-node.vue` / `session-file-dock.vue`：
+  改读 `browsingDir` / `selectedPath`。
+- `src/renderer/src/style.css`：新增 `.fb-tabs` / `.fb-tab` / `.fb-tab-x` / `.fb-tab-new`。
+- `src/renderer/src/i18n-panels.ts`：新增 `files.tabsLabel`、`files.tabBlank`、`files.tabNew`、
+  `files.tabClose`、`files.openInNewTab`。
+
+边界保持：文件标签切换不动 AI 会话、草稿、项目目录；浏览仍不调 `switchDirectory`。
+
+验证：
+
+- `tests/renderer-files-store.test.ts`：38 通过（新增 7 例——各标签位置/选中/预览互不污染、
+  各标签独立前进后退、同目录去重、关闭激活邻居、关闭最后一个不停在空视图、
+  关闭即失效在途预览、重名标签补父目录）。
+- 全量 `vitest run`：1204 通过，1 个失败仍为 `tests/codex-server.test.ts` 的 `CODEX_HOME`
+  用例（改动前同样失败，与文件浏览无关）。
+- `vue-tsc` + `tsc` 双 tsconfig 无错误；`biome check .` 仍为 6 个 warning（与改动前一致）。
+
+未做（阶段三）：统一工具栏的图片解码失败态、CSV/TSV 表格、PDF；分栏宽度与标签未持久化到
+localStorage。

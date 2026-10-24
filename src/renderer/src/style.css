@@ -6768,6 +6768,68 @@ html[data-theme="dark"] ::selection {
   background: var(--bg);
 }
 
+/* One tab per browsing position, styled like the story tabs above the canvas. */
+.fb-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 0;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fb-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.fb-tab:hover {
+  background: var(--row-hover);
+  color: var(--primary-deep);
+}
+
+.fb-tab.on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.fb-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-tab-x {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  line-height: 1;
+}
+
+.fb-tab-x:hover {
+  background: var(--danger-soft, var(--row-hover));
+  color: var(--danger, var(--ink));
+}
+
+.fb-tab-new {
+  padding: 4px 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .fb-toolbar {
   display: flex;
   align-items: center;
