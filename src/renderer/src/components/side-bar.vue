@@ -909,6 +909,28 @@ watch(searchScopes, () => {
 watch(searchLimit, (value) => {
   settings.search.cap = value === "all" ? 0 : Number(value);
 });
+// The settings page writes settings.search.* directly; without this mirror
+// its changes never reach the live ✦ panel (the sidebar never remounts).
+// Same-value writes don't retrigger the outbound watches, so no loop.
+watch(
+  () => settings.search.cap,
+  (cap) => {
+    searchLimit.value = cap > 0 ? String(cap) : "all";
+  },
+);
+watch(
+  () => ({ ...settings.search.scopes }),
+  (scopes) => {
+    for (const key of Object.keys(scopes) as (keyof ScopeSet)[]) {
+      searchScopes[key] = scopes[key];
+    }
+  },
+);
+
+/** The panel's cap row showing exactly what settings stores (0 renders "all"). */
+const searchLimitDefault = computed(() =>
+  settings.search.cap > 0 ? String(settings.search.cap) : "all",
+);
 
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
@@ -930,7 +952,7 @@ const boostActive = computed(
     boostOpen.value ||
     projectScope.value !== "" ||
     searchScopes.body ||
-    searchLimit.value !== String(settings.search.cap) ||
+    searchLimit.value !== searchLimitDefault.value ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
     parsedQuery.value.includes.some((term) => term.scope !== null),
@@ -952,7 +974,7 @@ const boostOffDefault = computed(
     !searchScopes.title ||
     !searchScopes.tag ||
     searchScopes.body ||
-    searchLimit.value !== String(settings.search.cap),
+    searchLimit.value !== searchLimitDefault.value,
 );
 
 /** One click back to title+tag, all projects, the configured cap. */
@@ -961,7 +983,7 @@ function resetBoost(): void {
   searchScopes.tag = true;
   searchScopes.body = false;
   projectScope.value = "";
-  searchLimit.value = String(settings.search.cap);
+  searchLimit.value = searchLimitDefault.value;
 }
 
 // ── body scan (main-process, two-phase) ─────────────────────────────

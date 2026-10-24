@@ -180,6 +180,8 @@ const api: AweforkApi = {
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
+  openAppData: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:openAppData"),
   listDir: (target: string): Promise<FsResult<DirListing>> =>
     ipcRenderer.invoke("awefork:listDir", target),
   statFile: (target: string): Promise<FsResult<FileStat>> =>

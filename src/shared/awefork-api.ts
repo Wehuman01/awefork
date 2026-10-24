@@ -255,6 +255,8 @@ export interface AweforkApi {
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */
   pickDirectory(): Promise<string | null>;
+  /** Open the app data folder (settings storage) in the OS file manager. */
+  openAppData(): Promise<{ ok: boolean; error?: string }>;
   /**
    * File browser surface (read-only, backend-free). Every fallible call
    * answers with an FsResult so the UI can phrase the failure; browsing

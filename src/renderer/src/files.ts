@@ -9,7 +9,7 @@
  * is stored as { code } here, so the components phrase failures per locale
  * instead of catching throws.
  */
-import { reactive } from "vue";
+import { reactive, watch } from "vue";
 import {
   displayName,
   isAbsolutePath,
@@ -250,6 +250,22 @@ export function toggleHidden(): void {
   files.showHidden = !files.showHidden;
   settings.files.showHidden = files.showHidden;
 }
+
+// The settings page writes settings.files.view/showHidden directly; without
+// this mirror the toolbar keeps this boot's seed until a restart, and the
+// toolbar toggle then writes that stale seed back over the settings change.
+watch(
+  () => settings.files.view,
+  (view) => {
+    files.view = view as FileView;
+  },
+);
+watch(
+  () => settings.files.showHidden,
+  (showHidden) => {
+    files.showHidden = showHidden;
+  },
+);
 
 /** Directories shown by the current filter and hidden-files setting. */
 export function visibleEntries(): FileEntry[] {

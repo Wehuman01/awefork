@@ -1027,6 +1027,8 @@ export function installMockAdapter(): void {
     composer: async () => null,
     saveComposer: async () => undefined,
     openPath: async (target) => ({ ok: false, error: t("demo.openPathError", { target }) }),
+    // No real app data folder in a browser tab.
+    openAppData: async () => ({ ok: false, error: t("demo.openPathError", { target: "" }) }),
     // No system terminal in a browser tab; the demo only declines politely.
     openSessionTerminal: async () => ({ ok: false, error: t("demo.terminalError") }),
     convertDocument: async (filename) => t("demo.convertStub", { filename }),

@@ -740,6 +740,13 @@ export function registerIpc(
   // renderer has no other way to name it.
   ipcMain.handle("awefork:homePath", () => app.getPath("home"));
 
+  // The settings page's Storage section opens the app data folder; "~" fails
+  // the openPath gate and names the wrong folder anyway.
+  ipcMain.handle("awefork:openAppData", async () => {
+    const error = await shell.openPath(app.getPath("userData"));
+    return error ? { ok: false, error } : { ok: true };
+  });
+
   // Reveal an entry in the OS file manager — the one file action that
   // leaves the app, and the only one routed through shell besides openPath.
   ipcMain.handle("awefork:showInFolder", (_event: IpcMainInvokeEvent, target: string) => {

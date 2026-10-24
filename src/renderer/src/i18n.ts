@@ -14,7 +14,7 @@
  * survives restarts and is visible to every window at its own boot. Default
  * is `"zh"` so the UI stays Chinese unless the user picks EN.
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { dict as dictDialogs } from "./i18n-dialogs";
 import { dict as dictMessages } from "./i18n-messages";
 import { dict as dictPanels } from "./i18n-panels";
@@ -46,6 +46,18 @@ export function setLocale(next: Locale): void {
   settings.language.locale = next;
   stampLang(next);
 }
+
+// Resetting the language section (or all settings) writes the blob directly
+// without going through setLocale; follow it so the UI language flips too.
+watch(
+  () => settings.language.locale,
+  (next) => {
+    if (next !== locale.value) {
+      locale.value = next;
+      stampLang(next);
+    }
+  },
+);
 
 type Entry = { zh: string; en: string };
 type Dict = Record<string, Entry>;

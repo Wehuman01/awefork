@@ -426,3 +426,24 @@ describe("sidebar tree", () => {
     expect(mod.files.treeLoading["/a"]).toBe(false);
   });
 });
+
+describe("settings mirror", () => {
+  it("settings-page writes to settings.files reach the live store", async () => {
+    const { mod, files } = await bootFiles({});
+    const { settings } = await import("../src/renderer/src/settings");
+    const { nextTick } = await import("vue");
+
+    // The settings page assigns directly; without the mirror the toolbar
+    // keeps this boot's seed until a restart.
+    settings.files.showHidden = !settings.files.showHidden;
+    settings.files.view = files.view === "list" ? "grid" : "list";
+    await nextTick();
+
+    expect(files.showHidden).toBe(settings.files.showHidden);
+    expect(files.view).toBe(settings.files.view);
+
+    // Restore so other tests seed from the defaults again.
+    settings.files.showHidden = false;
+    settings.files.view = "list";
+  });
+});

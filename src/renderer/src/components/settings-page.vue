@@ -739,7 +739,7 @@ function storageSection(): SectionDef {
         t("settings.openFolder"),
         () => {
           // The folder is main's business: the renderer only knows it exists.
-          void window.awefork?.openPath("~").catch(() => null);
+          void window.awefork?.openAppData().catch(() => null);
         },
       ),
       info(
@@ -1031,9 +1031,12 @@ function onBackdropClick(event: MouseEvent): void {
   backdropDown = false;
 }
 
-function onSearchEscape(): void {
+function onSearchEscape(event: KeyboardEvent): void {
   if (query.value) {
     query.value = "";
+    // The window-level handler would otherwise see the query already empty
+    // and close the panel on the same keystroke that only cleared the text.
+    event.stopPropagation();
     return;
   }
   close();
