@@ -2025,6 +2025,27 @@ mark.hl {
   stroke-dasharray: 6 6;
 }
 
+/* A summary reads as a join of the completed model branches. The cards remain
+   in the native session grid; links use the open gap beside each card column. */
+.edge.parallel-link {
+  stroke: var(--lavender-deep);
+  stroke-width: 2;
+  stroke-opacity: 0.8;
+  pointer-events: none;
+}
+
+.edge.parallel-trunk {
+  stroke-width: 2.5;
+}
+
+.edge.parallel-summary-link {
+  stroke-width: 2.75;
+}
+
+.parallel-link-arrow {
+  fill: var(--lavender-deep);
+}
+
 /* the ✂ badge filling a severed edge's gap. It lives in the world layer, so
    it scales with the canvas and stays put however the branch grows. */
 .edge-cut-badge {
@@ -2228,6 +2249,22 @@ mark.hl {
     var(--shadow-lift);
 }
 
+.turn.parallel-summary {
+  border: 2px solid var(--lavender);
+  border-radius: 8px 22px 8px 22px;
+  background: linear-gradient(145deg, var(--panel), var(--lavender-soft));
+  box-shadow:
+    0 0 0 2px var(--lavender-soft),
+    var(--shadow-card);
+}
+
+.turn.parallel-summary.selected {
+  border-color: var(--primary);
+  box-shadow:
+    0 0 0 4px var(--primary-soft),
+    var(--shadow-lift);
+}
+
 .turn.running {
   border-color: var(--sky);
 }
@@ -2358,9 +2395,50 @@ mark.hl {
   background: var(--fork-chip-hover);
 }
 
+.parallel-summary-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--fork-chip-border);
+  border-radius: 999px 999px 5px 999px;
+  padding: 2px 8px;
+  background: var(--lavender-soft);
+  color: var(--lavender-deep);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .turn-body {
   display: flex;
   gap: 9px;
+}
+
+.parallel-summary-sources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -2px 0 9px 37px;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.parallel-summary-sources button {
+  max-width: 122px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--fork-chip-border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--lavender-deep);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parallel-summary-sources button:hover {
+  background: var(--lavender-soft);
+  border-color: var(--lavender);
 }
 
 .turn-preview {

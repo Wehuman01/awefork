@@ -18,6 +18,20 @@ export interface ParallelTarget {
   baselineMessageIds: string[];
 }
 
+export interface ParallelSummarySource {
+  targetId: string;
+  sessionId: string;
+  label: string;
+  baselineMessageIds: string[];
+}
+
+export interface ParallelSummaryVersion {
+  version: number;
+  sessionId: string;
+  createdAt: number;
+  sources: ParallelSummarySource[];
+}
+
 /** A reading group references native sessions; it never changes their history. */
 export interface ParallelGroup {
   id: string;
@@ -35,6 +49,7 @@ export interface ParallelGroup {
   summaryText: string;
   summaryError: string | null;
   summarySourceIds: string[];
+  summaryVersions: ParallelSummaryVersion[];
   settings: ParallelSummarySettings;
 }
 

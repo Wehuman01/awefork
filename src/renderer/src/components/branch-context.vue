@@ -428,10 +428,11 @@ const currentParallelGroup = computed(() =>
 const showParallelResults = ref(true);
 const parallelSummaryInputId = computed(() => {
   const group = currentParallelGroup.value;
-  if (!group?.summarySessionId || group.summarySessionId !== store.selectedId) return null;
+  const version = group?.summaryVersions.find((item) => item.sessionId === store.selectedId);
+  if (!version || !store.selectedId) return null;
   return (
-    store.messagesBySession[group.summarySessionId]?.find((message) => message.role === "user")
-      ?.id ?? null
+    store.messagesBySession[store.selectedId]?.find((message) => message.role === "user")?.id ??
+    null
   );
 });
 const parallelRoundBusy = computed(() =>
@@ -458,9 +459,8 @@ watch(
   { immediate: true },
 );
 async function openParallelSource(sessionId: string): Promise<void> {
-  const summary = currentParallelGroup.value?.summarySessionId === sessionId;
   await selectSession(sessionId);
-  showParallelResults.value = summary;
+  showParallelResults.value = false;
 }
 function compareParallelSources(sessionIds: [string, string]): void {
   void enterCompare(sessionIds[0], sessionIds[1]);

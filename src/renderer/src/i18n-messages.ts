@@ -59,6 +59,16 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "这个回合分出了 {n} 条子分支 — 点击看整个子树",
     en: "{n} branches forked from this turn — click to view the whole subtree",
   },
+  "canvas.parallelSummary": { zh: "回答汇总", en: "Answer summary" },
+  "canvas.parallelSources": { zh: "汇入", en: "From" },
+  "canvas.parallelOpenSource": {
+    zh: "查看 {model} 的原始回答",
+    en: "Open {model}'s original answer",
+  },
+  "canvas.parallelContinueHint": {
+    zh: "从这份汇总继续对话",
+    en: "Continue from this summary",
+  },
   "canvas.stubForks": {
     zh: "这条空分支分出了 {n} 条子分支 — 点击看整个子树",
     en: "{n} branches forked from this empty branch — click to view the whole subtree",

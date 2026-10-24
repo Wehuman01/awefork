@@ -11,6 +11,19 @@
   >
     <div class="world" :style="worldStyle">
       <svg class="edges" :width="svgSize.w" :height="svgSize.h">
+        <defs>
+          <marker
+            id="parallel-summary-arrow"
+            markerWidth="8"
+            markerHeight="8"
+            refX="7"
+            refY="4"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M 0 0 L 8 4 L 0 8 z" class="parallel-link-arrow" />
+          </marker>
+        </defs>
         <g v-for="edge in edgesWithPoints" :key="`${edge.from}->${edge.to}`">
           <template v-if="edge.severed">
             <!-- An empty-context fork: the line is cut in two, because context
@@ -68,6 +81,24 @@
             }"
           />
         </g>
+        <g
+          v-for="links in parallelSummaryViews"
+          :key="`parallel:${links.node.id}`"
+          aria-hidden="true"
+        >
+          <path
+            v-for="source in links.sources"
+            :key="`${links.node.id}:${source.node.id}`"
+            :d="source.path"
+            class="edge parallel-link"
+          />
+          <path :d="links.trunkPath" class="edge parallel-link parallel-trunk" />
+          <path
+            :d="links.summaryPath"
+            class="edge parallel-link parallel-summary-link"
+            marker-end="url(#parallel-summary-arrow)"
+          />
+        </g>
         <path v-if="draftEdge" :d="draftEdge.path" class="edge draft-edge" />
       </svg>
 
@@ -92,6 +123,7 @@
         :data-message="node.messageId ?? ''"
         class="turn"
         :class="{
+          'parallel-summary': isParallelSummary(node),
           selected: node.id === selectedTurnId,
           running: isNodeRunning(node),
           recent: isNodeRecent(node),
@@ -160,7 +192,13 @@
         <button
           type="button"
           class="add-chip"
-          :title="isSessionTip(node) ? t('canvas.continueBranchHint') : t('canvas.newBranchHint')"
+          :title="
+            isParallelSummary(node)
+              ? t('canvas.parallelContinueHint')
+              : isSessionTip(node)
+                ? t('canvas.continueBranchHint')
+                : t('canvas.newBranchHint')
+          "
           @click.stop="openDraft(node)"
         >
           ＋
@@ -169,6 +207,7 @@
           <div class="turn-head">
             <span class="avatar user">🍑</span>
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
+            <span v-if="isParallelSummary(node)" class="parallel-summary-badge">✦ {{ t("canvas.parallelSummary") }} v{{ parallelSummaryVersion(node) }}</span>
             <button
               v-if="forkCountOf(node) > 0"
               type="button"
@@ -186,6 +225,16 @@
             <p class="turn-preview" :class="{ errored: !node.preview && node.error }">
               {{ previewOf(node) }}
             </p>
+          </div>
+          <div v-if="parallelSummaryOf(node)" class="parallel-summary-sources">
+            <span>{{ t("canvas.parallelSources") }}</span>
+            <button
+              v-for="source in parallelSummaryOf(node)?.sources ?? []"
+              :key="source.node.id"
+              type="button"
+              :title="t('canvas.parallelOpenSource', { model: source.label })"
+              @click.stop="selectNode(source.node)"
+            >{{ source.label }}</button>
           </div>
           <div v-if="node.toolNames.length > 0" class="chips">
             <span
@@ -405,7 +454,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { fileKind } from "../../../shared/attachment-kinds";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
-import { draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
+import { COL_GAP, draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
 import { type DraftAttachment, readAttachments } from "../attachments";
 import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
@@ -427,6 +476,7 @@ import {
   isTurnDelete,
   isTurnMarked,
   openDraft,
+  parallelGroups,
   recentAlphaFor,
   requestSessionMenu,
   retryNode,
@@ -501,6 +551,90 @@ const svgSize = computed(() => {
 });
 
 const nodeById = computed(() => new Map(graph.value.nodes.map((n) => [n.id, n])));
+
+interface ParallelSourceNode {
+  node: TurnNode;
+  label: string;
+  path: string;
+}
+
+interface ParallelSummaryLinks {
+  node: TurnNode;
+  version: number;
+  sources: ParallelSourceNode[];
+  trunkPath: string;
+  summaryPath: string;
+}
+
+/**
+ * The first turn of a summary session is the canvas summary card. Its source
+ * turns are linked through the open column gap beside the native fork cards,
+ * keeping the existing session layout and all normal card actions intact.
+ */
+const parallelSummaryViews = computed<ParallelSummaryLinks[]>(() => {
+  const result: ParallelSummaryLinks[] = [];
+  for (const group of parallelGroups) {
+    if (group.backend !== store.activeBackend) continue;
+    for (const version of group.summaryVersions) {
+      const summaryMessage = store.messagesBySession[version.sessionId]?.find(
+        (message) => message.role === "user",
+      );
+      if (!summaryMessage) continue;
+      const summaryNode = nodeById.value.get(`${version.sessionId}:${summaryMessage.id}`);
+      if (!summaryNode) continue;
+
+      const sources = version.sources.flatMap((source): ParallelSourceNode[] => {
+        const baseline = new Set(source.baselineMessageIds);
+        const sourceMessage = store.messagesBySession[source.sessionId]?.findLast(
+          (message) =>
+            message.role === "user" && message.text === group.prompt && !baseline.has(message.id),
+        );
+        const sourceNode = sourceMessage
+          ? nodeById.value.get(`${source.sessionId}:${sourceMessage.id}`)
+          : undefined;
+        if (!sourceNode) return [];
+        return [{ node: sourceNode, label: source.label, path: "" }];
+      });
+
+      const busX =
+        Math.max(summaryNode.x, ...sources.map((source) => source.node.x)) +
+        NODE_WIDTH +
+        COL_GAP / 2;
+      const summaryY = summaryNode.y + summaryNode.height / 2;
+      for (const source of sources) {
+        const y = source.node.y + source.node.height / 2;
+        source.path = `M ${source.node.x + NODE_WIDTH} ${y} H ${busX}`;
+      }
+      const ys = [...sources.map((source) => source.node.y + source.node.height / 2), summaryY];
+      result.push({
+        node: summaryNode,
+        version: version.version,
+        sources,
+        trunkPath: ys.length > 1 ? `M ${busX} ${Math.min(...ys)} V ${Math.max(...ys)}` : "",
+        summaryPath: sources.length
+          ? `M ${busX} ${summaryY} H ${summaryNode.x + NODE_WIDTH}`
+          : "",
+      });
+    }
+  }
+  return result;
+});
+
+const parallelSummaryByNode = computed(
+  () => new Map(parallelSummaryViews.value.map((links) => [links.node.id, links])),
+);
+
+function parallelSummaryOf(node: TurnNode): ParallelSummaryLinks | null {
+  return parallelSummaryByNode.value.get(node.id) ?? null;
+}
+
+function isParallelSummary(node: TurnNode): boolean {
+  return parallelSummaryByNode.value.has(node.id);
+}
+
+function parallelSummaryVersion(node: TurnNode): number | null {
+  return parallelSummaryOf(node)?.version ?? null;
+}
 
 // ── active path: the selected turn's lineage back to the story's root ──
 // Shared with the pane's context chain — state.activeChain is the source.

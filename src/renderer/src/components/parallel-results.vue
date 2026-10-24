@@ -126,7 +126,10 @@ function excerpt(target: ParallelTarget): string {
 
     <section class="summary-card" :aria-label="pt('summary')" :aria-busy="summaryRunning">
       <div class="summary-heading"><strong>{{ pt('summary') }}</strong><span v-if="summaryRunning" class="running-dot" aria-hidden="true"></span></div>
-      <p class="summary-meta">{{ group.summarySourceIds.length ? pt('summaryBy', { model: summaryModelLabel, n: group.summarySourceIds.length }) : pt('pendingBy', { model: summaryModelLabel }) }}</p>
+      <p class="summary-meta">
+        {{ group.summarySourceIds.length ? pt('summaryBy', { model: summaryModelLabel, n: group.summarySourceIds.length }) : pt('pendingBy', { model: summaryModelLabel }) }}
+        <span v-if="group.summaryVersions.length"> · {{ pt('version', { n: group.summaryVersions[group.summaryVersions.length - 1]?.version ?? group.summaryVersions.length }) }}</span>
+      </p>
       <p v-if="group.summarySourceIds.length && group.summarySourceIds.length < group.targets.length" class="partial-note">{{ pt('partialSummary') }}</p>
       <MarkdownView v-if="group.summaryText" :source="group.summaryText" />
       <p v-else class="empty-summary" role="status">{{ summaryHint }}</p>

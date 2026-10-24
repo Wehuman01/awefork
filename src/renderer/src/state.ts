@@ -60,6 +60,7 @@ import { panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 import {
   type ParallelGroup,
+  type ParallelSummarySource,
   type ParallelSummarySettings,
   type ParallelTarget,
   parallelGroupBusy,
@@ -83,6 +84,7 @@ export function parallelGroupForSession(
         group.backend === backend &&
         (group.anchorSessionId === sessionId ||
           group.summarySessionId === sessionId ||
+          group.summaryVersions.some((version) => version.sessionId === sessionId) ||
           group.targets.some((target) => target.sessionId === sessionId)),
     ) ?? null
   );
@@ -4329,6 +4331,7 @@ export async function sendParallelPrompt(
     summaryText: "",
     summaryError: null,
     summarySourceIds: [],
+    summaryVersions: [],
     settings: { model: summary.model ? { ...summary.model } : null, length: summary.length },
   });
   parallelGroups.push(group);
@@ -4487,6 +4490,7 @@ async function createParallelSummary(
   group: ParallelGroup,
   sources: ParallelTarget[],
 ): Promise<void> {
+  const sourceIds = sources.map((source) => source.id);
   group.summaryStatus = "running";
   group.summaryError = null;
   const sourceText = sources
@@ -4511,7 +4515,6 @@ async function createParallelSummary(
           "按四部分输出：结论、共识、分歧（标明模型）、建议下一步。使用与原问题相同的语言。",
           sourceText,
         ].join("\n\n");
-  const sourceIds = sources.map((source) => source.id);
   try {
     const session = await window.awefork.fork(
       group.backend,
@@ -4520,6 +4523,26 @@ async function createParallelSummary(
       { context: "none" },
     );
     group.summarySessionId = session.id;
+    group.summaryText = "";
+    group.summarySourceIds = sourceIds;
+    const versionSources: ParallelSummarySource[] = sources.flatMap((source) =>
+      source.sessionId
+        ? [
+            {
+              targetId: source.id,
+              sessionId: source.sessionId,
+              label: source.label,
+              baselineMessageIds: [...source.baselineMessageIds],
+            },
+          ]
+        : [],
+    );
+    group.summaryVersions.push({
+      version: group.summaryVersions.length + 1,
+      sessionId: session.id,
+      createdAt: Date.now(),
+      sources: versionSources,
+    });
     try {
       await window.awefork.renameSession(
         group.backend,
