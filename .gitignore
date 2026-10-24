@@ -13,3 +13,5 @@ dist/
 .worktrees/
 /.zcode
 /todo
+# canvas benchmark reports and raw data are local artifacts, not sources
+docs/performance/

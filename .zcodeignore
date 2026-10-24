@@ -12,6 +12,8 @@ dist/
 # useIgnoreFile skips them, so their biome.json can't trip the nested-root check
 .worktrees/
 /.zcode
+# canvas benchmark reports and raw data are local artifacts, not sources
+docs/performance/
 
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/

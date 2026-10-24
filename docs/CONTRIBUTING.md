@@ -165,8 +165,9 @@ Canvas loading prioritizes the selected session and its ancestors, with at most 
   store and navigation regressions live in `tests/renderer-session-overview-state.test.ts`.
 - `npm run verify` runs typecheck, lint, and Vitest. `npm run test:gui` builds
   the app and runs the real Electron interaction suite against the mock adapter.
-  For repeatable production-renderer measurements and their limits, see
-  [the many-branch performance report](performance/2026-10-22-many-branches.md).
+  For repeatable production-renderer measurements, run
+  `node scripts/canvas-benchmark.mjs`; its reports and raw data are local
+  artifacts and are not committed.
 
 ## Release
 
