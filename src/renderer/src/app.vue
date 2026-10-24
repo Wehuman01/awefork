@@ -68,6 +68,7 @@
             >{{ t("files.tabCanvas") }}</button
           >
           <button
+            v-if="fileBrowserEnabled"
             type="button"
             class="main-tab"
             :class="{ on: mainView === 'files' }"
@@ -171,6 +172,7 @@ import {
 import { t } from "./i18n";
 import {
   type MainView,
+  fileBrowserEnabled,
   mainView,
   PANEL_LIMITS,
   panelStyle,
