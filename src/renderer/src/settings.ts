@@ -103,6 +103,8 @@ export interface Settings {
   labs: {
     /** The file browsing system: middle-column browser, sidebar tree, dock jumps. */
     fileBrowser: boolean;
+    /** Multi-model parallel prompts: fork per model, read side by side, summarize. */
+    parallelModels: boolean;
   };
 }
 
@@ -128,7 +130,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },
-  labs: { fileBrowser: false },
+  labs: { fileBrowser: false, parallelModels: false },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -221,7 +223,10 @@ export function normalizeSettings(raw: unknown): Settings {
       cap: pickNumber(search.cap, d.search.cap, 0, 10_000),
     },
     updates: { checkOnLaunch: pickBool(updates.checkOnLaunch, d.updates.checkOnLaunch) },
-    labs: { fileBrowser: pickBool(labs.fileBrowser, d.labs.fileBrowser) },
+    labs: {
+      fileBrowser: pickBool(labs.fileBrowser, d.labs.fileBrowser),
+      parallelModels: pickBool(labs.parallelModels, d.labs.parallelModels),
+    },
   };
 }
 

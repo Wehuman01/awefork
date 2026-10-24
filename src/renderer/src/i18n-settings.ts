@@ -341,6 +341,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "中列文件浏览器、侧栏文件树和文件坞跳转。关闭时回到会话视图。",
     en: "Middle-column browser, sidebar file tree and dock jumps. Off falls back to session views.",
   },
+  "settings.labsParallelModels": { zh: "多模型发送", en: "Multi-model prompts" },
+  "settings.labsParallelModelsDesc": {
+    zh: "把同一个问题同时发给多个模型，分支并排阅读，并生成汇总。关闭后回到单模型发送。",
+    en: "Send one prompt to several models at once, read the branches side by side, and get a summary. Off falls back to a single model.",
+  },
   "settings.labsNote": { zh: "关于实验室", en: "About Labs" },
   "settings.labsNoteDesc": {
     zh: "功能稳定后会从实验室毕业，进入正式分区；关闭开关不会丢失相关偏好。",

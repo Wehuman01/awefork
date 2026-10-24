@@ -981,6 +981,15 @@ function labsSection(): SectionDef {
           settings.labs.fileBrowser = next;
         },
       ),
+      toggle(
+        "labs.parallelModels",
+        t("settings.labsParallelModels"),
+        t("settings.labsParallelModelsDesc"),
+        settings.labs.parallelModels,
+        (next) => {
+          settings.labs.parallelModels = next;
+        },
+      ),
       info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""),
     ],
     keywords: "labs experiment 实验室 实验 experimental beta",
