@@ -42,6 +42,7 @@ import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
   browseTo,
+  browsingDir,
   files,
   isTreeNodeExpanded,
   startPathDrag,
@@ -59,7 +60,7 @@ const props = defineProps<{
 
 const expanded = computed(() => isTreeNodeExpanded(props.entry.path));
 const isActive = computed(
-  () => files.browsing !== null && samePath(files.browsing, props.entry.path),
+  () => browsingDir.value !== null && samePath(browsingDir.value, props.entry.path),
 );
 
 /** Children load on first expand — never a recursive scan up front. */

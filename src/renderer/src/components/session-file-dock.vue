@@ -38,7 +38,7 @@
             :key="child.path"
             class="ft-node"
           >
-            <div class="ft-row sfd-file-row" :class="{ active: files.selectedPath === child.path }">
+            <div class="ft-row sfd-file-row" :class="{ active: selectedPath === child.path }">
               <span class="sfd-file-leaf" aria-hidden="true"></span>
               <span
                 class="ft-row-label"
@@ -72,6 +72,7 @@ import {
   initFiles,
   loadTreeChildren,
   previewEntry,
+  selectedPath,
   startPathDrag,
   visibleTreeChildren,
 } from "../files";

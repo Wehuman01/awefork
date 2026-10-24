@@ -73,6 +73,7 @@ import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
   browseTo,
+  browsingDir,
   files,
   initFiles,
   isTreeNodeExpanded,
@@ -122,7 +123,7 @@ const treeErrorText = computed(() => {
 });
 
 function isActive(dir: string): boolean {
-  return files.browsing !== null && samePath(files.browsing, dir);
+  return browsingDir.value !== null && samePath(browsingDir.value, dir);
 }
 
 function browse(dir: string): void {

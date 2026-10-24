@@ -19,8 +19,19 @@
         @click="act(openFolder)"
         >{{ t("files.menuOpenFolder") }}</button
       >
+      <button
+        v-if="menu.entry.isDir"
+        type="button"
+        class="file-menu-item"
+        role="menuitem"
+        @click="act(openInNewTab)"
+        >{{ t("files.openInNewTab") }}</button
+      >
       <button v-else type="button" class="file-menu-item" role="menuitem" @click="act(preview)">{{
         t("files.menuPreview")
+      }}</button>
+      <button type="button" class="file-menu-item" role="menuitem" @click="act(openSystem)">{{
+        t("files.menuOpenSystem")
       }}</button>
       <button type="button" class="file-menu-item" role="menuitem" @click="act(reveal)">{{
         t("files.menuReveal")
@@ -107,7 +118,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { FileEntry, FileStat } from "../../../shared/file-types";
 import { closeFileMenu, fileMenu } from "../file-menu";
-import { browseTo, flashNotice, previewEntry, revealEntry } from "../files";
+import { browseTo, flashNotice, openFileTabFor, previewEntry, revealEntry } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
@@ -245,6 +256,25 @@ function preview(): void {
   if (!entry || entry.isDir) return;
   openFilesView();
   void previewEntry(entry);
+}
+
+/**
+ * The system's own way to open the entry — the default app for a file, the
+ * Finder for a directory. The double-click now stays in-app, so this is the
+ * deliberate "hand it to the OS" path.
+ */
+async function openSystem(): Promise<void> {
+  const entry = fileMenu.entry;
+  if (!entry) return;
+  const result = await window.awefork.openPath(entry.path).catch(() => null);
+  if (result && !result.ok) flashNotice(t("files.openFailed"));
+}
+
+function openInNewTab(): void {
+  const entry = fileMenu.entry;
+  if (!entry) return;
+  openFilesView();
+  void openFileTabFor(entry.path);
 }
 
 function openFolder(): void {

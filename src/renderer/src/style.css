@@ -6879,6 +6879,68 @@ html[data-theme="dark"] ::selection {
   background: var(--bg);
 }
 
+/* One tab per browsing position, styled like the story tabs above the canvas. */
+.fb-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 0;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fb-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.fb-tab:hover {
+  background: var(--row-hover);
+  color: var(--primary-deep);
+}
+
+.fb-tab.on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
+.fb-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-tab-x {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  line-height: 1;
+}
+
+.fb-tab-x:hover {
+  background: var(--danger-soft, var(--row-hover));
+  color: var(--danger, var(--ink));
+}
+
+.fb-tab-new {
+  padding: 4px 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .fb-toolbar {
   display: flex;
   align-items: center;
@@ -7079,13 +7141,24 @@ html[data-theme="dark"] ::selection {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* The narrow-column overlay positions against the body, not the page. */
+  position: relative;
 }
 
 .fb-entries {
   flex: 1;
-  min-width: 0;
+  /* The listing keeps a floor even when the stored preview width is wider
+     than the shrunken body allows; the preview clamps to what is left. */
+  min-width: 240px;
+  flex-shrink: 0;
   overflow-y: auto;
   padding: 6px;
+}
+
+/* Keyboard walking needs a focus target; the rows are buttons already. */
+.fb-entries:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: -2px;
 }
 
 .fb-entries.grid {
@@ -7214,11 +7287,70 @@ html[data-theme="dark"] ::selection {
 /* preview pane */
 
 .fb-preview {
-  flex: 0 0 320px;
+  flex: 0 0 var(--fb-preview-width, 340px);
   min-width: 0;
   border-left: 1px solid var(--line);
   background: var(--card);
   overflow-y: auto;
+}
+
+/* Divider between the listing and the preview: invisible except for the
+   grab strip, like the shell's panel handles. */
+.fb-split {
+  flex: 0 0 6px;
+  margin-left: -3px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 6;
+}
+
+.fb-split:hover,
+.fb-split:active {
+  background: var(--primary-soft);
+}
+
+/* Narrow middle column: the preview covers the listing instead of two
+   slivers. The listing stays underneath, reachable by closing the preview. */
+.fb-body-narrow .fb-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  flex-basis: auto;
+  width: 100%;
+  border-left: none;
+  box-shadow: var(--shadow-lift);
+}
+
+/* Reading mode: the listing folds away and the preview owns the middle
+   column. Only this column changes — the side panels keep their widths, so
+   the reader is never a full-app takeover. */
+.fb-body-reading .fb-entries,
+.fb-body-reading .fb-split {
+  display: none;
+}
+
+.fb-body-reading .fb-preview {
+  flex: 1 1 auto;
+  border-left: none;
+}
+
+.fb-reading-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.fb-reading-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fp {
@@ -7289,6 +7421,11 @@ html[data-theme="dark"] ::selection {
   line-height: 1;
 }
 
+.fp-open:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .fp-open-btn {
   margin: 10px 14px;
   padding: 5px 12px;
@@ -7296,16 +7433,30 @@ html[data-theme="dark"] ::selection {
   font-weight: 700;
 }
 
-.fp-open:hover,
+.fp-open:hover:not(:disabled),
 .fp-open-btn:hover {
   background: var(--primary-soft);
   border-color: var(--primary-border);
   color: var(--primary-deep);
 }
 
+.fp-zoom-pct {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .fp-image-wrap {
   padding: 10px;
   text-align: center;
+  overflow: auto;
+}
+
+/* Zoomed past the frame's width: scroll inside the pane instead of
+   stretching the layout. */
+.fp-image-wrap.zoomed {
+  text-align: left;
 }
 
 .fp-image {
@@ -7314,6 +7465,69 @@ html[data-theme="dark"] ::selection {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
+}
+
+/* PDF pages: one rendered image per page, navigated from the toolbar. */
+.fp-pdf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.fp-pdf-page {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.fp-pdf-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.fp-pdf-count {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* CSV/TSV as a table: bounded by the preview cap, with a note saying so. */
+.fp-csv {
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.fp-csv table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.fp-csv th,
+.fp-csv td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fp-csv th {
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.fp-csv-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
 }
 
 .fp-markdown {
@@ -7634,34 +7848,9 @@ html[data-theme="dark"] .fp-image {
   background: #241d2e;
 }
 
-/* Enlarged preview: the same pane, fixed over the app. Esc or the button
-   steps back; a new file's preview resets it. Declared after the base
-   rules so the more specific selectors win without reordering them. */
-.fp.zoomed {
-  position: fixed;
-  inset: 16px;
-  z-index: 75;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lift);
-  padding: 12px;
-  outline: none;
-}
-
-.fp.zoomed .fp-image {
-  max-height: calc(100vh - 96px);
-}
-
-.fp.zoomed .fp-markdown {
-  max-width: 860px;
-  margin: 0 auto;
-  font-size: 14px;
-}
-
-html[data-theme="dark"] .fp.zoomed {
-  background: var(--card);
-}
+/* Reading mode enlarges the preview through .fb-body-reading above (the
+   listing folds away and the pane takes the middle column) — there is no
+   app-wide overlay any more, so the side panels stay where they are. */
 
 /* ── settings page (floating panel) ─────────────────────────────────── */
 
