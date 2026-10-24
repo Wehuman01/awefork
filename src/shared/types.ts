@@ -646,5 +646,6 @@ export interface AgentAdapter {
   abort(sessionId: string): Promise<void>;
   /** Subscribe to the normalized event feed. Returns an unsubscribe function. */
   subscribe(handler: (event: AgentEvent) => void): Promise<() => void>;
-  dispose(): void;
+  /** Keep backend-owned work running when the app is quitting in the background. */
+  dispose(options?: { keepAlive?: boolean }): void;
 }

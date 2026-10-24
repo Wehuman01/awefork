@@ -524,7 +524,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
         }
       }
       for (const promise of adapters.values()) {
-        void promise.then((adapter) => adapter.dispose()).catch(() => {});
+        void promise.then((adapter) => adapter.dispose({ keepAlive })).catch(() => {});
       }
       adapters.clear();
       if (keepAlive) return;

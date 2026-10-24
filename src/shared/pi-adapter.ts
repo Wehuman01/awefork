@@ -791,8 +791,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       };
     },
 
-    dispose() {
+    dispose(options) {
       emitEvent = null;
+      // Leave the pool and its idle reaper alive so active turns can finish;
+      // the child handles keep the main process around until they are reaped.
+      if (options?.keepAlive) return;
       for (const timer of idleTimers.values()) clearTimeout(timer);
       idleTimers.clear();
       for (const proc of sessions.values()) proc.kill();
