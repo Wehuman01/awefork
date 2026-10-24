@@ -143,6 +143,37 @@ describe("navigation", () => {
     expect(h.files.entries).toEqual([]);
   });
 
+  it("previews a clicked file in the same step, and only selects a directory", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/a": listing("/a", [entry("b", true), entry("readme.md")]),
+      },
+    });
+    await h.mod.browseTo("/a");
+    // bootFiles re-imports the module graph, so the live settings instance
+    // is the one files.ts holds — read it back through the store's import.
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "preview";
+    h.mod.selectOrPreviewEntry(entry("readme.md"));
+    expect(h.files.selectedPath).toBe("/root/readme.md");
+    await vi.waitFor(() => expect(h.files.preview?.path).toBe("/root/readme.md"));
+    // A directory keeps the selection but never fills the preview pane.
+    h.mod.selectOrPreviewEntry(entry("b", true));
+    expect(h.files.selectedPath).toBe("/root/b");
+    expect(h.files.preview?.path).toBe("/root/readme.md");
+    settings.files.openOnDouble = "system";
+  });
+
+  it("a click only selects when a double-click is configured to open the system app", async () => {
+    const h = await bootFiles();
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "system";
+    h.mod.selectOrPreviewEntry(entry("a.md"));
+    expect(h.files.selectedPath).toBe("/root/a.md");
+    expect(h.files.preview).toBeNull();
+    expect(h.api.readTextPreview).not.toHaveBeenCalled();
+  });
+
   it("drops a selection that the new listing no longer has", async () => {
     const h = await bootFiles({
       listings: {
@@ -220,6 +251,51 @@ describe("preview", () => {
     expect(h.files.preview?.error?.code).toBe("too-large");
     // The misnamed fallback must never even ask for text.
     expect(h.api.readTextPreview).not.toHaveBeenCalled();
+  });
+
+  it("retires an in-flight preview when the listing changes directory", async () => {
+    vi.resetModules();
+    const gates: Array<() => void> = [];
+    const api = {
+      listDir: vi.fn(async (dir: string) => listing(dir, [])),
+      statFile: async () => ({ ok: true, value: {} }),
+      readTextPreview: vi.fn(
+        (target: string) =>
+          new Promise((resolve) => {
+            gates.push(() =>
+              resolve({
+                ok: true,
+                value: { path: target, text: `late ${target}`, truncated: false, bytes: 1 },
+              }),
+            );
+          }),
+      ),
+      readImagePreview: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
+      searchFiles: async () => ({ ok: true, value: [] }),
+      homePath: async () => "/home/demo",
+      relativeToRoot: async () => ({ ok: true, value: "x" }),
+    };
+    (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
+    const mod = await import("../src/renderer/src/files");
+
+    const first = mod.previewEntry(entry("first.md"));
+    await Promise.resolve();
+    await Promise.resolve();
+    // Navigating away retires the read; its late answer must not reappear
+    // as the preview of a directory that no longer lists the file.
+    await mod.browseTo("/somewhere/else");
+    gates[0]?.();
+    await first;
+    expect(mod.files.preview).toBeNull();
+  });
+
+  it("closing the preview leaves the selection alone", async () => {
+    const h = await bootFiles();
+    await h.mod.previewEntry(entry("a.md"));
+    expect(h.files.preview).not.toBeNull();
+    h.mod.clearPreview();
+    expect(h.files.preview).toBeNull();
+    expect(h.files.selectedPath).toBe("/root/a.md");
   });
 
   it("clears the stale selection and preview when a listing fails", async () => {

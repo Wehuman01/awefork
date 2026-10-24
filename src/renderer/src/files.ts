@@ -115,6 +115,10 @@ export async function ensureBrowsing(root: string | null): Promise<void> {
 }
 
 async function load(dir: string): Promise<void> {
+  // Any preview in flight belongs to the directory being left; a listing is
+  // a navigation, so the read is retired before the new rows arrive and a
+  // late answer cannot describe a file this listing no longer shows.
+  previewSeq += 1;
   const seq = ++listSeq;
   files.loading = true;
   files.error = null;
@@ -233,6 +237,26 @@ export async function refresh(): Promise<void> {
 
 export function selectEntry(entry: FileEntry): void {
   files.selectedPath = entry.path;
+}
+
+/**
+ * A click on a row: a file is selected and previewed in one step (the
+ * side dock's click already previews), a directory is only selected so the
+ * preview pane keeps describing a file. The previous click's preview, if
+ * still in flight, must not land afterwards and describe a row the user has
+ * already moved past — that is the same staleness rule as previewEntry's.
+ */
+export function selectOrPreviewEntry(entry: FileEntry): void {
+  files.selectedPath = entry.path;
+  if (entry.isDir) return;
+  if (settings.files.openOnDouble === "system") return;
+  void previewEntry(entry);
+}
+
+/** Drop the current preview without touching the selection. */
+export function clearPreview(): void {
+  previewSeq += 1;
+  files.preview = null;
 }
 
 export function setFilter(value: string): void {

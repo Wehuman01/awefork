@@ -12,19 +12,16 @@
     <template v-else-if="preview.status === 'loading'">
       <p class="fp-loading">{{ t("files.previewLoading") }}</p>
     </template>
-    <template v-else-if="preview.status === 'image'">
-      <div class="fp-image-wrap">
-        <img class="fp-image" :src="preview.dataUrl" :alt="preview.path" />
-      </div>
-    </template>
-    <template v-else-if="preview.status === 'text'">
+    <template v-else>
       <div class="fp-head">
         <span class="fp-name" :title="preview.path">{{ nameOf(preview.path) }}</span>
-        <span v-if="codeLang" class="fp-lang">{{ codeLang }}</span>
-        <span v-if="preview.truncated" class="fp-trunc" :title="t('files.truncatedTitle')">{{
+        <span v-if="preview.status === 'text' && codeLang" class="fp-lang">{{ codeLang }}</span>
+        <span v-if="preview.status === 'text' && preview.truncated" class="fp-trunc" :title="t('files.truncatedTitle')">{{
           t("files.truncated")
         }}</span>
+        <span v-if="preview.status === 'image'" class="fp-lang">{{ t("files.kindImage") }}</span>
         <button
+          v-if="preview.status !== 'error'"
           type="button"
           class="fp-open"
           :class="{ on: zoomed }"
@@ -35,14 +32,25 @@
           >⤢</button
         >
         <button type="button" class="fp-open" :title="t('files.openSystem')" @click="openSystem">↗</button>
+        <button
+          type="button"
+          class="fp-open"
+          :title="t('files.closePreview')"
+          :aria-label="t('files.closePreview')"
+          @click="clearPreview"
+          >✕</button
+        >
       </div>
-      <MarkdownView v-if="isMarkdown" class="fp-markdown" :source="preview.text ?? ''" />
-      <div v-else class="fp-code">
-        <pre><code><span v-for="(line, i) in lines" :key="i" class="fp-line"><span class="fp-ln">{{ i + 1 }}</span><span class="fp-text">{{ line }}</span></span></code></pre>
+      <div v-if="preview.status === 'image'" class="fp-image-wrap">
+        <img class="fp-image" :src="preview.dataUrl" :alt="preview.path" />
       </div>
-    </template>
-    <template v-else>
-      <div class="fp-error">
+      <template v-else-if="preview.status === 'text'">
+        <MarkdownView v-if="isMarkdown" class="fp-markdown" :source="preview.text ?? ''" />
+        <div v-else class="fp-code">
+          <pre><code><span v-for="(line, i) in lines" :key="i" class="fp-line"><span class="fp-ln">{{ i + 1 }}</span><span class="fp-text">{{ line }}</span></span></code></pre>
+        </div>
+      </template>
+      <div v-else class="fp-error">
         <p class="fp-error-title">{{ errorText }}</p>
         <p class="fp-error-sub">{{ preview.path }}</p>
         <button
@@ -61,7 +69,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { displayName } from "../../../shared/file-paths";
-import { flashNotice, type PreviewState } from "../files";
+import { clearPreview, flashNotice, type PreviewState } from "../files";
 import { t } from "../i18n";
 import { MarkdownView } from "./markdown-view";
 

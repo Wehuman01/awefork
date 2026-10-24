@@ -142,7 +142,7 @@
       </button>
     </div>
 
-    <div class="fb-body">
+    <div class="fb-body" :class="{ 'fb-body-narrow': narrow }">
       <div class="fb-entries" :class="files.view" @contextmenu.prevent>
         <p v-if="files.loading" class="fb-state">{{ t("files.loading") }}</p>
         <p v-else-if="listError" class="fb-state err">{{ listError }}</p>
@@ -164,7 +164,7 @@
             :class="{ selected: entry.path === files.selectedPath }"
             draggable="true"
             @dragstart="startPathDrag($event, [entry.path])"
-            @click="selectEntry(entry)"
+            @click="selectOrPreviewEntry(entry)"
             @dblclick="openEntry(entry)"
             @keydown.enter.prevent="openEntry(entry)"
             @contextmenu.prevent="openFileMenu(entry, $event.clientX, $event.clientY)"
@@ -190,7 +190,7 @@
             :class="{ selected: entry.path === files.selectedPath }"
             draggable="true"
             @dragstart="startPathDrag($event, [entry.path])"
-            @click="selectEntry(entry)"
+            @click="selectOrPreviewEntry(entry)"
             @dblclick="openEntry(entry)"
             @keydown.enter.prevent="openEntry(entry)"
             @contextmenu.prevent="openFileMenu(entry, $event.clientX, $event.clientY)"
@@ -203,7 +203,13 @@
         </template>
         <p v-if="files.capped" class="fb-capped">{{ t("files.capped", { n: MAX_ENTRIES }) }}</p>
       </div>
-      <aside class="fb-preview">
+      <div v-if="files.preview !== null && !narrow" class="fb-split" @mousedown="startSplitDrag"></div>
+      <aside
+        v-if="files.preview !== null"
+        class="fb-preview"
+        :class="{ 'fb-preview-overlay': narrow }"
+        :style="previewStyle"
+      >
         <FilePreview :preview="files.preview" />
       </aside>
     </div>
@@ -213,7 +219,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { displayName, joinSegments, parentOf, pathSegments } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { MAX_ENTRIES } from "../../../shared/file-types";
@@ -233,6 +239,7 @@ import {
   refresh,
   revealEntry,
   selectEntry,
+  selectOrPreviewEntry,
   setFilter,
   setQuickIncludeHidden,
   setView,
@@ -251,6 +258,84 @@ const filterInput = ref("");
 const quickInput = ref("");
 const quickHiddenInput = ref(false);
 const quickItems = ref<HTMLButtonElement[]>([]);
+
+/**
+ * True while the middle column cannot hold a listing and a preview side by
+ * side. Below the threshold the preview covers the listing instead of
+ * squeezing both into a pair of slivers.
+ */
+const narrow = ref(false);
+
+// The middle column is the element that decides whether a listing and a
+// preview fit side by side; its width is what a panel drag changes.
+let narrowObserver: ResizeObserver | null = null;
+onMounted(() => {
+  const host = document.querySelector(".main-col");
+  if (!host) return;
+  narrowObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect.width ?? 0;
+    narrow.value = width > 0 && width < 640;
+  });
+  narrowObserver.observe(host);
+});
+onBeforeUnmount(() => {
+  narrowObserver?.disconnect();
+  narrowObserver = null;
+  if (splitDrag) {
+    window.removeEventListener("mousemove", splitDrag.move);
+    window.removeEventListener("mouseup", splitDrag.up);
+    splitDrag = null;
+  }
+});
+
+/**
+ * Drag the divider between the listing and the preview. The width lives in
+ * a CSS variable on the browser root so the pane and the divider read the
+ * same number, and it survives view switches within this boot.
+ */
+const previewWidth = ref(340);
+const PREVIEW_MIN = 220;
+const PREVIEW_MAX = 640;
+interface SplitDrag {
+  move: (event: MouseEvent) => void;
+  up: () => void;
+}
+
+let splitDrag: SplitDrag | null = null;
+
+const previewStyle = computed(() => ({ "--fb-preview-width": `${previewWidth.value}px` }));
+
+function startSplitDrag(event: MouseEvent): void {
+  if (event.button !== 0 || splitDrag) return;
+  event.preventDefault();
+  const body = (event.currentTarget as HTMLElement).parentElement;
+  if (!body) return;
+  // The rect is captured once: the body's right edge is fixed for the drag,
+  // so a window resize mid-drag cannot make the width jump.
+  const rect = body.getBoundingClientRect();
+  const move = (moveEvent: MouseEvent): void => {
+    const width = Math.round(rect.right - moveEvent.clientX);
+    previewWidth.value = Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, width));
+  };
+  const up = (): void => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    splitDrag = null;
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+  splitDrag = { move, up };
+}
+
+/** ↑ / ↓ walk the rows and preview the file the focus lands on. */
+function stepSelection(offset: number): void {
+  const rowsNow = rows.value;
+  if (rowsNow.length === 0) return;
+  const current = rowsNow.findIndex((entry) => entry.path === files.selectedPath);
+  const next = Math.min(Math.max((current < 0 ? 0 : current) + offset, 0), rowsNow.length - 1);
+  const target = rowsNow[next];
+  if (target) selectOrPreviewEntry(target);
+}
 
 // The path box mirrors the browsing directory until the user edits it.
 watch(

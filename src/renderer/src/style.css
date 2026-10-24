@@ -6968,6 +6968,8 @@ html[data-theme="dark"] ::selection {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* The narrow-column overlay positions against the body, not the page. */
+  position: relative;
 }
 
 .fb-entries {
@@ -7103,11 +7105,38 @@ html[data-theme="dark"] ::selection {
 /* preview pane */
 
 .fb-preview {
-  flex: 0 0 320px;
+  flex: 0 0 var(--fb-preview-width, 340px);
   min-width: 0;
   border-left: 1px solid var(--line);
   background: var(--card);
   overflow-y: auto;
+}
+
+/* Divider between the listing and the preview: invisible except for the
+   grab strip, like the shell's panel handles. */
+.fb-split {
+  flex: 0 0 6px;
+  margin-left: -3px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 6;
+}
+
+.fb-split:hover,
+.fb-split:active {
+  background: var(--primary-soft);
+}
+
+/* Narrow middle column: the preview covers the listing instead of two
+   slivers. The listing stays underneath, reachable by closing the preview. */
+.fb-body-narrow .fb-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  flex-basis: auto;
+  width: 100%;
+  border-left: none;
+  box-shadow: var(--shadow-lift);
 }
 
 .fp {
