@@ -74,6 +74,11 @@ async function bootFiles(options: { listings?: Record<string, FsResult<DirListin
       ok: false as const,
       error: { code: "unsupported" as const },
     })),
+    readFileAsDataUrl: vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "unsupported" as const },
+    })),
+    openPath: vi.fn(async () => ({ ok: true as const })),
     searchFiles: vi.fn(async () => ({ ok: true as const, value: [entry("hit.md")] })),
     homePath: vi.fn(async () => "/home/demo"),
     relativeToRoot: vi.fn(async () => ({ ok: true as const, value: "x" })),
@@ -237,6 +242,7 @@ describe("preview", () => {
           }),
       ),
       readImagePreview: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
+      readFileAsDataUrl: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
       searchFiles: async () => ({ ok: true, value: [] }),
       homePath: async () => "/home/demo",
       relativeToRoot: async () => ({ ok: true, value: "x" }),
@@ -389,6 +395,48 @@ describe("preview", () => {
     expect(h.api.readTextPreview).not.toHaveBeenCalled();
   });
 
+  it("asks for a PDF's bytes and falls back to the error pane when unreadable", async () => {
+    const h = await bootFiles();
+    // The document read fails (over the cap, unreadable); a PDF must not
+    // fall through to the text reader, so it lands on the error pane —
+    // which offers the system open — with the read's own code.
+    await h.mod.previewEntry(entry("doc.pdf"));
+    expect(h.api.readFileAsDataUrl).toHaveBeenCalledWith(
+      "/root/doc.pdf",
+      "application/pdf",
+      expect.any(Number),
+    );
+    expect(h.api.readTextPreview).not.toHaveBeenCalled();
+    expect(active(h.mod).preview?.status).toBe("error");
+    expect(active(h.mod).preview?.error?.code).toBe("unsupported");
+  });
+
+  it("keeps reading mode across file switches and drops it with the preview", async () => {
+    const h = await bootFiles();
+    // The default double-click hands the file to the OS; reading mode is
+    // about the in-app preview, so the setting is switched for this case.
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.openOnDouble = "preview";
+    await h.mod.browseTo("/root");
+    // A double-click reads; a later click in the same tab must not unread.
+    await h.mod.openEntry(entry("a.md"));
+    expect(active(h.mod).reading).toBe(true);
+    await h.mod.selectOrPreviewEntry(entry("b.md"));
+    expect(active(h.mod).reading).toBe(true);
+    // Another tab starts unread.
+    await h.mod.openFileTab("/a");
+    expect(active(h.mod).reading).toBe(false);
+    await h.mod.activateFileTab(h.files.tabs[0].id);
+    expect(active(h.mod).reading).toBe(true);
+    // Closing the preview ends the reading session.
+    h.mod.clearPreview();
+    expect(active(h.mod).reading).toBe(false);
+    // Entering needs something to read.
+    h.mod.enterReading();
+    expect(active(h.mod).reading).toBe(false);
+    settings.files.openOnDouble = "system";
+  });
+
   it("retires an in-flight preview when the listing changes directory", async () => {
     vi.resetModules();
     const gates: Array<() => void> = [];
@@ -407,6 +455,7 @@ describe("preview", () => {
           }),
       ),
       readImagePreview: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
+      readFileAsDataUrl: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
       searchFiles: async () => ({ ok: true, value: [] }),
       homePath: async () => "/home/demo",
       relativeToRoot: async () => ({ ok: true, value: "x" }),
@@ -747,6 +796,7 @@ describe("tabs", () => {
           }),
       ),
       readImagePreview: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
+      readFileAsDataUrl: vi.fn(async () => ({ ok: false, error: { code: "unsupported" } })),
       searchFiles: async () => ({ ok: true, value: [] }),
       homePath: async () => "/home/demo",
       relativeToRoot: async () => ({ ok: true, value: "x" }),

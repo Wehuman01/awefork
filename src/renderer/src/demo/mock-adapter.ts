@@ -883,6 +883,7 @@ export function installMockAdapter(): void {
     }),
     readTextPreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
     readImagePreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    readFileAsDataUrl: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
     relativeToRoot: async (_root, target) => ({ ok: true as const, value: target }),
     searchFiles: async () => ({ ok: true as const, value: [] }),
     homePath: async () => "/demo",

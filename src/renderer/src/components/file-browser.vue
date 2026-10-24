@@ -181,7 +181,25 @@
       </button>
     </div>
 
-    <div class="fb-body" :class="{ 'fb-body-narrow': narrow }">
+    <div
+      class="fb-body"
+      :class="{ 'fb-body-narrow': narrow, 'fb-body-reading': tab.reading }"
+      @keydown.esc="exitReading"
+    >
+      <div v-if="tab.reading" class="fb-reading-bar">
+        <button
+          type="button"
+          class="fb-btn"
+          :title="t('files.exitReading')"
+          :aria-label="t('files.exitReading')"
+          @click="exitReading"
+        >
+          ‹</button
+        >
+        <span class="fb-reading-name" :title="tab.browsing ?? undefined">{{
+          tab.browsing ? displayName(tab.browsing) : t("files.tabBlank")
+        }}</span>
+      </div>
       <div
         ref="entriesEl"
         class="fb-entries"
@@ -257,7 +275,7 @@
         :class="{ 'fb-preview-overlay': narrow }"
         :style="previewStyle"
       >
-        <FilePreview :preview="tab.preview" />
+        <FilePreview :preview="tab.preview" :reading="tab.reading" @toggle-reading="toggleReading" />
       </aside>
     </div>
 
@@ -277,6 +295,7 @@ import {
   clearQuickSearch,
   closeFileTab,
   ensureBrowsing,
+  exitReading,
   type FileTab,
   files,
   fileTabLabel,
@@ -298,6 +317,7 @@ import {
   setView,
   startPathDrag,
   toggleHidden,
+  toggleReading,
   visibleEntries,
 } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
@@ -459,6 +479,18 @@ watch(
 watch(
   () => tab.value?.id,
   async () => {
+    const top = tab.value?.scrollTop ?? 0;
+    await nextTick();
+    if (entriesEl.value) entriesEl.value.scrollTop = top;
+  },
+);
+
+// Reading mode folds the listing away; leaving it puts the rows back, so the
+// saved offset is re-applied (a display:none listing cannot keep its own).
+watch(
+  () => tab.value?.reading,
+  async (reading) => {
+    if (reading) return;
     const top = tab.value?.scrollTop ?? 0;
     await nextTick();
     if (entriesEl.value) entriesEl.value.scrollTop = top;

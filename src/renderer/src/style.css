@@ -7210,6 +7210,38 @@ html[data-theme="dark"] ::selection {
   box-shadow: var(--shadow-lift);
 }
 
+/* Reading mode: the listing folds away and the preview owns the middle
+   column. Only this column changes — the side panels keep their widths, so
+   the reader is never a full-app takeover. */
+.fb-body-reading .fb-entries,
+.fb-body-reading .fb-split {
+  display: none;
+}
+
+.fb-body-reading .fb-preview {
+  flex: 1 1 auto;
+  border-left: none;
+}
+
+.fb-reading-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.fb-reading-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .fp {
   min-height: 100%;
   display: flex;
@@ -7278,6 +7310,11 @@ html[data-theme="dark"] ::selection {
   line-height: 1;
 }
 
+.fp-open:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .fp-open-btn {
   margin: 10px 14px;
   padding: 5px 12px;
@@ -7285,16 +7322,30 @@ html[data-theme="dark"] ::selection {
   font-weight: 700;
 }
 
-.fp-open:hover,
+.fp-open:hover:not(:disabled),
 .fp-open-btn:hover {
   background: var(--primary-soft);
   border-color: var(--primary-border);
   color: var(--primary-deep);
 }
 
+.fp-zoom-pct {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .fp-image-wrap {
   padding: 10px;
   text-align: center;
+  overflow: auto;
+}
+
+/* Zoomed past the frame's width: scroll inside the pane instead of
+   stretching the layout. */
+.fp-image-wrap.zoomed {
+  text-align: left;
 }
 
 .fp-image {
@@ -7303,6 +7354,69 @@ html[data-theme="dark"] ::selection {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
+}
+
+/* PDF pages: one rendered image per page, navigated from the toolbar. */
+.fp-pdf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.fp-pdf-page {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.fp-pdf-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.fp-pdf-count {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* CSV/TSV as a table: bounded by the preview cap, with a note saying so. */
+.fp-csv {
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.fp-csv table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.fp-csv th,
+.fp-csv td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fp-csv th {
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.fp-csv-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
 }
 
 .fp-markdown {
@@ -7623,34 +7737,9 @@ html[data-theme="dark"] .fp-image {
   background: #241d2e;
 }
 
-/* Enlarged preview: the same pane, fixed over the app. Esc or the button
-   steps back; a new file's preview resets it. Declared after the base
-   rules so the more specific selectors win without reordering them. */
-.fp.zoomed {
-  position: fixed;
-  inset: 16px;
-  z-index: 75;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lift);
-  padding: 12px;
-  outline: none;
-}
-
-.fp.zoomed .fp-image {
-  max-height: calc(100vh - 96px);
-}
-
-.fp.zoomed .fp-markdown {
-  max-width: 860px;
-  margin: 0 auto;
-  font-size: 14px;
-}
-
-html[data-theme="dark"] .fp.zoomed {
-  background: var(--card);
-}
+/* Reading mode enlarges the preview through .fb-body-reading above (the
+   listing folds away and the pane takes the middle column) — there is no
+   app-wide overlay any more, so the side panels stay where they are. */
 
 /* ── settings page (floating panel) ─────────────────────────────────── */
 
