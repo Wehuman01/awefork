@@ -2601,27 +2601,6 @@ html[data-density="compact"] .ft-row {
   animation: run-pulse 1.6s ease-in-out infinite;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 10px;
-}
-
-.chip {
-  font-size: 10.5px;
-  font-weight: 800;
-  padding: 2.5px 9px;
-  border-radius: 999px;
-  background: var(--mint-soft);
-  color: var(--mint-deep);
-}
-
-.chip.lav {
-  background: var(--lavender-soft);
-  color: var(--lavender-deep);
-}
-
 .turn-foot {
   display: flex;
   align-items: center;

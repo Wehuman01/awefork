@@ -244,14 +244,6 @@
               @click.stop="selectNode(source.node)"
             >{{ source.label }}</button>
           </div>
-          <div v-if="node.toolNames.length > 0" class="chips">
-            <span
-              v-for="(name, i) in node.toolNames"
-              :key="name"
-              class="chip"
-              :class="{ lav: i % 2 === 1 }"
-            >{{ name }}</span>
-          </div>
           <div class="turn-foot">
             <span v-if="isNodeRunning(node)" class="running-flag">{{ t("canvas.running") }}</span>
             <span v-else>{{ footMeta(node) }}</span>
