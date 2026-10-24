@@ -148,10 +148,6 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "开启后，退出 awefork 时保留可后台运行的后端；Pi 依赖本应用内的 RPC 子进程，会随退出停止。",
     en: "With this on, quitting keeps backends that can run detached; Pi uses app-owned RPC children and stops on quit.",
   },
-  "settings.backendSwitchNote": {
-    zh: "切换会重塑整个工作区，因此每次切换都会先确认；已有会话仍保留在历史记录里。安装探针只跑 --version，不会启动服务。",
-    en: "A switch reshapes the workspace, so every pick confirms first; existing sessions stay in history. The install probe only runs --version.",
-  },
   "settings.backendReady": { zh: "可用", en: "Ready" },
   "settings.backendMissing": { zh: "未安装", en: "Not installed" },
   "settings.backendWarn": { zh: "版本警告", en: "Version warning" },
@@ -335,7 +331,6 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "{sessions} 个会话 · {dirs} 个项目",
     en: "{sessions} sessions · {dirs} projects",
   },
-  "settings.manage": { zh: "管理", en: "Manage" },
   "settings.trash": { zh: "回收站", en: "Trash" },
   "settings.trashDesc": {
     zh: "已删除的会话先放进回收站，可随时放回；当前有 {count} 个。",

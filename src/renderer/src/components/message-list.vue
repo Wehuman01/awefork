@@ -37,8 +37,8 @@
               @click="copyMessage(message)"
             >{{ copiedId === message.id ? "✓" : "⧉" }}</button>
             <p v-if="message.toolNames.length > 0" class="tool-row">
-              <span v-for="name in message.toolNames" :key="name" class="tool-chip lav">{{
-                name
+              <span class="tool-chip lav" :title="message.toolNames.join(' · ')">{{
+                toolSummary(message.toolNames)
               }}</span>
             </p>
             <details v-if="message.thinking" class="thought">
@@ -119,6 +119,7 @@ import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
 import type { LivePart, ReadonlyChatMessage } from "../state";
 import { hasReadableThought, thoughtSummary } from "../thought";
+import { toolSummary } from "../tool-summary";
 import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
