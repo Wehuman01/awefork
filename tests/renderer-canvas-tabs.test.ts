@@ -198,6 +198,13 @@ describe("canvas tabs", () => {
 
     apiSessions = [STORY_B]; // story-a deleted server-side
     await state.refreshSessions();
+    // One missed refresh is not proof the story died — codex's thread/list
+    // can omit a fresh thread for a moment — so the tab keeps its selection
+    // (and the pane its composer) until the session stays missing.
+    expect(state.store.selectedId).toBe("story-a");
+
+    vi.advanceTimersByTime(9_000);
+    await state.refreshSessions();
 
     const parked = state.store.canvasTabs.find((t) => t.id === storyATab);
     expect(parked?.rootId).toBeNull();
@@ -229,6 +236,12 @@ describe("canvas tabs", () => {
     // Back to the story-b tab, so the dying story is the ACTIVE one.
     await state.activateCanvasTab(state.store.canvasTabs[0].id);
     apiSessions = [STORY_A]; // story-b deleted server-side
+    await state.refreshSessions();
+    // Still inside the grace window: the dying tab keeps its selection and
+    // adopts nothing.
+    expect(state.store.selectedId).toBe("story-b");
+
+    vi.advanceTimersByTime(9_000);
     await state.refreshSessions();
 
     // The active (story-b) tab died blank; story-a is the only survivor and

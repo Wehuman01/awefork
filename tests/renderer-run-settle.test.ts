@@ -229,6 +229,56 @@ describe("renderer message updates", () => {
     expect(h.store.running.s1).toBe(true);
   });
 
+  it("keeps the optimistic prompt row while the run's snapshot lags behind", async () => {
+    const h = await bootState();
+    await h.state.selectSession("s1");
+    await h.state.sendPromptTo("s1", "new prompt");
+    expect(h.store.messagesBySession.s1?.at(-1)?.id).toMatch(/^local_/);
+
+    // A mid-run snapshot from a backend whose store projects rollouts late:
+    // the prompt has not landed server-side yet.
+    h.setRows([USER_ROW, assistantRow(null)]);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.store.messagesBySession.s1?.at(-1)?.text).toBe("new prompt");
+
+    // The server row arrives: the local stand-in is spent and dropped.
+    h.setRows([USER_ROW, { ...assistantRow(null), id: "m3", role: "user", text: "new prompt" }]);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.store.messagesBySession.s1?.some((m) => m.id.startsWith("local_"))).toBe(false);
+    expect(h.store.messagesBySession.s1?.at(-1)?.id).toBe("m3");
+  });
+
+  it("transfers a writer-locked run to its fork instead of settling it failed", async () => {
+    // codex refuses the locked thread's writer and continues the turn in a
+    // fork. The run moves house: the prompt row survives, the run and
+    // watchdog follow the fork, and the pane selects the fork so the reply
+    // streams where the user is looking.
+    const FORK: SessionSummary = {
+      ...SESSION,
+      id: "fork-1",
+      title: "s1 的分支",
+      parentSessionId: "s1",
+      origin: "fork",
+    };
+    const h = await bootState({ sessions: [SESSION, FORK] });
+    await h.state.selectSession("s1");
+    await h.state.sendPromptTo("s1", "继续");
+    expect(h.store.messagesBySession.s1?.at(-1)?.text).toBe("继续");
+
+    h.send({
+      type: "session.branchContinued",
+      sessionId: "s1",
+      forkedSessionId: "fork-1",
+      message: "codex: continued in the new branch fork-1",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.store.running.s1).toBeFalsy();
+    expect(h.store.running["fork-1"]).toBe(true);
+    expect(h.store.messagesBySession.s1?.at(-1)?.text).toBe("继续");
+    expect(h.store.selectedId).toBe("fork-1");
+  });
+
   it("does not settle a resend from the old poll while prompt acknowledgement is pending", async () => {
     const h = await bootState();
     let finishPoll!: (rows: ChatMessage[]) => void;
