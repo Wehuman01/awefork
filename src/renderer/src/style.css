@@ -6617,6 +6617,7 @@ code.md-code {
   inset: 0;
   z-index: 35;
   pointer-events: none;
+  container-type: inline-size;
 }
 
 .canvas-overview > * {
@@ -7186,6 +7187,16 @@ code.md-code {
   -webkit-box-orient: vertical;
 }
 
+.summary-retry {
+  margin-top: 7px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--primary-deep);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .summary-ask {
   margin-top: 9px;
   padding: 9px 11px;
@@ -7205,6 +7216,14 @@ code.md-code {
   margin-top: 6px;
   font-size: 10.5px;
   color: var(--ask);
+}
+
+.summary-ask > pre {
+  margin: 7px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--ink);
+  font-size: 11px;
 }
 
 .summary-ask-options,
@@ -7320,7 +7339,7 @@ code.md-code {
   transform: translateY(-6px);
 }
 
-@media (max-width: 900px) {
+@container (max-width: 560px) {
   .float-column-labels,
   .float-session-row {
     grid-template-columns: minmax(140px, 1fr) 70px 12px;
@@ -7329,10 +7348,6 @@ code.md-code {
   .float-activity,
   .float-column-labels > span:last-child {
     display: none;
-  }
-
-  .overview-trigger .trigger-name {
-    padding-right: 8px;
   }
 }
 

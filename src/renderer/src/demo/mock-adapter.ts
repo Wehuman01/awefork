@@ -509,6 +509,8 @@ export function installMockAdapter(): void {
   // with the same per-entry merge rule as OverviewLedgerStore.merge.
   const demoLedger: OverviewReadLedger = {};
   const demoUnknown = new Map<string, string>();
+  const demoObservedAt: Record<string, number> = {};
+  const demoScannedAt: Record<string, number> = {};
   const ledgerHandlers = new Set<
     (update: {
       sequence: number;
@@ -1093,8 +1095,18 @@ export function installMockAdapter(): void {
       sequence: ledgerSequence,
       ledger: { ...demoLedger },
       unknown: Object.fromEntries([...demoUnknown].map((key) => [key, ""])),
+      observedAt: { ...demoObservedAt },
+      scannedAt: { ...demoScannedAt },
     }),
-    overviewRecordSettle: async (backend, sessionId, failed, settleId) => {
+    overviewObserveSessions: async (backend, sessions, scannedAt) => {
+      for (const session of sessions) {
+        const key = overviewKey(backend, session.id);
+        demoObservedAt[key] = Math.max(demoObservedAt[key] ?? 0, session.updatedAt);
+      }
+      demoScannedAt[backend] = Math.max(demoScannedAt[backend] ?? 0, scannedAt);
+      return demoScannedAt[backend] ?? scannedAt;
+    },
+    overviewRecordSettle: async (backend, sessionId, failed, settleId, runId) => {
       const key = overviewKey(backend, sessionId);
       const next = recordOverviewSettle(demoLedger, key, {
         settledAt: Date.now(),
@@ -1105,8 +1117,9 @@ export function installMockAdapter(): void {
         for (const oldKey of Object.keys(demoLedger)) delete demoLedger[oldKey];
         Object.assign(demoLedger, next);
         const marker = demoUnknown.get(key);
+        const settledRunId = runId ?? settleId;
         const unknownCleared =
-          marker !== undefined && (!marker || !settleId || marker === settleId);
+          marker !== undefined && (!marker || !settledRunId || marker === settledRunId);
         if (unknownCleared) demoUnknown.delete(key);
         broadcastLedger(key, demoLedger[key] ?? null, unknownCleared ? null : undefined);
       }
@@ -1145,6 +1158,7 @@ export function installMockAdapter(): void {
       const key = overviewKey(backend, sessionId);
       const forgotten = delete demoLedger[key];
       const forgotUnknown = demoUnknown.delete(key);
+      delete demoObservedAt[key];
       if (forgotten || forgotUnknown) broadcastLedger(key, null, null);
       return forgotten;
     },

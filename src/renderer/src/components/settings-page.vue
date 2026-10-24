@@ -256,6 +256,7 @@ import {
   installBackend,
   installingLabel,
   refreshBackendList,
+  refreshOverviewSessions,
   store,
   switchBackend,
   toggleFavoriteModel,
@@ -1088,6 +1089,7 @@ function labsSection(): SectionDef {
       settings.labs.sessionOverview,
       (next) => {
         settings.labs.sessionOverview = next;
+        if (next) void refreshOverviewSessions();
         // The pill and panel unmount with the switch; a panel left "open"
         // in the store would pop back up when the switch returns on.
         if (!next) closeOverviewPanel();

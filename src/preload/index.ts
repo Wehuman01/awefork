@@ -252,13 +252,20 @@ const api: AweforkApi = {
   },
   overviewLedger: (): Promise<OverviewLedgerSnapshot> =>
     ipcRenderer.invoke("awefork:overviewLedger"),
+  overviewObserveSessions: (
+    backend: BackendId,
+    sessions: Array<{ id: string; updatedAt: number }>,
+    scannedAt: number,
+  ): Promise<number> =>
+    ipcRenderer.invoke("awefork:overviewObserveSessions", backend, sessions, scannedAt),
   overviewRecordSettle: (
     backend: BackendId,
     sessionId: string,
     failed: boolean,
     settleId?: string,
+    runId?: string,
   ): Promise<OverviewReadEntry> =>
-    ipcRenderer.invoke("awefork:overviewRecordSettle", backend, sessionId, failed, settleId),
+    ipcRenderer.invoke("awefork:overviewRecordSettle", backend, sessionId, failed, settleId, runId),
   overviewSetUnknown: (
     backend: BackendId,
     sessionId: string,

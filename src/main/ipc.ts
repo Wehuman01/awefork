@@ -143,10 +143,11 @@ import { resolveZcodeCli } from "./zcode-server.js";
  * file-browser.ts.
  * Update download progress arrives on channel "awefork:update-progress" as
  * {downloaded,total}. Events are forwarded on channel "awefork:event" as
- * {backend, event}.
+ * {backend, event, eventId, runId?}.
  * Canvas session overview (main-owned unread ledger, when one is passed in):
  *   overviewLedger        -> overview snapshot         for a new window
- *   overviewRecordSettle(backend, session, failed, runId?) -> entry (once)
+ *   overviewObserveSessions(backend, sessions, scannedAt) -> saved scan time
+ *   overviewRecordSettle(backend, session, failed, settleId?, runId?) -> entry
  *   overviewMarkSeen(backend, session, upTo?)      -> entry | null (broadcast)
  *   overviewForget(backend, session)               -> boolean (hard delete)
  *   overviewMergeLedger(ledger)                    -> merged ledger (window sync)
@@ -194,6 +195,29 @@ export function registerIpc(
       return { ...snapshot, sequence };
     });
     ipcMain.handle(
+      "awefork:overviewObserveSessions",
+      async (
+        _event: IpcMainInvokeEvent,
+        backend: BackendId,
+        value: unknown,
+        scannedAt: unknown,
+      ) => {
+        const id = storeBackend(backend);
+        const sessions = (Array.isArray(value) ? value : []).slice(0, 10_000);
+        return overviewLedger.observeUpdatedAt(
+          id,
+          sessions.flatMap((session) =>
+            typeof session?.id === "string" &&
+            session.id.length > 0 &&
+            Number.isFinite(session.updatedAt)
+              ? [{ key: overviewKey(id, session.id), updatedAt: Number(session.updatedAt) }]
+              : [],
+          ),
+          Number.isFinite(scannedAt) ? Number(scannedAt) : Date.now(),
+        );
+      },
+    );
+    ipcMain.handle(
       "awefork:overviewRecordSettle",
       async (
         _event: IpcMainInvokeEvent,
@@ -201,12 +225,14 @@ export function registerIpc(
         sessionId: string,
         failed: boolean,
         settleId?: string,
+        runId?: string,
       ) => {
         const key = overviewKey(storeBackend(backend), String(sessionId ?? ""));
         const result = await overviewLedger.recordSettle(key, {
           settledAt: Date.now(),
           failed: Boolean(failed),
           settleId: typeof settleId === "string" ? settleId.slice(0, 256) : undefined,
+          runId: typeof runId === "string" ? runId.slice(0, 256) : undefined,
         });
         if (result.changed) {
           broadcast(key, result.entry, result.unknownCleared ? null : undefined);

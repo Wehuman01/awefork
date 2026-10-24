@@ -133,12 +133,15 @@
         </div>
         <div class="summary-block">
           <span>{{ t("overview.lastPrompt") }}</span>
-          <p>{{ summary.loading ? t("overview.loadingSummary") : summary.prompt || t("overview.noPrompt") }}</p>
+          <p>{{ summary.loading ? t("overview.loadingSummary") : summary.error ? t("overview.summaryFailed") : summary.prompt || t("overview.noPrompt") }}</p>
         </div>
         <div class="summary-block">
           <span>{{ t("overview.lastReply") }}</span>
-          <p>{{ summary.loading ? t("overview.loadingSummary") : summary.reply || t("overview.noReply") }}</p>
+          <p>{{ summary.loading ? t("overview.loadingSummary") : summary.error ? t("overview.summaryFailed") : summary.reply || t("overview.noReply") }}</p>
         </div>
+        <button v-if="summary.error && !summary.loading" type="button" class="summary-retry" @click="retrySummary">
+          {{ t("overview.retrySummary") }}
+        </button>
 
         <!-- A pending ask is answered through the same queue the inline card and
              the modal use, routed by backend + requestId. Complex asks (forms,
@@ -148,29 +151,37 @@
           <b>{{ t(ask.title, ask.vars) }}</b>
           <p v-if="ask.detail">{{ t(ask.detail, ask.vars) }}</p>
           <pre v-if="ask.kind === 'command-approval'">{{ ask.command }}</pre>
+          <pre v-if="ask.kind === 'opencode-permission' && ask.command">{{ ask.command }}</pre>
+          <small v-if="ask.kind === 'opencode-permission' && ask.patterns.length">
+            {{ t("interaction.matchedRule", { rule: ask.patterns.join(" · ") }) }}
+          </small>
           <small v-if="ask.kind === 'command-approval' && ask.cwd">
             {{ t("interaction.workingDir", { cwd: ask.cwd }) }}
+          </small>
+          <small v-if="ask.kind === 'file-approval' && ask.grantRoot">
+            {{ t("interaction.requestWrite", { root: ask.grantRoot }) }}
           </small>
           <ul v-if="ask.kind === 'permission-approval'">
             <li v-for="item in ask.requested" :key="item">{{ item }}</li>
           </ul>
-          <div v-if="askOptions" class="summary-ask-options">
-            <button
-              v-for="option in askOptions"
-              :key="option"
-              type="button"
-              @click="answerWithOption(option)"
-            >{{ option }}</button>
-          </div>
-          <ul v-else-if="ask.kind === 'user-input'">
+          <ul v-if="ask.kind === 'user-input'">
             <li v-for="question in ask.questions" :key="question.id">
               <b>{{ question.header }}</b>
               <span>{{ question.question }}</span>
               <small v-if="question.options?.length">
-                {{ question.options.map((option) => option.label).join(" · ") }}
+                {{ question.options.map((option) => option.description ? `${option.label}: ${option.description}` : option.label).join(" · ") }}
               </small>
             </li>
           </ul>
+          <div v-if="askOptions" class="summary-ask-options">
+            <button
+              v-for="option in askOptions"
+              :key="option.label"
+              type="button"
+              :title="option.description"
+              @click="answerWithOption(option.label)"
+            >{{ option.label }}</button>
+          </div>
           <ul v-else-if="ask.kind === 'opencode-form'">
             <li v-for="field in ask.fields" :key="field.key">
               {{ field.title || field.key }}<small v-if="field.description">{{ field.description }}</small>
@@ -363,15 +374,22 @@ function clearFilters(): void {
 // ── summary (loaded on demand, one request at a time) ───────────────────
 
 const summary = reactive<
-  OverviewSummary & { loading: boolean; key: string | null; revision: number | null }
+  OverviewSummary & {
+    loading: boolean;
+    error: boolean;
+    key: string | null;
+    revision: number | null;
+  }
 >({
   prompt: "",
   reply: "",
   loading: false,
+  error: false,
   key: null,
   revision: null,
 });
 let summaryToken = 0;
+const summaryRetry = ref(0);
 let summaryReadQueue = Promise.resolve();
 const summaryCache = new Map<
   string,
@@ -380,11 +398,12 @@ const summaryCache = new Map<
 
 const summarySource = computed(() => {
   const row = selectedRow.value;
-  if (!row) return { key: null, updatedAt: 0, revision: null };
+  if (!row) return { key: null, updatedAt: 0, revision: null, retry: summaryRetry.value };
   return {
     key: rowKey(row),
     updatedAt: row.session.updatedAt,
     revision: store.overviewRead[overviewKey(row.backend, row.session.id)]?.revision ?? null,
+    retry: summaryRetry.value,
   };
 });
 
@@ -394,6 +413,7 @@ watch(summarySource, async ({ key, updatedAt, revision }) => {
   summary.key = key;
   summary.prompt = "";
   summary.reply = "";
+  summary.error = false;
   summary.revision = null;
   if (!key) {
     summary.loading = false;
@@ -437,13 +457,17 @@ watch(summarySource, async ({ key, updatedAt, revision }) => {
     summary.reply = text.reply;
     summary.revision = revision;
   } catch {
-    // A failed read leaves the summary empty; the jump button reports the
-    // real error, and an empty summary is not an error the user must clear.
+    summary.error = true;
   } finally {
     release();
     if (token === summaryToken) summary.loading = false;
   }
 });
+
+function retrySummary(): void {
+  if (summary.key) summaryCache.delete(summary.key);
+  summaryRetry.value += 1;
+}
 
 const ask = computed<AgentInteractionRequest | null>(() => {
   const row = selectedRow.value;
@@ -452,22 +476,25 @@ const ask = computed<AgentInteractionRequest | null>(() => {
 });
 
 /** Only requests with a direct allow/deny response are answered in place. */
-const askApproval = computed(
-  () =>
-    ask.value !== null &&
-    ["command-approval", "file-approval", "permission-approval", "opencode-permission"].includes(
-      ask.value.kind,
-    ),
-);
+const askApproval = computed(() => {
+  const current = ask.value;
+  if (!current) return false;
+  if (current.kind === "opencode-permission") {
+    return current.patterns.length > 0 || Boolean(current.command);
+  }
+  if (current.kind === "file-approval") return Boolean(current.grantRoot);
+  if (current.kind === "permission-approval") return current.requested.length > 0;
+  return current.kind === "command-approval";
+});
 
 /** One closed question with options can be answered with a single click. */
-const askOptions = computed<string[] | null>(() => {
+const askOptions = computed<Array<{ label: string; description: string }> | null>(() => {
   const current = ask.value;
   if (current?.kind !== "user-input") return null;
   if (current.questions.length !== 1) return null;
   const options = current.questions[0]?.options;
   if (!options || options.length === 0) return null;
-  return options.map((option) => option.label);
+  return options;
 });
 
 function answerAsk(decision: "allow" | "deny"): void {
@@ -591,6 +618,7 @@ function onDocPointerDown(event: PointerEvent): void {
 function onDocKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape" && store.overview.open) {
     event.preventDefault();
+    event.stopPropagation();
     closeOverviewPanel();
     return;
   }

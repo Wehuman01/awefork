@@ -17,6 +17,7 @@ import {
 export function createOverviewLedgerMock(): Pick<
   AweforkApi,
   | "overviewLedger"
+  | "overviewObserveSessions"
   | "overviewRecordSettle"
   | "overviewSetUnknown"
   | "overviewMarkSeen"
@@ -26,6 +27,8 @@ export function createOverviewLedgerMock(): Pick<
 > {
   const ledger: OverviewReadLedger = {};
   const unknown = new Map<string, string>();
+  const observedAt: Record<string, number> = {};
+  const scannedAt: Record<string, number> = {};
   const handlers = new Set<
     (update: {
       sequence: number;
@@ -53,12 +56,23 @@ export function createOverviewLedgerMock(): Pick<
       sequence,
       ledger: { ...ledger },
       unknown: Object.fromEntries(unknown),
+      observedAt: { ...observedAt },
+      scannedAt: { ...scannedAt },
     }),
+    overviewObserveSessions: async (backend, sessions, requestedAt) => {
+      for (const session of sessions) {
+        const key = overviewKey(backend, session.id);
+        observedAt[key] = Math.max(observedAt[key] ?? 0, session.updatedAt);
+      }
+      scannedAt[backend] = Math.max(scannedAt[backend] ?? 0, requestedAt);
+      return scannedAt[backend] ?? requestedAt;
+    },
     overviewRecordSettle: async (
       backend: BackendId,
       sessionId: string,
       failed: boolean,
       settleId?: string,
+      runId?: string,
     ) => {
       const key = overviewKey(backend, sessionId);
       const next = recordOverviewSettle(ledger, key, {
@@ -70,8 +84,9 @@ export function createOverviewLedgerMock(): Pick<
         for (const oldKey of Object.keys(ledger)) delete ledger[oldKey];
         Object.assign(ledger, next);
         const marker = unknown.get(key);
+        const settledRunId = runId ?? settleId;
         const unknownCleared =
-          marker !== undefined && (!marker || !settleId || marker === settleId);
+          marker !== undefined && (!marker || !settledRunId || marker === settledRunId);
         if (unknownCleared) unknown.delete(key);
         broadcast(key, ledger[key] ?? null, unknownCleared ? null : undefined);
       }
@@ -115,6 +130,7 @@ export function createOverviewLedgerMock(): Pick<
       const key = overviewKey(backend, sessionId);
       const forgotten = delete ledger[key];
       const forgotUnknown = unknown.delete(key);
+      delete observedAt[overviewKey(backend, sessionId)];
       if (forgotten || forgotUnknown) broadcast(key, null, null);
       return forgotten;
     },

@@ -60,6 +60,8 @@ export interface BackendEventEnvelope {
   backend: BackendId;
   /** Stable id assigned by main before one event is broadcast to every window. */
   eventId?: string;
+  /** Shared id for the current run, including windows that joined mid-stream. */
+  runId?: string;
   event: AgentEvent;
 }
 

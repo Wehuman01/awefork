@@ -338,12 +338,19 @@ export interface AweforkApi {
    * every adapter method.
    */
   overviewLedger(): Promise<OverviewLedgerSnapshot>;
+  /** Persist this window's newest session-list timestamps for closed-app recovery. */
+  overviewObserveSessions(
+    backend: BackendId,
+    sessions: Array<{ id: string; updatedAt: number }>,
+    scannedAt: number,
+  ): Promise<number>;
   /** Fold one observed run ending in; returns the entry it produced. */
   overviewRecordSettle(
     backend: BackendId,
     sessionId: string,
     failed: boolean,
     settleId?: string,
+    runId?: string,
   ): Promise<OverviewReadEntry>;
   /** Persist that a previously observed run has no confirmed ending yet. */
   overviewSetUnknown(

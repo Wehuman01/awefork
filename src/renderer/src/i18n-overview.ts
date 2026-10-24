@@ -72,6 +72,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "overview.noPrompt": { zh: "这条会话还没有提问", en: "No prompt in this session yet" },
   "overview.noReply": { zh: "还没有回复", en: "No reply yet" },
   "overview.loadingSummary": { zh: "读取中…", en: "Loading…" },
+  "overview.summaryFailed": { zh: "摘要读取失败", en: "Couldn't read the summary" },
+  "overview.retrySummary": { zh: "重试读取", en: "Retry" },
   "overview.workingDir": { zh: "工作目录", en: "Working dir" },
   "overview.markSeen": { zh: "标记已查看", en: "Mark as seen" },
   "overview.jump": { zh: "跳转到会话", en: "Jump to session" },

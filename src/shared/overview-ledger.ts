@@ -30,15 +30,18 @@ import { enqueueWrite } from "./write-queue.js";
  */
 
 /** Read the sidecar; a missing or corrupt file reads as an empty ledger. */
-async function readOverviewState(
-  filePath: string,
-): Promise<{ ledger: OverviewReadLedger; unknown: Map<string, string> }> {
+async function readOverviewState(filePath: string): Promise<{
+  ledger: OverviewReadLedger;
+  unknown: Map<string, string>;
+  observedAt: Map<string, number>;
+  scannedAt: Map<string, number>;
+}> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ledger: {}, unknown: new Map() };
+      return { ledger: {}, unknown: new Map(), observedAt: new Map(), scannedAt: new Map() };
     }
     throw error;
   }
@@ -50,19 +53,46 @@ async function readOverviewState(
       "version" in parsed &&
       (parsed as { version?: unknown }).version === 1
     ) {
-      const document = parsed as { ledger?: unknown; unknown?: unknown };
+      const document = parsed as {
+        ledger?: unknown;
+        unknown?: unknown;
+        observedAt?: unknown;
+        scannedAt?: unknown;
+      };
       const unknown =
         document.unknown && typeof document.unknown === "object"
           ? Object.entries(document.unknown as Record<string, unknown>)
               .filter(([, value]) => value === true || typeof value === "string")
               .map(([key, value]) => [key, typeof value === "string" ? value : ""] as const)
           : [];
-      return { ledger: normalizeOverviewLedger(document.ledger), unknown: new Map(unknown) };
+      const observedAt =
+        document.observedAt && typeof document.observedAt === "object"
+          ? Object.entries(document.observedAt as Record<string, unknown>)
+              .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+              .map(([key, value]) => [key, value as number] as const)
+          : [];
+      const scannedAt =
+        document.scannedAt && typeof document.scannedAt === "object"
+          ? Object.entries(document.scannedAt as Record<string, unknown>)
+              .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+              .map(([key, value]) => [key, value as number] as const)
+          : [];
+      return {
+        ledger: normalizeOverviewLedger(document.ledger),
+        unknown: new Map(unknown),
+        observedAt: new Map(observedAt),
+        scannedAt: new Map(scannedAt),
+      };
     }
     // Version 0 was a plain ledger; keep its unread records during upgrade.
-    return { ledger: normalizeOverviewLedger(parsed), unknown: new Map() };
+    return {
+      ledger: normalizeOverviewLedger(parsed),
+      unknown: new Map(),
+      observedAt: new Map(),
+      scannedAt: new Map(),
+    };
   } catch {
-    return { ledger: {}, unknown: new Map() };
+    return { ledger: {}, unknown: new Map(), observedAt: new Map(), scannedAt: new Map() };
   }
 }
 
@@ -74,12 +104,16 @@ async function writeOverviewState(
   filePath: string,
   ledger: OverviewReadLedger,
   unknown: ReadonlyMap<string, string>,
+  observedAt: ReadonlyMap<string, number>,
+  scannedAt: ReadonlyMap<string, number>,
 ): Promise<void> {
   await fs.mkdir(dirname(filePath), { recursive: true });
   const document = {
     version: 1,
     ledger,
     unknown: Object.fromEntries(unknown),
+    observedAt: Object.fromEntries(observedAt),
+    scannedAt: Object.fromEntries(scannedAt),
   };
   await writeFileAtomic(filePath, `${JSON.stringify(document, null, 2)}\n`);
 }
@@ -93,6 +127,8 @@ async function writeOverviewState(
 export class OverviewLedgerStore {
   private ledger: OverviewReadLedger = {};
   private unknown = new Map<string, string>();
+  private observedAt = new Map<string, number>();
+  private scannedAt = new Map<string, number>();
   private loaded: Promise<void> | null = null;
   private readonly settleIds = new Set<string>();
 
@@ -101,13 +137,17 @@ export class OverviewLedgerStore {
   /** Read the sidecar once; later calls resolve immediately. */
   async load(): Promise<OverviewReadLedger> {
     if (!this.loaded) {
-      this.loaded = readOverviewState(this.filePath).then(({ ledger, unknown }) => {
-        this.ledger = ledger;
-        this.unknown = unknown;
-        for (const entry of Object.values(ledger)) {
-          if (entry.settleId) this.settleIds.add(entry.settleId);
-        }
-      });
+      this.loaded = readOverviewState(this.filePath).then(
+        ({ ledger, unknown, observedAt, scannedAt }) => {
+          this.ledger = ledger;
+          this.unknown = unknown;
+          this.observedAt = observedAt;
+          this.scannedAt = scannedAt;
+          for (const entry of Object.values(ledger)) {
+            if (entry.settleId) this.settleIds.add(entry.settleId);
+          }
+        },
+      );
     }
     await this.loaded;
     return this.ledger;
@@ -120,7 +160,34 @@ export class OverviewLedgerStore {
       sequence: 0,
       ledger,
       unknown: Object.fromEntries(this.unknown),
+      observedAt: Object.fromEntries(this.observedAt),
+      scannedAt: Object.fromEntries(this.scannedAt),
     };
+  }
+
+  /** Store the newest session-list timestamps seen by any overview window. */
+  async observeUpdatedAt(
+    backend: string,
+    entries: Array<{ key: string; updatedAt: number }>,
+    scannedAt: number,
+  ): Promise<number> {
+    await this.load();
+    let changed = false;
+    for (const { key, updatedAt } of entries) {
+      if (!key || !Number.isFinite(updatedAt)) continue;
+      if (updatedAt <= (this.observedAt.get(key) ?? Number.NEGATIVE_INFINITY)) continue;
+      this.observedAt.set(key, updatedAt);
+      changed = true;
+    }
+    const previousScan = this.scannedAt.get(backend) ?? 0;
+    const requestedScan = Number.isFinite(scannedAt) ? scannedAt : Date.now();
+    const nextScan = Math.max(previousScan, requestedScan);
+    if (previousScan === 0 || nextScan - previousScan >= 30_000) {
+      this.scannedAt.set(backend, nextScan);
+      changed = true;
+    }
+    if (changed) await this.persist(this.ledger);
+    return this.scannedAt.get(backend) ?? nextScan;
   }
 
   /** Persist that the last known live run has not yet been confirmed settled. */
@@ -149,7 +216,7 @@ export class OverviewLedgerStore {
   /** Fold a settle in, persist, and return the entry it produced. */
   async recordSettle(
     key: string,
-    input: { settledAt: number; failed: boolean; settleId?: string },
+    input: { settledAt: number; failed: boolean; settleId?: string; runId?: string },
   ): Promise<{ entry: OverviewReadEntry; changed: boolean; unknownCleared: boolean }> {
     await this.load();
     if (input.settleId && this.settleIds.has(input.settleId)) {
@@ -169,9 +236,10 @@ export class OverviewLedgerStore {
     // a second revision in this main-process lifetime.
     if (input.settleId) this.settleIds.add(input.settleId);
     const unknownRunId = this.unknown.get(key);
+    const settledRunId = input.runId ?? input.settleId;
     const unknownCleared =
       unknownRunId !== undefined &&
-      (!unknownRunId || !input.settleId || unknownRunId === input.settleId);
+      (!unknownRunId || !settledRunId || unknownRunId === settledRunId);
     if (unknownCleared) this.unknown.delete(key);
     await this.persist(next);
     const entry = next[key];
@@ -197,7 +265,8 @@ export class OverviewLedgerStore {
     await this.load();
     const hadEntry = key in this.ledger;
     const hadUnknown = this.unknown.has(key);
-    if (!hadEntry && !hadUnknown) return false;
+    const hadObserved = this.observedAt.delete(key);
+    if (!hadEntry && !hadUnknown && !hadObserved) return false;
     this.unknown.delete(key);
     await this.persist(forgetOverviewSession(this.ledger, key));
     return true;
@@ -230,7 +299,7 @@ export class OverviewLedgerStore {
   private async persist(next: OverviewReadLedger): Promise<OverviewReadLedger> {
     this.ledger = next;
     await enqueueWrite(this.filePath, async () => {
-      await writeOverviewState(this.filePath, next, this.unknown);
+      await writeOverviewState(this.filePath, next, this.unknown, this.observedAt, this.scannedAt);
     });
     return next;
   }

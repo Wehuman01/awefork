@@ -121,7 +121,7 @@ export interface OverviewEvidence {
   waiting: boolean;
   /** A run is in flight, visible or parked in another backend's slot. */
   running: boolean;
-  /** The last settled run awefork recorded, if any. */
+  /** The last settled result awefork recorded or recovered, if any. */
   result: OverviewReadEntry | null;
   /** A run was observed but its ending never confirmed (timeout, disconnect). */
   unknown: boolean;

@@ -6,9 +6,9 @@
  * overview-ledger.ts, which is node-only.
  *
  * Semantics:
- * - revision is awefork's OWN observation counter, bumped once per settled run
- *   awefork actually watched. It is not the agent's turn id and never shown
- *   as one.
+ * - revision is awefork's own observation counter, bumped once per confirmed
+ *   result it sees live or recovers from a later session snapshot. It is not
+ *   the agent's turn id and never shown as one.
  * - seen is the watermark the user was actually shown. A result that lands
  *   while a session is loading stays unread (the jump pins the revision).
  * - Only an observed ending mints a revision. A silent timeout or a lost
@@ -18,7 +18,7 @@
 
 /** One ledger entry: the last observed result plus the seen watermark. */
 export interface OverviewReadEntry {
-  /** Observation counter, bumped once per settled run awefork watched. */
+  /** Observation counter, bumped once per result awefork confirmed. */
   revision: number;
   /** Highest revision the user has actually been shown. */
   seen: number;
@@ -26,7 +26,7 @@ export interface OverviewReadEntry {
   settledAt: number;
   /** The run ended with an explicit error (a lost connection does not count). */
   failed: boolean;
-  /** Shared event id used to make one run's settlement idempotent across windows. */
+  /** Stable event/message observation id used to dedupe a settlement across windows. */
   settleId?: string;
 }
 
@@ -39,6 +39,10 @@ export interface OverviewLedgerSnapshot {
   ledger: OverviewReadLedger;
   /** Sessions whose last running state was not confirmed before shutdown. */
   unknown: Record<string, string>;
+  /** Last session-list timestamp observed by the overview, keyed per session. */
+  observedAt?: Record<string, number>;
+  /** Last successful overview list start time for each backend. */
+  scannedAt?: Record<string, number>;
 }
 
 /** A null entry is a deletion tombstone. */
@@ -74,8 +78,8 @@ export function pruneOverviewLedger(ledger: OverviewReadLedger): OverviewReadLed
 /**
  * Fold one observed settle into the ledger: bump the revision, keep the seen
  * watermark (a new result after viewing is unread again) and record how the
- * run ended. Repeated settles keep bumping — callers gate on having actually
- * watched the run, so a duplicate idle frame never reaches this twice.
+ * run ended. Callers pass a stable observation id so duplicate windows do not
+ * bump the revision twice.
  */
 export function recordOverviewSettle(
   ledger: OverviewReadLedger,

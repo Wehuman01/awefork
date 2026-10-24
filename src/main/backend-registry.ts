@@ -285,6 +285,8 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
   /** `backend:sessionId` of runs in flight; see runningSessions below. */
   const running = new Map<string, { backend: BackendId; sessionId: string }>();
+  /** One id shared by every renderer for each run currently observed by main. */
+  const runIds = new Map<string, string>();
   /**
    * The persisted quitKeepAlive setting, read once at startup so the sync
    * before-quit path never awaits a file; setQuitKeepAlive keeps it current.
@@ -297,14 +299,9 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     if (!quitKeepAliveSet) quitKeepAliveCached = value;
   });
   /**
-   * Event ids double as the overview's run-settle ids, which the ledger
-   * dedupes on forever (a duplicate must never mint a second revision). A
-   * per-launch prefix keeps that dedupe working across restarts: a bare
-   * counter would restart at "event-1" on every launch and collide with the
-   * first run the previous launch recorded — silently swallowing the new
-   * result's revision. One prefix per launch makes the ids unique in both
-   * dimensions at once: all windows see the same id for one event, and no
-   * launch ever reuses another's.
+   * Event ids stay unique across app launches for durable event-based
+   * observations. Run ids below are assigned once in main and shared with
+   * every renderer, including windows that join during a run.
    */
   const eventPrefix = `e${randomBytes(6).toString("hex")}-`;
   let eventSequence = 0;
@@ -350,19 +347,27 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     void adapter
       .subscribe((event) => {
         const key = "sessionId" in event ? `${backend}:${event.sessionId}` : null;
+        const eventId = `${eventPrefix}${++eventSequence}`;
+        let runId = key ? runIds.get(key) : undefined;
         if (event.type === "message.started" && key) {
           running.set(key, { backend, sessionId: event.sessionId });
+          runId = eventId;
+          runIds.set(key, runId);
+        } else if (event.type === "message.delta" && key && !runId) {
+          // An app/window can join after the start frame. The first delta is
+          // shared by all current renderers, so it becomes their run identity.
+          runId = eventId;
+          runIds.set(key, runId);
         } else if (event.type === "session.idle" && key) {
           running.delete(key);
         } else if (event.type === "server.error" && "sessionId" in event && event.sessionId) {
           // A failed prompt settles that session's run just like idle would.
           running.delete(`${backend}:${event.sessionId}`);
         }
-        forwardEvent?.({
-          backend,
-          event,
-          eventId: `${eventPrefix}${++eventSequence}`,
-        });
+        forwardEvent?.({ backend, event, eventId, ...(runId ? { runId } : {}) });
+        if ((event.type === "session.idle" || event.type === "server.error") && key) {
+          runIds.delete(key);
+        }
       })
       .then((unsubscribe) => {
         unsubscribers.push(unsubscribe);

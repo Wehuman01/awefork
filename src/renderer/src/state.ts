@@ -441,6 +441,10 @@ interface AppState {
    * session-overview.ts for the revision semantics.
    */
   overviewRead: OverviewReadLedger;
+  /** Session-list timestamps last captured by the overview, for restart recovery. */
+  overviewObservedAt: Record<string, number>;
+  /** Last successful list-start time used to recognize sessions created offline. */
+  overviewScannedAt: Partial<Record<BackendId, number>>;
   /**
    * Sessions listed for backends this window never switched to (keyed by
    * backend). A visited backend is read from its parked workspace instead.
@@ -538,6 +542,8 @@ const state = reactive<AppState>({
   // Filled by the boot snapshot (or the migration merge below); the rows read
   // it reactively, so an empty start just means "nothing unread yet".
   overviewRead: {},
+  overviewObservedAt: {},
+  overviewScannedAt: {},
   overviewRemote: {},
   overviewUnknown: {},
 });
@@ -1377,7 +1383,9 @@ export async function init(): Promise<void> {
   await bootBackend(backend);
   // Fill the trigger's cross-agent counts after first paint. The adapters are
   // lazy by design; this one paced sweep is the deliberate startup cost.
-  setTimeout(() => void refreshOverviewSessions(), OVERVIEW_BOOT_SWEEP_DELAY_MS);
+  setTimeout(() => {
+    if (settings.labs.sessionOverview) void refreshOverviewSessions();
+  }, OVERVIEW_BOOT_SWEEP_DELAY_MS);
   // New-version check once startup settles: the agent server has just come up,
   // so give the handshake a beat. Fire-and-forget — never blocks first paint,
   // and every failure path stays silent. The settings page can turn it off.
@@ -1520,6 +1528,7 @@ async function flushTrash(): Promise<void> {
 export async function refreshSessions(options: { markSeen?: boolean } = {}): Promise<void> {
   const backend = state.activeBackend;
   const generation = workspaceGeneration;
+  const scanAt = Date.now();
   try {
     const { sessions, lineage } = await window.awefork.sessions(backend);
     // The user switched backends while the fetch ran: this result belongs to a
@@ -1529,6 +1538,13 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
     if (generation !== workspaceGeneration || backend !== state.activeBackend) return;
     state.sessions = sessions;
     state.lineage = lineage;
+    if (settings.labs.sessionOverview) {
+      void reconcileOverviewSessions(
+        backend,
+        overviewPool(sessions, state.trash, state.archive),
+        scanAt,
+      );
+    }
     // The fetch is the connection test; success revives a UI that an earlier
     // failure (or a cold-start timeout) had flagged as offline.
     state.connectionError = null;
@@ -2342,8 +2358,33 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
     stopWatch(live.backend, sessionId);
     // A completion row is evidence the run ended; running out of patience is
     // not. The silent case only frees the spinner — it must not mint a result.
-    settleRun(live.backend, sessionId, done ? "settled" : "unknown");
+    const lastReply = done
+      ? [...messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "assistant" &&
+              message.completedAt !== null &&
+              message.completedAt >= live.sentAt &&
+              message.finish !== "tool-calls",
+          )
+      : undefined;
+    settleRun(
+      live.backend,
+      sessionId,
+      done ? "settled" : "unknown",
+      overviewRunIds.get(key),
+      lastReply ? overviewMessageObservationId(live.backend, sessionId, lastReply.id) : undefined,
+    );
   }
+}
+
+function overviewMessageObservationId(
+  backend: BackendId,
+  sessionId: string,
+  messageId: string,
+): string {
+  return `message:${backend}:${sessionId}:${messageId}`.slice(0, 256);
 }
 
 /** How long a settled session keeps its "just ran" tint, and the fade granularity. */
@@ -2395,13 +2436,25 @@ function settleRun(
   backend: BackendId,
   sessionId: string,
   reason: SettleReason = "settled",
+  runId?: string,
   settleId?: string,
 ): void {
   // Was there a run to end? A late idle for a run that already settled, or a
   // startup/idle frame for a session awefork never watched, must not mint a
   // second result — the first, known ending stands (a failed run is not
   // overwritten by an idle that follows it).
-  const observed = isRunning(backend, sessionId);
+  const key = overviewKey(backend, sessionId);
+  const unknownRunId = state.overviewUnknown[key];
+  const observedRunId =
+    runId ??
+    overviewRunIds.get(streamKey(backend, sessionId)) ??
+    (reason === "settled" ? unknownRunId : undefined);
+  const matchingUnknown =
+    unknownRunId !== undefined &&
+    (unknownRunId === "" || observedRunId === undefined || unknownRunId === observedRunId);
+  // An explicit idle can confirm a run that the watchdog already moved to
+  // unknown. It still cannot create a result for a session with no run evidence.
+  const observed = isRunning(backend, sessionId) || (reason === "settled" && matchingUnknown);
   stopWatch(backend, sessionId);
   streamBuffers.delete(streamKey(backend, sessionId));
   setStreamTail(backend, sessionId, null);
@@ -2425,12 +2478,7 @@ function settleRun(
   // must not mint a second result. An explicit failure is the exception — the
   // error itself is the evidence, even for a run started outside awefork.
   if (observed || reason === "failed") {
-    recordOverviewOutcome(
-      backend,
-      sessionId,
-      reason,
-      settleId ?? overviewRunIds.get(streamKey(backend, sessionId)),
-    );
+    recordOverviewOutcome(backend, sessionId, reason, observedRunId, settleId ?? observedRunId);
   }
   if (backend === state.activeBackend && state.selectedId === sessionId) {
     state.streamParts = [];
@@ -2451,7 +2499,12 @@ export function recentAlphaFor(sessionId: string): number {
   return 1 - age / RECENT_MS;
 }
 
-async function finishRun(backend: BackendId, sessionId: string, settleId?: string): Promise<void> {
+async function finishRun(
+  backend: BackendId,
+  sessionId: string,
+  runId?: string,
+  settleId?: string,
+): Promise<void> {
   // Replace the live bubble only after its persisted counterpart is in state.
   // Both mutations occur before Vue renders, avoiding an empty or duplicated
   // assistant slot at the end of a streamed response.
@@ -2459,7 +2512,7 @@ async function finishRun(backend: BackendId, sessionId: string, settleId?: strin
   const messages = await loadSessionMessages(sessionId, false, backend);
   if (generation !== messageLoads.generation(backend, sessionId)) return;
   const currentRunId = overviewRunIds.get(streamKey(backend, sessionId));
-  if (settleId && currentRunId && currentRunId !== settleId) return;
+  if (runId && currentRunId && currentRunId !== runId) return;
   // The run's file changes settle with it; the card appears without the user
   // reselecting anything.
   refreshFileChanges(sessionId, backend);
@@ -2467,7 +2520,13 @@ async function finishRun(backend: BackendId, sessionId: string, settleId?: strin
   // without the tint (its card carries ⚠ + retry instead).
   const assistants = (messages ?? []).filter((m) => m.role === "assistant");
   const lastRun = assistants[assistants.length - 1];
-  settleRun(backend, sessionId, lastRun?.error ? "failed" : "settled", settleId ?? currentRunId);
+  settleRun(
+    backend,
+    sessionId,
+    lastRun?.error ? "failed" : "settled",
+    runId ?? currentRunId,
+    lastRun ? overviewMessageObservationId(backend, sessionId, lastRun.id) : settleId,
+  );
   if (backend === state.activeBackend) void refreshSessions();
 }
 
@@ -2588,7 +2647,7 @@ function queueInteraction(backend: BackendId, request: AgentInteractionRequest):
  * visible workspace.
  */
 function handleEnvelope(envelope: BackendEventEnvelope): void {
-  handleEvent(envelope.backend, envelope.event, envelope.eventId);
+  handleEvent(envelope.backend, envelope.event, envelope.eventId, envelope.runId);
 }
 
 /** Show a non-error notice; the timer only clears it while it is still current. */
@@ -2627,7 +2686,12 @@ async function followContinuedBranch(lockedId: string, forkedId: string): Promis
   await selectSession(forkedId, { focus: true });
 }
 
-function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): void {
+function handleEvent(
+  backend: BackendId,
+  event: AgentEvent,
+  eventId?: string,
+  sharedRunId?: string,
+): void {
   switch (event.type) {
     case "interaction.requested": {
       queueInteraction(backend, event.request);
@@ -2642,13 +2706,14 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
     case "session.updated": {
       // A single run emits several of these; coalesce into one refresh.
       if (backend === state.activeBackend) scheduleRefresh();
-      else void refreshOverviewSessions();
+      else if (settings.labs.sessionOverview) void refreshOverviewSessions();
       break;
     }
     case "message.started": {
       const key = streamKey(backend, event.sessionId);
       if (!isRunning(backend, event.sessionId) || !overviewRunIds.has(key)) {
         const runId =
+          sharedRunId ??
           eventId ??
           (event.messageId ? `${backend}:${event.sessionId}:${event.messageId}` : undefined);
         if (runId) overviewRunIds.set(key, runId);
@@ -2673,7 +2738,7 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       // frame never arrived (or that a silent stretch let the watchdog settle)
       // and resets the watchdog so streaming runs cannot time out mid-flight.
       if (!isRunning(backend, event.sessionId)) {
-        const runId = eventId ?? `${backend}:${event.sessionId}:${event.messageId}`;
+        const runId = sharedRunId ?? eventId ?? `${backend}:${event.sessionId}:${event.messageId}`;
         overviewRunIds.set(streamKey(backend, event.sessionId), runId);
         setOverviewUnknown(
           backend,
@@ -2686,7 +2751,7 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       } else if (!overviewRunIds.has(streamKey(backend, event.sessionId))) {
         overviewRunIds.set(
           streamKey(backend, event.sessionId),
-          eventId ?? `${backend}:${event.sessionId}:${event.messageId}`,
+          sharedRunId ?? eventId ?? `${backend}:${event.sessionId}:${event.messageId}`,
         );
         setOverviewUnknown(
           backend,
@@ -2728,22 +2793,12 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       break;
     }
     case "session.idle": {
-      // An explicit idle also resolves an unfinished run restored after a
-      // restart, without inventing a result for a run we did not watch end.
-      if (!isRunning(backend, event.sessionId)) {
-        setOverviewUnknown(
-          backend,
-          event.sessionId,
-          false,
-          state.overviewUnknown[overviewKey(backend, event.sessionId)],
-        );
-      }
-      const settleId = overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
+      const runId = sharedRunId ?? overviewRunIds.get(streamKey(backend, event.sessionId));
       stopWatch(backend, event.sessionId);
       // The turn finished, so any queued approval/input it blocked on is gone
       // (codex only ends a turn after its server requests resolve or time out).
       dropSessionInteractions(backend, event.sessionId);
-      void finishRun(backend, event.sessionId, settleId);
+      void finishRun(backend, event.sessionId, runId, eventId);
       break;
     }
     case "session.compressed": {
@@ -2808,12 +2863,13 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       // "running" for its whole timeout. Settle the named session up front;
       // connection-level errors carry no sessionId and only toast.
       if (event.sessionId) {
-        const settleId = overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
-        if (settleId) overviewRunIds.set(streamKey(backend, event.sessionId), settleId);
+        const runId =
+          sharedRunId ?? overviewRunIds.get(streamKey(backend, event.sessionId)) ?? eventId;
+        if (runId) overviewRunIds.set(streamKey(backend, event.sessionId), runId);
         stopWatch(backend, event.sessionId);
         // An explicit server-side error is a failed run, not an unobserved one:
         // it mints a 失败 result the later idle frame cannot overwrite.
-        settleRun(backend, event.sessionId, "failed", settleId);
+        settleRun(backend, event.sessionId, "failed", runId, eventId);
         dropSessionInteractions(backend, event.sessionId);
         if (backend === state.activeBackend) {
           // Reload so the optimistic local prompt row disappears if the
@@ -6247,6 +6303,18 @@ async function loadOverviewLedgerFromMain(): Promise<void> {
     // broadcasts that arrived while the snapshot or migration was in flight.
     state.overviewRead = mergeOverviewLedgerLocal(ledger, state.overviewRead);
     state.overviewUnknown = { ...snapshot.unknown, ...state.overviewUnknown };
+    const observedAt = { ...(snapshot.observedAt ?? {}) };
+    for (const [key, updatedAt] of Object.entries(state.overviewObservedAt)) {
+      observedAt[key] = Math.max(observedAt[key] ?? 0, updatedAt);
+    }
+    state.overviewObservedAt = observedAt;
+    const scannedAt = { ...(snapshot.scannedAt ?? {}) };
+    for (const [backend, at] of Object.entries(state.overviewScannedAt)) {
+      if (at !== undefined) {
+        scannedAt[backend] = Math.max(scannedAt[backend] ?? 0, at);
+      }
+    }
+    state.overviewScannedAt = scannedAt;
     overviewSequence = snapshot.sequence;
   } catch {
     // No main process (a test boot, a preload that predates the channel): the
@@ -6257,6 +6325,13 @@ async function loadOverviewLedgerFromMain(): Promise<void> {
     const updates = pendingOverviewUpdates.sort((a, b) => a.sequence - b.sequence);
     pendingOverviewUpdates = [];
     for (const update of updates) applyOverviewUpdate(update);
+    if (settings.labs.sessionOverview && state.sessions.length > 0) {
+      void reconcileOverviewSessions(
+        state.activeBackend,
+        overviewPool(state.sessions, state.trash, state.archive),
+        Date.now(),
+      );
+    }
   }
 }
 
@@ -6465,6 +6540,75 @@ let overviewSweepPromise: Promise<void> | null = null;
 /** Re-list an agent at most this often; a warm server makes repeats cheap. */
 const OVERVIEW_SWEEP_MS = 30_000;
 const OVERVIEW_BOOT_SWEEP_DELAY_MS = 3_000;
+/**
+ * Compare updated sessions with the last list snapshot and recover an
+ * assistant reply added while the app was closed. First sight establishes a
+ * baseline, so existing history is never called new.
+ */
+async function reconcileOverviewSessions(
+  backend: BackendId,
+  sessions: readonly SessionSummary[],
+  scanAt: number,
+): Promise<void> {
+  if (!settings.labs.sessionOverview || !overviewSnapshotReady || sessions.length === 0) return;
+  const updates: Array<{ id: string; updatedAt: number }> = [];
+  const priorScanAt = state.overviewScannedAt[backend] ?? 0;
+  for (const session of sessions) {
+    if (!Number.isFinite(session.updatedAt) || session.updatedAt <= 0) continue;
+    const key = overviewKey(backend, session.id);
+    const previous = state.overviewObservedAt[key];
+    const createdOffline =
+      priorScanAt > 0 && previous === undefined && session.createdAt > priorScanAt;
+    if (
+      (previous !== undefined && session.updatedAt > previous) ||
+      (createdOffline && session.updatedAt > session.createdAt)
+    ) {
+      let messages: ChatMessage[];
+      try {
+        messages = await window.awefork.messages(backend, session.id);
+      } catch {
+        continue;
+      }
+      const latestReply = [...messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === "assistant" &&
+            message.finish !== "tool-calls" &&
+            (message.completedAt !== null || message.error !== null),
+        );
+      const completedAt = latestReply?.completedAt ?? latestReply?.createdAt ?? 0;
+      const previousResultAt = state.overviewRead[key]?.settledAt ?? 0;
+      const resultBaseline = previous ?? session.createdAt;
+      let canAdvance = true;
+      if (latestReply && completedAt > resultBaseline && completedAt > previousResultAt) {
+        canAdvance = await recordOverviewOutcome(
+          backend,
+          session.id,
+          latestReply.error ? "failed" : "settled",
+          state.overviewUnknown[key],
+          overviewMessageObservationId(backend, session.id, latestReply.id),
+        );
+      }
+      if (!canAdvance) continue;
+    }
+    updates.push({ id: session.id, updatedAt: session.updatedAt });
+  }
+  if (updates.length === 0) return;
+  try {
+    const persistedScanAt = await window.awefork.overviewObserveSessions(backend, updates, scanAt);
+    for (const { id, updatedAt } of updates) {
+      const key = overviewKey(backend, id);
+      state.overviewObservedAt[key] = Math.max(state.overviewObservedAt[key] ?? 0, updatedAt);
+    }
+    state.overviewScannedAt[backend] = Math.max(
+      state.overviewScannedAt[backend] ?? 0,
+      persistedScanAt,
+    );
+  } catch {
+    // Keep the local baseline unchanged so a later refresh can retry the save.
+  }
+}
 
 /**
  * Refresh the session lists of the agents this window is not showing. Cheap by
@@ -6474,6 +6618,7 @@ const OVERVIEW_BOOT_SWEEP_DELAY_MS = 3_000;
  * one agent; the others keep listing.
  */
 export async function refreshOverviewSessions(force = false): Promise<void> {
+  if (!settings.labs.sessionOverview) return;
   if (overviewSweepPromise) {
     overviewSweepPending = true;
     return overviewSweepPromise.then(() => {
@@ -6487,6 +6632,9 @@ export async function refreshOverviewSessions(force = false): Promise<void> {
   const targets = state.backendList.filter(
     (info) => info.installed && info.id !== state.activeBackend,
   );
+  if (overviewSnapshotReady) {
+    void reconcileOverviewSessions(state.activeBackend, visibleSessions.value, now);
+  }
   const sweep = (async () => {
     await Promise.allSettled(
       targets.map(async (info) => {
@@ -6505,6 +6653,15 @@ export async function refreshOverviewSessions(force = false): Promise<void> {
             window.awefork.trash(info.id),
             window.awefork.archive(info.id),
           ]);
+          await reconcileOverviewSessions(
+            info.id,
+            overviewPool(
+              sessions,
+              trash.map((entry) => entry.id),
+              archive,
+            ),
+            now,
+          );
           state.overviewRemote = {
             ...state.overviewRemote,
             [info.id]: {
@@ -6735,37 +6892,42 @@ function recordOverviewOutcome(
   backend: BackendId,
   sessionId: string,
   reason: SettleReason,
-  observationId?: string,
-): void {
+  runId?: string,
+  settleId?: string,
+): Promise<boolean> {
   const key = overviewKey(backend, sessionId);
   if (reason === "unknown") {
-    setOverviewUnknown(backend, sessionId, true, observationId);
-    return;
+    setOverviewUnknown(backend, sessionId, true, runId);
+    return Promise.resolve(true);
   }
   if (reason === "aborted") {
-    setOverviewUnknown(backend, sessionId, false, observationId);
-    return;
+    setOverviewUnknown(backend, sessionId, false, runId);
+    return Promise.resolve(true);
   }
   const failed = reason === "failed";
   const settledAt = Date.now();
-  const settleId =
-    observationId ?? overviewRunIds.get(streamKey(backend, sessionId)) ?? crypto.randomUUID();
+  const observedRunId = runId ?? overviewRunIds.get(streamKey(backend, sessionId));
+  const observationId = settleId ?? observedRunId ?? crypto.randomUUID();
   const previousLedger = state.overviewRead;
   const nextLedger = recordOverviewSettle(previousLedger, key, {
     settledAt,
     failed,
-    settleId,
+    settleId: observationId,
   });
   state.overviewRead = nextLedger;
   if (nextLedger !== previousLedger) {
-    clearOverviewUnknown(backend, sessionId, settleId);
+    clearOverviewUnknown(backend, sessionId, observedRunId);
   }
-  void window.awefork
-    .overviewRecordSettle(backend, sessionId, failed, settleId)
-    .then((entry) => applyOverviewEntry(key, entry))
+  return window.awefork
+    .overviewRecordSettle(backend, sessionId, failed, observationId, observedRunId)
+    .then((entry) => {
+      applyOverviewEntry(key, entry);
+      return true;
+    })
     .catch(() => {
       // The optimistic fold stays and is spooled for the next shared merge.
       saveLegacyLocalLedger(state.overviewRead);
+      return false;
     });
 }
 
