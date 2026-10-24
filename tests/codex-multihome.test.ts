@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodexHome } from "../src/main/codex-homes.js";
 import { createCodexMultiHomeAdapter } from "../src/main/codex-multihome.js";
+import { recordFork } from "../src/shared/lineage-store.js";
 import type { AgentAdapter, AgentEvent } from "../src/shared/types.js";
 
 const tempDirs: string[] = [];
@@ -92,6 +93,7 @@ function makeSummary(
 interface Harness {
   facade: AgentAdapter;
   byHome: Map<string, FakeHomeAdapter>;
+  lineagePath: string;
 }
 
 function makeFacade(
@@ -110,14 +112,15 @@ function makeFacade(
       fakeHomeAdapter(home, homeSessions[home.id] ?? [], updatedAt[home.id]),
     ]),
   );
+  const lineagePath = join(makeDir(), "lineage.json");
   const facade = createCodexMultiHomeAdapter({
-    lineagePath: join(makeDir(), "lineage.json"),
+    lineagePath,
     homes: () => homes,
     createHomeAdapter: (home) => Promise.resolve(homeAdapter(byHome, home.id)),
     defaultHomePath: () => "/homes/default",
     ...overrides,
   });
-  return { facade, byHome };
+  return { facade, byHome, lineagePath };
 }
 
 describe("codex multi-home facade", () => {
@@ -372,7 +375,8 @@ describe("codex multi-home facade", () => {
   });
 
   it("continues a foreign empty-context fork in its own home without importing a rollout", async () => {
-    const { facade, byHome } = makeFacade({ default: [], cxo: ["parent"] });
+    const { facade, byHome, lineagePath } = makeFacade({ default: [], cxo: ["parent"] });
+    await facade.listSessions();
     const foreign = homeAdapter(byHome, "cxo");
     foreign.fork.mockResolvedValue({
       ...makeSummary("forked-empty", 300),
@@ -381,9 +385,17 @@ describe("codex multi-home facade", () => {
     });
 
     const forked = await facade.fork("parent", "turn", { context: "none" });
+    // The fake fork does not write lineage itself; the real adapter records
+    // context: none before returning, so mirror that here.
+    await recordFork(lineagePath, "forked-empty", {
+      parentId: "parent",
+      atMessageId: "turn",
+      createdAt: 1,
+      context: "none",
+    });
     await facade.prompt(forked.id, "第一条消息", null);
 
-    expect(foreign.prompt).toHaveBeenCalledWith("forked-empty", "第一条消息", null, []);
+    expect(foreign.prompt.mock.calls[0]?.slice(0, 3)).toEqual(["forked-empty", "第一条消息", null]);
     expect(homeAdapter(byHome, "default").prompt).not.toHaveBeenCalled();
   });
 

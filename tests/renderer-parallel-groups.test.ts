@@ -68,7 +68,18 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
   const counts: Record<string, number> = {};
   const key = (backend: BackendId, id: string) => `${backend}:${id}`;
   const promptFailures = new Set<string>();
-  let forkDeferred: ((session: SessionSummary) => void) | null = null;
+  const heldPrompts: Array<() => void> = [];
+  const holdPrompts = (): void => {
+    heldPrompts.length = 0;
+    pendingHold = true;
+  };
+  const releasePrompts = (): void => {
+    const held = [...heldPrompts];
+    heldPrompts.length = 0;
+    pendingHold = false;
+    for (const release of held) release();
+  };
+  let pendingHold = false;
   const abort = vi.fn(async () => {});
   const tagStore: TagStore = {
     sessions: options.tags ? { [ANCHOR.id]: [...options.tags] } : {},
@@ -81,23 +92,15 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     tagStore.sessions[args.id] = args.tags;
     return structuredClone(tagStore);
   });
-  const fork = vi.fn(
-    (_backend: BackendId, _id: string) =>
-      new Promise<SessionSummary>((resolve) => {
-        forkDeferred = resolve;
-      }),
-  );
-  const saveComposer = vi.fn(async () => {});
-  const resolveFork = (): void => {
-    counts.codex = (counts.codex ?? 0) + 1;
-    const id = `fork-${counts.codex}`;
+  const fork = vi.fn(async (backend: BackendId, _id: string) => {
+    counts[backend] = (counts[backend] ?? 0) + 1;
+    const id = `fork-${counts[backend]}`;
     const session = { ...ANCHOR, id, parentSessionId: ANCHOR.id, origin: "fork" as const };
-    required(sessions.codex).push(session);
-    histories.set(key("codex", id), structuredClone(options.inheritedRows ?? []));
-    const resolve = forkDeferred;
-    forkDeferred = null;
-    resolve?.(session);
-  };
+    required(sessions[backend]).push(session);
+    histories.set(key(backend, id), structuredClone(options.inheritedRows ?? []));
+    return session;
+  });
+  const saveComposer = vi.fn(async () => {});
   const prompt = vi.fn(
     async (
       backend: BackendId,
@@ -109,7 +112,18 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
       structuredClone({ backend, id, text, model, attachments });
       if (promptFailures.has(key(backend, id))) throw new Error("provider unavailable");
       const history = histories.get(key(backend, id)) ?? [];
-      histories.set(key(backend, id), [...history, row(`user-${history.length}`, "user", text)]);
+      const land = () =>
+        histories.set(key(backend, id), [...history, row(`user-${history.length}`, "user", text)]);
+      if (pendingHold) {
+        await new Promise<void>((resolve) => {
+          heldPrompts.push(() => {
+            land();
+            resolve();
+          });
+        });
+      } else {
+        land();
+      }
     },
   );
   const api = {
@@ -181,8 +195,9 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     state,
     saveComposer,
     fork,
-    resolveFork,
     prompt,
+    holdPrompts,
+    releasePrompts,
     setSessionTags,
     histories,
     key,
@@ -526,15 +541,58 @@ describe("parallel reading groups", () => {
       height: 100,
     });
     h.state.setDraftText("旧问题");
+    // The fork resolves but the prompt stays in flight: the user keeps typing
+    // while the round is still accepting.
+    h.holdPrompts();
     const sending = h.state.sendDraftParallel(MODELS.slice(0, 2), SETTINGS);
     await vi.advanceTimersByTimeAsync(0);
     h.state.setDraftText("继续编辑的问题");
-    h.resolveFork();
-    h.resolveFork();
+    h.releasePrompts();
     await sending;
 
     expect(h.state.store.draft?.text).toBe("继续编辑的问题");
     expect(h.saveComposer).not.toHaveBeenCalledWith("codex", null);
+  });
+
+  it("does not revive a sent draft that was stashed when the user switched targets", async () => {
+    const h = await bootState();
+    const openTurn = (messageId: string): void => {
+      h.state.openDraft({
+        id: `${ANCHOR.id}:${messageId}`,
+        kind: "turn",
+        sessionId: ANCHOR.id,
+        messageId,
+        title: "一轮",
+        preview: "",
+        toolNames: [],
+        modelIds: [],
+        model: null,
+        createdAt: 1,
+        durationMs: null,
+        outputTokens: 0,
+        error: null,
+        col: 0,
+        row: 0,
+        x: 0,
+        y: 0,
+        height: 100,
+      });
+    };
+    openTurn("m1");
+    h.state.setDraftText("A 的问题");
+    h.holdPrompts();
+    const sending = h.state.sendDraftParallel(MODELS.slice(0, 2), SETTINGS);
+    await vi.advanceTimersByTimeAsync(0);
+    // While the round is accepting, the user moves to another turn: A parks.
+    openTurn("m2");
+    h.state.setDraftText("B 的问题");
+    h.releasePrompts();
+    await sending;
+
+    // The draft now visible is B, untouched by A's send.
+    expect(h.state.store.draft?.text).toBe("B 的问题");
+    // A's exact snapshot was spent with the round — it must not come back.
+    expect(h.state.store.stashedDrafts[`${ANCHOR.id}:m1`]).toBeUndefined();
   });
 
   it("forks a ✂ draft's round with no ancestor history", async () => {

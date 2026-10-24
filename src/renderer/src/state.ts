@@ -3681,6 +3681,23 @@ function unstashDraft(sessionId: string, atMessageId: string | null): void {
   delete state.stashedDrafts[draftKeyOf(sessionId, atMessageId)];
 }
 
+/**
+ * Drop a parked draft only if it is still the exact draft that was sent.
+ * A parked copy the user edited after switching targets must survive an
+ * unrelated send of the same target's earlier text.
+ */
+function unstashDraftIfMatch(
+  sessionId: string,
+  atMessageId: string | null,
+  sent: PersistedDraft,
+): void {
+  const key = draftKeyOf(sessionId, atMessageId);
+  const parked = plainStashedDrafts()[key];
+  if (parked !== undefined && JSON.stringify(parked) === JSON.stringify(sent)) {
+    delete state.stashedDrafts[key];
+  }
+}
+
 export function openDraft(node: TurnNode): void {
   const atMessageId = isSessionTip(node) ? null : node.messageId;
   const key = draftKeyOf(node.sessionId, atMessageId);
@@ -4690,12 +4707,19 @@ export async function sendDraftParallel(
         // The round is out and the user did not touch the draft: drop it,
         // take its parked copy with it, and clear the sidecar.
         state.draft = null;
-        unstashDraft(draft.sessionId, draft.atMessageId);
+        unstashDraftIfMatch(draft.sessionId, draft.atMessageId, sentDraft ?? currentDraft);
         void flushComposer(backend);
       } else if (currentDraft === null) {
         // The draft was closed while the round was accepted. Clear only the
         // sent snapshot from the sidecar; a newer draft must survive.
         void clearComposerDraft(backend, sentDraft ?? undefined).catch(() => {});
+      } else if (sentDraft !== null) {
+        // The user switched to another target while the round was accepting:
+        // the sent draft was parked, and only that exact snapshot is spent.
+        // A newer stash of the same target (re-opened and re-edited) must
+        // survive, so the parked copy is compared, not blindly deleted.
+        unstashDraftIfMatch(draft.sessionId, draft.atMessageId, sentDraft);
+        void clearComposerDraft(backend, sentDraft).catch(() => {});
       }
     } else {
       // The run belongs to the parked backend; clear its saved draft without

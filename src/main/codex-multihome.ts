@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { readLineage } from "../shared/lineage-store.js";
 import { createCodexAdapter } from "../shared/codex-adapter.js";
+import { readLineage } from "../shared/lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
