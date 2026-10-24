@@ -243,13 +243,29 @@ describe("preview", () => {
     };
     (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
     const mod = await import("../src/renderer/src/files");
-    mod.parkFileTab();
+    // Land the tab on the files' own directory first: previewEntry on a
+    // parked tab browses the parent as a preparation, and that listing
+    // would otherwise interleave with the race under test.
+    await mod.browseTo("/root");
 
+    // The first read must be in flight before the second starts: a request
+    // begun while an earlier one is still pending is the exact race, and
+    // starting both in the same tick would let the second retire the first
+    // before its read is even issued.
     const first = mod.previewEntry(entry("first.md"));
+    let spins = 0;
+    while (gates.length < 1 && spins < 500) {
+      await Promise.resolve();
+      spins += 1;
+    }
+    expect(gates).toHaveLength(1);
     const second = mod.previewEntry(entry("second.md"));
-    // Let both requests reach their gated read before answering.
-    await Promise.resolve();
-    await Promise.resolve();
+    spins = 0;
+    while (gates.length < 2 && spins < 500) {
+      await Promise.resolve();
+      spins += 1;
+    }
+    expect(gates).toHaveLength(2);
     // The second preview answers first; the first one answers late and must
     // not overwrite it.
     gates[1]?.();
@@ -265,6 +281,102 @@ describe("preview", () => {
     await h.mod.previewEntry(entry("blob.bin"));
     expect(active(h.mod).preview?.status).toBe("error");
     expect(active(h.mod).preview?.error?.code).toBe("binary");
+  });
+
+  it("creates a tab for a dock click that arrives before the view mounted", async () => {
+    vi.resetModules();
+    const api = {
+      listDir: vi.fn(async (dir: string) => listing(dir, [])),
+      statFile: async () => ({ ok: true, value: {} }),
+      readTextPreview: async (target: string) => ({
+        ok: true as const,
+        value: { path: target, text: `text of ${target}`, truncated: false, bytes: 4 },
+      }),
+      readImagePreview: async () => ({ ok: false as const, error: { code: "unsupported" } }),
+      searchFiles: async () => ({ ok: true as const, value: [] }),
+      homePath: async () => "/home/demo",
+      relativeToRoot: async () => ({ ok: true as const, value: "x" }),
+    };
+    (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
+    const mod = await import("../src/renderer/src/files");
+    // No parkFileTab: this is the cold dock click — tabs is still empty and
+    // the browser view has not mounted yet.
+    expect(mod.files.tabs).toHaveLength(0);
+
+    await mod.previewEntry({ ...entry("readme.md"), path: "/proj/docs/readme.md" });
+
+    // The click was not dropped: a tab exists, parked on the file's parent,
+    // with the file selected and previewed.
+    expect(mod.files.tabs).toHaveLength(1);
+    const tab = mod.files.tabs[0];
+    expect(tab.browsing).toBe("/proj/docs");
+    expect(tab.selectedPath).toBe("/proj/docs/readme.md");
+    expect(tab.preview?.status).toBe("text");
+    expect(mod.files.activeTabId).toBe(tab.id);
+  });
+
+  it("a reveal in flight keeps its preview on the tab it started in", async () => {
+    vi.resetModules();
+    const listGates: Array<() => void> = [];
+    const api = {
+      listDir: vi.fn(
+        (dir: string) =>
+          new Promise((resolve) => {
+            listGates.push(() => resolve(listing(dir, [])));
+          }),
+      ),
+      statFile: async () => ({ ok: true as const, value: {} }),
+      readTextPreview: async (target: string) => ({
+        ok: true as const,
+        value: { path: target, text: `text of ${target}`, truncated: false, bytes: 4 },
+      }),
+      readImagePreview: async () => ({ ok: false as const, error: { code: "unsupported" } }),
+      searchFiles: async () => ({ ok: true as const, value: [] }),
+      homePath: async () => "/home/demo",
+      relativeToRoot: async () => ({ ok: true as const, value: "x" }),
+    };
+    (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
+    const mod = await import("../src/renderer/src/files");
+    // Two tabs, each parked then landed. parkFileTab is synchronous, so the
+    // listing gate for each browse is the only thing in flight — no
+    // initFiles await to race against the gate bookkeeping.
+    const idA = mod.parkFileTab();
+    const landingA = mod.browseTo("/a");
+    expect(listGates).toHaveLength(1);
+    listGates.shift()?.();
+    await landingA;
+    const idB = mod.parkFileTab();
+    const landingB = mod.browseTo("/b");
+    expect(listGates).toHaveLength(1);
+    listGates.shift()?.();
+    await landingB;
+    const tabA = mod.files.tabs.find((tab) => tab.id === idA);
+    const tabB = mod.files.tabs.find((tab) => tab.id === idB);
+    if (!tabA || !tabB) throw new Error("fixture tabs missing");
+    expect(mod.files.activeTabId).toBe(tabB.id);
+
+    // A quick-open hit is clicked while /a is active; the listing read for
+    // /a/docs is still in flight when the user switches to /b.
+    await mod.activateFileTab(tabA.id);
+    const reveal = mod.revealEntry({ ...entry("readme.md"), path: "/a/docs/readme.md" });
+    let spins = 0;
+    while (listGates.length < 1 && spins < 500) {
+      await Promise.resolve();
+      spins += 1;
+    }
+    expect(listGates).toHaveLength(1);
+    await mod.activateFileTab(tabB.id);
+    listGates.shift()?.();
+    await reveal;
+
+    // The preview belongs to /a — the tab the click was made in. Switching
+    // mid-flight must not push A's file into B's pane.
+    expect(tabA.browsing).toBe("/a/docs");
+    expect(tabA.selectedPath).toBe("/a/docs/readme.md");
+    expect(tabA.preview?.path).toBe("/a/docs/readme.md");
+    expect(tabB.preview).toBeNull();
+    expect(tabB.selectedPath).toBeNull();
+    expect(tabB.browsing).toBe("/b");
   });
 
   it("surfaces an oversized image as too-large instead of falling through to binary", async () => {
@@ -301,11 +413,19 @@ describe("preview", () => {
     };
     (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
     const mod = await import("../src/renderer/src/files");
-    mod.parkFileTab();
+    // Land first, so the preview read under test is not preceded by the
+    // parked tab's parent-listing navigation.
+    await mod.browseTo("/root");
 
     const first = mod.previewEntry(entry("first.md"));
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait for the read to hang on the gate (see the sibling race test for
+    // why this polls instead of counting microtasks).
+    let spins = 0;
+    while (gates.length < 1 && spins < 500) {
+      await Promise.resolve();
+      spins += 1;
+    }
+    expect(gates).toHaveLength(1);
     // Navigating away retires the read; its late answer must not reappear
     // as the preview of a directory that no longer lists the file.
     await mod.browseTo("/somewhere/else");
@@ -633,11 +753,18 @@ describe("tabs", () => {
     };
     (globalThis as unknown as { window: { awefork: unknown } }).window = { awefork: api };
     const mod = await import("../src/renderer/src/files");
-    mod.parkFileTab();
+    // Land first, so the read under test is not preceded by the parked tab's
+    // parent-listing navigation.
+    await mod.browseTo("/root");
 
     const first = mod.previewEntry(entry("first.md"));
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait for the read to hang on the gate (see the sibling race test).
+    let spins = 0;
+    while (gates.length < 1 && spins < 500) {
+      await Promise.resolve();
+      spins += 1;
+    }
+    expect(gates).toHaveLength(1);
     await mod.closeFileTab(mod.files.tabs[0].id);
     gates[0]?.();
     await first;
@@ -654,6 +781,32 @@ describe("tabs", () => {
     await h.mod.openFileTab("/two/src");
     const labels = h.files.tabs.map((entry) => h.mod.fileTabLabel(entry));
     expect(labels).toEqual(["one/src", "two/src"]);
+  });
+
+  it("clamps the split width so the listing keeps a floor", async () => {
+    const h = await bootFiles();
+    await h.mod.browseTo("/a");
+    // A 660px body: the hard 640 cap would leave the listing 14px wide, so
+    // the available space wins and the floor is honoured.
+    h.mod.setPreviewWidth(640, 660);
+    expect(active(h.mod).previewWidth).toBe(660 - 240);
+    // A wide body still caps at 640.
+    h.mod.setPreviewWidth(900, 1400);
+    expect(active(h.mod).previewWidth).toBe(640);
+    // The floor holds at the bottom too.
+    h.mod.setPreviewWidth(10, 1400);
+    expect(active(h.mod).previewWidth).toBe(220);
+  });
+
+  it("keeps the listing scroll per tab", async () => {
+    const h = await bootFiles();
+    await h.mod.browseTo("/a");
+    h.mod.setListingScroll(1234);
+    expect(active(h.mod).scrollTop).toBe(1234);
+    await h.mod.openFileTab("/b");
+    // The new tab starts unscrolled; A's offset is untouched.
+    expect(active(h.mod).scrollTop).toBe(0);
+    expect(h.files.tabs[0].scrollTop).toBe(1234);
   });
 });
 
