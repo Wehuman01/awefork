@@ -30,6 +30,9 @@
       <button v-else type="button" class="file-menu-item" role="menuitem" @click="act(preview)">{{
         t("files.menuPreview")
       }}</button>
+      <button type="button" class="file-menu-item" role="menuitem" @click="act(openSystem)">{{
+        t("files.menuOpenSystem")
+      }}</button>
       <button type="button" class="file-menu-item" role="menuitem" @click="act(reveal)">{{
         t("files.menuReveal")
       }}</button>
@@ -253,6 +256,18 @@ function preview(): void {
   if (!entry || entry.isDir) return;
   openFilesView();
   void previewEntry(entry);
+}
+
+/**
+ * The system's own way to open the entry — the default app for a file, the
+ * Finder for a directory. The double-click now stays in-app, so this is the
+ * deliberate "hand it to the OS" path.
+ */
+async function openSystem(): Promise<void> {
+  const entry = fileMenu.entry;
+  if (!entry) return;
+  const result = await window.awefork.openPath(entry.path).catch(() => null);
+  if (result && !result.ok) flashNotice(t("files.openFailed"));
 }
 
 function openInNewTab(): void {

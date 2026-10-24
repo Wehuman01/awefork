@@ -243,8 +243,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "settings.openOnDouble": { zh: "双击文件", en: "Double-click a file" },
   "settings.openOnDoubleDesc": {
-    zh: "交给系统默认应用打开，或在应用内预览。",
-    en: "Hand it to the system default app, or preview inside the app.",
+    zh: "默认在应用内预览；也可以交给系统默认应用打开（右键始终有这一项）。",
+    en: "Previews inside the app by default; hand it to the system default app instead (the right-click always offers that).",
   },
   "settings.openSystem": { zh: "系统打开", en: "System app" },
   "settings.openPreview": { zh: "应用内预览", en: "In-app preview" },

@@ -126,7 +126,9 @@ export const DEFAULT_SETTINGS: Settings = {
     view: "list",
     previewCapKb: 512,
     imageCapMb: 8,
-    openOnDouble: "system",
+    // A double-click stays inside the app: the in-app preview. The system
+    // app is one right-click away (and the setting still switches it back).
+    openOnDouble: "preview",
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },

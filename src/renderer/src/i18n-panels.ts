@@ -647,6 +647,7 @@ Fix item 1 first: register the middleware once on the route group; one line clos
   "files.toggleTree": { zh: "展开 / 收起", en: "Expand / collapse" },
   "files.menuOpenFolder": { zh: "打开文件夹", en: "Open folder" },
   "files.menuPreview": { zh: "快速预览", en: "Quick preview" },
+  "files.menuOpenSystem": { zh: "用默认应用打开", en: "Open with the default app" },
   "files.menuReveal": { zh: "在文件列表中定位", en: "Reveal in file list" },
   "files.menuCopyAbsolute": { zh: "复制绝对路径", en: "Copy absolute path" },
   "files.menuCopyRelative": { zh: "复制项目相对路径", en: "Copy project-relative path" },
