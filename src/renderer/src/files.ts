@@ -107,6 +107,23 @@ function activeTab(): FileTab | null {
 }
 
 /**
+ * The tab an entry jump binds to. A dock click or a context-menu preview can
+ * arrive before the browser view has mounted and called ensureBrowsing, so a
+ * missing tab is created rather than dropping the click. Callers bind once
+ * here and never re-read the active tab after an await — a jump made in one
+ * tab must not land its preview on whichever tab is active when the read
+ * returns.
+ */
+function requireTab(): FileTab {
+  const existing = activeTab();
+  if (existing) return existing;
+  const tab = makeTab(null);
+  files.tabs.push(tab);
+  files.activeTabId = tab.id;
+  return tab;
+}
+
+/**
  * The active tab's browsing directory and selection, for the surfaces that
  * only need to know where the browser is (the sidebar tree's active row,
  * the dock's selected row). Null until a tab holds a position.
@@ -145,6 +162,9 @@ function makeTab(dir: string | null): FileTab {
 
 const DEFAULT_PREVIEW_WIDTH = 340;
 
+/** The listing always keeps this much room; the preview clamps to the rest. */
+export const MIN_LISTING_WIDTH = 240;
+
 export function flashNotice(message: string): void {
   files.notice = message;
   if (noticeTimer) clearTimeout(noticeTimer);
@@ -177,6 +197,10 @@ export async function ensureBrowsing(root: string | null): Promise<void> {
   }
   const tab = activeTab();
   if (!tab || tab.browsing !== null) return;
+  // A dock or context-menu preview claims the parked tab before this view
+  // even mounts; landing on the project root now would list a different
+  // directory and drop the selection the jump just made.
+  if (tab.selectedPath !== null) return;
   await browseTabTo(tab, root ?? files.homePath ?? "/");
 }
 
@@ -264,10 +288,21 @@ export function fileTabLabel(tab: FileTab): string {
   return parent === null ? name : `${displayName(parent)}/${name}`;
 }
 
-export function setPreviewWidth(width: number): void {
+/**
+ * Set the split width, clamped against the space the preview may take: the
+ * listing keeps a floor (240px incl. the splitter) so a wide preview can
+ * never squeeze the file names into slivers, and the hard 220..640 range
+ * still applies. The caller passes the measured body width when it has one;
+ * without it only the hard range applies.
+ */
+export function setPreviewWidth(width: number, bodyWidth?: number): void {
   const tab = activeTab();
   if (!tab) return;
-  tab.previewWidth = Math.min(640, Math.max(220, width));
+  let max = 640;
+  if (bodyWidth !== undefined) {
+    max = Math.min(max, Math.max(220, bodyWidth - MIN_LISTING_WIDTH));
+  }
+  tab.previewWidth = Math.min(max, Math.max(220, width));
 }
 
 export function setListingScroll(top: number): void {
@@ -275,11 +310,13 @@ export function setListingScroll(top: number): void {
   if (tab) tab.scrollTop = top;
 }
 
-async function load(tab: FileTab, dir: string): Promise<void> {
+async function load(tab: FileTab, dir: string, forPreview = false): Promise<void> {
   // Any preview in flight belongs to the directory being left; a listing is
   // a navigation, so the read is retired before the new rows arrive and a
-  // late answer cannot describe a file this listing no longer shows.
-  tab.previewSeq += 1;
+  // late answer cannot describe a file this listing no longer shows. A
+  // navigation that is itself landing the preview's parent directory is the
+  // exception: retiring here would kill the preview being prepared.
+  if (!forPreview) tab.previewSeq += 1;
   const seq = ++tab.listSeq;
   tab.loading = true;
   tab.error = null;
@@ -310,8 +347,14 @@ async function load(tab: FileTab, dir: string): Promise<void> {
   tab.entries = result.value.entries;
   tab.capped = result.value.capped;
   // A selection that no longer exists in the listed directory is dropped,
-  // so the preview never describes a row the user cannot see.
-  if (tab.selectedPath && !result.value.entries.some((e) => e.path === tab.selectedPath)) {
+  // so the preview never describes a row the user cannot see. A landing
+  // made for a preview keeps its selection: the read is still in flight and
+  // the file may legitimately miss the listing's first snapshot.
+  if (
+    !forPreview &&
+    tab.selectedPath &&
+    !result.value.entries.some((e) => e.path === tab.selectedPath)
+  ) {
     tab.selectedPath = null;
     tab.preview = null;
   }
@@ -324,9 +367,16 @@ export async function browseTo(dir: string): Promise<void> {
   await browseTabTo(tab, dir);
 }
 
-async function browseTabTo(tab: FileTab, dir: string): Promise<void> {
+/**
+ * Navigate a tab to a directory, recording history unless this is a redraw.
+ * `forPreview` marks the navigation as a *preparation* for a preview about
+ * to be made (a dock jump landing on the file's parent): the listing that
+ * arrives will describe the previewed file, so the in-flight read must not
+ * be retired the way a real navigation retires it.
+ */
+async function browseTabTo(tab: FileTab, dir: string, forPreview = false): Promise<void> {
   if (tab.browsing !== null && samePath(dir, tab.browsing)) {
-    await load(tab, tab.browsing);
+    await load(tab, tab.browsing, forPreview);
     return;
   }
   if (tab.browsing !== null) {
@@ -334,7 +384,7 @@ async function browseTabTo(tab: FileTab, dir: string): Promise<void> {
     // A fresh navigation invalidates the forward stack, like any browser.
     tab.forward = [];
   }
-  await load(tab, dir);
+  await load(tab, dir, forPreview);
 }
 
 export async function goBack(): Promise<void> {
@@ -382,8 +432,7 @@ export function entryFromPath(target: string): FileEntry {
  * keeps a failed file jump out of the navigation history.
  */
 export async function goToPath(input: string): Promise<void> {
-  const tab = activeTab();
-  if (!tab) return;
+  const tab = requireTab();
   let target = input.trim();
   if (target === "") return;
   if (target === "~") target = files.homePath ?? target;
@@ -398,7 +447,7 @@ export async function goToPath(input: string): Promise<void> {
   if (stat?.ok && stat.value.exists && !stat.value.isDir) {
     const parent = parentOf(target);
     if (parent !== null) await browseTabTo(tab, parent);
-    await previewEntry(entryFromPath(target));
+    await previewOnTab(tab, entryFromPath(target));
     return;
   }
   await browseTabTo(tab, target);
@@ -423,12 +472,11 @@ export function selectEntry(entry: FileEntry): void {
  * already moved past — that is the same staleness rule as previewEntry's.
  */
 export function selectOrPreviewEntry(entry: FileEntry): void {
-  const tab = activeTab();
-  if (!tab) return;
+  const tab = requireTab();
   tab.selectedPath = entry.path;
   if (entry.isDir) return;
   if (settings.files.openOnDouble === "system") return;
-  void previewEntry(entry);
+  void previewOnTab(tab, entry);
 }
 
 /** Drop the current preview without touching the selection. */
@@ -497,7 +545,7 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     // instead of leaving the user on an error.
     if (tab.error?.code === "not-a-directory") {
       tab.error = null;
-      await previewEntry(entry);
+      await previewOnTab(tab, entry);
     }
     return;
   }
@@ -511,13 +559,32 @@ export async function openEntry(entry: FileEntry): Promise<void> {
       return;
     }
   }
-  await previewEntry(entry);
+  await previewOnTab(tab, entry);
 }
 
-/** Preview a file; responses that lost the race are dropped. */
+/**
+ * Preview a file; responses that lost the race are dropped. The tab is
+ * bound once: a preview requested in one tab is never re-read against
+ * whichever tab happens to be active when a slow IPC answer arrives.
+ */
 export async function previewEntry(entry: FileEntry): Promise<void> {
-  const tab = activeTab();
-  if (!tab) return;
+  const tab = requireTab();
+  // Claim the selection before any await: a dock or menu jump on a parked
+  // tab would otherwise let the view's first-landing watch (ensureBrowsing)
+  // list the project root while the parent listing is still in flight.
+  tab.selectedPath = entry.path;
+  // A jump from a surface outside the browser (dock click, context menu) can
+  // reach a tab that has never listed a directory. Land on the file's parent
+  // first so the listing underneath describes what the preview shows.
+  if (tab.browsing === null) {
+    const parent = parentOf(entry.path);
+    if (parent !== null) await browseTabTo(tab, parent, true);
+  }
+  await previewOnTab(tab, entry);
+}
+
+/** Preview on the bound tab — never re-reads the active tab. */
+async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
   const seq = ++tab.previewSeq;
   tab.selectedPath = entry.path;
   tab.preview = { path: entry.path, status: "loading" };
@@ -567,17 +634,18 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
 
 /**
  * Locate an entry from elsewhere (quick open, "reveal"): enter its parent
- * directory, select it, and preview it when it is a file.
+ * directory, select it, and preview it when it is a file. The tab is bound
+ * once at entry: if the user switches tabs while the listing is in flight,
+ * the selection and preview still land on the tab the click belonged to.
  */
 export async function revealEntry(entry: FileEntry): Promise<void> {
-  const tab = activeTab();
-  if (!tab) return;
+  const tab = requireTab();
   const parent = parentOf(entry.path);
   if (parent !== null && !samePath(parent, tab.browsing ?? "")) {
     await browseTabTo(tab, parent);
   }
   tab.selectedPath = entry.path;
-  if (!entry.isDir) await previewEntry(entry);
+  if (!entry.isDir) await previewOnTab(tab, entry);
 }
 
 /** Quick search inside one project root (never the browsing directory). */
