@@ -4229,14 +4229,22 @@ async function flushComposer(backend: BackendId): Promise<void> {
  * the whole file and take the backend's favorites, recents and remembered
  * project with it.
  */
-async function clearComposerDraft(backend: BackendId): Promise<void> {
+async function clearComposerDraft(
+  backend: BackendId,
+  expectedDraft?: PersistedDraft,
+): Promise<void> {
   let current: PersistedComposer | null = null;
   try {
     current = await window.awefork.composer(backend);
   } catch {
     return;
   }
-  if (!current?.draft) return;
+  if (
+    !current?.draft ||
+    (expectedDraft && JSON.stringify(current.draft) !== JSON.stringify(expectedDraft))
+  ) {
+    return;
+  }
   try {
     await window.awefork.saveComposer(backend, { ...current, draft: null });
   } catch {
@@ -4380,13 +4388,31 @@ let modelsRequested = false;
 
 async function ensureModels(): Promise<void> {
   if (modelsRequested) return;
+  const backend = state.activeBackend;
   modelsRequested = true;
   try {
-    state.models = await window.awefork.models(state.activeBackend);
+    const models = await window.awefork.models(backend);
+    if (state.activeBackend === backend) {
+      state.models = models;
+      return;
+    }
+    // This backend may be parked while its catalogue request was in flight.
+    // Finish its own snapshot without painting into the visible workspace.
+    const snapshot = workspaceCache.get(backend);
+    if (snapshot) {
+      snapshot.models = models;
+      snapshot.modelsRequested = true;
+    }
   } catch (error) {
-    // Allow a later draft to retry — the catalog may load once the agent settles.
-    modelsRequested = false;
-    state.actionError = error instanceof Error ? error.message : String(error);
+    if (state.activeBackend === backend) {
+      // Allow a later draft to retry — the catalog may load once the agent settles.
+      modelsRequested = false;
+      state.actionError = error instanceof Error ? error.message : String(error);
+    } else {
+      // A failed parked request must be retryable when its workspace returns.
+      const snapshot = workspaceCache.get(backend);
+      if (snapshot) snapshot.modelsRequested = false;
+    }
   }
 }
 
@@ -4639,6 +4665,8 @@ export async function sendDraftParallel(
   const draft = state.draft;
   if (!draft?.text.trim() || state.draftSending) return false;
   const backend = state.activeBackend;
+  const generation = workspaceGeneration;
+  const sentDraft = plainPersistedDraft();
   state.draftSending = true;
   try {
     const accepted = await startParallelRound(
@@ -4653,11 +4681,31 @@ export async function sendDraftParallel(
       summary,
     );
     if (!accepted) return false;
-    // The round is out, so the draft is spent — same ending as a single
-    // send: drop it, take its parked copy with it, and clear the sidecar.
-    state.draft = null;
-    unstashDraft(draft.sessionId, draft.atMessageId);
-    void flushComposer(backend);
+    if (generation === workspaceGeneration && backend === state.activeBackend) {
+      // The round is out, so the draft is spent — same ending as a single
+      // send: drop it, take its parked copy with it, and clear the sidecar.
+      state.draft = null;
+      unstashDraft(draft.sessionId, draft.atMessageId);
+      void flushComposer(backend);
+    } else if (backend === state.activeBackend) {
+      const currentDraft = plainPersistedDraft();
+      if (
+        !currentDraft ||
+        (sentDraft && JSON.stringify(currentDraft) === JSON.stringify(sentDraft))
+      ) {
+        if (currentDraft) {
+          state.draft = null;
+          unstashDraft(draft.sessionId, draft.atMessageId);
+          void flushComposer(backend);
+        } else {
+          void clearComposerDraft(backend, sentDraft ?? undefined).catch(() => {});
+        }
+      }
+    } else {
+      // The run belongs to the parked backend; clear its saved draft without
+      // touching the draft now visible in the new workspace.
+      void clearComposerDraft(backend, sentDraft ?? undefined).catch(() => {});
+    }
     return true;
   } finally {
     state.draftSending = false;
