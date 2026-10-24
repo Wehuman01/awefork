@@ -165,11 +165,18 @@ try {
   // 0. The file browser is a labs experiment, off by default, and its main
   //    column and sidebar tabs only exist behind that gate. Seed the switch
   //    on and reload once so every section below runs against the same app
-  //    a user who flipped it would have.
-  await cdp.evaluate(
-    `localStorage.setItem("awefork:settings", ${JSON.stringify(
-      JSON.stringify({ labs: { fileBrowser: true } }),
-    )})`,
+  //    a user who flipped it would have. The seed retries because the CDP
+  //    target can surface while the window is still its pre-navigation
+  //    document, where localStorage is denied.
+  await retry(
+    () =>
+      cdp.evaluate(
+        `localStorage.setItem("awefork:settings", ${JSON.stringify(
+          JSON.stringify({ labs: { fileBrowser: true } }),
+        )})`,
+      ),
+    30_000,
+    "seed the labs switch",
   );
   await cdp.evaluate(`location.reload()`);
 
