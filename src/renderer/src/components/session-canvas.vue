@@ -357,14 +357,40 @@
             @select="setDraftVariant"
           />
           <button
+            v-if="canDraftParallel"
+            type="button"
+            class="draft-parallel"
+            :class="{ on: draftParallel }"
+            :title="t('input.parallelMode')"
+            :aria-pressed="draftParallel"
+            @click="toggleDraftParallel"
+          >⇄</button>
+          <button
+            v-if="draftParallel"
+            type="button"
+            class="draft-parallel-pick"
+            @click="draftModelDialogOpen = true"
+          >{{ draftParallelTargets.length }} · {{ t("input.parallelAddModel") }}</button>
+          <button
             type="button"
             class="send-btn"
-            :disabled="!store.draft?.text.trim() || store.draftSending"
+            :disabled="!store.draft?.text.trim() || store.draftSending || (draftParallel && draftParallelTargets.length < 2)"
+            :title="draftParallel && draftParallelTargets.length < 2 ? t('input.parallelNeedTwo') : undefined"
             @click="submitDraft"
           >{{ store.draftSending ? "…" : "➤" }}</button>
           <span class="hint">{{ t("canvas.draftHint") }}</span>
         </div>
       </article>
+      <ParallelModelDialog
+        v-model:open="draftModelDialogOpen"
+        :models="store.models"
+        :favorite-models="store.favoriteModels"
+        :recent-models="store.recentModels"
+        :max="MAX_PARALLEL_TARGETS"
+        :targets="draftParallelTargets"
+        @update:targets="draftParallelTargets = $event"
+        @toggle-favorite="toggleFavoriteModel"
+      />
     </div>
 
     <div v-if="graph.nodes.length === 0 && store.connectionError" class="canvas-empty">
@@ -455,18 +481,20 @@ import { fileKind } from "../../../shared/attachment-kinds";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { COL_GAP, draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
+import type { ModelChoice } from "../../../shared/types";
 import { type DraftAttachment, readAttachments } from "../attachments";
 import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import { joinPaths } from "../path-insert";
-import { settings } from "../settings";
+import { MAX_PARALLEL_TARGETS, settings } from "../settings";
 import {
   activeChain,
   cancelComparePick,
   cardHeights,
   childTurnIds,
   comparePlan,
+  defaultParallelTargets,
   deleteSession,
   deleteTurn,
   dismissDraft,
@@ -483,6 +511,7 @@ import {
   retryNode,
   selectTurn,
   sendDraft,
+  sendDraftParallel,
   setActiveCanvasTabView,
   setDraftAttachments,
   setDraftContextMode,
@@ -500,6 +529,7 @@ import {
 import BranchDigest from "./branch-digest.vue";
 import MarksPanel from "./marks-panel.vue";
 import ModelPicker from "./model-picker.vue";
+import ParallelModelDialog from "./parallel-model-dialog.vue";
 import StorySearch from "./story-search.vue";
 import VariantPicker from "./variant-picker.vue";
 
@@ -613,9 +643,7 @@ const parallelSummaryViews = computed<ParallelSummaryLinks[]>(() => {
         version: version.version,
         sources,
         trunkPath: ys.length > 1 ? `M ${busX} ${Math.min(...ys)} V ${Math.max(...ys)}` : "",
-        summaryPath: sources.length
-          ? `M ${busX} ${summaryY} H ${summaryNode.x + NODE_WIDTH}`
-          : "",
+        summaryPath: sources.length ? `M ${busX} ${summaryY} H ${summaryNode.x + NODE_WIDTH}` : "",
       });
     }
   }
@@ -944,7 +972,47 @@ const pickFromTitle = computed(
 );
 
 function submitDraft(): void {
+  if (draftParallel.value) {
+    void submitDraftParallel();
+    return;
+  }
   void sendDraft();
+}
+
+// ── draft multi-model entry ────────────────────────────────────────
+// The canvas draft sends the same round the pane composer does; only the
+// anchor differs (the draft's own session and fork point).
+
+const draftParallel = ref(false);
+const draftParallelTargets = ref<(ModelChoice | null)[]>([]);
+const draftModelDialogOpen = ref(false);
+const canDraftParallel = computed(() => settings.labs.parallelModels && store.models.length > 0);
+
+function toggleDraftParallel(): void {
+  draftParallel.value = !draftParallel.value;
+  if (!draftParallel.value) return;
+  if (draftParallelTargets.value.length === 0) {
+    draftParallelTargets.value = defaultParallelTargets(store.models);
+  }
+  // Nothing usable from the defaults: open the picker so the round can be
+  // configured before it can be sent.
+  if (draftParallelTargets.value.length < 2) draftModelDialogOpen.value = true;
+}
+
+async function submitDraftParallel(): Promise<void> {
+  if (store.draftSending) return;
+  if (draftParallelTargets.value.length < 2) {
+    flashNotice(t("input.parallelNeedTwo"));
+    return;
+  }
+  const accepted = await sendDraftParallel(draftParallelTargets.value, {
+    model: settings.labs.parallel.summaryModel ? { ...settings.labs.parallel.summaryModel } : null,
+    length: settings.labs.parallel.summaryLength,
+  });
+  if (!accepted) return;
+  // state.ts already spent the draft; only the local round state is ours.
+  draftParallel.value = false;
+  draftParallelTargets.value = [];
 }
 
 /** Esc closes the draft — except while an IME composition owns the key. */
