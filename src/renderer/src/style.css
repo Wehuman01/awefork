@@ -2870,6 +2870,18 @@ html[data-density="compact"] .ft-row {
   min-width: 0;
 }
 
+/* parallel mode: the target names take the picker's place. A long list
+   ellipsizes (full list in the title) instead of pushing the controls
+   onto a second row. */
+.draft-foot .draft-parallel-models {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-soft);
+}
+
 /* the draft's multi-model switch and its target-count entry */
 .draft-parallel,
 .draft-parallel-pick {

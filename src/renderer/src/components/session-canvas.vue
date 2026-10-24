@@ -354,21 +354,28 @@
           @paste="onDraftPaste"
         ></textarea>
         <div class="draft-foot">
-          <ModelPicker
-            class="draft-model"
-            :model-value="store.draft?.model ?? null"
-            :models="store.models"
-            :favorite-models="store.favoriteModels"
-            :recent-models="store.recentModels"
-            :title="t('canvas.branchModelTitle')"
-            @update:model-value="setDraftModel"
-            @toggle-favorite="toggleFavoriteModel"
-          />
-          <VariantPicker
-            :model="store.draft?.model ?? null"
-            :models="store.models"
-            @select="setDraftVariant"
-          />
+          <template v-if="!draftParallel">
+            <ModelPicker
+              class="draft-model"
+              :model-value="store.draft?.model ?? null"
+              :models="store.models"
+              :favorite-models="store.favoriteModels"
+              :recent-models="store.recentModels"
+              :title="t('canvas.branchModelTitle')"
+              @update:model-value="setDraftModel"
+              @toggle-favorite="toggleFavoriteModel"
+            />
+            <VariantPicker
+              :model="store.draft?.model ?? null"
+              :models="store.models"
+              @select="setDraftVariant"
+            />
+          </template>
+          <span
+            v-else
+            class="draft-parallel-models"
+            :title="draftParallelLabels.join(' · ')"
+          >{{ draftParallelLabels.join(" · ") }}</span>
           <button
             v-if="canDraftParallel"
             type="button"
@@ -1052,6 +1059,20 @@ const draftParallel = ref(false);
 const draftParallelTargets = ref<(ModelChoice | null)[]>([]);
 const draftModelDialogOpen = ref(false);
 const canDraftParallel = computed(() => settings.labs.parallelModels && store.models.length > 0);
+
+/** The round's target names, shown in place of the single-model picker. */
+const draftParallelLabels = computed(() =>
+  draftParallelTargets.value.map((choice) => parallelTargetLabel(choice)),
+);
+
+/** One target's display name; null means the agent's own default model. */
+function parallelTargetLabel(choice: ModelChoice | null): string {
+  if (!choice) return t("input.parallelDefaultModel");
+  const option = store.models.find(
+    (item) => `${item.providerId}:${item.modelId}` === `${choice.providerId}:${choice.modelId}`,
+  );
+  return option?.modelName || option?.modelId || choice.modelId;
+}
 
 function toggleDraftParallel(): void {
   draftParallel.value = !draftParallel.value;
