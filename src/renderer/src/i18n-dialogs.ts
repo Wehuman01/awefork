@@ -20,6 +20,16 @@ export const dict: Record<string, Entry> = {
   "modelpicker.groupRecent": { zh: "最近使用", en: "Recent" },
   "modelpicker.groupAll": { zh: "全部模型", en: "All models" },
 
+  // ── parallel-model-dialog ──────────────────────────────────────────────
+  "paralleldlg.title": { zh: "选择模型", en: "Pick models" },
+  "paralleldlg.count": { zh: "{n} / {max}", en: "{n} / {max}" },
+  "paralleldlg.hint": {
+    zh: "点按添加或移除；先点强度，再点模型，即按该强度加入。",
+    en: "Click to add or remove; pick an effort first to join with it.",
+  },
+  "paralleldlg.maxed": { zh: "最多 {max} 个模型", en: "At most {max} models" },
+  "paralleldlg.summarySection": { zh: "本轮汇总", en: "This round's summary" },
+
   // ── compress-dialog ────────────────────────────────────────────────────
   "compress.ariaLabel": { zh: "压缩会话", en: "Compress session" },
   "compress.kicker": { zh: "🧹 压缩会话", en: "🧹 Compress session" },

@@ -233,6 +233,15 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "input.parallelSummaryLength": { zh: "汇总长度", en: "Summary length" },
   "input.parallelBrief": { zh: "精简", en: "Brief" },
   "input.parallelStandard": { zh: "标准", en: "Standard" },
+  "input.parallelNone": { zh: "不汇总", en: "No summary" },
+  "input.parallelNoneHint": {
+    zh: "本轮不生成汇总，回答仍可并排阅读，之后也能手动汇总。",
+    en: "No summary this round — the answers stay side by side, and you can summarize later.",
+  },
+  "input.parallelPlaceholder": {
+    zh: "同一问题，发送给 {n} 个模型…",
+    en: "One prompt to {n} models…",
+  },
   "input.parallelHint": {
     zh: "回答会各自保存在独立分支，完成后自动汇总。",
     en: "Each answer stays in its own branch. A summary is generated when they finish.",

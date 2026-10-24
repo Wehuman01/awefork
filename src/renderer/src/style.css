@@ -2858,6 +2858,37 @@ html[data-density="compact"] .ft-row {
   min-width: 0;
 }
 
+/* the draft's multi-model switch and its target-count entry */
+.draft-parallel,
+.draft-parallel-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed var(--primary-border);
+  background: var(--card);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-deep);
+}
+
+.draft-parallel.on {
+  border-style: solid;
+  background: var(--primary-soft);
+}
+
+.draft-parallel-pick {
+  border-style: solid;
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+.draft-parallel-pick:hover {
+  border-color: var(--primary-border);
+  color: var(--primary-deep);
+}
+
 .mini-select {
   display: flex;
   align-items: center;
@@ -4591,6 +4622,17 @@ code.md-code {
   gap: 6px;
 }
 
+.parallel-summary-options {
+  flex-wrap: wrap;
+}
+
+.parallel-summary-note {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
 .parallel-panel-head {
   justify-content: space-between;
   color: var(--ink-soft);
@@ -4668,61 +4710,6 @@ code.md-code {
 
 .parallel-add-model:hover {
   background: var(--primary-soft);
-}
-
-.parallel-model-menu {
-  display: flex;
-  flex-direction: column;
-  max-height: 185px;
-  overflow-y: auto;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  box-shadow: var(--shadow-card);
-}
-
-.parallel-model-menu input {
-  width: 100%;
-  margin-bottom: 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--panel);
-  font-size: 11px;
-  outline: none;
-}
-
-.parallel-model-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 7px;
-  text-align: left;
-  font-size: 10px;
-}
-
-.parallel-model-menu button:hover {
-  background: var(--row-hover);
-}
-
-.parallel-model-menu button strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.parallel-model-menu .parallel-provider,
-.parallel-model-menu p {
-  flex: 0 0 auto;
-  color: var(--ink-faint);
-  font-size: 9px;
-}
-
-.parallel-model-menu p {
-  padding: 8px;
 }
 
 .parallel-summary-row {
@@ -8218,6 +8205,24 @@ html[data-theme="dark"] .fp.zoomed {
   font-size: 9px;
   color: var(--ink-faint);
   pointer-events: none;
+}
+
+.settings-text {
+  width: 220px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+  outline: none;
+}
+
+.settings-text:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .settings-btn {
