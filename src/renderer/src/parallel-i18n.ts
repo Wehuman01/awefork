@@ -10,6 +10,11 @@ const dictionary = {
   attachments: { zh: "{n} 个附件", en: "{n} attachments" },
   summary: { zh: "回答汇总", en: "Summary" },
   version: { zh: "第 {n} 版", en: "Version {n}" },
+  historical: { zh: "历史版本（只读）", en: "Earlier version (read-only)" },
+  historicalLoading: {
+    zh: "这一版汇总的原文还没载入，打开它的分支即可查看。",
+    en: "This version's text is not loaded yet — open its branch to read it.",
+  },
   summaryBy: { zh: "由 {model} 汇总 · 纳入 {n} 份回答", en: "By {model} · {n} answers included" },
   pendingBy: { zh: "汇总模型：{model}", en: "Summary model: {model}" },
   sources: { zh: "各模型回答", en: "Model answers" },

@@ -2523,6 +2523,26 @@ html[data-density="compact"] .ft-row {
   white-space: nowrap;
 }
 
+/* A source fork of a multi-model round: same family as the summary badge, but
+   an outline so the join card stays the loud one. */
+.parallel-source-badge {
+  flex: 0 0 auto;
+  border: 1px dashed var(--fork-chip-border);
+  border-radius: 5px 999px 999px 999px;
+  padding: 2px 8px;
+  background: var(--card);
+  color: var(--lavender-deep);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.parallel-source-badge:hover {
+  background: var(--lavender-soft);
+  border-style: solid;
+}
+
 .turn-body {
   display: flex;
   gap: 9px;
@@ -2882,6 +2902,12 @@ html[data-density="compact"] .ft-row {
   border-style: solid;
   border-color: var(--line);
   color: var(--ink-soft);
+}
+
+/* Not enough models to send yet — the picker is the way out. */
+.draft-parallel-pick.warn {
+  border-color: var(--ask-border);
+  color: var(--ask-deep);
 }
 
 .draft-parallel-pick:hover {
@@ -4779,6 +4805,13 @@ code.md-code {
   min-width: 0;
   color: var(--ink-faint);
   font-size: 10px;
+}
+
+/* A disabled send needs its reason in the layout, not only in a tooltip. */
+.parallel-need-two {
+  margin: 6px 2px 0;
+  color: var(--ask-deep);
+  font-size: 10.5px;
 }
 
 /* The meter's compress shortcut: a quiet round icon inside the pill. In

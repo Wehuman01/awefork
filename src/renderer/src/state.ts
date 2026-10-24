@@ -4808,10 +4808,38 @@ async function startParallelTarget(group: ParallelGroup, target: ParallelTarget)
 
 const pauseParallelPoll = () => new Promise<void>((resolve) => setTimeout(resolve, 400));
 
+/**
+ * How long a round waits for one target before calling it unreachable. The
+ * renderer's own watchdog settles a session whose run went silent, but a
+ * backend that never publishes an idle frame leaves `running` stuck — and an
+ * unbounded wait here would freeze the whole round's summary with no way out.
+ * Ten minutes is well past any real answer, and the target still keeps its
+ * fork: the panel offers a retry.
+ */
+const PARALLEL_SETTLE_TIMEOUT_MS = 10 * 60_000;
+
+/** Wait for a session's run to settle; false when the deadline ran out first. */
+async function waitForParallelSettle(
+  backend: BackendId,
+  sessionId: string,
+  timeoutMs = PARALLEL_SETTLE_TIMEOUT_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isRunning(backend, sessionId)) {
+    if (Date.now() >= deadline) return false;
+    await pauseParallelPoll();
+  }
+  return true;
+}
+
 async function collectParallelTarget(group: ParallelGroup, target: ParallelTarget): Promise<void> {
   if (target.status !== "running" || !target.sessionId) return;
   const sessionId = target.sessionId;
-  while (isRunning(group.backend, sessionId)) await pauseParallelPoll();
+  if (!(await waitForParallelSettle(group.backend, sessionId))) {
+    target.status = "unknown";
+    target.error = t("state.parallelTargetTimeout");
+    return;
+  }
   // Idle can precede the backend's final message snapshot briefly.
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -4820,7 +4848,10 @@ async function collectParallelTarget(group: ParallelGroup, target: ParallelTarge
       if (result.status !== "unknown" || attempt === 2) {
         target.status = result.status;
         target.text = result.text;
-        target.error = result.error;
+        // A silent run can settle through the watchdog with no error of its
+        // own; say why the answer is missing rather than leaving it blank.
+        target.error =
+          result.error ?? (result.status === "unknown" ? t("state.parallelTargetTimeout") : null);
         return;
       }
     } catch (error) {
@@ -4868,6 +4899,11 @@ export async function retryParallelTarget(groupId: string, targetId: string): Pr
     !["failed", "unknown"].includes(target.status)
   )
     return;
+  // Claim the target before the first await: parallelGroupBusy reads status,
+  // and startParallelTarget only flips it to "preparing" after its own awaits,
+  // so two quick clicks would otherwise both pass the guard above.
+  target.status = "preparing";
+  target.error = null;
   await startParallelTarget(group, target);
   if (group.backend === state.activeBackend) await refreshSessions();
   await collectParallelTarget(group, target);
@@ -4923,6 +4959,12 @@ async function createParallelSummary(
           "按四部分输出：结论、共识、分歧（标明模型）、建议下一步。使用与原问题相同的语言。",
           sourceText,
         ].join("\n\n");
+  // A failed (re-)summary must not cost the user the last good one: keep its
+  // text and provenance aside and put them back if this attempt dies. They
+  // also drive finishParallelRound's "needs a fresh summary" test, so an
+  // early overwrite would silently suppress the retry after a failure.
+  const previousText = group.summaryText;
+  const previousSourceIds = [...group.summarySourceIds];
   try {
     const session = await window.awefork.fork(
       group.backend,
@@ -4972,7 +5014,9 @@ async function createParallelSummary(
     );
     if (result.error) throw new Error(result.error);
     if (group.backend === state.activeBackend) await refreshSessions();
-    while (isRunning(group.backend, session.id)) await pauseParallelPoll();
+    if (!(await waitForParallelSettle(group.backend, session.id))) {
+      throw new Error(t("state.parallelSummaryTimeout"));
+    }
     let reply: ReturnType<typeof parallelReply> = { status: "unknown", text: "", error: null };
     for (let attempt = 0; attempt < 3; attempt++) {
       reply = parallelReply(
@@ -4988,10 +5032,15 @@ async function createParallelSummary(
     if (reply.status === "done") {
       group.summaryText = reply.text;
       group.summarySourceIds = sourceIds;
+    } else {
+      group.summaryText = previousText;
+      group.summarySourceIds = previousSourceIds;
     }
   } catch (error) {
     group.summaryStatus = "failed";
     group.summaryError = error instanceof Error ? error.message : String(error);
+    group.summaryText = previousText;
+    group.summarySourceIds = previousSourceIds;
   }
 }
 

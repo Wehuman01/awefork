@@ -209,6 +209,20 @@
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
             <span v-if="isParallelSummary(node)" class="parallel-summary-badge">✦ {{ t("canvas.parallelSummary") }} v{{ parallelSummaryVersion(node) }}</span>
             <button
+              v-else-if="parallelSourceOf(node)"
+              type="button"
+              class="parallel-source-badge"
+              :title="
+                t('canvas.parallelSourceHint', {
+                  round: parallelSourceOf(node)?.round ?? 0,
+                  index: parallelSourceOf(node)?.index ?? 0,
+                  total: parallelSourceOf(node)?.total ?? 0,
+                  model: parallelSourceOf(node)?.label ?? '',
+                })
+              "
+              @click.stop="openParallelRound(parallelSourceOf(node)?.groupId ?? '')"
+            >⇄ {{ t("canvas.parallelSource", { round: parallelSourceOf(node)?.round ?? 0, index: parallelSourceOf(node)?.index ?? 0, total: parallelSourceOf(node)?.total ?? 0 }) }}</button>
+            <button
               v-if="forkCountOf(node) > 0"
               type="button"
               class="fork-chip"
@@ -369,6 +383,8 @@
             v-if="draftParallel"
             type="button"
             class="draft-parallel-pick"
+            :class="{ warn: draftParallelTargets.length < 2 }"
+            :title="draftParallelTargets.length < 2 ? t('input.parallelNeedTwo') : undefined"
             @click="draftModelDialogOpen = true"
           >{{ draftParallelTargets.length }} · {{ t("input.parallelAddModel") }}</button>
           <button
@@ -378,7 +394,7 @@
             :title="draftParallel && draftParallelTargets.length < 2 ? t('input.parallelNeedTwo') : undefined"
             @click="submitDraft"
           >{{ store.draftSending ? "…" : "➤" }}</button>
-          <span class="hint">{{ t("canvas.draftHint") }}</span>
+          <span class="hint">{{ draftParallel && draftParallelTargets.length < 2 ? t("input.parallelNeedTwo") : t("canvas.draftHint") }}</span>
         </div>
       </article>
       <ParallelModelDialog
@@ -509,6 +525,7 @@ import {
   recentAlphaFor,
   requestSessionMenu,
   retryNode,
+  selectSession,
   selectTurn,
   sendDraft,
   sendDraftParallel,
@@ -660,6 +677,60 @@ function parallelSummaryOf(node: TurnNode): ParallelSummaryLinks | null {
 
 function isParallelSummary(node: TurnNode): boolean {
   return parallelSummaryByNode.value.has(node.id);
+}
+
+/**
+ * The round a source fork belongs to, so its card says what it is: without
+ * this the fork cards of one round look like unrelated branches, and the pane
+ * (which reads them as one reading group) has no counterpart on the canvas.
+ */
+interface ParallelSourceBadge {
+  groupId: string;
+  /** 1-based ordinal of the round on this canvas, oldest first. */
+  round: number;
+  label: string;
+  /** 1-based position of this fork within its round. */
+  index: number;
+  total: number;
+}
+
+const parallelSourceByNode = computed(() => {
+  const badges = new Map<string, ParallelSourceBadge>();
+  const rounds = parallelGroups.filter((group) => group.backend === store.activeBackend);
+  for (const [roundIndex, group] of rounds.entries()) {
+    for (const [targetIndex, target] of group.targets.entries()) {
+      if (!target.sessionId) continue;
+      // The turn this round added, not an inherited copy of the question.
+      const baseline = new Set(target.baselineMessageIds);
+      const message = store.messagesBySession[target.sessionId]?.findLast(
+        (row) => row.role === "user" && row.text === group.prompt && !baseline.has(row.id),
+      );
+      if (!message) continue;
+      badges.set(`${target.sessionId}:${message.id}`, {
+        groupId: group.id,
+        round: roundIndex + 1,
+        label: target.label,
+        index: targetIndex + 1,
+        total: group.targets.length,
+      });
+    }
+  }
+  return badges;
+});
+
+function parallelSourceOf(node: TurnNode): ParallelSourceBadge | null {
+  return parallelSourceByNode.value.get(node.id) ?? null;
+}
+
+/** Open a round's reading view from any of its cards. */
+function openParallelRound(groupId: string): void {
+  const group = parallelGroups.find((item) => item.id === groupId);
+  if (!group) return;
+  // The newest summary session names this round unambiguously; the anchor
+  // would resolve to whichever round is newest for that session.
+  const landing =
+    group.summaryVersions.at(-1)?.sessionId ?? group.summarySessionId ?? group.anchorSessionId;
+  void selectSession(landing);
 }
 
 function parallelSummaryVersion(node: TurnNode): number | null {

@@ -366,21 +366,48 @@ function sharedPrefixCount(
   // fork relationship, on every layout) doubled the graph's parsing cost.
   const childTurns = turnsOf.get(sessionId) ?? [];
   const parentTurns = turnsOf.get(parentId) ?? [];
-  const parentIds = new Set(parentTurns.map((t) => t.messageId));
-
-  let count = 0;
-  while (count < childTurns.length) {
-    const turn = childTurns[count];
-    if (!turn || !parentIds.has(turn.messageId)) break;
-    count += 1;
-  }
-  if (count > 0) return count;
-
-  const atMessageId = options.lineage[sessionId]?.atMessageId;
-  if (!atMessageId) return 0;
   // An empty-context fork carries no copied rows at all — every turn it has
   // is its own, no matter how the counts line up against the fork position.
   if (options.lineage[sessionId]?.context === "none") return 0;
+  if (childTurns.length === 0 || parentTurns.length === 0) return 0;
+
+  // 1. Ids survive the copy: exact and cheapest.
+  const parentIds = new Set(parentTurns.map((t) => t.messageId));
+  let byId = 0;
+  while (byId < childTurns.length) {
+    const turn = childTurns[byId];
+    if (!turn || !parentIds.has(turn.messageId)) break;
+    byId += 1;
+  }
+  if (byId > 0) return byId;
+
+  // 2. The fork re-keyed every copied row (opencode v2 and zcode both mint new
+  //    message ids on fork) so no id matches. A copy keeps each row's own
+  //    creation time and its prompt text, so a leading run agreeing on both is
+  //    the inherited prefix — this is what keeps a fork from redrawing its
+  //    ancestor's story. Requiring both (not just the time) means a coarse
+  //    clock cannot swallow the fork's own first turn by accident.
+  let byCopy = 0;
+  while (byCopy < childTurns.length) {
+    const childTurn = childTurns[byCopy];
+    const parentTurn = parentTurns[byCopy];
+    if (
+      !childTurn ||
+      !parentTurn ||
+      childTurn.createdAt !== parentTurn.createdAt ||
+      childTurn.title !== parentTurn.title
+    ) {
+      break;
+    }
+    byCopy += 1;
+  }
+  if (byCopy > 0) return byCopy;
+
+  // 3. Last resort: the recorded fork position, when the copy's ids and times
+  //    both drifted. A tip fork (atMessageId null) recorded no position, so
+  //    there is nothing left to trust and every turn counts as the child's own.
+  const atMessageId = options.lineage[sessionId]?.atMessageId;
+  if (!atMessageId) return 0;
   const index = parentTurns.findIndex((t) => t.messageId === atMessageId);
   if (index === -1) return 0;
   return Math.min(index + 1, childTurns.length);

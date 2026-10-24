@@ -118,9 +118,9 @@
           @toggle-favorite="$emit('toggle-favorite', $event)"
         />
         <span class="parallel-summary-label">{{ t("input.parallelSummaryLength") }}</span>
-        <button type="button" :class="{ on: summaryLength === 'brief' }" @click="summaryLength = 'brief'">{{ t("input.parallelBrief") }}</button>
-        <button type="button" :class="{ on: summaryLength === 'standard' }" @click="summaryLength = 'standard'">{{ t("input.parallelStandard") }}</button>
-        <button type="button" :class="{ on: summaryLength === 'none' }" @click="summaryLength = 'none'">{{ t("input.parallelNone") }}</button>
+        <button type="button" :class="{ on: summaryLength === 'brief' }" @click="setSummaryLength('brief')">{{ t("input.parallelBrief") }}</button>
+        <button type="button" :class="{ on: summaryLength === 'standard' }" @click="setSummaryLength('standard')">{{ t("input.parallelStandard") }}</button>
+        <button type="button" :class="{ on: summaryLength === 'none' }" @click="setSummaryLength('none')">{{ t("input.parallelNone") }}</button>
         <p v-if="summaryLength === 'none'" class="parallel-summary-note">{{ t("input.parallelNoneHint") }}</p>
       </div>
     </fieldset>
@@ -181,6 +181,11 @@
         >{{ parallelMode ? t("input.parallelSend", { n: parallelModels.length }) : t("input.send") }}</button>
       <button v-else type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
     </div>
+    <!-- Why the send button is inert, said where the user is looking: the
+         button's title alone is easy to miss behind a disabled control. -->
+    <p v-if="parallelMode && parallelModels.length < 2" class="parallel-need-two" role="status">
+      {{ t("input.parallelNeedTwo") }}
+    </p>
   </form>
 </template>
 
@@ -300,6 +305,16 @@ function initParallelDefaults(): void {
   summaryLength.value = defaults.summaryLength;
 }
 
+/**
+ * Remember the round's summary setup for the next one. Tuning it inside the
+ * composer is a preference, not a one-off — without this the same model and
+ * length would have to be picked again for every round.
+ */
+function rememberParallelDefaults(): void {
+  settings.labs.parallel.summaryModel = summaryModel.value ? { ...summaryModel.value } : null;
+  settings.labs.parallel.summaryLength = summaryLength.value;
+}
+
 onMounted(() => {
   initParallelDefaults();
   fitTextarea();
@@ -310,6 +325,10 @@ watch(
     parallelMode.value = false;
     parallelModels.value = [];
     modelDialogOpen.value = false;
+    summaryOptionsOpen.value = false;
+    editingTarget.value = null;
+    // The summary model belongs to the outgoing backend's catalog.
+    initParallelDefaults();
   },
 );
 watch(canUseParallelModels, (available) => {
@@ -363,6 +382,28 @@ function setParallelVariant(index: number | null, variant: string | null): void 
 function setSummaryModel(model: ModelChoice | null): void {
   if (busy.value) return;
   summaryModel.value = model ? { ...model } : null;
+  rememberParallelDefaults();
+}
+
+/** Length is a round-level preference too; keep it for the next send. */
+function setSummaryLength(length: ParallelSummaryLength): void {
+  if (busy.value) return;
+  summaryLength.value = length;
+  rememberParallelDefaults();
+}
+
+/** The sent lineup becomes the default for the next round. */
+function rememberParallelTargets(): void {
+  const chosen: ModelChoice[] = [];
+  for (const choice of parallelModels.value) {
+    if (!choice) continue;
+    chosen.push({
+      providerId: choice.providerId,
+      modelId: choice.modelId,
+      variant: choice.variant ?? null,
+    });
+  }
+  settings.labs.parallel.targets = chosen;
 }
 
 const summaryLengthLabel = computed(() => {
@@ -604,6 +645,9 @@ async function submit(): Promise<void> {
         },
       );
       if (!accepted) return;
+      // The next round starts from this one's lineup, so a repeat question
+      // does not have to be reassembled model by model.
+      rememberParallelTargets();
     } catch (error) {
       flashNotice(error instanceof Error ? error.message : String(error));
       return;

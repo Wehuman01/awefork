@@ -53,6 +53,14 @@ export const dict: Record<string, Entry> = {
     zh: "回答已保留，但汇总失败：{error}",
     en: "The answers were kept, but summarization failed: {error}",
   },
+  "state.parallelTargetTimeout": {
+    zh: "这个模型长时间没有回报结果，可能后端已断开。可以单独重试。",
+    en: "This model never reported back — the backend may have dropped. Retry it on its own.",
+  },
+  "state.parallelSummaryTimeout": {
+    zh: "汇总长时间没有完成，可能后端已断开。回答已保留，可重新汇总。",
+    en: "The summary never finished — the backend may have dropped. The answers are kept; summarize again.",
+  },
   "state.parallelDefaultModel": { zh: "Agent 默认模型", en: "Agent default model" },
   "state.parallelBranchSessionTitle": {
     zh: "同题 · {prompt} · {model} · {time}",

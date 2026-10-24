@@ -2,9 +2,15 @@
 import { computed, ref, watch } from "vue";
 import { type ParallelGroup, type ParallelTarget, parallelGroupBusy } from "../parallel-groups";
 import { pt } from "../parallel-i18n";
+import { store } from "../state";
 import { MarkdownView } from "./markdown-view";
 
-const props = defineProps<{ group: ParallelGroup; summaryModelLabel: string }>();
+const props = defineProps<{
+  group: ParallelGroup;
+  summaryModelLabel: string;
+  /** Session of the summary version in view; null/absent = the newest one. */
+  viewingSessionId?: string | null;
+}>();
 const emit = defineEmits<{
   open: [sessionId: string];
   compare: [sessionIds: [string, string]];
@@ -12,6 +18,53 @@ const emit = defineEmits<{
   retry: [targetId: string];
 }>();
 const selected = ref<string[]>([]);
+
+/**
+ * The version the canvas sent the user to. The group's own text and source
+ * ids always describe its newest summary, so selecting an older summary card
+ * must read that version back from its native session instead.
+ */
+const viewedVersion = computed(() => {
+  const id = props.viewingSessionId;
+  if (!id) return null;
+  return props.group.summaryVersions.find((version) => version.sessionId === id) ?? null;
+});
+const historical = computed(
+  () =>
+    viewedVersion.value !== null && viewedVersion.value.sessionId !== props.group.summarySessionId,
+);
+const shownSourceIds = computed(() =>
+  historical.value
+    ? (viewedVersion.value?.sources.map((source) => source.targetId) ?? [])
+    : props.group.summarySourceIds,
+);
+const shownVersionNumber = computed(
+  () =>
+    viewedVersion.value?.version ??
+    props.group.summaryVersions.at(-1)?.version ??
+    props.group.summaryVersions.length,
+);
+const archiveText = computed(() => {
+  const version = viewedVersion.value;
+  if (!version || !historical.value) return "";
+  // The canvas already loaded every summary session's rows to draw its cards;
+  // reading them back keeps an older version's text on screen without a fetch.
+  const rows = store.messagesBySession[version.sessionId] ?? [];
+  const firstUser = rows.find((message) => message.role === "user");
+  if (!firstUser) return "";
+  const reply = rows
+    .filter(
+      (message) =>
+        message.role === "assistant" &&
+        message.createdAt >= firstUser.createdAt &&
+        message.completedAt !== null &&
+        message.finish !== "tool-calls",
+    )
+    .at(-1);
+  return reply?.text.trim() ?? "";
+});
+const shownText = computed(() => (historical.value ? archiveText.value : props.group.summaryText));
+
 const doneTargets = computed(() =>
   props.group.targets.filter((target) => target.status === "done"),
 );
@@ -55,8 +108,8 @@ const summaryHint = computed(() => {
 });
 const summaryMetaText = computed(() => {
   if (props.group.summaryStatus === "skipped") return pt("notSummarized");
-  return props.group.summarySourceIds.length
-    ? pt("summaryBy", { model: props.summaryModelLabel, n: props.group.summarySourceIds.length })
+  return shownSourceIds.value.length
+    ? pt("summaryBy", { model: props.summaryModelLabel, n: shownSourceIds.value.length })
     : pt("pendingBy", { model: props.summaryModelLabel });
 });
 const summaryAction = computed(() => {
@@ -67,6 +120,9 @@ const summaryAction = computed(() => {
 });
 const canSummarize = computed(
   () =>
+    // An older version in view is a read-only snapshot; summarizing would
+    // write the newest one, so the action belongs to the live version only.
+    !historical.value &&
     doneTargets.value.length > 0 &&
     !summaryRunning.value &&
     (!(props.group.summaryStatus === "failed" || props.group.summaryStatus === "unknown") ||
@@ -136,17 +192,19 @@ function excerpt(target: ParallelTarget): string {
       <div class="summary-heading"><strong>{{ pt('summary') }}</strong><span v-if="summaryRunning" class="running-dot" aria-hidden="true"></span></div>
       <p class="summary-meta">
         {{ summaryMetaText }}
-        <span v-if="group.summaryVersions.length"> · {{ pt('version', { n: group.summaryVersions[group.summaryVersions.length - 1]?.version ?? group.summaryVersions.length }) }}</span>
+        <span v-if="group.summaryVersions.length"> · {{ pt('version', { n: shownVersionNumber }) }}</span>
+        <span v-if="historical" class="historical-note"> · {{ pt('historical') }}</span>
       </p>
-      <p v-if="group.summarySourceIds.length && group.summarySourceIds.length < group.targets.length" class="partial-note">{{ pt('partialSummary') }}</p>
-      <MarkdownView v-if="group.summaryText" :source="group.summaryText" />
+      <p v-if="shownSourceIds.length && shownSourceIds.length < group.targets.length" class="partial-note">{{ pt('partialSummary') }}</p>
+      <MarkdownView v-if="shownText" :source="shownText" />
+      <p v-else-if="historical" class="empty-summary" role="status">{{ pt('historicalLoading') }}</p>
       <p v-else class="empty-summary" role="status">{{ summaryHint }}</p>
-      <p v-if="group.summaryText && (group.summaryStatus === 'failed' || group.summaryStatus === 'unknown')" class="error-note">{{ summaryHint }}</p>
+      <p v-if="!historical && group.summaryText && (group.summaryStatus === 'failed' || group.summaryStatus === 'unknown')" class="error-note">{{ summaryHint }}</p>
       <p v-if="group.summaryError" class="error-note">{{ group.summaryError }}</p>
-      <p v-if="stale" class="update-note">{{ pt('stale') }}</p>
+      <p v-if="stale && !historical" class="update-note">{{ pt('stale') }}</p>
       <div class="summary-actions">
         <button v-if="canSummarize" class="summary-button" type="button" @click="emit('summarize')">{{ summaryAction }}</button>
-        <button v-if="group.summarySessionId" class="text-button" type="button" @click="emit('open', group.summarySessionId)">{{ pt('openSummary') }}</button>
+        <button v-if="group.summarySessionId && !historical" class="text-button" type="button" @click="emit('open', group.summarySessionId)">{{ pt('openSummary') }}</button>
       </div>
     </section>
 

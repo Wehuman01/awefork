@@ -28,6 +28,7 @@ export const dict: Record<string, Entry> = {
     en: "Click to add or remove; pick an effort first to join with it.",
   },
   "paralleldlg.maxed": { zh: "最多 {max} 个模型", en: "At most {max} models" },
+  "paralleldlg.order": { zh: "本轮第 {n} 个模型", en: "Model {n} in this round" },
   "paralleldlg.summarySection": { zh: "本轮汇总", en: "This round's summary" },
 
   // ── compress-dialog ────────────────────────────────────────────────────

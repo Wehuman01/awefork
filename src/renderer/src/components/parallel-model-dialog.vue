@@ -54,8 +54,7 @@
                   >{{ v ?? t("input.parallelDefaultVariant") }}</span
                 >
               </span>
-              <span
-                class="pmd-star"
+              <span class="pmd-star"
                 :class="{ on: isFavorite(entry.option) }"
                 role="button"
                 tabindex="-1"
@@ -63,7 +62,9 @@
                 @click.stop="toggleFavorite(entry.option)"
                 >{{ isFavorite(entry.option) ? "★" : "☆" }}</span
               >
-              <span v-if="isSelected(entry.option)" class="pmd-check">✓</span>
+              <!-- The position the model holds in the round, not just a tick:
+                   the send order is what the reader sees as 1/4, 2/4, … -->
+              <span v-if="orderOf(entry.option) > 0" class="pmd-check" :title="t('paralleldlg.order', { n: orderOf(entry.option) })">{{ orderOf(entry.option) }}</span>
             </button>
           </template>
           <p v-if="filtered.length === 0" class="pmd-empty">{{ t("input.parallelNoModels") }}</p>
@@ -212,6 +213,14 @@ const entries = computed<Entry[]>(() => {
 
 function isSelected(option: ModelOption): boolean {
   return props.targets.some((target) => target !== null && modelKey(target) === modelKey(option));
+}
+
+/** 1-based position in the round; 0 when the model is not selected. */
+function orderOf(option: ModelOption): number {
+  const index = props.targets.findIndex(
+    (target) => target !== null && modelKey(target) === modelKey(option),
+  );
+  return index < 0 ? 0 : index + 1;
 }
 
 function isFavorite(option: ModelOption): boolean {
@@ -507,11 +516,16 @@ onUnmounted(() => {
 
 .pmd-check {
   flex: 0 0 auto;
-  width: 16px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary-soft);
   text-align: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--primary);
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--primary-deep);
 }
 
 .pmd-empty {

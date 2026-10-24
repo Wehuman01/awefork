@@ -518,4 +518,67 @@ describe("parallel reading groups", () => {
     expect(group.contextMode).toBe("none");
     expect(h.fork).toHaveBeenCalledWith("codex", ANCHOR.id, "m1", { context: "none" });
   });
+
+  it("keeps a failed re-summary from discarding the previous summary", async () => {
+    const h = await bootState();
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, "fork-2", "回答乙");
+    await settle(h, required(group.summarySessionId), "第一版汇总");
+    expect(group.summaryText).toBe("第一版汇总");
+    const firstSourceIds = [...group.summarySourceIds];
+
+    // A retry that fails must leave the readable summary and its provenance
+    // in place — otherwise the panel would blank out a summary that worked.
+    h.promptFailures.add(h.key("codex", "fork-4"));
+    const retry = h.state.summarizeParallelGroup(group.id);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(group.summaryStatus).toBe("failed");
+    expect(group.summaryText).toBe("第一版汇总");
+    expect(group.summarySourceIds).toEqual(firstSourceIds);
+  });
+
+  it("settles a target whose run never reports idle instead of hanging the round", async () => {
+    const h = await bootState();
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const target = required(group.targets[0]);
+    // The prompt went out and the branch is marked running, but the backend
+    // never publishes idle (a dropped SSE frame) and no answer row ever lands.
+    // Two backstops must keep the round moving: the renderer's own watchdog,
+    // then the round's own deadline. Without either it waits forever.
+    expect(target.status).toBe("running");
+    await settle(h, "fork-2", "另一份回答");
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    expect(target.status).toBe("unknown");
+    expect(target.error).toBeTruthy();
+    // The round still finished: the usable answer was summarized.
+    expect(group.summaryStatus).not.toBe("waiting");
+    expect(group.summaryStatus).not.toBe("running");
+  });
+
+  it("does not start two retries for the same target", async () => {
+    const h = await bootState();
+    h.promptFailures.add(h.key("codex", "fork-2"));
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const failed = required(group.targets[1]);
+    // The round must be idle before a retry is allowed at all; settle the
+    // healthy branch and its summary first.
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, required(group.summarySessionId), "第一版汇总");
+    h.promptFailures.clear();
+    h.prompt.mockClear();
+    // Two clicks before the first await resolves: the second must be refused.
+    // Only the guard matters here, so neither retry is driven to completion.
+    void h.state.retryParallelTarget(group.id, failed.id);
+    void h.state.retryParallelTarget(group.id, failed.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.prompt).toHaveBeenCalledTimes(1);
+    expect(h.prompt).toHaveBeenCalledWith("codex", failed.sessionId, QUESTION, MODELS[1], []);
+    // Claimed synchronously, so a third click cannot slip in either.
+    expect(failed.status).not.toBe("failed");
+  });
 });

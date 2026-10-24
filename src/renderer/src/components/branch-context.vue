@@ -250,6 +250,7 @@
         v-if="currentParallelGroup && showParallelResults"
         :group="currentParallelGroup"
         :summary-model-label="parallelSummaryModelLabel"
+        :viewing-session-id="store.selectedId"
         @open="openParallelSource"
         @compare="compareParallelSources"
         @summarize="summarizeCurrentGroup"
@@ -452,9 +453,15 @@ watch(
   () => [store.selectedId, currentParallelGroup.value?.id] as const,
   () => {
     const group = currentParallelGroup.value;
+    const selected = store.selectedId;
+    // A summary session of ANY version opens the reading view, not just the
+    // newest one: the canvas draws every version as its own summary card, so
+    // landing on an older card must show what that card promised.
     showParallelResults.value = Boolean(
       group &&
-        (store.selectedId === group.anchorSessionId || store.selectedId === group.summarySessionId),
+        (selected === group.anchorSessionId ||
+          selected === group.summarySessionId ||
+          group.summaryVersions.some((version) => version.sessionId === selected)),
     );
   },
   { immediate: true },

@@ -73,6 +73,14 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "从这份汇总继续对话",
     en: "Continue from this summary",
   },
+  "canvas.parallelSource": {
+    zh: "第 {round} 轮 · {index}/{total}",
+    en: "Round {round} · {index}/{total}",
+  },
+  "canvas.parallelSourceHint": {
+    zh: "第 {round} 轮多模型提问的第 {index}/{total} 个回答（{model}）— 点击打开整轮阅读视图",
+    en: "Answer {index}/{total} of multi-model round {round} ({model}) — click to open the round",
+  },
   "canvas.stubForks": {
     zh: "这条空分支分出了 {n} 条子分支 — 点击看整个子树",
     en: "{n} branches forked from this empty branch — click to view the whole subtree",
