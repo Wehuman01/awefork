@@ -438,8 +438,9 @@
     <!-- Session overview (画布会话总览): a status pill pinned above the canvas
          plus its floating panel. Both sit outside .world, so panning and
          zooming the canvas never move them; mousedown/wheel stop here so
-         working the panel never starts a pan. -->
-    <div class="canvas-overview" @mousedown.stop @wheel.stop>
+         working the panel never starts a pan. A labs experiment — the gate
+         lives in settings, so turning it off removes both surfaces. -->
+    <div v-if="settings.labs.sessionOverview" class="canvas-overview" @mousedown.stop @wheel.stop>
       <SessionOverviewTrigger />
       <SessionOverviewPanel />
     </div>

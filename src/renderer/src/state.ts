@@ -2799,31 +2799,6 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       });
       break;
     }
-    case "session.branchContinued": {
-      // The prompt hit a writer-locked thread and now runs on a fresh fork.
-      // Treat it as the run moving house, not a failure: the optimistic
-      // prompt row survives, the run and watchdog transfer to the fork, and
-      // the pane follows the fork so the reply streams where the user is
-      // looking instead of on a hidden branch.
-      //
-      // The notice rides infoToast, not actionError: this event arrives
-      // inside prompt(), and the send's own success path clears actionError
-      // on the way out — an error banner here would be wiped before it ever
-      // painted. Nothing failed, either.
-      flashInfoToast(event.message);
-      stopWatch(backend, event.sessionId);
-      setRunning(backend, event.sessionId, false);
-      dropSessionInteractions(backend, event.sessionId);
-      setRunning(backend, event.forkedSessionId, true);
-      // Slack covers a turn that completes between prompt and this event;
-      // the fork's copied history all completed minutes before "now".
-      watchCompletion(backend, event.forkedSessionId, Date.now() - 5_000);
-      void refreshSessions().then(() => {
-        if (backend !== state.activeBackend || state.selectedId !== event.sessionId) return;
-        void followContinuedBranch(event.sessionId, event.forkedSessionId);
-      });
-      break;
-    }
     case "server.error": {
       // Toast regardless of which backend failed — a background run dying is
       // exactly what the user needs to hear about.

@@ -252,6 +252,7 @@ import {
   archivedDirectoryViews,
   archivedSessionViews,
   checkForUpdates,
+  closeOverviewPanel,
   installBackend,
   installingLabel,
   refreshBackendList,
@@ -1080,6 +1081,18 @@ function labsSection(): SectionDef {
         settings.labs.parallelModels = next;
       },
     ),
+    toggle(
+      "labs.sessionOverview",
+      t("settings.labsSessionOverview"),
+      t("settings.labsSessionOverviewDesc"),
+      settings.labs.sessionOverview,
+      (next) => {
+        settings.labs.sessionOverview = next;
+        // The pill and panel unmount with the switch; a panel left "open"
+        // in the store would pop back up when the switch returns on.
+        if (!next) closeOverviewPanel();
+      },
+    ),
   ];
   // The multi-model defaults only matter once the feature is on; hiding them
   // keeps the section about switches, not about a disabled feature's knobs.
@@ -1108,7 +1121,8 @@ function labsSection(): SectionDef {
     ...LOCAL_STORE(),
     resettable: true,
     rows,
-    keywords: "labs experiment 实验室 实验 experimental beta parallel 并行 多模型",
+    keywords:
+      "labs experiment 实验室 实验 experimental beta parallel 并行 多模型 overview 总览 面板",
   };
 }
 

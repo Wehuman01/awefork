@@ -162,17 +162,17 @@ try {
   await cdp.open();
   await cdp.send("Runtime.enable");
 
-  // 0. The file browser is a labs experiment, off by default, and its main
-  //    column and sidebar tabs only exist behind that gate. Seed the switch
-  //    on and reload once so every section below runs against the same app
-  //    a user who flipped it would have. The seed retries because the CDP
-  //    target can surface while the window is still its pre-navigation
-  //    document, where localStorage is denied.
+  // 0. Labs experiments (file browser, session overview) are off by default;
+  //    their surfaces only exist behind those gates. Seed the switches on and
+  //    reload once so every section below runs against the same app a user
+  //    who flipped them would have. The seed retries because the CDP target
+  //    can surface while the window is still its pre-navigation document,
+  //    where localStorage is denied.
   await retry(
     () =>
       cdp.evaluate(
         `localStorage.setItem("awefork:settings", ${JSON.stringify(
-          JSON.stringify({ labs: { fileBrowser: true } }),
+          JSON.stringify({ labs: { fileBrowser: true, sessionOverview: true } }),
         )})`,
       ),
     30_000,

@@ -376,6 +376,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "把同一个问题同时发给多个模型，分支并排阅读，并生成汇总。关闭后回到单模型发送。",
     en: "Send one prompt to several models at once, read the branches side by side, and get a summary. Off falls back to a single model.",
   },
+  "settings.labsSessionOverview": { zh: "会话总览面板", en: "Session overview panel" },
+  "settings.labsSessionOverviewDesc": {
+    zh: "画布上方的状态胶囊与浮动面板，一览所有 agent 的会话：运行、等待、未读与失败，可搜索并跳转。",
+    en: "The status pill above the canvas and its floating panel listing every agent's sessions — running, waiting, unread and failed — with search and jump.",
+  },
   "settings.parallelDefaults": { zh: "默认模型与汇总", en: "Default models & summary" },
   "settings.parallelDefaultsDesc": {
     zh: "打开多模型模式时预选这些模型（含各自强度）；汇总模型与长度决定每轮结束后的汇总方式，可以选「不汇总」。",

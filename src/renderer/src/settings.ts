@@ -112,6 +112,11 @@ export interface Settings {
     /** Multi-model parallel prompts: fork per model, read side by side, summarize. */
     parallelModels: boolean;
     /**
+     * The canvas session overview: the status pill above the branch canvas
+     * and its floating panel of every agent's sessions.
+     */
+    sessionOverview: boolean;
+    /**
      * Defaults for multi-model prompts. Targets are pre-selected when the
      * mode opens; a pick the current catalog no longer lists is skipped
      * rather than sent. Summary "none" leaves the round unsummarized.
@@ -152,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   labs: {
     fileBrowser: false,
     parallelModels: false,
+    sessionOverview: false,
     parallel: { targets: [], summaryModel: null, summaryLength: "brief" },
   },
 };
@@ -299,6 +305,7 @@ export function normalizeSettings(raw: unknown): Settings {
     labs: {
       fileBrowser: pickBool(labs.fileBrowser, d.labs.fileBrowser),
       parallelModels: pickBool(labs.parallelModels, d.labs.parallelModels),
+      sessionOverview: pickBool(labs.sessionOverview, d.labs.sessionOverview),
       parallel: {
         targets: Array.isArray(parallel.targets)
           ? parallel.targets
