@@ -1,6 +1,6 @@
 {
   "name": "awefork",
-  "version": "0.3.6",
+  "version": "0.4.5",
   "private": true,
   "type": "module",
   "description": "Non-linear session workbench for AI coding agents — fork any turn, keep every branch",
@@ -19,7 +19,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "test:gui": "npm run build && node tests/gui-test.mjs",
+    "test:gui": "npm run build && node tests/gui-test.mjs && node tests/canvas-initial-view.test.mjs && node tests/gui-file-drop.test.mjs && node tests/gui-composer-folder.test.mjs",
     "verify": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json && biome check . && vitest run"
   },
   "build": {
@@ -76,6 +76,7 @@
   "dependencies": {
     "katex": "^0.18.7",
     "mammoth": "^1.12.2",
+    "pdfjs-dist": "^6.4.299",
     "undici": "^8.10.2",
     "word-extractor": "^1.0.4"
   }

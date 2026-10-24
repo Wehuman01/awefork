@@ -27,6 +27,15 @@ export interface CodexJsonRpcOptions {
   onDisconnect?: () => void;
   /** Handles server→client requests after the adapter has subscribed. */
   onRequest?: CodexRequestHandler;
+  /** Safe-reply deadline for a server request. */
+  requestTimeoutMs?: number;
+  /**
+   * While this returns true, the safe-reply backstop keeps re-arming instead
+   * of firing: a live renderer owns the ask (its auto-deny setting decides,
+   * including "never"), and codex holds the turn open meanwhile. The backstop
+   * exists for a renderer that is gone.
+   */
+  rendererAlive?: () => boolean;
 }
 
 export interface CodexJsonRpc {
@@ -52,11 +61,19 @@ const SAFE_REPLIES: Record<string, unknown> = {
   "item/fileChange/requestApproval": { decision: "decline" },
   "item/permissions/requestApproval": { permissions: { fileSystem: null, network: null } },
   "mcpServer/elicitation/request": { action: "decline" },
-  execCommandApproval: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
-  applyPatchApproval: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+  execCommandApproval: { decision: { denied: { rejection: "the user declined this action" } } },
+  applyPatchApproval: { decision: { denied: { rejection: "the user declined this action" } } },
 };
 
 const KNOWN_REQUESTS = new Set([...Object.keys(SAFE_REPLIES), "item/tool/requestUserInput"]);
+
+/**
+ * Backstop only, and it re-arms while a renderer window is alive (see
+ * `rendererAlive`): a live renderer owns the ask — its auto-deny setting
+ * decides, including "never" — so this guard declines only once no window
+ * can show the ask anymore.
+ */
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export function createCodexJsonRpc(
   stdin: { write(chunk: string | Uint8Array): boolean },
@@ -71,6 +88,7 @@ export function createCodexJsonRpc(
   let disconnected = false;
   let notify = options.onNotification;
   let handleRequest = options.onRequest;
+  const requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
 
   const notifyDisconnect = () => {
     if (disconnected) return;
@@ -113,7 +131,8 @@ export function createCodexJsonRpc(
     }
     if (!handleRequest) {
       const fallback = safeReply(method);
-      if (fallback === undefined) replyError(id, -32000, "awefork 未获得用户输入，请求已取消");
+      if (fallback === undefined)
+        replyError(id, -32000, "awefork got no user input, the request was canceled");
       else replyResult(id, fallback);
       return;
     }
@@ -122,12 +141,26 @@ export function createCodexJsonRpc(
       if (settled) return;
       settled = true;
       openServerRequests.delete(cancel);
+      clearTimeout(timer);
       if (error) replyError(id, -32000, error instanceof Error ? error.message : String(error));
       else replyResult(id, result);
     };
-    // The ask waits for the user indefinitely — codex holds the turn open,
-    // same contract as opencode's asks. Only a disconnect settles it here (the
-    // reply write is a guarded no-op), so a late handler resolution can never
+    const armBackstop = () => {
+      timer = setTimeout(() => {
+        if (options.rendererAlive?.()) {
+          armBackstop();
+          return;
+        }
+        const fallback = safeReply(method);
+        if (fallback === undefined)
+          finish(null, "awefork got no user input, the request timed out");
+        else finish(fallback);
+      }, requestTimeoutMs);
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    armBackstop();
+    // Disconnect settles the request here (the reply write is a guarded
+    // no-op), so neither the timer above nor a late handler resolution can
     // reach the dead stdin.
     const cancel = () => finish(null, "codex app-server connection lost");
     openServerRequests.add(cancel);

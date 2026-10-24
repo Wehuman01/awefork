@@ -1,4 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
+import { withInlineFiles } from "./inline-attachments.js";
 import { readLineage, recordFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
@@ -70,7 +71,12 @@ interface PiMessage {
   timestamp?: number;
   model?: string;
   provider?: string;
-  usage?: { output?: number };
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
   stopReason?: string;
   errorMessage?: string;
 }
@@ -88,6 +94,12 @@ interface PiEntry {
   modelId?: string;
   thinkingLevel?: string;
   name?: string;
+  /** compaction entries: the summary that replaced everything before it. */
+  summary?: string;
+  /** compaction entries: the first entry the summary did NOT fold away. */
+  firstKeptEntryId?: string;
+  /** compaction entries: the footprint the fold started from. */
+  tokensBefore?: number;
 }
 
 interface PiHeader {
@@ -108,6 +120,8 @@ interface PiModel {
   name: string;
   provider: string;
   reasoning: boolean;
+  /** Context window in tokens, when the provider catalog ships it. */
+  contextWindow?: number;
   input: ("text" | "image")[];
 }
 
@@ -250,6 +264,24 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       .filter(Boolean);
 
   /** Map an ordered branch to ChatMessage rows, inheriting model/variant. */
+  /**
+   * pi-ai reports usage with cache reads/writes separate from input, like
+   * opencode — the sum is the step's footprint in the model's context window.
+   */
+  function piContextTokens(usage: PiMessage["usage"]): number | null {
+    if (!usage) return null;
+    const parts = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+
   const mapBranch = (branch: PiEntry[]): ChatMessage[] => {
     const rows: ChatMessage[] = [];
     let providerId: string | null = null;
@@ -264,6 +296,49 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         case "thinking_level_change":
           variant = entry.thinkingLevel ?? null;
           break;
+        // pi appends a compaction entry after folding history: the summary it
+        // carries is what later prompts send instead of the folded turns. The
+        // row is a marker (no text of its own) exactly like opencode's, so the
+        // pane draws its divider and the summary reads as the reply after it.
+        case "compaction": {
+          if (!entry.summary) break;
+          const at = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+          const createdAt = Number.isNaN(at) ? 0 : at;
+          rows.push({
+            id: entry.id,
+            role: "user",
+            text: "",
+            thinking: "",
+            toolNames: [],
+            modelId,
+            providerId,
+            variant,
+            attachmentNames: [],
+            createdAt,
+            completedAt: null,
+            finish: null,
+            outputTokens: null,
+            compaction: true,
+            error: null,
+          });
+          rows.push({
+            id: `${entry.id}:summary`,
+            role: "assistant",
+            text: entry.summary,
+            thinking: "",
+            toolNames: [],
+            modelId,
+            providerId,
+            variant,
+            attachmentNames: [],
+            createdAt,
+            completedAt: createdAt,
+            finish: "stop",
+            outputTokens: null,
+            error: null,
+          });
+          break;
+        }
         case "message": {
           const message = entry.message;
           if (!message || typeof message.role !== "string") break;
@@ -292,6 +367,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
               error: null,
             });
           } else if (message.role === "assistant") {
+            const contextTokens = piContextTokens(message.usage);
             rows.push({
               id: entry.id,
               role: "assistant",
@@ -306,6 +382,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
               completedAt: createdAt,
               finish: STOP_REASON_TO_FINISH[message.stopReason ?? ""] ?? null,
               outputTokens: typeof message.usage?.output === "number" ? message.usage.output : null,
+              ...(contextTokens === null ? {} : { contextTokens }),
               error: message.errorMessage ?? null,
             });
           }
@@ -320,7 +397,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
 
   /** Summary from a parsed file, before lineage overrides. */
   const mapSession = (parsed: ParsedSession): SessionSummary => {
-    let title = "(未命名会话)";
+    let title = "(untitled session)";
     const createdAt = parsed.header?.timestamp ? Date.parse(parsed.header.timestamp) : 0;
     let updatedAt = createdAt;
     for (const entry of parsed.entries) {
@@ -329,7 +406,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       if (entry.type === "session_info" && typeof entry.name === "string" && entry.name.trim()) {
         title = entry.name.trim();
       }
-      if (title === "(未命名会话)" && entry.type === "message" && entry.message?.role === "user") {
+      if (
+        title === "(untitled session)" &&
+        entry.type === "message" &&
+        entry.message?.role === "user"
+      ) {
         const text = userTextOf(entry.message);
         if (text) title = text.slice(0, 80);
       }
@@ -404,7 +485,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
   const requireSession = async (sessionId: string): Promise<ParsedSession> => {
     const found = (await refreshIndex()).get(sessionId);
-    if (!found?.header?.id) throw new Error(`pi 会话 ${sessionId} 不存在`);
+    if (!found?.header?.id) throw new Error(`pi session ${sessionId} does not exist`);
     return found;
   };
 
@@ -414,10 +495,10 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     try {
       parsed = JSON.parse(out.trim());
     } catch {
-      throw new Error(`无法解析 pi SDK 脚本输出：${out}`);
+      throw new Error(`cannot parse the pi SDK script output: ${out}`);
     }
     if (typeof parsed.sessionFile !== "string" || typeof parsed.sessionId !== "string") {
-      throw new Error(`pi SDK 脚本未返回会话信息：${out}`);
+      throw new Error(`the pi SDK script returned no session info: ${out}`);
     }
     return { sessionFile: parsed.sessionFile, sessionId: parsed.sessionId };
   };
@@ -507,6 +588,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
           modelName: model.name || model.id,
           variants: model.reasoning ? THINKING_LEVELS : [],
           attachment: model.input.includes("image"),
+          ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
         }));
       } finally {
         proc.kill();
@@ -521,7 +603,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       const createdAt = now();
       return {
         id: sessionId,
-        title: "(未命名会话)",
+        title: "(untitled session)",
         directory: cwd,
         parentSessionId: null,
         origin: "root",
@@ -548,7 +630,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         const createdAt = now();
         return {
           id: forkedId,
-          title: "(未命名会话)",
+          title: "(untitled session)",
           directory: cwd,
           parentSessionId: sessionId,
           origin: "fork",
@@ -584,21 +666,49 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     // Per the contract a detached copy records no lineage — and since none
     // can be produced here, refuse. The renderer hides the surface anyway.
     async exportSession() {
-      throw new Error("pi 不支持导出为去关联的原生会话");
+      throw new Error("pi cannot export a detached native session");
     },
 
-    // pi has no compaction primitive; the renderer hides the affordance
-    // (capabilities.compress === false) and this throws if ever reached.
-    async compress() {
-      throw new Error("pi 不支持会话压缩");
+    /**
+     * pi folds history with its own `compact` RPC command (verified against
+     * 0.55.3's rpc-mode). It resolves only when the whole summary is written,
+     * so unlike opencode's detached summarize this one can await the result
+     * before announcing: the compaction entry is already in the file, and the
+     * marker + summary rows show on the next reload. The model argument is
+     * unused — pi summarizes with the session's own model, which it must
+     * already have for the session to have any turns.
+     */
+    async compress(sessionId) {
+      const found = await requireSession(sessionId);
+      let proc = sessions.get(sessionId);
+      if (!proc) proc = await ensureRpc(sessionId, found.file, found.header?.cwd ?? "");
+      sessions.set(sessionId, proc);
+      cancelReap(sessionId);
+      try {
+        await proc.request({ type: "compact" }, 300_000);
+      } catch (error) {
+        // A request-level failure (no model configured, nothing to compact)
+        // has no frame to settle the run by itself; surface it with the
+        // session id so the renderer settles, then rethrow.
+        const detail = error instanceof Error ? error.message : String(error);
+        emit({ type: "server.error", sessionId, message: `pi compact failed: ${detail}` });
+        scheduleReap(sessionId);
+        throw error instanceof Error ? error : new Error(detail);
+      } finally {
+        invalidate(sessionId);
+        scheduleReap(sessionId);
+      }
+      emit({ type: "session.compressed", sessionId });
     },
 
     async deleteSession() {
-      throw new Error("pi 没有原生的整会话删除原语，请手动删除会话文件");
+      throw new Error(
+        "pi has no native whole-session delete primitive, delete the session file by hand",
+      );
     },
 
     async deleteMessage() {
-      throw new Error("pi 没有原生的单条消息删除原语");
+      throw new Error("pi has no native single-message delete primitive");
     },
 
     async renameSession(sessionId, title) {
@@ -607,7 +717,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       invalidate(sessionId);
     },
 
-    async prompt(sessionId, text, model) {
+    async prompt(sessionId, text, model, attachments) {
       const found = await requireSession(sessionId);
       let proc = sessions.get(sessionId);
       if (!proc) proc = await ensureRpc(sessionId, found.file, found.header?.cwd ?? "");
@@ -615,6 +725,12 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       // A run is starting on this child; a reap armed by the previous run
       // must not fire mid-flight.
       cancelReap(sessionId);
+      // pi's prompt takes images only, as ImageContent blocks with the base64
+      // payload out of the data URL. The composer normalizes every non-image
+      // to text/plain, so those are flattened into the message text instead:
+      // pi has no file part to hang them on.
+      const images = (attachments ?? []).filter((a) => a.mime.startsWith("image/"));
+      const inline = (attachments ?? []).filter((a) => !a.mime.startsWith("image/"));
       try {
         if (model) {
           await proc.request({
@@ -625,7 +741,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
           const level = model.variant ?? null;
           if (level) await proc.request({ type: "set_thinking_level", level });
         }
-        await proc.request({ type: "prompt", message: text });
+        await proc.request({
+          type: "prompt",
+          message: withInlineFiles(text, inline),
+          ...(images.length > 0 ? { images: images.map(toPiImage) } : {}),
+        });
       } catch (error) {
         // A request-level failure (auth, dead child) has no frame to settle
         // the run by itself; surface it with the session id so the renderer
@@ -647,13 +767,13 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     },
 
     async respondInteraction() {
-      throw new Error("pi 没有服务端发起的交互请求");
+      throw new Error("pi has no server-initiated interaction requests");
     },
 
     async abort(sessionId) {
       const proc = sessions.get(sessionId);
       // Nothing running means the idle UI's stop button has nothing to stop.
-      if (!proc) throw new Error("该会话当前没有正在运行的回合");
+      if (!proc) throw new Error("this session has no turn running right now");
       await proc.request({ type: "abort" });
       // agent_end normally follows an abort and re-arms the reap; arming here
       // too covers a backend that skips it.
@@ -671,8 +791,11 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       };
     },
 
-    dispose() {
+    dispose(options) {
       emitEvent = null;
+      // awefork's process exits on quit, which also kills the adapter's
+      // event sink and reap timers. Pi has no detached server to finish the
+      // turn, so keep-alive cannot preserve its work; always tear it down.
       for (const timer of idleTimers.values()) clearTimeout(timer);
       idleTimers.clear();
       for (const proc of sessions.values()) proc.kill();
@@ -689,13 +812,13 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
  */
 function forkCutLeafId(branch: PiEntry[], atMessageId: string | null): string {
   const last = branch[branch.length - 1];
-  if (!last) throw new Error("会话为空，无法分叉");
+  if (!last) throw new Error("session is empty, cannot fork");
   if (atMessageId === null) return last.id;
   const userIds = branch
     .filter((e) => e.type === "message" && e.message?.role === "user")
     .map((e) => e.id);
   const at = userIds.indexOf(atMessageId);
-  if (at === -1) throw new Error(`会话中找不到消息 ${atMessageId}`);
+  if (at === -1) throw new Error(`cannot find message ${atMessageId} in the session`);
   const next = userIds[at + 1];
   if (next === undefined) return last.id;
   // The next user message's parent is the final entry of the cut turn.
@@ -734,7 +857,24 @@ function renameScript(root: string, file: string, title: string): string {
   ].join("\n");
 }
 
-/** Normalize pi's agent stream onto awefork's smaller event surface. */
+/** Map one staged image attachment onto pi's ImageContent shape. */
+function toPiImage(attachment: PromptAttachment): {
+  type: "image";
+  data: string;
+  mimeType: string;
+} {
+  // pi takes the payload, not the URL: a data URL's base64 starts after the
+  // comma. A malformed URL yields the whole string and pi rejects the prompt,
+  // which the caller's catch turns into a named error rather than a silent
+  // drop of the attachment.
+  const comma = attachment.dataUrl.indexOf(",");
+  return {
+    type: "image",
+    data: comma === -1 ? attachment.dataUrl : attachment.dataUrl.slice(comma + 1),
+    mimeType: attachment.mime,
+  };
+}
+
 function emitPiEvent(sessionId: string, event: unknown, emit: (event: AgentEvent) => void): void {
   if (typeof event !== "object" || event === null) return;
   const e = event as Record<string, unknown>;

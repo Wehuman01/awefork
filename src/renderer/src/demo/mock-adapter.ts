@@ -64,9 +64,9 @@ interface SessionDef {
   minutesAgo: number;
   /** Project directory; defaults to DIRECTORY so old defs stay one-liners. */
   directory?: string;
-  /** Preset session tags (执行 / 实验设计 / 咨询 …) for the demo's tag shelf. */
+  /** Preset session tags (user-chosen labels) for the demo's tag shelf. */
   tags?: string[];
-  /** True on forks that carry none of the parent's turns (空上下文 fork). */
+  /** True on forks that carry none of the parent's turns (empty-context fork). */
   emptyContext?: boolean;
 }
 
@@ -261,6 +261,27 @@ const SESSION_DEFS: SessionDef[] = [
     turns: [],
   },
   {
+    // The demo's empty-context fork: it hangs off r3 in the lineage but
+    // carries none of the parent's turns, so the canvas severs its edge.
+    id: "s-clean",
+    title: "从零重写登录",
+    origin: "fork",
+    parent: "s-root",
+    atMessageId: "r3",
+    emptyContext: true,
+    minutesAgo: 860,
+    turns: [
+      {
+        id: "k1",
+        prompt: "不参考前面的方案，从零设计一套登录，先说你打算怎么做",
+        reply:
+          "从约束出发而不是从实现出发：先确定攻击面（撞库、重放、会话固定），再选凭证形态。建议短期 access + 可吊销 refresh，具体实现先不套用历史方案。",
+        tokens: 900,
+        minutesAgo: 850,
+      },
+    ],
+  },
+  {
     id: "w-root",
     title: "官网首页改版",
     origin: "root",
@@ -319,6 +340,7 @@ const MODELS: ModelOption[] = [
     modelName: "GLM 5.3 Flash",
     variants: ["low", "medium", "high"],
     attachment: true,
+    contextWindow: 128_000,
   },
   {
     providerId: "oc-awerouter",
@@ -327,6 +349,7 @@ const MODELS: ModelOption[] = [
     modelName: "GLM 5.3",
     variants: ["minimal", "low", "medium", "high", "xhigh"],
     attachment: true,
+    contextWindow: 200_000,
   },
   {
     providerId: "oc-local",
@@ -335,6 +358,7 @@ const MODELS: ModelOption[] = [
     modelName: "Qwen3 Coder 30B",
     variants: [],
     attachment: false,
+    contextWindow: 128_000,
   },
 ];
 
@@ -405,6 +429,7 @@ export function installMockAdapter(): void {
         parentId: def.parent,
         atMessageId: def.atMessageId,
         createdAt: minutesAgo(def.minutesAgo),
+        ...(def.emptyContext ? { context: "none" as const } : {}),
       };
     }
   }
@@ -413,7 +438,17 @@ export function installMockAdapter(): void {
   const ensureMessages = (id: string): ChatMessage[] => {
     let list = messages.get(id);
     if (!list) {
-      list = sessionTurns(defs, id).flatMap(turnMessages);
+      // The meter reads the newest reported step, so let usage grow over
+      // the session instead of every turn reporting the same footprint.
+      let contextBase = 9_000;
+      list = sessionTurns(defs, id).flatMap((turn) => {
+        const rows = turnMessages(turn);
+        contextBase += 2_400 + (turn.tokens ?? 800) * 6;
+        for (const row of rows) {
+          if (row.role === "assistant") row.contextTokens = contextBase;
+        }
+        return rows;
+      });
       messages.set(id, list);
     }
     return list;
@@ -440,7 +475,8 @@ export function installMockAdapter(): void {
   let trash: TrashEntry[] = [];
   let archive: ArchiveState = { sessions: [], directories: [] };
   // Hand-added directories keep their group here too; the browser tab can't
-  // open a native picker, so ＋ 新目录 hands out invented paths instead.
+  // open a native picker, so the + New directory entry hands out invented
+  // paths instead.
   let knownDirs: string[] = [];
   let pickedCount = 0;
   // Session tags, seeded from the defs and mutated through setSessionTags —
@@ -573,6 +609,7 @@ export function installMockAdapter(): void {
       defs.set(id, {
         id,
         title: t("demo.forkTitle", { title: parent?.title ?? t("demo.forkFallback") }),
+        directory: parent?.directory ?? DIRECTORY,
         origin: "fork",
         parent: sessionId,
         atMessageId,
@@ -860,6 +897,34 @@ export function installMockAdapter(): void {
       pickedCount += 1;
       return `/demo/picked-${pickedCount}`;
     },
+    // The demo runs in a browser tab with no filesystem: the file browser
+    // answers "not found" for everything, which the UI renders as its empty
+    // state rather than faking a tree.
+    listDir: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    statFile: async (target) => ({
+      ok: true as const,
+      value: {
+        path: target,
+        exists: false,
+        isDir: false,
+        isSymlink: false,
+        size: null,
+        mtime: null,
+        hidden: false,
+        childCount: null,
+      },
+    }),
+    readTextPreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    readImagePreview: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    readFileAsDataUrl: async () => ({ ok: false as const, error: { code: "not-found" as const } }),
+    relativeToRoot: async (_root, target) => ({ ok: true as const, value: target }),
+    searchFiles: async () => ({ ok: true as const, value: [] }),
+    homePath: async () => "/demo",
+    showInFolder: async () => ({
+      ok: false as const,
+      error: t("demo.openPathError", { target: "" }),
+    }),
+    pathForFile: () => null,
     // Demo runs in a real browser: a plain anchor download stands in for the
     // native save dialog, and the file lands in the browser's download dir.
     saveTextFile: async (defaultName, content) => {
@@ -972,6 +1037,10 @@ export function installMockAdapter(): void {
       ],
     }),
     selectBackend: async () => ({ ok: true }),
+    // Demo mode has no real CLIs to install; the guide stays dismissed.
+    installBackend: async () => ({ ok: false, error: "demo mode cannot install agents" }),
+    onboardingDone: async () => true,
+    finishOnboarding: async () => {},
     openAgentWindow: async () => ({ ok: true }),
     capabilities: async () => ({
       deleteMessage: true,
@@ -981,16 +1050,24 @@ export function installMockAdapter(): void {
       compress: true,
       exportBranch: true,
     }),
+    // No real quit in a browser tab; the demo toggle flips but persists nowhere.
+    quitKeepAlive: async () => false,
+    setQuitKeepAlive: async () => ({ ok: true }),
+    runningSessionCount: async () => 0,
     // The demo has no sidecar recorder; the pane never shows the card here.
     fileChanges: async () => null,
     fileChangeDiff: async () => null,
     openExternal: async (url) => {
       window.open(url, "_blank", "noopener");
     },
+    // No native chrome to mirror in a plain browser tab.
+    setTheme: async () => undefined,
     // The demo runs in a plain browser tab; there is no sidecar to keep.
     composer: async () => null,
     saveComposer: async () => undefined,
     openPath: async (target) => ({ ok: false, error: t("demo.openPathError", { target }) }),
+    // No real app data folder in a browser tab.
+    openAppData: async () => ({ ok: false, error: t("demo.openPathError", { target: "" }) }),
     // No system terminal in a browser tab; the demo only declines politely.
     openSessionTerminal: async () => ({ ok: false, error: t("demo.terminalError") }),
     convertDocument: async (filename) => t("demo.convertStub", { filename }),

@@ -5,8 +5,8 @@ import type { TagStore } from "./awefork-api.js";
 import { enqueueWrite } from "./write-queue.js";
 
 /**
- * Tag store: the labels the user pinned on sessions (执行 / 实验设计 /
- * 咨询 …). A plain JSON sidecar like pins — losing it only loses the
+ * Tag store: the labels the user pinned on sessions (any names they choose).
+ * A plain JSON sidecar like pins — losing it only loses the
  * curation, never session data. `sessions` maps sessionId → tag names
  * (ordered); `colors` maps tag name → hue (0-360) for user-chosen colors.
  * A color never outlives its tag: hues whose tag has no session references

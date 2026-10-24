@@ -206,18 +206,18 @@ describe("createCodexJsonRpc", () => {
     expect(replies[4]).toEqual({
       jsonrpc: "2.0",
       id: 5,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     expect(replies[5]).toEqual({
       jsonrpc: "2.0",
       id: 6,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     // User input has no safe default value — an explicit error cancels it.
     expect(replies[6]).toEqual({
       jsonrpc: "2.0",
       id: 7,
-      error: { code: -32000, message: "awefork 未获得用户输入，请求已取消" },
+      error: { code: -32000, message: "awefork got no user input, the request was canceled" },
     });
     rpc.dispose();
   });
@@ -265,7 +265,9 @@ describe("createCodexJsonRpc", () => {
   it("replies with an error when the handler rejects an unmappable request", async () => {
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
-    rpc.setRequestHandler(() => Promise.reject(new Error("awefork 无法处理 codex 请求 x")));
+    rpc.setRequestHandler(() =>
+      Promise.reject(new Error("awefork cannot handle the codex request x")),
+    );
     stdout.emit(
       "data",
       `${JSON.stringify({
@@ -279,7 +281,7 @@ describe("createCodexJsonRpc", () => {
     expect(JSON.parse(written[0] ?? "{}")).toEqual({
       jsonrpc: "2.0",
       id: 13,
-      error: { code: -32000, message: "awefork 无法处理 codex 请求 x" },
+      error: { code: -32000, message: "awefork cannot handle the codex request x" },
     });
     rpc.dispose();
   });
@@ -287,7 +289,11 @@ describe("createCodexJsonRpc", () => {
   it("waits indefinitely for an approval — no backstop deadline to guess with", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
-    const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
+    const alive = true;
+    const rpc = createCodexJsonRpc(stdin, stdout, {
+      onNotification: () => {},
+      rendererAlive: () => alive,
+    });
     rpc.setRequestHandler(() => new Promise<unknown>(() => {}));
     stdout.emit(
       "data",
@@ -299,14 +305,46 @@ describe("createCodexJsonRpc", () => {
       })}\n`,
     );
     expect(written).toHaveLength(0);
-    // Well past the old 60s backstop: the ask stays open, like opencode's.
+    // A live renderer owns the ask: well past the 60s backstop it stays open,
+    // like opencode's.
     vi.advanceTimersByTime(600_000);
     expect(written).toHaveLength(0);
     rpc.dispose();
     vi.useRealTimers();
   });
 
-  it("keeps a user-input request open past the old deadline instead of guessing an answer", async () => {
+  it("re-arms the backstop while a renderer window is alive, then declines once it is gone", async () => {
+    vi.useFakeTimers();
+    const { stdin, stdout, written } = fakeStreams();
+    let alive = true;
+    const rpc = createCodexJsonRpc(stdin, stdout, {
+      onNotification: () => {},
+      rendererAlive: () => alive,
+    });
+    rpc.setRequestHandler(() => new Promise<unknown>(() => {}));
+    stdout.emit(
+      "data",
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 34,
+        method: "item/commandExecution/requestApproval",
+        params: {},
+      })}\n`,
+    );
+    // A live renderer owns the ask: the backstop keeps re-arming, however
+    // long the user takes (auto-deny "never" must not be bypassed here).
+    vi.advanceTimersByTime(600_000);
+    expect(written).toHaveLength(0);
+    alive = false;
+    vi.advanceTimersByTime(59_999);
+    expect(written).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(JSON.parse(written[0] ?? "{}").result).toEqual({ decision: "decline" });
+    rpc.dispose();
+    vi.useRealTimers();
+  });
+
+  it("cancels a user-input request that outlives the deadline instead of guessing an answer", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
     const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
@@ -320,8 +358,12 @@ describe("createCodexJsonRpc", () => {
         params: { questions: [{ id: "q1", question: "？" }] },
       })}\n`,
     );
-    vi.advanceTimersByTime(600_000);
-    expect(written).toHaveLength(0);
+    vi.advanceTimersByTime(60_000);
+    expect(JSON.parse(written[0] ?? "{}")).toEqual({
+      jsonrpc: "2.0",
+      id: 32,
+      error: { code: -32000, message: "awefork got no user input, the request timed out" },
+    });
     rpc.dispose();
     vi.useRealTimers();
   });
@@ -329,7 +371,12 @@ describe("createCodexJsonRpc", () => {
   it("keeps exactly one reply when the handler resolves after a long wait", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();
-    const rpc = createCodexJsonRpc(stdin, stdout, { onNotification: () => {} });
+    const rpc = createCodexJsonRpc(stdin, stdout, {
+      onNotification: () => {},
+      // No windows in the test, so the backstop would decline at 60s; a
+      // renderer that survives that long keeps the ask open instead.
+      rendererAlive: () => true,
+    });
     let resolveHandler: (value: unknown) => void = () => {};
     rpc.setRequestHandler(() => new Promise<unknown>((resolve) => (resolveHandler = resolve)));
     stdout.emit(
@@ -453,12 +500,12 @@ describe("createCodexJsonRpc", () => {
     expect(replies[0]).toEqual({
       jsonrpc: "2.0",
       id: 21,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     expect(replies[1]).toEqual({
       jsonrpc: "2.0",
       id: 22,
-      result: { decision: { denied: { rejection: "用户拒绝了该操作" } } },
+      result: { decision: { denied: { rejection: "the user declined this action" } } },
     });
     rpc.dispose();
   });

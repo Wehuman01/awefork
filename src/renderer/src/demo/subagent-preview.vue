@@ -33,7 +33,8 @@
           <div class="message-row">
             <span class="avatar bot">✨</span>
             <div class="message-body">
-              <!-- 思考块：回放开头流式出现，结束后折叠成一行摘要 -->
+              <!-- thinking block: streams in at the start of the replay, then
+                   collapses into a one-line summary -->
               <details v-if="thinkingDone || phase === 'thinking'" class="thought" :open="phase === 'thinking'">
                 <summary class="thought-toggle">
                   <span v-if="phase === 'thinking'" class="spinner" aria-hidden="true"></span>
@@ -43,7 +44,7 @@
                 <div class="thought-body pre-wrap">{{ thinkingText }}</div>
               </details>
 
-              <!-- 旧版：去重后的工具名 chip + running 行 -->
+              <!-- old layout: deduplicated tool-name chips + a running row -->
               <template v-if="mode === 'old'">
                 <p v-if="running" class="tool-row">
                   <span class="tool-chip running-chip">running…</span>
@@ -60,7 +61,7 @@
                 </div>
               </template>
 
-              <!-- 新版：每个 task 一张卡片 -->
+              <!-- new layout: one card per task -->
               <template v-else>
                 <div
                   v-for="task in visibleTasks"
@@ -99,7 +100,8 @@
                     >
                   </div>
 
-                  <!-- 运行中：当前动作 + 字数 + 不确定进度条 -->
+                  <!-- running: current action + character count + indeterminate
+                       progress bar -->
                   <template v-if="task.status === 'running'">
                     <p class="pv-feed">
                       <span class="spinner" aria-hidden="true"></span>
@@ -118,7 +120,7 @@
                 <p class="pv-hint">{{ t("demo.hint") }}</p>
               </template>
 
-              <!-- 最终汇总回复 -->
+              <!-- final summary reply -->
               <div v-if="phase === 'synthesis' || phase === 'done'" class="message-text pre-wrap">
                 {{ finalText }}<span v-if="phase === 'synthesis'" class="stream-caret"></span>
               </div>
@@ -128,7 +130,7 @@
       </div>
     </main>
 
-    <!-- 画布 / 侧边栏配套改动（静态示意） -->
+    <!-- canvas / sidebar companion changes (static illustration) -->
     <section class="pv-strip">
       <div class="pv-mock">
         <p class="pv-mock-title">{{ t("demo.canvasTitle") }}</p>
@@ -152,7 +154,7 @@
       </div>
     </section>
 
-    <!-- 子会话抽屉：只读 transcript -->
+    <!-- sub-session drawer: read-only transcript -->
     <template v-if="drillTask">
       <div class="pv-backdrop" @click="closeDrill"></div>
       <aside class="pv-drill">
@@ -218,7 +220,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { t } from "../i18n";
 
-/** 一张卡片的静态定义 + 回放运行态。 */
+/** One card's static definition plus its replay running state. */
 interface TaskView {
   id: string;
   agent: string;
@@ -227,15 +229,17 @@ interface TaskView {
   prompt: string;
   result: string;
   thought: string;
-  /** 抽屉里的只读回报：三段式静态文案，模板循环渲染，不走 v-html。 */
+  /** The drawer's read-only report: three static text sections rendered by a
+   * template loop, never via v-html. */
   report: { intro: string; items: string[]; outro: string };
   tools: string[];
   feed: string[];
-  /** 回放里这一段跑多少毫秒。 */
+  /** How many milliseconds this section takes during the replay. */
   runMs: number;
-  /** 落定后展示的时长（秒）；回放中按真实秒数计时。 */
+  /** Duration shown when settled (seconds); timed live during the replay. */
   settledDuration: number;
-  /** 展示用时长（秒）：落定态用 settledDuration，回放完成用实际秒数。 */
+  /** Display duration (seconds): settledDuration when settled, the actual
+   * seconds once the replay finishes. */
   duration: number;
   status: "pending" | "running" | "done";
   elapsed: number;
@@ -330,7 +334,7 @@ const TASKS: TaskView[] = [
 const THINKING_TEXT = computed(() => t("demo.thinkingText"));
 const FINAL_TEXT = computed(() => t("demo.finalText"));
 
-/** 旧版 chip 行：按现网逻辑对工具名 Set 去重。 */
+/** Old chip row: deduplicates tool names through a Set, like production does. */
 const OLD_CHIPS = ["task", "read", "grep", "write", "bash"];
 
 const mode = ref<"new" | "old">("new");
@@ -344,7 +348,8 @@ const drillId = ref<string | null>(null);
 const paneEl = ref<HTMLElement | null>(null);
 
 const running = computed(() => phase.value !== "settled" && phase.value !== "done");
-/** 新版只渲染已出现（非 pending）的卡片，回放时逐个冒出来。 */
+/** New layout renders only cards that have appeared (not pending); they pop up
+ * one by one during the replay. */
 const visibleTasks = computed(() => tasks.value.filter((t) => t.status !== "pending"));
 const drillTask = computed(() => tasks.value.find((t) => t.id === drillId.value) ?? null);
 const oldChips = computed(() => (phase.value === "done" ? OLD_CHIPS : []));
@@ -366,7 +371,7 @@ function at(ms: number, fn: () => void): void {
   timers.push(setTimeout(fn, ms));
 }
 
-/** 打字机：把 text 逐段追加到 target，完成后回调。 */
+/** Typewriter: appends text to target in segments, then calls back. */
 function typewriter(
   text: string,
   chunkMs: number,
@@ -393,7 +398,7 @@ function settle(): void {
   clearTimers();
 }
 
-/** 回到全空的回合，从思考流开始把整个 run 演一遍。 */
+/** Back to an empty turn: replay the whole run from the thinking stream. */
 function replay(): void {
   clearTimers();
   closeDrill();
@@ -415,7 +420,8 @@ function replay(): void {
     },
   );
 
-  // 逐个派发：前一个完成后下一个开始（演示串行冒泡；并行同理）
+  // dispatch one at a time: the next starts after the previous finishes
+  // (the demo shows serial bubbling; parallel works the same way)
   let cursor = 1700;
   for (const def of TASKS) {
     const defRun = def.runMs;
@@ -433,7 +439,7 @@ function replay(): void {
     cursor += defRun;
   }
 
-  // 计时与动作轮播
+  // timing and action rotation
   tickTimer = setInterval(() => {
     const task = tasks.value.find((t) => t.status === "running");
     if (task) task.elapsed += 1;
@@ -443,7 +449,7 @@ function replay(): void {
     if (task) task.feedIndex += 1;
   }, 1400);
 
-  // 汇总回复
+  // summary reply
   at(cursor + 400, () => {
     phase.value = "synthesis";
     typewriter(
@@ -477,7 +483,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 onMounted(() => {
-  // 先摆出落定态，让打开页面的人先看到终点，再自动重播讲一遍过程
+  // show the settled state first so a visitor sees the end point, then replay
+  // the whole run automatically
   phase.value = "done";
   thinkingDone.value = true;
   thinkingText.value = THINKING_TEXT.value;
@@ -503,7 +510,7 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* ── 顶栏 ─────────────────────────────────────────────── */
+/* ── top bar ─────────────────────────────────────────────── */
 
 .pv-top {
   display: flex;
@@ -576,7 +583,7 @@ onUnmounted(() => {
   filter: brightness(1.05);
 }
 
-/* ── 消息区 ───────────────────────────────────────────── */
+/* ── message area ───────────────────────────────────────────── */
 
 .pv-pane {
   flex: 1;
@@ -595,7 +602,8 @@ onUnmounted(() => {
   color: var(--primary-deep);
 }
 
-/* 演示注解框：虚线边 + 奶油底，明确不属于应用 UI 本身 */
+/* demo annotation box: dashed border + cream fill, clearly not part of the
+   app UI itself */
 .pv-note {
   border: 1.5px dashed var(--butter);
   background: #fffaf0;
@@ -622,7 +630,7 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
-/* ── 子任务卡片 ───────────────────────────────────────── */
+/* ── sub-task cards ───────────────────────────────────────── */
 
 .pv-task {
   border: 1px solid var(--line);
@@ -727,7 +735,7 @@ onUnmounted(() => {
   color: var(--ink-soft);
 }
 
-/* 运行中的不确定进度条：一段奶油色光带来回扫 */
+/* indeterminate running progress bar: a cream light band sweeping back and forth */
 .pv-bar {
   height: 3px;
   border-radius: 99px;
@@ -786,7 +794,7 @@ onUnmounted(() => {
   margin: 2px 0 8px;
 }
 
-/* ── 底部：画布 / 侧边栏静态示意 ──────────────────────── */
+/* ── bottom: canvas / sidebar static illustration ──────────────────────── */
 
 .pv-strip {
   display: flex;
@@ -863,7 +871,7 @@ onUnmounted(() => {
   margin: 6px 0 0;
 }
 
-/* ── 子会话抽屉 ───────────────────────────────────────── */
+/* ── sub-session drawer ───────────────────────────────────────── */
 
 .pv-backdrop {
   position: fixed;

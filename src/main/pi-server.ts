@@ -10,6 +10,7 @@ import {
   type PiAdapterNodeSeams,
   type PiRpcProcess,
 } from "../shared/pi-adapter.js";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 
 const execFileAsync = promisify(execFile);
@@ -172,7 +173,9 @@ export function stopPiChildren(): void {
 async function runNodeScript(code: string): Promise<string> {
   const root = await resolvePiPackageRoot();
   if (!root) {
-    throw new Error(`找不到 pi 运行时：请先安装 ${PI_PACKAGE_NAME} 并确保 \`pi\` 在 PATH 上`);
+    throw new Error(
+      `pi runtime not found: install ${PI_PACKAGE_NAME} and make sure \`pi\` is on PATH`,
+    );
   }
   const script = code.split(PI_SDK_IMPORT).join(root);
   const spawnEnv = await resolveSpawnEnv(process.env, homedir(), undefined, process.platform);
@@ -191,7 +194,7 @@ async function runNodeScript(code: string): Promise<string> {
     child.on("error", (error) => reject(error));
     child.on("close", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`pi SDK 脚本执行失败：${stderr.trim() || `exit ${code}`}`));
+      else reject(new Error(`pi SDK script failed: ${stderr.trim() || `exit ${code}`}`));
     });
   });
 }
@@ -203,6 +206,8 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
   let exitHandler: (() => void) | null = null;
   let nextId = 1;
   let dead = false;
+  /** The child's exit code, kept for the 9009 (missing CLI) diagnosis. */
+  let exitCode: number | null = null;
   const pending = new Map<
     string,
     {
@@ -215,17 +220,32 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
   const settleExit = () => {
     if (dead) return;
     dead = true;
+    // cmd.exe reports a missing command as exit code 9009 and never surfaces
+    // the child's own ENOENT (the npm .cmd shim runs under shell:true). The
+    // ENOENT token lets the caller tell "the CLI is not installed" apart from
+    // "the CLI crashed", instead of surfacing a generic exit error.
     for (const entry of pending.values()) {
       clearTimeout(entry.timeout);
-      entry.reject(new Error("pi RPC 子进程已退出"));
+      entry.reject(new Error(exitDetail()));
     }
     pending.clear();
     const cb = exitHandler;
     exitHandler = null;
     cb?.();
   };
-  child.on("exit", settleExit);
-  child.on("close", settleExit);
+  const exitDetail = (): string =>
+    isCmdNotFound(exitCode)
+      ? missingCliMessage("pi", "Install it with: npm install -g @mariozechner/pi-coding-agent")
+      : "pi RPC child process has exited";
+  child.on("exit", (code) => {
+    exitCode = code;
+    settleExit();
+  });
+  child.on("close", (code) => {
+    // 'close' can carry the code on its own when 'exit' was never seen.
+    if (exitCode === null && typeof code === "number") exitCode = code;
+    settleExit();
+  });
   child.on("error", () => settleExit());
   child.stdout?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => {
@@ -258,7 +278,7 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
           pending.delete(id);
           clearTimeout(entry.timeout);
           if (frame.success === false) {
-            const detail = typeof frame.error === "string" ? frame.error : "pi RPC 请求失败";
+            const detail = typeof frame.error === "string" ? frame.error : "pi RPC request failed";
             entry.reject(new Error(detail));
           } else {
             entry.resolve(frame.data ?? null);
@@ -273,7 +293,7 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
 
   return {
     request<T = unknown>(command: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
-      if (dead) return Promise.reject(new Error("pi RPC 子进程未连接"));
+      if (dead) return Promise.reject(new Error(exitDetail()));
       const id = String(nextId++);
       const payload = JSON.stringify({ ...command, id });
       return new Promise<T>((resolve, reject) => {
@@ -283,7 +303,9 @@ function createPiRpcProcess(child: ChildProcess): PiRpcProcess {
           if (!pending.has(id)) return;
           pending.delete(id);
           reject(
-            new Error(`pi ${typeof command.type === "string" ? command.type : "命令"}请求超时`),
+            new Error(
+              `pi ${typeof command.type === "string" ? command.type : "command"} request timed out`,
+            ),
           );
         }, timeoutMs);
         pending.set(id, {

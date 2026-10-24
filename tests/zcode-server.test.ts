@@ -182,14 +182,14 @@ describe("zcode-server", () => {
       // in flight by the time stop() tears the handle down. The rejection
       // assertion must be attached before the clock advances, or the promise
       // rejects unhandled.
-      const pending = expect(handle.client()).rejects.toThrow("已停止");
+      const pending = expect(handle.client()).rejects.toThrow("has been stopped");
       handle.stop();
       await vi.advanceTimersByTimeAsync(50);
       await pending;
       // The respawned child must not have been installed — a follow-up client()
       // on a fresh handle (not the stopped one) would spawn again, not adopt it.
       expect(zcodeSpawnCount()).toBe(2);
-      await expect(handle.client()).rejects.toThrow("已停止");
+      await expect(handle.client()).rejects.toThrow("has been stopped");
     });
 
     it("a respawn that dies inside the grace window rejects instead of returning a dead client", async () => {
@@ -213,7 +213,7 @@ describe("zcode-server", () => {
       children[0]?.kill("SIGTERM");
       await vi.advanceTimersByTimeAsync(50);
 
-      const pending = expect(handle.client()).rejects.toThrow("重启后立即退出");
+      const pending = expect(handle.client()).rejects.toThrow("exited right after restart");
       // Let the respawn spawn, then kill the fresh child inside its grace.
       await vi.advanceTimersByTimeAsync(1);
       children[1]?.kill("SIGTERM");
@@ -314,6 +314,72 @@ describe("zcode-server", () => {
       const result = await resolveZcodeCli(process.env, homedir(), "darwin");
 
       expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(realCatalog);
+    });
+
+    it("finds the Windows per-user install of the ZCode desktop app", async () => {
+      const home = "/Users/tester";
+      const bundledCli = `${home}/AppData/Local/Programs/zcode/resources/glm/zcode.cjs`;
+      mocks.existsSync.mockImplementation((path: string) => path === bundledCli);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        process.env,
+        home,
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result).toEqual({ command: "node", args: [bundledCli], env: {} });
+    });
+
+    it("normalizes backslash overrides so the provider catalog resolves on Windows", async () => {
+      const override = "C:\\Apps\\ZCode\\resources\\glm\\zcode.cjs";
+      const catalog = "C:/Apps/ZCode/resources/glm/provider/zcode-builtin.json";
+      mocks.existsSync.mockImplementation((path: string) => path === override || path === catalog);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, AWEFORK_ZCODE_CLI: override },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(catalog);
+    });
+
+    it("finds the provider catalog one level above a Windows bundle", async () => {
+      // The real Windows layout puts the catalog in Resources/config/provider,
+      // one level above the glm/ folder the script lives in. A drive-letter
+      // path must not be treated as relative, or the lookup lands on the cwd.
+      const script = "C:/Program Files/ZCode/resources/glm/zcode.cjs";
+      const catalog = "C:/Program Files/ZCode/resources/config/provider/zcode-builtin.json";
+      mocks.existsSync.mockImplementation((path: string) => path === script || path === catalog);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, AWEFORK_ZCODE_CLI: script },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.env?.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(catalog);
+    });
+
+    it("probes the real Program Files root, not a hardcoded C: drive", async () => {
+      const script = "D:/Apps/ZCode/resources/glm/zcode.cjs";
+      mocks.existsSync.mockImplementation((path: string) => path === script);
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        { ...process.env, ProgramFiles: "D:/Apps" },
+        homedir(),
+        "win32",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.args).toEqual([script]);
     });
 
     it("uses PATH fallback on linux when bundle is absent", async () => {

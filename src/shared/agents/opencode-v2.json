@@ -3,7 +3,7 @@
   "protocol": "v2",
   "compat": {
     "min": "2.0.0",
-    "max": "2.1.0"
+    "max": "2.2.0"
   },
   "capabilities": {
     "deleteMessage": false,
@@ -80,6 +80,13 @@
       "outputTokens": ["tokens.output"],
       "error": ["error.message", "error.type"]
     },
+    "usage": {
+      "input": ["tokens.input"],
+      "output": ["tokens.output"],
+      "reasoning": ["tokens.reasoning"],
+      "cacheRead": ["tokens.cache.read"],
+      "cacheWrite": ["tokens.cache.write"]
+    },
     "parts": {
       "text": {
         "type": "text",
@@ -125,6 +132,7 @@
     "sessionPermissions": "/api/session/{id}/permission/{permissionId}/reply",
     "sessionFormReply": "/api/session/{id}/form/{formId}/reply",
     "sessionFormCancel": "/api/session/{id}/form/{formId}",
+    "forms": "/api/form",
     "projects": "/api/project",
     "providers": "/api/model",
     "events": "/api/event"

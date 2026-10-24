@@ -12,6 +12,7 @@ import type { CheckUpdatesResult } from "../shared/awefork-api.js";
  */
 
 export const RELEASES_API_URL = "https://api.github.com/repos/wehuman01/awefork/releases/latest";
+const RELEASES_DOWNLOAD_BASE = "https://github.com/wehuman01/awefork/releases/download";
 
 /** skips: `v0.1.7` -> `0.1.7`; anything shorter, longer or non-numeric -> null. */
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
@@ -43,8 +44,40 @@ export function isNewerVersion(candidate: string, current: string): boolean {
   );
 }
 
-/** Best-effort latest release fetch; every failure path returns null. */
-export async function fetchLatestVersion(): Promise<string | null> {
+/** Filename of the release artifact for a platform, or null when unsupported. */
+export function updateAssetFilename(
+  version: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string | null {
+  const normalized = normalizeVersion(version);
+  if (!normalized) return null;
+  if (platform === "darwin") return `awefork-${normalized}-${arch}.dmg`;
+  if (platform === "win32") return `awefork-${normalized}-${arch}-setup.exe`;
+  return null;
+}
+
+/** Download URL of a platform artifact, built only from a validated semver. */
+export function updateAssetUrl(
+  version: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string | null {
+  const normalized = normalizeVersion(version);
+  const filename = updateAssetFilename(version, platform, arch);
+  if (!normalized || !filename) return null;
+  return `${RELEASES_DOWNLOAD_BASE}/v${normalized}/${filename}`;
+}
+
+/**
+ * Best-effort latest-release fetch; every failure path returns null. The
+ * response carries the release's asset list so the caller can tell a notes-only
+ * release (no installers attached) from one the user can actually install.
+ */
+export async function fetchLatestRelease(): Promise<{
+  version: string;
+  assetNames: string[];
+} | null> {
   let response: Response;
   try {
     response = await fetch(RELEASES_API_URL, {
@@ -56,12 +89,40 @@ export async function fetchLatestVersion(): Promise<string | null> {
   }
   if (!response.ok) return null;
   try {
-    const release = (await response.json()) as { tag_name?: unknown };
+    const release = (await response.json()) as {
+      tag_name?: unknown;
+      assets?: unknown;
+    };
     if (typeof release.tag_name !== "string") return null;
-    return normalizeVersion(release.tag_name);
+    const version = normalizeVersion(release.tag_name);
+    if (!version) return null;
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const assetNames = assets
+      .map((asset) =>
+        asset && typeof asset === "object" ? (asset as { name?: unknown }).name : null,
+      )
+      .filter((name): name is string => typeof name === "string");
+    return { version, assetNames };
   } catch {
     return null;
   }
+}
+
+/**
+ * True when the release ships an installer this platform's build can use. A
+ * notes-only release (a tag pushed without building) has no dmg/exe asset, so
+ * prompting about it would offer an update the app cannot install — the user
+ * would follow the banner into a download 404.
+ */
+export function hasPlatformInstaller(
+  version: string,
+  assetNames: string[],
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): boolean {
+  const filename = updateAssetFilename(version, platform, arch);
+  if (!filename) return false;
+  return assetNames.includes(filename);
 }
 
 /**
@@ -101,13 +162,14 @@ export async function writeSkippedVersion(filePath: string, version: string | nu
 export async function checkForUpdates(respectSkip: boolean): Promise<CheckUpdatesResult> {
   try {
     const currentVersion = app.getVersion();
-    const latest = await fetchLatestVersion();
+    const release = await fetchLatestRelease();
     const skippedVersion = await readSkippedVersion(updateFilePath());
     const updateAvailable =
-      latest !== null &&
-      isNewerVersion(latest, currentVersion) &&
-      (!respectSkip || latest !== skippedVersion);
-    return { currentVersion, latest, updateAvailable };
+      release !== null &&
+      isNewerVersion(release.version, currentVersion) &&
+      hasPlatformInstaller(release.version, release.assetNames) &&
+      (!respectSkip || release.version !== skippedVersion);
+    return { currentVersion, latest: release?.version ?? null, updateAvailable };
   } catch {
     return { currentVersion: app.getVersion(), latest: null, updateAvailable: false };
   }

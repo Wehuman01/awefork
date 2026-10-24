@@ -46,6 +46,19 @@ const CODEX: SessionSummary = {
   updatedAt: 1_726_000_000_000,
 };
 
+/** A newest-by-updatedAt session living in a scratch directory, the way a TUI
+ *  run in a temp dir registers itself — the auto-select must not chase it when
+ *  a project is remembered. */
+const SCRATCH: SessionSummary = {
+  id: "s9",
+  title: "临时目录里的一次性会话",
+  directory: "/var/folders/scratch/T",
+  parentSessionId: null,
+  origin: "root",
+  createdAt: 1_726_000_100_000,
+  updatedAt: 1_726_000_100_000,
+};
+
 const MODEL: ModelChoice = { providerId: "oc", modelId: "glm-5.3" };
 
 /** A mid-story turn node: openDraft turns it into a fork-branch draft. */
@@ -75,8 +88,14 @@ function turnNode() {
 async function bootState(
   options: {
     composer?: PersistedComposer | null;
+    /** Per-backend sidecars; wins over `composer` when both name a backend. */
+    composerByBackend?: Record<BackendId, PersistedComposer | null>;
+    /** Runs inside every sidecar read, before it resolves — the moment the
+     *  workspace has already moved on but the state has not been read back. */
+    onComposerRead?: (backend: BackendId) => void | Promise<void>;
     messages?: Record<string, ChatMessage[]>;
     includeSecond?: boolean;
+    includeScratch?: boolean;
   } = {},
 ) {
   vi.resetModules();
@@ -87,7 +106,14 @@ async function bootState(
     sessions: vi.fn(async (backend: BackendId) =>
       backend === "codex"
         ? { sessions: [CODEX], lineage: {} }
-        : { sessions: options.includeSecond ? [OPENCODE, SECOND] : [OPENCODE], lineage: {} },
+        : {
+            sessions: options.includeScratch
+              ? [...(options.includeSecond ? [OPENCODE, SECOND] : [OPENCODE]), SCRATCH]
+              : options.includeSecond
+                ? [OPENCODE, SECOND]
+                : [OPENCODE],
+            lineage: {},
+          },
     ),
     messages: vi.fn(
       async (_backend: BackendId, sessionId: string) => options.messages?.[sessionId] ?? [],
@@ -120,7 +146,12 @@ async function bootState(
     archive: async () => ({ sessions: [], directories: [] }),
     archiveAdd: async () => ({ sessions: [], directories: [] }),
     archiveRemove: async () => ({ sessions: [], directories: [] }),
-    composer: vi.fn(async () => options.composer ?? null),
+    composer: vi.fn(async (backend: BackendId) => {
+      const byBackend = options.composerByBackend?.[backend];
+      const value = byBackend !== undefined ? byBackend : (options.composer ?? null);
+      if (options.onComposerRead) await options.onComposerRead(backend);
+      return value;
+    }),
     saveComposer: vi.fn(async (backend: BackendId, value: PersistedComposer | null) => {
       saves.push({ backend, value });
     }),
@@ -229,8 +260,12 @@ describe("composer persistence × backend switch", () => {
     expect(h.api.prompt).toHaveBeenCalledWith("opencode", "s1", "hello", null, []);
     expect(h.store.draft).toBeNull();
     // Without advancing the 600ms debounce — a crash right after sending
-    // must not resurrect the sent draft.
-    expect(h.saves).toContainEqual({ backend: "opencode", value: null });
+    // must not resurrect the sent draft. The remembered project stays in
+    // the sidecar, so the save is a value with a null draft, not null.
+    expect(h.saves).toContainEqual({
+      backend: "opencode",
+      value: expect.objectContaining({ draft: null }),
+    });
   });
 
   it("filters restored pane model picks down to sessions that still exist", async () => {
@@ -241,6 +276,37 @@ describe("composer persistence × backend switch", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(h.store.paneModels).toEqual({ s1: MODEL });
+  });
+
+  it("reopens the remembered project at boot instead of the newest session's directory", async () => {
+    const h = await bootState({
+      includeScratch: true,
+      composer: {
+        draft: null,
+        paneModels: {},
+        lastModel: null,
+        selectedDirectory: "/demo/shop-api",
+      },
+    });
+
+    // The scratch session is newest overall, but the boot keeps the project
+    // the last session ended in and selects within it.
+    expect(h.store.selectedDirectory).toBe("/demo/shop-api");
+    expect(h.store.selectedId).toBe("s1");
+  });
+
+  it("without a remembered project the boot still follows the newest session", async () => {
+    const h = await bootState({ includeScratch: true });
+    expect(h.store.selectedDirectory).toBe("/var/folders/scratch/T");
+  });
+
+  it("persists the open project on the debounced sidecar flush", async () => {
+    const h = await bootState();
+    await h.mod.selectSession("s1");
+    await vi.advanceTimersByTimeAsync(600);
+
+    const last = [...h.saves].reverse().find((s) => s.backend === "opencode");
+    expect(last?.value).toMatchObject({ selectedDirectory: "/demo/shop-api" });
   });
 });
 
@@ -523,5 +589,136 @@ describe("model quick access (常用 / 最近)", () => {
 
     expect(h.store.favoriteModels).toEqual([MODEL]);
     expect(h.store.recentModels).toEqual([MODEL, { providerId: "oc", modelId: "glm-5.3-flash" }]);
+  });
+});
+
+/**
+ * The favorites wipe: a backend switch cleared the workspace and then flushed
+ * the cleared state over the incoming backend's sidecar, so every restart
+ * came back with an empty 常用 group. Persists are only allowed once the
+ * backend they name has actually been read back into memory.
+ */
+describe("favorites survive a backend switch", () => {
+  const FAVORITES = [
+    { providerId: "oc", modelId: "glm-5.3" },
+    { providerId: "magpie", modelId: "workbuddy-ai/step-5-preview" },
+  ];
+
+  /** opencode owns the favorites; codex has an empty sidecar. */
+  function sidecars() {
+    return {
+      composerByBackend: {
+        opencode: {
+          draft: null,
+          paneModels: {},
+          lastModel: null,
+          favoriteModels: FAVORITES,
+          recentModels: [],
+          selectedDirectory: "/demo/shop-api",
+        },
+        codex: {
+          draft: null,
+          paneModels: {},
+          lastModel: null,
+          favoriteModels: [],
+          recentModels: [],
+          selectedDirectory: "/demo/shop-api",
+        },
+      } as Record<BackendId, PersistedComposer | null>,
+    };
+  }
+
+  it("a first visit to another backend does not wipe the parked backend's favorites", async () => {
+    const h = await bootState(sidecars());
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.store.favoriteModels).toEqual(FAVORITES);
+
+    await h.switchBackend("codex");
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Nothing ever wrote opencode's sidecar with the cleared state.
+    const wiped = h.saves.filter(
+      (s) =>
+        s.backend === "opencode" &&
+        s.value !== null &&
+        s.value.favoriteModels.length === 0 &&
+        s.value.selectedDirectory === null,
+    );
+    expect(wiped).toEqual([]);
+  });
+
+  it("a state change during the read-back cannot flush the cleared state", async () => {
+    // opencode has a parked snapshot to restore from, so the switch takes the
+    // fast path where the workspace is repainted before the sidecar is read.
+    let touched = false;
+    let nudge: (() => void) | null = null;
+    const h = await bootState({
+      ...sidecars(),
+      onComposerRead: (backend) => {
+        // Mid-read, the way a session refresh's directory auto-select lands:
+        // a persisted field changes while the composer state is still absent.
+        if (backend === "opencode" && !touched) {
+          touched = true;
+          nudge?.();
+        }
+      },
+    });
+    nudge = () => {
+      h.store.selectedDirectory = "/demo/shop-api";
+    };
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.store.favoriteModels).toEqual(FAVORITES);
+
+    await h.switchBackend("codex");
+    await vi.advanceTimersByTimeAsync(50);
+    touched = false;
+
+    await h.switchBackend("opencode");
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(touched).toBe(true);
+    expect(h.store.favoriteModels).toEqual(FAVORITES);
+    const wiped = h.saves.filter(
+      (s) =>
+        s.backend === "opencode" &&
+        s.value !== null &&
+        s.value.favoriteModels.length === 0 &&
+        s.value.selectedDirectory === null,
+    );
+    expect(wiped).toEqual([]);
+  });
+
+  it("switching back restores the parked backend's favorites from its snapshot", async () => {
+    const h = await bootState(sidecars());
+    await vi.advanceTimersByTimeAsync(50);
+
+    await h.switchBackend("codex");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.store.favoriteModels).toEqual([]);
+
+    await h.switchBackend("opencode");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.store.favoriteModels).toEqual(FAVORITES);
+  });
+
+  it("a send that lands after the switch clears only the draft, not the sidecar", async () => {
+    const h = await bootState(sidecars());
+    await vi.advanceTimersByTimeAsync(50);
+
+    h.openDraft(turnNode());
+    h.setDraftText("hello");
+    // Switch mid-send: the prompt still goes out, but the outgoing backend's
+    // draft is stale and must not resurrect.
+    const sending = h.sendDraft();
+    await h.switchBackend("codex");
+    h.resolveFork();
+    await sending;
+    await vi.advanceTimersByTimeAsync(50);
+
+    // The whole sidecar is never deleted for opencode — favorites included.
+    expect(h.saves.filter((s) => s.backend === "opencode" && s.value === null)).toEqual([]);
+    const opencodeSaves = h.saves.filter((s) => s.backend === "opencode" && s.value !== null);
+    const last = opencodeSaves.at(-1);
+    expect(last?.value?.favoriteModels).toEqual(FAVORITES);
   });
 });

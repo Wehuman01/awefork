@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { type BranchMarkdownTurn, buildBranchMarkdown } from "../src/shared/branch-markdown.js";
 
 const turn = (over: Partial<BranchMarkdownTurn> = {}): BranchMarkdownTurn => ({
-  title: "帮我看看这个报错",
-  prompt: "帮我看看这个报错",
-  reply: "这是 token 过期导致的。",
+  title: "Look at this error",
+  prompt: "Look at this error",
+  reply: "The token expired.",
   toolNames: [],
   model: "glm-4.7",
   variant: null,
@@ -16,7 +16,7 @@ const turn = (over: Partial<BranchMarkdownTurn> = {}): BranchMarkdownTurn => ({
 
 // 2026-09-17 21:30 local — the builder renders local time deterministically.
 const input = (turns: BranchMarkdownTurn[]) => ({
-  title: "修登录 bug",
+  title: "Fix the login bug",
   exportedAt: new Date(2026, 8, 17, 21, 30).getTime(),
   turns,
 });
@@ -24,30 +24,30 @@ const input = (turns: BranchMarkdownTurn[]) => ({
 describe("buildBranchMarkdown", () => {
   it("renders the header with export time, turn count and summed tokens", () => {
     const md = buildBranchMarkdown(input([turn(), turn({ outputTokens: 12400 })]));
-    expect(md).toMatch(/^# 修登录 bug\n\n/);
-    expect(md).toContain("> 导出于 2026-09-17 21:30 · 2 个回合 · 输出 13.2k tok");
+    expect(md).toMatch(/^# Fix the login bug\n\n/);
+    expect(md).toContain("> Exported 2026-09-17 21:30 · 2 turns · 13.2k tok output");
   });
 
   it("numbers turns and renders metadata only for what a turn reports", () => {
     const md = buildBranchMarkdown(input([turn({ variant: "high", toolNames: ["bash", "read"] })]));
-    expect(md).toContain("## 1. 帮我看看这个报错");
-    expect(md).toContain("- 模型：glm-4.7（high 档）");
-    expect(md).toContain("- 耗时 4.2s · 输出 830 tok");
-    expect(md).toContain("- 工具：bash、read");
-    expect(md).not.toContain("⚠ 失败");
+    expect(md).toContain("## 1. Look at this error");
+    expect(md).toContain("- Model: glm-4.7 (high tier)");
+    expect(md).toContain("- 4.2s · 830 tok output");
+    expect(md).toContain("- Tools: bash, read");
+    expect(md).not.toContain("⚠ Failed");
   });
 
   it("fences the full prompt and embeds the reply verbatim", () => {
     const md = buildBranchMarkdown(
       input([
         turn({
-          prompt: "第一行\n\n```js\ncode()\n```",
-          reply: "回复**加粗**也保留",
+          prompt: "First line\n\n```js\ncode()\n```",
+          reply: "The reply keeps **bold** too",
         }),
       ]),
     );
-    expect(md).toContain("````\n第一行\n\n```js\ncode()\n```\n````");
-    expect(md).toContain("**回复**\n\n回复**加粗**也保留\n");
+    expect(md).toContain("````\nFirst line\n\n```js\ncode()\n```\n````");
+    expect(md).toContain("**Reply**\n\nThe reply keeps **bold** too\n");
   });
 
   it("picks a longer fence when the prompt itself contains long backtick runs", () => {
@@ -61,25 +61,27 @@ describe("buildBranchMarkdown", () => {
     const md = buildBranchMarkdown(
       input([turn({ reply: "", toolNames: ["bash"], error: "timeout after 30s" })]),
     );
-    expect(md).toContain("- ⚠ 失败：timeout after 30s");
-    expect(md).not.toContain("*(无文本回复)*");
-    expect(md).not.toContain("**回复**");
+    expect(md).toContain("- ⚠ Failed: timeout after 30s");
+    expect(md).not.toContain("*(no text reply)*");
+    expect(md).not.toContain("**Reply**");
   });
 
   it("notes tool-only turns that succeeded without text", () => {
     const md = buildBranchMarkdown(input([turn({ reply: "", toolNames: ["bash"] })]));
-    expect(md).toContain("*(无文本回复)*");
+    expect(md).toContain("*(no text reply)*");
   });
 
   it("separates turns with blank lines around the rule so replies can't become setext headings", () => {
     const md = buildBranchMarkdown(input([turn(), turn()]));
-    expect(md).toContain("这是 token 过期导致的。\n\n---\n\n## 2.");
+    expect(md).toContain("The token expired.\n\n---\n\n## 2.");
     // Rules only sit between turns; the document ends with the last turn.
-    expect(md).toMatch(/这是 token 过期导致的。\n$/);
+    expect(md).toMatch(/The token expired\.\n$/);
   });
 
   it("renders an empty branch as just the header", () => {
     const md = buildBranchMarkdown(input([]));
-    expect(md).toBe("# 修登录 bug\n\n> 导出于 2026-09-17 21:30 · 0 个回合 · 输出 0 tok\n");
+    expect(md).toBe(
+      "# Fix the login bug\n\n> Exported 2026-09-17 21:30 · 0 turns · 0 tok output\n",
+    );
   });
 });

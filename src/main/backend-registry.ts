@@ -38,8 +38,10 @@ import { isPiInstalled, piNodeSeams, stopPiChildren } from "./pi-server.js";
 import {
   readBackendSelection,
   readOpencodePort,
+  readQuitKeepAlive,
   writeBackendSelection,
   writeOpencodePort,
+  writeQuitKeepAlive,
 } from "./settings-store.js";
 import {
   ensureZcodeServer,
@@ -78,13 +80,32 @@ export interface BackendRegistry {
   select(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
   /** Feature surface for one backend; opencode's depends on the probed CLI version. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
+  /**
+   * Drop the cached opencode probe so the next listBackends sees an install
+   * (or removal) that landed while the app was running.
+   */
+  reprobe(): void;
   /** Per-backend overlay-store paths (legacy bare files stay on opencode). */
   storePaths(backend: BackendId): StorePaths;
   /** Root of the per-session file-change sidecar directories. */
   fileChangesDir(backend: BackendId): string;
   /** Forward every spawned backend's events as tagged envelopes, forever. */
   forward(send: (envelope: BackendEventEnvelope) => void): void;
-  dispose(): void;
+  /**
+   * Sessions with a run in flight right now, tagged by backend — what the
+   * quit confirmation asks about. A session counts from its first
+   * message.started until its session.idle (or a session-scoped error).
+   */
+  runningSessions(): Array<{ backend: BackendId; sessionId: string }>;
+  /** The persisted quitKeepAlive setting, cached for the sync quit path. */
+  quitKeepAlive(): boolean;
+  /** Cache and persist the setting; takes effect on the next quit. */
+  setQuitKeepAlive(value: boolean): void;
+  /**
+   * Drop every adapter and stream. With keepAlive (or the persisted setting)
+   * the spawned servers are left running so their in-flight turns finish.
+   */
+  dispose(options?: { keepAlive?: boolean }): void;
 }
 
 /**
@@ -223,7 +244,9 @@ async function resolveOpenCodeServer(
   }
 
   if (!(await probe()).installed) {
-    throw new Error("未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。");
+    throw new Error(
+      "opencode CLI not found on PATH. Install it and retry, or run opencode serve manually.",
+    );
   }
   let lastError: unknown = null;
   for (const port of preferred) {
@@ -258,6 +281,19 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const adapters = new Map<BackendId, Promise<AgentAdapter>>();
   const unsubscribers: Array<() => void> = [];
   let forwardEvent: ((envelope: BackendEventEnvelope) => void) | null = null;
+  /** `backend:sessionId` of runs in flight; see runningSessions below. */
+  const running = new Map<string, { backend: BackendId; sessionId: string }>();
+  /**
+   * The persisted quitKeepAlive setting, read once at startup so the sync
+   * before-quit path never awaits a file; setQuitKeepAlive keeps it current.
+   * An explicit set wins over the startup read even if the read is still in
+   * flight — its resolution must not clobber the newer value.
+   */
+  let quitKeepAliveCached = false;
+  let quitKeepAliveSet = false;
+  void readQuitKeepAlive(settingsPath).then((value) => {
+    if (!quitKeepAliveSet) quitKeepAliveCached = value;
+  });
   /**
    * Event ids double as the overview's run-settle ids, which the ledger
    * dedupes on forever (a duplicate must never mint a second revision). A
@@ -311,6 +347,15 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
   const subscribeAdapter = (backend: BackendId, adapter: AgentAdapter): void => {
     void adapter
       .subscribe((event) => {
+        const key = "sessionId" in event ? `${backend}:${event.sessionId}` : null;
+        if (event.type === "message.started" && key) {
+          running.set(key, { backend, sessionId: event.sessionId });
+        } else if (event.type === "session.idle" && key) {
+          running.delete(key);
+        } else if (event.type === "server.error" && "sessionId" in event && event.sessionId) {
+          // A failed prompt settles that session's run just like idle would.
+          running.delete(`${backend}:${event.sessionId}`);
+        }
         forwardEvent?.({
           backend,
           event,
@@ -438,7 +483,7 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
 
     async select(backend) {
       if (!isBackendId(backend)) {
-        return { ok: false, error: `未知后端：${String(backend)}` };
+        return { ok: false, error: `unknown backend: ${String(backend)}` };
       }
       const installed =
         backend === "codex"
@@ -451,12 +496,12 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
       if (!installed) {
         const hint =
           backend === "codex"
-            ? "未在 PATH 上找到 codex CLI。安装：npm install -g @openai/codex"
+            ? "codex CLI not found on PATH. Install: npm install -g @openai/codex"
             : backend === "zcode"
-              ? "未找到 zcode CLI。安装 ZCode 桌面端后重试，或用 AWEFORK_ZCODE_CLI 指向 zcode.cjs。"
+              ? "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs."
               : backend === "pi"
-                ? "未在 PATH 上找到 pi CLI。安装：npm install -g @mariozechner/pi-coding-agent"
-                : "未在 PATH 上找到 opencode CLI。安装后重试，或手动运行 opencode serve。";
+                ? "pi CLI not found on PATH. Install: npm install -g @mariozechner/pi-coding-agent"
+                : "opencode CLI not found on PATH. Install it and retry, or run opencode serve manually.";
         return { ok: false, error: hint };
       }
       await writeBackendSelection(settingsPath, backend);
@@ -473,11 +518,29 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
 
     storePaths,
 
+    reprobe: () => {
+      opencodeProbe = null;
+    },
+
     forward(send) {
       forwardEvent = send;
     },
 
-    dispose() {
+    runningSessions: () => [...running.values()],
+
+    quitKeepAlive: () => quitKeepAliveCached,
+
+    setQuitKeepAlive(value) {
+      quitKeepAliveSet = true;
+      quitKeepAliveCached = value;
+      void writeQuitKeepAlive(settingsPath, value).catch(() => {
+        // A failed settings write only loses the preference across restarts;
+        // the cached flag still governs this quit.
+      });
+    },
+
+    dispose(options) {
+      const keepAlive = options?.keepAlive ?? quitKeepAliveCached;
       for (const unsubscribe of unsubscribers.splice(0)) {
         try {
           unsubscribe();
@@ -486,9 +549,10 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
         }
       }
       for (const promise of adapters.values()) {
-        void promise.then((adapter) => adapter.dispose()).catch(() => {});
+        void promise.then((adapter) => adapter.dispose({ keepAlive })).catch(() => {});
       }
       adapters.clear();
+      if (keepAlive) return;
       stopManagedServer();
       stopCodexServer();
       stopZcodeServer();

@@ -43,6 +43,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "cmp.noText": { zh: "(无文本回复)", en: "(no text reply)" },
 
   // ── session-canvas.vue ─────────────────────────────────────────────────
+  "canvas.tabsLabel": { zh: "画板故事标签", en: "Canvas story tabs" },
+  "canvas.tabClose": { zh: "关闭标签", en: "Close tab" },
+  "canvas.tabNewSession": { zh: "在当前文件夹新建会话", en: "New session in this folder" },
+  "canvas.tabBlank": { zh: "新画板", en: "New canvas" },
   "canvas.deleteTurnTitle": {
     zh: "删除这个回合（更早的对话保留）",
     en: "Delete this turn (earlier conversation stays)",
@@ -58,6 +62,24 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "canvas.turnForks": {
     zh: "这个回合分出了 {n} 条子分支 — 点击看整个子树",
     en: "{n} branches forked from this turn — click to view the whole subtree",
+  },
+  "canvas.parallelSummary": { zh: "回答汇总", en: "Answer summary" },
+  "canvas.parallelSources": { zh: "汇入", en: "From" },
+  "canvas.parallelOpenSource": {
+    zh: "查看 {model} 的原始回答",
+    en: "Open {model}'s original answer",
+  },
+  "canvas.parallelContinueHint": {
+    zh: "从这份汇总继续对话",
+    en: "Continue from this summary",
+  },
+  "canvas.parallelSource": {
+    zh: "第 {round} 轮 · {index}/{total}",
+    en: "Round {round} · {index}/{total}",
+  },
+  "canvas.parallelSourceHint": {
+    zh: "第 {round} 轮多模型提问的第 {index}/{total} 个回答（{model}）— 点击打开整轮阅读视图",
+    en: "Answer {index}/{total} of multi-model round {round} ({model}) — click to open the round",
   },
   "canvas.stubForks": {
     zh: "这条空分支分出了 {n} 条子分支 — 点击看整个子树",
@@ -79,8 +101,39 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "当前会复制切点前的全部对话到新分支；点击切换为空上下文",
     en: "Currently copies everything before the cut into the new branch; click to switch to empty context",
   },
-  "canvas.ctxNoneLabel": { zh: "✂ 空上下文", en: "✂ Empty context" },
-  "canvas.ctxInheritLabel": { zh: "⛓ 带历史", en: "⛓ With history" },
+  // Glyphs live in the templates, not here — a label is text in either language.
+  "canvas.ctxNoneLabel": { zh: "空上下文", en: "Empty context" },
+  "canvas.ctxNoneOriginLabel": { zh: "未继承上文", en: "No inherited history" },
+  "canvas.ctxInheritLabel": { zh: "带历史", en: "With history" },
+  // The static ✂ marker (sidebar / digest / compare column):
+  // it must never read as the draft's clickable toggle, hence its own strings.
+  "cut.markerTitle": {
+    zh: "空上下文分支：不带母本历史，从自己的第一句话开始",
+    en: "Empty-context branch: carries no parent history, starts from its own first turn",
+  },
+  "cut.digestChip": {
+    zh: "空上下文 · 从自己的第一句话开始",
+    en: "Empty context · starts from its own first turn",
+  },
+  // The pane is where the user actually reads, so the marker becomes a
+  // sentence that states the consequence rather than a symbol to decode.
+  "cut.paneNote": {
+    zh: "这条分支不带母本历史，从自己的第一句话开始。",
+    en: "This branch carries no parent history; it starts from its own first turn.",
+  },
+  // Above a story path, "上下文里没有" replaces the old "上文链路" heading —
+  // those ancestor turns are lineage, not this branch's context.
+  "cut.chainLabel": { zh: "故事路径", en: "Story path" },
+  "cut.splitFrom": { zh: "从「{title}」分出", en: "Split off from “{title}”" },
+  "cut.splitFromFallback": { zh: "母本分支", en: "the parent branch" },
+  "cut.chainGhost": {
+    zh: "母本的对话没有带过来",
+    en: "The parent's turns did not come along",
+  },
+  "cut.compareNote": {
+    zh: "✂ 不带母本历史",
+    en: "✂ Carries no parent history",
+  },
   "canvas.remove": { zh: "移除", en: "Remove" },
   "canvas.phContinue": {
     zh: "描述下一步…（发送后继续这个分支）",
@@ -120,8 +173,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "canvas.cancelEsc": { zh: "取消（Esc）", en: "Cancel (Esc)" },
   "canvas.fitView": { zh: "适配视图", en: "Fit view" },
   "canvas.mmHint": {
-    zh: "滚轮缩放画布 · ⌘滚轮缩放地图",
-    en: "Wheel zooms the canvas · ⌘wheel zooms the map",
+    zh: "滚轮缩放画布 · {mod}滚轮缩放地图",
+    en: "Wheel zooms the canvas · {mod}wheel zooms the map",
   },
   "canvas.confirmDeleteTurn": {
     zh: "删除回合「{title}」？\n只删除这一问一答，更早的对话保留。此操作不可撤销。",
@@ -166,8 +219,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Type something and the rendered Markdown will show here",
   },
   "compare.hint": {
-    zh: "⌘↵ 发送 · 两侧模型可独立选择",
-    en: "⌘↵ Send · each side can pick its own model",
+    zh: "{mod}↵ 发送 · 两侧模型可独立选择",
+    en: "{mod}↵ Send · each side can pick its own model",
   },
   "compare.sendBoth": { zh: "发送到两边 ➤", en: "Send to both ➤" },
   "compare.sendSide": { zh: "发送到{side} ➤", en: "Send to {side} ➤" },
@@ -200,8 +253,6 @@ export const dict: Record<string, { zh: string; en: string }> = {
   // ── branch-context.vue + branch-digest.vue ─────────────────────────────
   "branch.compareTitle": { zh: "⇄ 分支对比", en: "⇄ Branch compare" },
   "branch.freeTitle": { zh: "⇄ 自由并排", en: "⇄ Free side-by-side" },
-  "branch.prevPair": { zh: "上一对（←）", en: "Previous pair (←)" },
-  "branch.nextPair": { zh: "下一对（→）", en: "Next pair (→)" },
   "branch.exitCompare": { zh: "退出对比（Esc）", en: "Exit compare (Esc)" },
   "branch.current": { zh: "当前", en: "Current" },
   "branch.commonPrefix": { zh: "共同前缀 · {n} 个回合", en: "Common prefix · {n} turns" },
@@ -226,6 +277,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "branch.selectColumn": {
     zh: "选中「{title}」并退出对比",
     en: "Select “{title}” and exit compare",
+  },
+  "branch.syncScrollTitle": {
+    zh: "同步滚动：滚轮滚动时两栏一起下滑",
+    en: "Sync scroll: the wheel carries both columns down together",
   },
   "branch.select": { zh: "选中", en: "Select" },
   "branch.jumpLatest": { zh: "跳到这个会话的最新回合", en: "Jump to this session's latest turn" },

@@ -24,13 +24,35 @@ describe("backendCapabilities", () => {
     });
   });
 
-  it("gates codex to no message delete and no attachments", () => {
+  it("gates codex to no message delete and compaction, but allows attachments", () => {
     expect(backendCapabilities("codex")).toEqual({
+      deleteMessage: false,
+      deleteSession: true,
+      attachments: true,
+      fileChanges: false,
+      compress: true,
+      exportBranch: false,
+    });
+  });
+
+  it("gives pi compaction and no session delete", () => {
+    expect(backendCapabilities("pi")).toEqual({
+      deleteMessage: false,
+      deleteSession: false,
+      attachments: true,
+      fileChanges: false,
+      compress: true,
+      exportBranch: false,
+    });
+  });
+
+  it("gives zcode session delete through the v4 command channel and compaction", () => {
+    expect(backendCapabilities("zcode")).toEqual({
       deleteMessage: false,
       deleteSession: true,
       attachments: false,
       fileChanges: false,
-      compress: false,
+      compress: true,
       exportBranch: false,
     });
   });
@@ -65,5 +87,20 @@ describe("resolveStorePath", () => {
       "/data/archive-codex.json",
     );
     expect(resolveStorePath("", "archive", "codex", () => false)).toBe("archive-codex.json");
+  });
+
+  it("joins with the directory's own separator, not a hardcoded slash", () => {
+    // A Windows userData path spells its separator with "\"; a hardcoded
+    // "/" would give the store files a name that differs from what an older
+    // awefork wrote, so the legacy-store lookup could miss a file that is
+    // really there. The join follows the directory's own style.
+    const path = resolveStorePath(
+      "C:\\Users\\peng\\AppData\\Roaming\\awefork",
+      "pins",
+      "codex",
+      () => false,
+    );
+    expect(path).toBe("C:\\Users\\peng\\AppData\\Roaming\\awefork\\pins-codex.json");
+    expect(path).not.toContain("/");
   });
 });

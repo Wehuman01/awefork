@@ -1,9 +1,10 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
 import { CODEX_NOT_LOGGED_IN_MESSAGE } from "../shared/codex-adapter.js";
 import { type CodexJsonRpc, createCodexJsonRpc } from "./codex-jsonrpc.js";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 
 const execFileAsync = promisify(execFile);
@@ -136,6 +137,9 @@ export async function ensureCodexServer(
   const client = createCodexJsonRpc(child.stdin, child.stdout, {
     onNotification: () => {},
     onDisconnect: markDead,
+    // The backstop declines an unanswered ask only once no renderer window
+    // can show it; a live window owns the ask for as long as the user needs.
+    rendererAlive: () => BrowserWindow.getAllWindows().some((win) => !win.isDestroyed()),
   });
 
   const deadline = Date.now() + handshakeTimeoutMs;
@@ -148,6 +152,15 @@ export async function ensureCodexServer(
     }
     if (child.exitCode !== null || !slot.alive) {
       client.dispose();
+      // cmd.exe reports a missing command as exit code 9009 and never sets
+      // the child's own ENOENT (the npm .cmd shim runs under shell:true).
+      // Without this the handshake below would first wait out its 5s
+      // initialize timeout before the loop noticed the dead child.
+      if (isCmdNotFound(child.exitCode)) {
+        throw new Error(
+          missingCliMessage("codex app-server", "Install it with: npm install -g @openai/codex"),
+        );
+      }
       const detail = stderrTail.trim();
       throw new Error(
         `codex app-server exited during startup${
@@ -179,9 +192,9 @@ export async function ensureCodexServer(
           authMessage = NOT_LOGGED_IN_MESSAGE;
         }
       } catch (error) {
-        authMessage = `${NOT_LOGGED_IN_MESSAGE}（${
+        authMessage = `${NOT_LOGGED_IN_MESSAGE} (${
           error instanceof Error ? error.message : String(error)
-        }）`;
+        })`;
       }
       servers.set(key, slot);
       slot.result = {
@@ -191,6 +204,18 @@ export async function ensureCodexServer(
       };
       return slot.result;
     } catch (error) {
+      // A dead child settles the pending request as a lost connection, so
+      // the exit code only becomes visible here — check it before the
+      // handshake retry, otherwise a missing CLI on Windows costs a full
+      // initialize timeout per attempt.
+      if (isCmdNotFound(child.exitCode)) {
+        client.dispose();
+        killChild(child);
+        markDead();
+        throw new Error(
+          missingCliMessage("codex app-server", "Install it with: npm install -g @openai/codex"),
+        );
+      }
       // Handshake-level failures (timeout while the CLI warms up) retry until
       // the deadline; the spawn/exit checks above break the loop early.
       if (Date.now() > deadline) {

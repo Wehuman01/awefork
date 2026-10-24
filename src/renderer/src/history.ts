@@ -257,7 +257,7 @@ export function redoSteps(n = 1): Promise<boolean> {
   return enqueue(() => redoRange(Math.min(state.entries.length - 1, state.cursor + n - 1)));
 }
 
-/** Undo until the named entry is undone too (panel row click / toast 撤销). */
+/** Undo until the named entry is undone too (panel row click / toast Undo). */
 export function undoTo(id: number): Promise<boolean> {
   return enqueue(async () => {
     const idx = state.entries.findIndex((entry) => entry.id === id);

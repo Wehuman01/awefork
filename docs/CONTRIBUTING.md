@@ -4,13 +4,14 @@
 
 ```bash
 npm install
-npm run dev        # launches Electron + Vite against a real/child opencode serve
+npm run dev        # launches Electron + Vite; the selected agent starts lazily
 npm run typecheck
 npm run lint
 npm test
 ```
 
-Requirements: Node.js ≥ 22, `opencode` CLI on PATH.
+Requirements: Node.js ≥ 22. A supported agent CLI (`opencode`, `codex`, `pi`, or
+ZCode) is needed for a live app run, but not for unit tests or the GUI suite.
 
 ## Engineering Taste
 
@@ -28,41 +29,103 @@ We follow these principles verbatim. Apply them unless there is an explicit conf
 
 ```
 src/
-  main/            # Electron main: bootstrap, window, opencode serve lifecycle, IPC wiring
-  preload/         # contextBridge surface (window.awefork)
-  shared/          # pure logic + agent adapters — no Electron imports, fully testable
-    types.ts       # AgentAdapter protocol + domain types
-    opencode-client.ts   # thin typed fetch client for opencode's HTTP API
-    opencode-adapter.ts  # AgentAdapter implementation (first backend)
-    lineage-store.ts     # fork lineage sidecar (JSON)
-    marks-store.ts       # key-turn mark sidecar (sessionId:messageId)
-    session-tree.ts      # pure projection: sessions + lineage -> display tree
-    sse.ts               # SSE frame parser for /event
-  renderer/        # Vue 3 app (no state library; plain reactive state in state.ts)
-tests/             # one test file per shared module; fake opencode server via node:http
-docs/              # CONTRIBUTING.md, CHANGELOG.md
+  main/                     # Electron lifecycle, IPC, backend registry and process owners
+    backend-registry.ts     # lazy adapter lifecycle, capability routing, per-backend stores
+    opencode-server.ts      # server discovery/reuse/spawn and opencode transport
+    codex-multihome.ts      # one Codex facade over the default and aweswitch homes
+    codex-server.ts         # app-server processes and JSON-RPC transport
+    pi-server.ts            # JSONL indexing and short-lived RPC children
+    zcode-server.ts         # app-server discovery, lifecycle and provider config
+    file-browser.ts         # bounded read-only filesystem access for the renderer
+    save-file.ts            # native save dialog for generated branch Markdown
+    ipc.ts                  # invoke handlers for sessions, overlays, files and updates
+  preload/                  # the single contextBridge surface (window.awefork)
+  shared/                   # pure logic, protocol data and adapters; no Electron imports
+    types.ts                # AgentAdapter, domain types and normalized AgentEvent union
+    backend.ts              # backend IDs, capabilities and store-path migration
+    awefork-api.ts          # typed renderer/preload contract
+    agents/                 # opencode v1/v2 protocol descriptors
+    agent-descriptor.ts     # closed-vocabulary validator and version selection
+    opencode-adapter.ts     # descriptor-driven HTTP/SSE backend
+    codex-adapter.ts        # Codex JSON-RPC backend
+    pi-adapter.ts           # pi JSONL/RPC backend
+    zcode-adapter.ts        # ZCode app-server backend
+    *-store.ts              # lineage, pins, marks, tags, archive, trash and composer overlays
+    canvas-*.ts             # pure graph and working-set projections
+    file-*.ts, diff.ts      # filesystem contracts, paths, changes and bounded diffs
+  renderer/                 # Vue 3 app; reactive state lives in state.ts
+tests/                      # unit, fake-server and real-Electron interaction tests
+docs/                       # changelog, contribution guide, specs and measurements
 ```
 
-Separation rule: `shared/` never imports Electron; `main/` wires processes; `renderer/` renders and calls the preload bridge. Naming: kebab-case files, `run`+PascalCase only for commands, verb-first camelCase utilities, `is/has/should` booleans, PascalCase types.
+Separation rule: `shared/` never imports Electron; `main/` owns processes and I/O;
+`renderer/` renders and calls the typed preload bridge. Naming: kebab-case files,
+`run`+PascalCase only for commands, verb-first camelCase utilities,
+`is/has/should` booleans, PascalCase types.
 
 ## Architecture
 
 ### The one idea
 
-Agent sessions are trees. Every supported agent already has a native fork/history primitive; awefork is a projection and control layer on top:
+Agent sessions are trees. Every supported agent has a native fork/history
+primitive; awefork is a projection and control layer on top:
 
 ```
-renderer ── window.awefork (preload) ── ipc ── AgentAdapter ── agent's native API
+renderer ── window.awefork ── IPC ── backend registry ── AgentAdapter
+                                                       ├─ opencode HTTP/SSE
+                                                       ├─ Codex stdio JSON-RPC
+                                                       ├─ pi JSONL/RPC
+                                                       └─ ZCode app-server
 ```
+
+Every backend-specific IPC request names its backend. The registry keeps one lazy
+adapter per backend, forwards tagged events from all running backends, and routes
+overlay reads and writes to backend-specific files.
 
 ### Hard constraints (facts + rules)
 
-1. **Read-only projection.** Session data is fetched through the agent's API. awefork never writes to agent storage, never mutates session files, never invents a session format.
-2. **Fork through native primitives.** opencode: `POST /session/{id}/fork` with an **exclusive cut point** — the new session keeps messages strictly *before* `messageID`. The adapter's protocol-level promise is different: `fork(sessionId, atMessageId)` KEEPS the turn starting at that user message, so the adapter translates by passing the *next user message* as the cut, or omitting the cut at the last turn. Any new backend must honor this same promise.
-3. **Lineage is ours.** opencode's fork copies messages without recording a parent link, so awefork maintains `<userData>/lineage.json` (single writer assumed). Subagent relationships (`parentID` in the agent's own data) are a separate `origin` and are hidden from the tree by default.
-4. **Events are normalized.** Backend SSE streams are mapped to the small `AgentEvent` union (`session.updated`, `message.started`, `message.delta`, `session.idle`, `server.error`) before crossing IPC. The renderer never sees backend-specific payloads.
-5. **Server lifecycle.** Port 4096 is probed at startup; a running `opencode serve` is reused, otherwise one is spawned as a child and killed on quit. Never kill a server you didn't spawn.
-6. **Known limitation:** the message list is flat. Sessions where the user reverted and re-asked inside the same session show every attempt in order; dead-branch filtering is future work.
+1. **Native sessions stay native.** Session data comes through each agent's API
+   or files. awefork adds overlay sidecars, but does not invent a replacement
+   session format or rewrite the agent's store.
+2. **Fork through native primitives.** The adapter contract keeps the full turn
+   that starts with `atMessageId`; each adapter translates that into its
+   backend's exclusive cut or turn ID. `context: "none"` creates an empty native
+   session and records the visual lineage in awefork's sidecar.
+3. **Lineage has a backend owner.** opencode needs an awefork sidecar because
+   its copy omits the parent link. Codex, pi, and ZCode also persist their native
+   linkage; awefork still uses its sidecar for cross-backend presentation,
+   detached exports, and empty-context forks. Never assume one global
+   `lineage.json`.
+4. **Events are normalized.** HTTP/SSE, JSON-RPC notifications, and RPC frames
+   become the `AgentEvent` union in `types.ts`, including message parts, tool
+   progress, compaction, interactions, branch continuation, and connection
+   changes. The renderer never branches on raw backend payloads.
+5. **Capabilities gate affordances.** `backendCapabilities()` is the single
+   renderer-facing feature surface. Missing rename/delete/export/attachment/
+   compression/file-change support must hide or disable the action rather than
+   defer the error until click time.
+6. **Lifecycle belongs to main.** opencode reuses compatible servers and walks
+   configured, remembered, classic, and discovered ports. Codex, pi, and ZCode
+   own separate child processes or pooled RPC children. Never kill a process
+   awefork did not spawn.
+7. **Overlay state is scoped.** New writes use
+   `<userData>/<store>-<backend>.json`; legacy bare names remain opencode
+   fallbacks. Settings are split between main's `settings.json` and the
+   renderer's validated `awefork:settings` blob; shell geometry lives in the
+   separate `awefork:layout` record.
+8. **The renderer gets no Node access.** `contextIsolation` stays on and
+   `nodeIntegration` stays off. The preload exposes typed IPC only; navigation
+   away from the app and new windows are denied.
+9. **Reply content is untrusted.** Markdown becomes a typed tree and Vue
+   vnodes; raw reply HTML is never injected. External links pass a protocol
+   allowlist in main, and math output uses KaTeX with `trust` disabled.
+10. **File access is bounded.** Browser listings cap entries, previews cap
+    bytes, and a dropped Finder item keeps its absolute path as text rather
+    than inventing a path. File reads are read-only; saving branch Markdown is
+    a separate, explicit native-dialog action.
+11. **Known limitation:** the message list is flat. Sessions where the user
+   reverted and re-asked inside the same session show every attempt in order;
+   dead-branch filtering is future work.
 
 ### Session overview
 
@@ -72,15 +135,37 @@ The main process owns `overview-read.json`, including result revisions, seen wat
 
 ### Adding an agent backend
 
-Implement `AgentAdapter` in `src/shared/`, add an entry in main-process wiring for its lifecycle, and extend the fake server in tests. The protocol doc-comment in `types.ts` is the contract; do not fork the protocol per backend.
+Implement `AgentAdapter` in `src/shared/`, add its ID and capability row in
+`src/shared/backend.ts`, extend the typed bridge in `src/shared/awefork-api.ts`,
+and wire its lifecycle through the main-process backend registry. Add a fake
+transport and focused adapter tests. The protocol doc-comments in `types.ts` are
+the contract; do not fork the protocol per backend. If protocol facts drift
+often, put the closed vocabulary in a descriptor and validate it at startup, as
+opencode does.
+
+### Renderer message updates
+
+Update `messagesBySession` by session key and preserve arrays whose complete message state is unchanged. Reads are serialized by backend and session; completion and explicit reloads request a snapshot taken after any older read. Local sends and deletions invalidate older snapshots. Changed replies publish together at the next animation frame, with a timer fallback for hidden windows, and reads resolve after publication.
+
+Canvas loading prioritizes the selected session and its ancestors, with at most four canvas reads active across workspaces. `loadingMessages` tracks the missing data needed to position that branch; `loadingCanvas` tracks the remaining batch. Old queued jobs stop after a selection, directory or backend switch. Background responses may populate their session caches, but cannot clear a newer batch's loading state. While sibling heights settle, requested focus follows its card; manual pan, zoom or fit ends that tracking.
 
 ## Testing
 
-- One test file per shared module under `tests/`.
-- Real I/O: temp dirs on disk (`mkdtemp`), real HTTP via a fake opencode server (`node:http`) that mirrors verified endpoint semantics. No module-level mocks.
-- Adapter semantics worth re-verifying against a real opencode release when upgrading: exclusive-cut fork, `prompt_async` fire-and-forget, SSE frame shape on `/event`.
-- Overview projection and ledger tests live in `tests/renderer-session-overview.test.ts`; store and navigation regressions live in `tests/renderer-session-overview-state.test.ts`.
-- Run `npm run verify` for types, formatting, and unit tests. Run `npm run test:gui` separately for the real-window smoke test; it builds the app before launching the demo backend.
+- Unit tests use real temp directories and real HTTP servers where the boundary
+  matters. Codex and ZCode use fake JSON-RPC clients; pi uses fake JSONL/RPC
+  seams. No module-level mocks for the storage layer.
+- Adapter tests cover protocol translation and recovery, including exclusive
+  fork cuts, prompt acknowledgement, dropped frames, compaction, attachments,
+  and capability-specific failure paths.
+- Renderer state regressions use a scripted preload bridge and fake timers. They
+  cover message snapshots, optimistic sends, backend switches, canvas tabs,
+  files, settings, and multi-model round settlement.
+- Overview projection and ledger tests live in `tests/renderer-session-overview.test.ts`;
+  store and navigation regressions live in `tests/renderer-session-overview-state.test.ts`.
+- `npm run verify` runs typecheck, lint, and Vitest. `npm run test:gui` builds
+  the app and runs the real Electron interaction suite against the mock adapter.
+  For repeatable production-renderer measurements and their limits, see
+  [the many-branch performance report](performance/2026-10-22-many-branches.md).
 
 ## Release
 

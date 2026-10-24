@@ -29,6 +29,47 @@ export const dict: Record<string, Entry> = {
     en: "Model list unavailable right now; can't compress",
   },
   "state.compressFailed": { zh: "压缩失败：{error}", en: "Compress failed: {error}" },
+  "state.parallelDuplicateModels": {
+    zh: "所选模型重复，请调整后再发送。",
+    en: "The selected models include a duplicate. Adjust the list and try again.",
+  },
+  "state.parallelGroupBusy": {
+    zh: "这个会话上一轮多模型发送还没有结束，稍后再试。",
+    en: "A parallel round from this session is still running. Try again once it settles.",
+  },
+  "state.parallelNoReplies": {
+    zh: "没有收到可汇总的回答。",
+    en: "No usable replies were received to summarize.",
+  },
+  "state.parallelSummaryFailed": {
+    zh: "回答已保留，但汇总失败：{error}",
+    en: "The answers were kept, but summarization failed: {error}",
+  },
+  "state.parallelTargetTimeout": {
+    zh: "这个模型长时间没有回报结果，可能后端已断开。可以单独重试。",
+    en: "This model never reported back — the backend may have dropped. Retry it on its own.",
+  },
+  "state.parallelTargetStopped": {
+    zh: "这个模型的回答已手动停止。可以单独重试。",
+    en: "This model's answer was stopped by hand. Retry it on its own.",
+  },
+  "state.parallelSummaryTimeout": {
+    zh: "汇总长时间没有完成，可能后端已断开。回答已保留，可重新汇总。",
+    en: "The summary never finished — the backend may have dropped. The answers are kept; summarize again.",
+  },
+  "state.parallelDefaultModel": { zh: "Agent 默认模型", en: "Agent default model" },
+  "state.parallelBranchSessionTitle": {
+    zh: "同题 · {prompt} · {model} · {time}",
+    en: "Parallel · {prompt} · {model} · {time}",
+  },
+  "state.parallelSummarySessionTitle": {
+    zh: "汇总 · {prompt} · {time}",
+    en: "Summary · {prompt} · {time}",
+  },
+  "state.compressForkTitle": {
+    zh: "🧹 压缩 · {title}",
+    en: "🧹 Compact · {title}",
+  },
 
   // ── history labels: pins / marks / tags ────────────────────────────────
   "state.pinLabel": { zh: "置顶「{title}」", en: 'Pinned "{title}"' },
@@ -119,6 +160,10 @@ export const dict: Record<string, Entry> = {
   "state.switchBackendFailed": {
     zh: "无法切换到 {backend}。",
     en: "Couldn't switch to {backend}.",
+  },
+  "state.installFailed": {
+    zh: "安装 {backend} 失败。",
+    en: "Couldn't install {backend}.",
   },
   "state.updaterLaunched": {
     zh: "更新安装器已启动，按提示完成安装",

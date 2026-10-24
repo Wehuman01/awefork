@@ -2,14 +2,59 @@
   <main
     ref="viewportEl"
     class="viewport"
-    :class="{ panning }"
+    :class="{ panning, 'path-drag-over': pathDragOver }"
     @wheel.prevent="onWheel"
     @mousedown="onMouseDown"
+    @dragover.prevent="onPathDragOver"
+    @dragleave="onPathDragLeave"
+    @drop.prevent="onPathDrop"
   >
     <div class="world" :style="worldStyle">
       <svg class="edges" :width="svgSize.w" :height="svgSize.h">
+        <defs>
+          <marker
+            id="parallel-summary-arrow"
+            markerWidth="8"
+            markerHeight="8"
+            refX="7"
+            refY="4"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M 0 0 L 8 4 L 0 8 z" class="parallel-link-arrow" />
+          </marker>
+        </defs>
         <g v-for="edge in edgesWithPoints" :key="`${edge.from}->${edge.to}`">
+          <template v-if="edge.severed">
+            <!-- An empty-context fork: the line is cut in two, because context
+                 does not cross it. Both halves keep the fork edge's own look. -->
+            <path
+              :d="edge.headPath"
+              class="edge fork severed"
+              :class="{
+                active: onActivePath(edge),
+                dim: hasActivePath && !onActivePath(edge),
+                desc: isSubtreeEdge(edge),
+                'cmp-el': cmpEdgeRole(edge) === 'l',
+                'cmp-er': cmpEdgeRole(edge) === 'r',
+                'cmp-edim': cmpEdgeRole(edge) === 'dim',
+              }"
+            />
+            <path
+              :d="edge.tailPath"
+              class="edge fork severed"
+              :class="{
+                active: onActivePath(edge),
+                dim: hasActivePath && !onActivePath(edge),
+                desc: isSubtreeEdge(edge),
+                'cmp-el': cmpEdgeRole(edge) === 'l',
+                'cmp-er': cmpEdgeRole(edge) === 'r',
+                'cmp-edim': cmpEdgeRole(edge) === 'dim',
+              }"
+            />
+          </template>
           <path
+            v-else
             :d="edge.path"
             class="edge"
             :class="{
@@ -36,6 +81,24 @@
             }"
           />
         </g>
+        <g
+          v-for="links in parallelSummaryViews"
+          :key="`parallel:${links.node.id}`"
+          aria-hidden="true"
+        >
+          <path
+            v-for="source in links.sources"
+            :key="`${links.node.id}:${source.node.id}`"
+            :d="source.path"
+            class="edge parallel-link"
+          />
+          <path :d="links.trunkPath" class="edge parallel-link parallel-trunk" />
+          <path
+            :d="links.summaryPath"
+            class="edge parallel-link parallel-summary-link"
+            marker-end="url(#parallel-summary-arrow)"
+          />
+        </g>
         <path v-if="draftEdge" :d="draftEdge.path" class="edge draft-edge" />
       </svg>
 
@@ -44,8 +107,12 @@
         :key="node.id"
         :ref="cardRef"
         :data-node-id="node.id"
+        :data-drop="node.kind === 'turn' ? 'turn' : 'tip'"
+        :data-session="node.sessionId"
+        :data-message="node.messageId ?? ''"
         class="turn"
         :class="{
+          'parallel-summary': isParallelSummary(node),
           selected: node.id === selectedTurnId,
           running: isNodeRunning(node),
           recent: isNodeRecent(node),
@@ -58,6 +125,7 @@
           'cmp-r': cmpRole(node) === 'r',
           'cmp-anchor': cmpRole(node) === 'anchor',
           pickable: pickArmed,
+          'drop-on': isDropTarget(node),
         }"
         :style="{
           left: `${node.x}px`,
@@ -113,7 +181,13 @@
         <button
           type="button"
           class="add-chip"
-          :title="isSessionTip(node) ? t('canvas.continueBranchHint') : t('canvas.newBranchHint')"
+          :title="
+            isParallelSummary(node)
+              ? t('canvas.parallelContinueHint')
+              : isSessionTip(node)
+                ? t('canvas.continueBranchHint')
+                : t('canvas.newBranchHint')
+          "
           @click.stop="openDraft(node)"
         >
           ＋
@@ -122,6 +196,26 @@
           <div class="turn-head">
             <span class="avatar user">🍑</span>
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
+            <span v-if="isParallelSummary(node)" class="parallel-summary-badge">✦ {{ t("canvas.parallelSummary") }} v{{ parallelSummaryVersion(node) }}</span>
+            <button
+              v-else-if="parallelSourceOf(node)"
+              type="button"
+              class="parallel-source-badge"
+              :title="
+                t('canvas.parallelSourceHint', {
+                  round: parallelSourceOf(node)?.round ?? 0,
+                  index: parallelSourceOf(node)?.index ?? 0,
+                  total: parallelSourceOf(node)?.total ?? 0,
+                  model: parallelSourceOf(node)?.label ?? '',
+                })
+              "
+              @click.stop="openParallelRound(parallelSourceOf(node)?.groupId ?? '')"
+            >⇄ {{ t("canvas.parallelSource", { round: parallelSourceOf(node)?.round ?? 0, index: parallelSourceOf(node)?.index ?? 0, total: parallelSourceOf(node)?.total ?? 0 }) }}</button>
+            <span
+              v-if="isEmptyContextStart(node)"
+              class="ctx-origin-tag"
+              :title="t('cut.markerTitle')"
+            >{{ t("canvas.ctxNoneOriginLabel") }}</span>
             <button
               v-if="forkCountOf(node) > 0"
               type="button"
@@ -140,13 +234,15 @@
               {{ previewOf(node) }}
             </p>
           </div>
-          <div v-if="node.toolNames.length > 0" class="chips">
-            <span
-              v-for="(name, i) in node.toolNames"
-              :key="name"
-              class="chip"
-              :class="{ lav: i % 2 === 1 }"
-            >{{ name }}</span>
+          <div v-if="parallelSummaryOf(node)" class="parallel-summary-sources">
+            <span>{{ t("canvas.parallelSources") }}</span>
+            <button
+              v-for="source in parallelSummaryOf(node)?.sources ?? []"
+              :key="source.node.id"
+              type="button"
+              :title="t('canvas.parallelOpenSource', { model: source.label })"
+              @click.stop="selectNode(source.node)"
+            >{{ source.label }}</button>
           </div>
           <div class="turn-foot">
             <span v-if="isNodeRunning(node)" class="running-flag">{{ t("canvas.running") }}</span>
@@ -169,6 +265,11 @@
           <div class="turn-head">
             <span class="avatar user">🌱</span>
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
+            <span
+              v-if="isEmptyContextStart(node)"
+              class="ctx-origin-tag"
+              :title="t('cut.markerTitle')"
+            >{{ t("canvas.ctxNoneOriginLabel") }}</span>
             <button
               v-if="forkCountOf(node) > 0"
               type="button"
@@ -185,7 +286,10 @@
         v-if="draftNode"
         :ref="draftRef"
         class="draft"
+        :class="{ 'drop-on': dropTarget?.kind === 'draft' }"
         :style="{ left: `${draftX}px`, top: `${draftY}px` }"
+        data-drop="draft"
+        :data-session="store.draft?.sessionId ?? ''"
         @mousedown.stop
       >
         <div class="draft-head">
@@ -206,7 +310,11 @@
             @click="
               setDraftContextMode(store.draft?.contextMode === 'none' ? 'inherit' : 'none')
             "
-          >{{ store.draft?.contextMode === "none" ? t("canvas.ctxNoneLabel") : t("canvas.ctxInheritLabel") }}</button>
+          >{{
+            store.draft?.contextMode === "none"
+              ? `✂ ${t("canvas.ctxNoneLabel")}`
+              : `⛓ ${t("canvas.ctxInheritLabel")}`
+          }}</button>
           <button type="button" class="close" @click="dismissDraft">✕</button>
         </div>
         <div v-if="(store.draft?.attachments.length ?? 0) > 0" class="draft-atts">
@@ -228,6 +336,7 @@
           </span>
         </div>
         <textarea
+          ref="draftTextarea"
           :value="store.draft?.text"
           :placeholder="store.draft?.atMessageId == null ? t('canvas.phContinue') : t('canvas.phNew')"
           @input="setDraftText(($event.target as HTMLTextAreaElement).value)"
@@ -237,30 +346,65 @@
           @paste="onDraftPaste"
         ></textarea>
         <div class="draft-foot">
-          <ModelPicker
-            class="draft-model"
-            :model-value="store.draft?.model ?? null"
-            :models="store.models"
-            :favorite-models="store.favoriteModels"
-            :recent-models="store.recentModels"
-            :title="t('canvas.branchModelTitle')"
-            @update:model-value="setDraftModel"
-            @toggle-favorite="toggleFavoriteModel"
-          />
-          <VariantPicker
-            :model="store.draft?.model ?? null"
-            :models="store.models"
-            @select="setDraftVariant"
-          />
+          <template v-if="!draftParallel">
+            <ModelPicker
+              class="draft-model"
+              :model-value="store.draft?.model ?? null"
+              :models="store.models"
+              :favorite-models="store.favoriteModels"
+              :recent-models="store.recentModels"
+              :title="t('canvas.branchModelTitle')"
+              @update:model-value="setDraftModel"
+              @toggle-favorite="toggleFavoriteModel"
+            />
+            <VariantPicker
+              :model="store.draft?.model ?? null"
+              :models="store.models"
+              @select="setDraftVariant"
+            />
+          </template>
+          <span
+            v-else
+            class="draft-parallel-models"
+            :title="draftParallelLabels.join(' · ')"
+          >{{ draftParallelLabels.join(" · ") }}</span>
+          <button
+            v-if="canDraftParallel"
+            type="button"
+            class="draft-parallel"
+            :class="{ on: draftParallel }"
+            :title="t('input.parallelMode')"
+            :aria-pressed="draftParallel"
+            @click="toggleDraftParallel"
+          >⇄</button>
+          <button
+            v-if="draftParallel"
+            type="button"
+            class="draft-parallel-pick"
+            :class="{ warn: draftParallelTargets.length < 2 }"
+            :title="draftParallelTargets.length < 2 ? t('input.parallelNeedTwo') : undefined"
+            @click="draftModelDialogOpen = true"
+          >{{ draftParallelTargets.length }} · {{ t("input.parallelAddModel") }}</button>
           <button
             type="button"
             class="send-btn"
-            :disabled="!store.draft?.text.trim() || store.draftSending"
+            :disabled="!store.draft?.text.trim() || store.draftSending || (draftParallel && draftParallelTargets.length < 2)"
+            :title="draftParallel && draftParallelTargets.length < 2 ? t('input.parallelNeedTwo') : undefined"
             @click="submitDraft"
           >{{ store.draftSending ? "…" : "➤" }}</button>
-          <span class="hint">{{ t("canvas.draftHint") }}</span>
+          <span class="hint">{{ draftParallel && draftParallelTargets.length < 2 ? t("input.parallelNeedTwo") : t("canvas.draftHint") }}</span>
         </div>
       </article>
+      <ParallelModelDialog
+        v-model:open="draftModelDialogOpen"
+        :models="store.models"
+        :favorite-models="store.favoriteModels"
+        :recent-models="store.recentModels"
+        :max="MAX_PARALLEL_TARGETS"
+        :targets="draftParallelTargets"
+        @update:targets="draftParallelTargets = $event"
+        @toggle-favorite="toggleFavoriteModel"
+      />
     </div>
 
     <div v-if="graph.nodes.length === 0 && store.connectionError" class="canvas-empty">
@@ -355,34 +499,44 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { fileKind } from "../../../shared/attachment-kinds";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
-import { draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
+import { COL_GAP, draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
+import type { ModelChoice } from "../../../shared/types";
 import { type DraftAttachment, readAttachments } from "../attachments";
+import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
+import { joinPaths } from "../path-insert";
+import { MAX_PARALLEL_TARGETS, settings } from "../settings";
 import {
   activeChain,
   cancelComparePick,
   cardHeights,
   childTurnIds,
   comparePlan,
+  defaultParallelTargets,
   deleteSession,
   deleteTurn,
   dismissDraft,
   enterCompare,
   forkedFromSelection,
+  insertDraftText,
   isSessionTip,
   isTurnDelete,
   isTurnMarked,
   openDraft,
+  parallelGroups,
   recentAlphaFor,
   requestSessionMenu,
   retryNode,
+  selectSession,
   selectTurn,
   sendDraft,
+  sendDraftParallel,
+  setActiveCanvasTabView,
   setDraftAttachments,
   setDraftContextMode,
   setDraftModel,
@@ -399,6 +553,7 @@ import {
 import BranchDigest from "./branch-digest.vue";
 import MarksPanel from "./marks-panel.vue";
 import ModelPicker from "./model-picker.vue";
+import ParallelModelDialog from "./parallel-model-dialog.vue";
 import SessionOverviewPanel from "./session-overview-panel.vue";
 import SessionOverviewTrigger from "./session-overview-trigger.vue";
 import StorySearch from "./story-search.vue";
@@ -409,6 +564,8 @@ const scale = ref(1);
 const tx = ref(0);
 const ty = ref(0);
 const panning = ref(false);
+let loadingAnchorId: string | null = null;
+let loadingAnchorFrame: number | null = null;
 
 const graph = computed(() => turnGraph.value);
 const selectedTurnId = computed(() => store.selectedTurnId);
@@ -452,6 +609,142 @@ const svgSize = computed(() => {
 });
 
 const nodeById = computed(() => new Map(graph.value.nodes.map((n) => [n.id, n])));
+
+interface ParallelSourceNode {
+  node: TurnNode;
+  label: string;
+  path: string;
+}
+
+interface ParallelSummaryLinks {
+  node: TurnNode;
+  version: number;
+  sources: ParallelSourceNode[];
+  trunkPath: string;
+  summaryPath: string;
+}
+
+/**
+ * The first turn of a summary session is the canvas summary card. Its source
+ * turns are linked through the open column gap beside the native fork cards,
+ * keeping the existing session layout and all normal card actions intact.
+ */
+const parallelSummaryViews = computed<ParallelSummaryLinks[]>(() => {
+  const result: ParallelSummaryLinks[] = [];
+  for (const group of parallelGroups) {
+    if (group.backend !== store.activeBackend) continue;
+    for (const version of group.summaryVersions) {
+      const summaryMessage = store.messagesBySession[version.sessionId]?.find(
+        (message) => message.role === "user",
+      );
+      if (!summaryMessage) continue;
+      const summaryNode = nodeById.value.get(`${version.sessionId}:${summaryMessage.id}`);
+      if (!summaryNode) continue;
+
+      const sources = version.sources.flatMap((source): ParallelSourceNode[] => {
+        const baseline = new Set(source.baselineMessageIds);
+        const sourceMessage = store.messagesBySession[source.sessionId]?.findLast(
+          (message) =>
+            message.role === "user" && message.text === group.prompt && !baseline.has(message.id),
+        );
+        const sourceNode = sourceMessage
+          ? nodeById.value.get(`${source.sessionId}:${sourceMessage.id}`)
+          : undefined;
+        if (!sourceNode) return [];
+        return [{ node: sourceNode, label: source.label, path: "" }];
+      });
+
+      const busX =
+        Math.max(summaryNode.x, ...sources.map((source) => source.node.x)) +
+        NODE_WIDTH +
+        COL_GAP / 2;
+      const summaryY = summaryNode.y + summaryNode.height / 2;
+      for (const source of sources) {
+        const y = source.node.y + source.node.height / 2;
+        source.path = `M ${source.node.x + NODE_WIDTH} ${y} H ${busX}`;
+      }
+      const ys = [...sources.map((source) => source.node.y + source.node.height / 2), summaryY];
+      result.push({
+        node: summaryNode,
+        version: version.version,
+        sources,
+        trunkPath: ys.length > 1 ? `M ${busX} ${Math.min(...ys)} V ${Math.max(...ys)}` : "",
+        summaryPath: sources.length ? `M ${busX} ${summaryY} H ${summaryNode.x + NODE_WIDTH}` : "",
+      });
+    }
+  }
+  return result;
+});
+
+const parallelSummaryByNode = computed(
+  () => new Map(parallelSummaryViews.value.map((links) => [links.node.id, links])),
+);
+
+function parallelSummaryOf(node: TurnNode): ParallelSummaryLinks | null {
+  return parallelSummaryByNode.value.get(node.id) ?? null;
+}
+
+function isParallelSummary(node: TurnNode): boolean {
+  return parallelSummaryByNode.value.has(node.id);
+}
+
+/**
+ * The round a source fork belongs to, so its card says what it is: without
+ * this the fork cards of one round look like unrelated branches, and the pane
+ * (which reads them as one reading group) has no counterpart on the canvas.
+ */
+interface ParallelSourceBadge {
+  groupId: string;
+  /** 1-based ordinal of the round on this canvas, oldest first. */
+  round: number;
+  label: string;
+  /** 1-based position of this fork within its round. */
+  index: number;
+  total: number;
+}
+
+const parallelSourceByNode = computed(() => {
+  const badges = new Map<string, ParallelSourceBadge>();
+  const rounds = parallelGroups.filter((group) => group.backend === store.activeBackend);
+  for (const [roundIndex, group] of rounds.entries()) {
+    for (const [targetIndex, target] of group.targets.entries()) {
+      if (!target.sessionId) continue;
+      // The turn this round added, not an inherited copy of the question.
+      const baseline = new Set(target.baselineMessageIds);
+      const message = store.messagesBySession[target.sessionId]?.findLast(
+        (row) => row.role === "user" && row.text === group.prompt && !baseline.has(row.id),
+      );
+      if (!message) continue;
+      badges.set(`${target.sessionId}:${message.id}`, {
+        groupId: group.id,
+        round: roundIndex + 1,
+        label: target.label,
+        index: targetIndex + 1,
+        total: group.targets.length,
+      });
+    }
+  }
+  return badges;
+});
+
+function parallelSourceOf(node: TurnNode): ParallelSourceBadge | null {
+  return parallelSourceByNode.value.get(node.id) ?? null;
+}
+
+/** Open a round's reading view from any of its cards. */
+function openParallelRound(groupId: string): void {
+  const group = parallelGroups.find((item) => item.id === groupId);
+  if (!group) return;
+  // The newest summary session names this round unambiguously; the anchor
+  // would resolve to whichever round is newest for that session.
+  const landing =
+    group.summaryVersions.at(-1)?.sessionId ?? group.summarySessionId ?? group.anchorSessionId;
+  void selectSession(landing);
+}
+
+function parallelSummaryVersion(node: TurnNode): number | null {
+  return parallelSummaryOf(node)?.version ?? null;
+}
 
 // ── active path: the selected turn's lineage back to the story's root ──
 // Shared with the pane's context chain — state.activeChain is the source.
@@ -513,12 +806,84 @@ const directForkCounts = computed<Map<string, number>>(() => {
   return counts;
 });
 
+/** The first card (or empty stub) of a fork that did not inherit history. */
+const emptyContextStartIds = computed(() => {
+  const ids = new Set<string>();
+  for (const edge of graph.value.edges) {
+    if (edge.kind === "fork" && edge.context === "none") ids.add(edge.to);
+  }
+  return ids;
+});
+
+function isEmptyContextStart(node: TurnNode): boolean {
+  return emptyContextStartIds.value.has(node.id);
+}
+
 function forkCountOf(node: TurnNode): number {
   return node.sessionId === store.selectedId ? (directForkCounts.value.get(node.id) ?? 0) : 0;
 }
 
-const edgesWithPoints = computed(() =>
-  graph.value.edges.flatMap((edge) => {
+/**
+ * Split a cubic bezier at `t`, returning both halves as their own control
+ * polygons (de Casteljau). Used to cut a real gap out of an empty-context
+ * fork edge without placing a marker over other lines.
+ */
+function splitCubic(
+  curve: ReadonlyArray<readonly [number, number]>,
+  t: number,
+): [[number, number][], [number, number][]] {
+  const [p0, p1, p2, p3] = curve as [
+    readonly [number, number],
+    readonly [number, number],
+    readonly [number, number],
+    readonly [number, number],
+  ];
+  const lerp = (a: readonly [number, number], b: readonly [number, number]): [number, number] => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+  ];
+  const a = lerp(p0, p1);
+  const b = lerp(p1, p2);
+  const c = lerp(p2, p3);
+  const d = lerp(a, b);
+  const e = lerp(b, c);
+  const mid = lerp(d, e);
+  return [
+    [[...p0], a, d, mid],
+    [mid, e, c, [...p3]],
+  ];
+}
+
+function cubicPath(curve: ReadonlyArray<readonly [number, number]>): string {
+  const [p0, p1, p2, p3] = curve;
+  if (!p0 || !p1 || !p2 || !p3) return "";
+  return `M ${p0[0]} ${p0[1]} C ${p1[0]} ${p1[1]}, ${p2[0]} ${p2[1]}, ${p3[0]} ${p3[1]}`;
+}
+
+/** Small gap near the child card, expressed as a fraction of the curve. */
+const CUT_POSITION = 0.9;
+const CUT_GAP = 0.02;
+
+/**
+ * One drawn edge. Severed edges carry the two halves of the curve instead of
+ * a single path.
+ */
+interface DrawnEdge {
+  from: string;
+  to: string;
+  kind: "sequence" | "fork";
+  ex: number;
+  ey: number;
+  severed: boolean;
+  /** Whole curve; empty on a severed edge. */
+  path: string;
+  /** The two halves of a severed edge; empty on an intact one. */
+  headPath: string;
+  tailPath: string;
+}
+
+const edgesWithPoints = computed<DrawnEdge[]>(() =>
+  graph.value.edges.flatMap((edge): DrawnEdge[] => {
     const from = nodeById.value.get(edge.from);
     const to = nodeById.value.get(edge.to);
     if (!from || !to) return [];
@@ -527,12 +892,45 @@ const edgesWithPoints = computed(() =>
     const x2 = to.x;
     const y2 = to.y + to.height / 2;
     const bend = Math.max(46, (x2 - x1) / 2);
+    const curve: [number, number][] = [
+      [x1, y1],
+      [x1 + bend, y1],
+      [x2 - bend, y2],
+      [x2, y2],
+    ];
+    const base = {
+      from: edge.from,
+      to: edge.to,
+      kind: edge.kind,
+      ex: x2 - 2,
+      ey: y2,
+    };
+
+    if (edge.kind === "fork" && edge.context === "none") {
+      const t1 = CUT_POSITION - CUT_GAP;
+      const t2 = CUT_POSITION + CUT_GAP;
+      // Split at t2 first, then cut the front piece at t1 (its parameter is
+      // measured on the original curve, so rescale by t2).
+      const [front, back] = splitCubic(curve, t2);
+      const [head] = splitCubic(front, t1 / t2);
+      return [
+        {
+          ...base,
+          severed: true,
+          path: "",
+          headPath: cubicPath(head),
+          tailPath: cubicPath(back),
+        },
+      ];
+    }
+
     return [
       {
-        ...edge,
-        path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
-        ex: x2 - 2,
-        ey: y2,
+        ...base,
+        severed: false,
+        path: cubicPath(curve),
+        headPath: "",
+        tailPath: "",
       },
     ];
   }),
@@ -649,7 +1047,61 @@ const pickFromTitle = computed(
 );
 
 function submitDraft(): void {
+  if (draftParallel.value) {
+    void submitDraftParallel();
+    return;
+  }
   void sendDraft();
+}
+
+// ── draft multi-model entry ────────────────────────────────────────
+// The canvas draft sends the same round the pane composer does; only the
+// anchor differs (the draft's own session and fork point).
+
+const draftParallel = ref(false);
+const draftParallelTargets = ref<(ModelChoice | null)[]>([]);
+const draftModelDialogOpen = ref(false);
+const canDraftParallel = computed(() => settings.labs.parallelModels && store.models.length > 0);
+
+/** The round's target names, shown in place of the single-model picker. */
+const draftParallelLabels = computed(() =>
+  draftParallelTargets.value.map((choice) => parallelTargetLabel(choice)),
+);
+
+/** One target's display name; null means the agent's own default model. */
+function parallelTargetLabel(choice: ModelChoice | null): string {
+  if (!choice) return t("input.parallelDefaultModel");
+  const option = store.models.find(
+    (item) => `${item.providerId}:${item.modelId}` === `${choice.providerId}:${choice.modelId}`,
+  );
+  return option?.modelName || option?.modelId || choice.modelId;
+}
+
+function toggleDraftParallel(): void {
+  draftParallel.value = !draftParallel.value;
+  if (!draftParallel.value) return;
+  if (draftParallelTargets.value.length === 0) {
+    draftParallelTargets.value = defaultParallelTargets(store.models);
+  }
+  // Nothing usable from the defaults: open the picker so the round can be
+  // configured before it can be sent.
+  if (draftParallelTargets.value.length < 2) draftModelDialogOpen.value = true;
+}
+
+async function submitDraftParallel(): Promise<void> {
+  if (store.draftSending) return;
+  if (draftParallelTargets.value.length < 2) {
+    flashNotice(t("input.parallelNeedTwo"));
+    return;
+  }
+  const accepted = await sendDraftParallel(draftParallelTargets.value, {
+    model: settings.labs.parallel.summaryModel ? { ...settings.labs.parallel.summaryModel } : null,
+    length: settings.labs.parallel.summaryLength,
+  });
+  if (!accepted) return;
+  // state.ts already spent the draft; only the local round state is ours.
+  draftParallel.value = false;
+  draftParallelTargets.value = [];
 }
 
 /** Esc closes the draft — except while an IME composition owns the key. */
@@ -665,7 +1117,11 @@ function onDraftEsc(event: KeyboardEvent): void {
  */
 function removeNode(node: TurnNode): void {
   if (isTurnDelete(node)) {
-    const ok = window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
+    // Turn deletes have no undo, so the confirmation is on by default; the
+    // settings page can turn it off for people who prefer the speed.
+    const ok =
+      !settings.canvas.confirmDelete ||
+      window.confirm(t("canvas.confirmDeleteTurn", { title: node.title }));
     if (ok) void deleteTurn(node);
     return;
   }
@@ -684,6 +1140,9 @@ let activeDrag: { move: (event: MouseEvent) => void; up: () => void } | null = n
 
 function onMouseDown(event: MouseEvent): void {
   if (event.button !== 0) return;
+  loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   panning.value = true;
   const startX = event.clientX - tx.value;
   const startY = event.clientY - ty.value;
@@ -715,6 +1174,9 @@ function zoomBy(factor: number): void {
 }
 
 function zoomAt(px: number, py: number, factor: number): void {
+  loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   const next = Math.min(1.8, Math.max(0.45, scale.value * factor));
   const applied = next / scale.value;
   tx.value = px - (px - tx.value) * applied;
@@ -722,8 +1184,9 @@ function zoomAt(px: number, py: number, factor: number): void {
   scale.value = next;
 }
 
-/** Frame exactly these nodes; the shared math behind 全图适配 and subtree focus. */
+/** Frame exactly these nodes; the shared math behind fit-to-view and subtree focus. */
 function fitTo(nodes: TurnNode[]): void {
+  loadingAnchorId = null;
   const rect = viewportEl.value?.getBoundingClientRect();
   if (!rect || nodes.length === 0) return;
   const minX = Math.min(...nodes.map((n) => n.x));
@@ -743,8 +1206,38 @@ function fitView(): void {
   fitTo(graph.value.nodes);
 }
 
+// ── canvas tabs: park / restore the camera ──────────────────────────
+// The live camera is written into the active tab's slot on every change, so
+// switching away never loses it; activation replays the saved transform and
+// hands the camera to the user (no re-fit, no overview flash).
+
+watch([scale, tx, ty], () => {
+  setActiveCanvasTabView({ scale: scale.value, tx: tx.value, ty: ty.value });
+});
+
+watch(
+  () => store.canvasTabRestoreRequest,
+  (request) => {
+    if (!request) return;
+    const view = store.canvasTabViews[request.tabId];
+    if (!view) return;
+    scale.value = view.scale;
+    tx.value = view.tx;
+    ty.value = view.ty;
+    userAdjustedView = true;
+    overviewProvisional = false;
+    overviewShown = true;
+    centeredFor = store.selectedId;
+    pendingFocus = null;
+    pendingJump = null;
+    loadingAnchorId = null;
+  },
+);
+
 /** ⎇ badge click: pull the selected session's whole fork subtree into view. */
 function focusSubtree(): void {
+  userAdjustedView = true;
+  overviewProvisional = false;
   const ids = new Set(forkedFromSelection.value);
   if (store.selectedId) ids.add(store.selectedId);
   fitTo(graph.value.nodes.filter((n) => ids.has(n.sessionId)));
@@ -757,9 +1250,15 @@ function centerOnSession(sessionId: string): void {
 
 /** Search hits and digest rows land here: put one node in the middle of view. */
 function centerOnNode(node: TurnNode): void {
+  scale.value = Math.max(scale.value, 0.85);
+  alignNode(node);
+  loadingAnchorId = store.loadingCanvas ? node.id : null;
+}
+
+/** Keep a requested focus in place while sibling cards change row-band heights. */
+function alignNode(node: TurnNode): void {
   const rect = viewportEl.value?.getBoundingClientRect();
   if (!rect) return;
-  scale.value = Math.max(scale.value, 0.85);
   tx.value = rect.width / 2 - (node.x + NODE_WIDTH / 2) * scale.value;
   ty.value = rect.height / 2 - (node.y + node.height / 2) * scale.value;
 }
@@ -779,6 +1278,14 @@ let pendingJump: string | null = null;
 // so later graph changes (a branch switch reshaping the canvas) never re-fit
 // and flash the whole-graph view before a jump lands.
 let overviewShown = false;
+// The overview above was taken while sibling branches were still loading: the
+// graph can still grow and re-band its rows, so the framing is provisional
+// until the batch settles. Handing the view back to openInitialView at that
+// point is what keeps the selected card on screen.
+let overviewProvisional = false;
+// Any manual pan / zoom / fit hands the camera to the user for good — the
+// load-settle pass must not yank the view back afterwards.
+let userAdjustedView = false;
 
 function nodesOf(sessionId: string | null): TurnNode[] {
   if (!sessionId) return [];
@@ -787,11 +1294,16 @@ function nodesOf(sessionId: string | null): TurnNode[] {
 
 function openInitialView(): void {
   if (graph.value.nodes.length === 0) return;
-  if (graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
+  // "Fit view on open" off: open on the selected branch's latest card at the
+  // current zoom instead of shrinking the whole tree into the viewport.
+  const fits = settings.canvas.autoFit;
+  if (fits && graph.value.nodes.length <= OVERVIEW_NODE_LIMIT) {
     fitView();
     overviewShown = true;
+    overviewProvisional = store.loadingCanvas;
     return;
   }
+  overviewProvisional = false;
   if (store.selectedId && nodesOf(store.selectedId).length > 0) {
     focusNow(store.selectedId);
   }
@@ -814,8 +1326,7 @@ function resolvePendingJump(): boolean {
 }
 
 watch(graph, () => {
-  // Wait for the directory's message batch to finish — every merge re-lays
-  // out the whole graph, so centering mid-load lands on a stale position.
+  // The selected branch and ancestors establish its identity and fork point.
   if (store.loadingMessages) return;
   if (pendingJump) {
     resolvePendingJump();
@@ -825,7 +1336,25 @@ watch(graph, () => {
     if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
     return;
   }
+  if (loadingAnchorId) {
+    const anchor = nodeById.value.get(loadingAnchorId);
+    if (anchor) alignNode(anchor);
+  }
   if (centeredFor === null && !overviewShown) openInitialView();
+  // The provisional overview was framed on a partial graph. Once sibling
+  // branches push it past the overview limit, the whole-graph fit stops being
+  // the right framing — hand the camera to the selected branch, whose anchor
+  // then survives every further row re-band.
+  if (
+    overviewProvisional &&
+    graph.value.nodes.length > OVERVIEW_NODE_LIMIT &&
+    centeredFor === null &&
+    store.selectedId &&
+    nodesOf(store.selectedId).length > 0
+  ) {
+    focusNow(store.selectedId);
+    overviewProvisional = false;
+  }
 });
 watch(
   () => store.loadingMessages,
@@ -834,6 +1363,10 @@ watch(
     // The last merge's graph pass ran while still loading — finish a pending
     // chain jump here, or the view would wait on a graph change that never comes.
     if (!resolvePendingJump()) return;
+    if (pendingFocus) {
+      if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+      return;
+    }
     if (centeredFor === null && pendingFocus === null && !overviewShown) {
       openInitialView();
     }
@@ -844,14 +1377,50 @@ watch(
   (request) => {
     if (!request) return;
     pendingFocus = request.sessionId;
-    if (nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+    if (!store.loadingMessages && nodesOf(pendingFocus).length > 0) focusNow(pendingFocus);
+  },
+);
+
+watch(
+  () => store.loadingCanvas,
+  (loading) => {
+    if (loadingAnchorFrame !== null) cancelAnimationFrame(loadingAnchorFrame);
+    loadingAnchorFrame = null;
+    if (loading) return;
+    // ResizeObserver supplies final row heights after the last DOM patch.
+    loadingAnchorFrame = requestAnimationFrame(() => {
+      loadingAnchorFrame = requestAnimationFrame(() => {
+        loadingAnchorFrame = null;
+        if (store.loadingCanvas) return;
+        const anchor = loadingAnchorId ? nodeById.value.get(loadingAnchorId) : null;
+        if (anchor) alignNode(anchor);
+        loadingAnchorId = null;
+        // The batch settled: whatever the initial overview framed on a
+        // partial graph is now stale. Re-decide on the final graph unless the
+        // user has taken the camera (or a focus/jump is about to land).
+        if (
+          overviewProvisional &&
+          !userAdjustedView &&
+          centeredFor === null &&
+          pendingFocus === null &&
+          pendingJump === null
+        ) {
+          overviewProvisional = false;
+          overviewShown = false;
+          openInitialView();
+        }
+      });
+    });
   },
 );
 
 watch(
   () => store.fitRequest,
   (nonce) => {
-    if (nonce) fitView();
+    if (!nonce) return;
+    userAdjustedView = true;
+    overviewProvisional = false;
+    fitView();
   },
 );
 
@@ -934,6 +1503,7 @@ onMounted(() => {
   if (viewportEl.value) resizeObserver.observe(viewportEl.value);
 });
 onUnmounted(() => {
+  if (loadingAnchorFrame !== null) cancelAnimationFrame(loadingAnchorFrame);
   resizeObserver?.disconnect();
   cardObserver.disconnect();
   observedCards.clear();
@@ -958,7 +1528,7 @@ watch(graph, (g) => {
   }
 });
 
-const showMinimap = computed(() => graph.value.nodes.length > 0);
+const showMinimap = computed(() => settings.canvas.minimap && graph.value.nodes.length > 0);
 
 const minimapGeometry = computed(() => {
   const nodes = graph.value.nodes;
@@ -971,7 +1541,7 @@ const minimapGeometry = computed(() => {
   return { minX, minY, s, offX: (MM_WIDTH - worldW * s) / 2, offY: (MM_HEIGHT - worldH * s) / 2 };
 });
 
-// The map's own zoom (方案3): ⌘/Ctrl+wheel magnifies the minimap itself,
+// The map's own zoom (option 3): ⌘/Ctrl+wheel magnifies the minimap itself,
 // cursor-anchored, so colors stay readable no matter how big the world gets.
 // null = the classic whole-world overview. Stale values self-heal: mmGeom
 // clamps against the current fit, so a project switch falls back to overview.
@@ -1149,6 +1719,9 @@ function followViewportInMinimap(): boolean {
 }
 
 function onMinimapDown(event: MouseEvent): void {
+  loadingAnchorId = null;
+  userAdjustedView = true;
+  overviewProvisional = false;
   if (event.button !== 0) return;
   const point = minimapWorldPoint(event.clientX, event.clientY);
   camTarget = point ? { ...point } : null;
@@ -1255,8 +1828,8 @@ function draftAttachments(): readonly DraftAttachment[] {
 function onDraftPaste(event: ClipboardEvent): void {
   const files = event.clipboardData?.files;
   if (!files || files.length === 0) return;
-  // Backend gate first: codex takes no attachments at all, and a staged chip
-  // would silently not ship with the prompt.
+  // Backend gate first: a backend without attachment support would silently
+  // not ship a staged chip with the prompt.
   if (!store.capabilities.attachments) {
     event.preventDefault();
     return;
@@ -1282,6 +1855,135 @@ function removeDraftAttachment(id: string): void {
   setDraftAttachments(draftAttachments().filter((a) => a.id !== id));
 }
 
+// ── path drop: files from the file panel (or Finder) land as plain text ──
+//
+// A drop carries the file's real path and splices it into the draft it
+// landed on — never an attachment chip, never a send, never a read of the
+// file's contents. Canvas panning is pointer-driven (mousedown), so it can
+// never start from an HTML5 drag; the two gestures do not compete.
+
+interface DropTarget {
+  kind: "draft" | "turn";
+  sessionId: string;
+  messageId: string | null;
+}
+
+const pathDragOver = ref(false);
+const dropTarget = ref<DropTarget | null>(null);
+const draftTextarea = ref<HTMLTextAreaElement | null>(null);
+
+/** The drop target under the pointer, from the data attributes the cards
+ *  and the draft box carry. null = empty canvas, which guesses nothing. */
+function dropTargetFrom(event: DragEvent): DropTarget | null {
+  const el = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-drop]");
+  if (!el) return null;
+  const kind = el.dataset.drop;
+  if (kind !== "draft" && kind !== "turn") return null;
+  const sessionId = el.dataset.session || store.draft?.sessionId;
+  if (!sessionId) return null;
+  return { kind, sessionId, messageId: el.dataset.message || null };
+}
+
+function isDropTarget(node: TurnNode): boolean {
+  const target = dropTarget.value;
+  if (target?.kind !== "turn") return false;
+  return target.sessionId === node.sessionId && target.messageId === (node.messageId ?? null);
+}
+
+function onPathDragOver(event: DragEvent): void {
+  if (!isPathDrag(event)) return;
+  // preventDefault is what makes this element a drop target at all.
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  pathDragOver.value = true;
+  dropTarget.value = dropTargetFrom(event);
+}
+
+function onPathDragLeave(event: DragEvent): void {
+  // Leaving for a child of the viewport (a card, the draft) is not leaving
+  // the canvas — only a departure from the viewport clears the highlight.
+  const related = event.relatedTarget as Node | null;
+  if (related && viewportEl.value?.contains(related)) return;
+  pathDragOver.value = false;
+  dropTarget.value = null;
+}
+
+function onPathDrop(event: DragEvent): void {
+  pathDragOver.value = false;
+  dropTarget.value = null;
+  const drop = readPathDrop(event);
+  if (!drop) return;
+  event.preventDefault();
+  if (drop.paths.length === 0) {
+    // Files arrived but the OS would not name them — say so, and never
+    // invent a path or quietly restage the drop as attachments.
+    flashNotice(t("files.dropNoPath"));
+    return;
+  }
+  const target = dropTargetFrom(event);
+  if (!target) {
+    // Empty canvas: no target is guessed, and nothing is inserted anywhere.
+    flashNotice(t("files.dropNoTarget"));
+    return;
+  }
+  if (store.draftSending) {
+    // A send is in flight; the text stays where it is until it lands.
+    flashNotice(t("files.draftSending"));
+    return;
+  }
+  const text = joinPaths(drop.paths);
+  if (target.kind === "draft" && store.draft) {
+    insertIntoDraftTextarea(text);
+    return;
+  }
+  // A card: the session's tip continues in place, a mid-story turn forks —
+  // the same openDraft semantics the ＋ button uses. The draft opens first,
+  // then the path lands in its fresh textarea.
+  const node = graph.value.nodes.find(
+    (n) => n.sessionId === target.sessionId && (n.messageId ?? null) === target.messageId,
+  );
+  if (!node) {
+    flashNotice(t("files.dropNoTarget"));
+    return;
+  }
+  openDraft(node);
+  void nextTick(() => insertIntoDraftTextarea(text));
+}
+
+/**
+ * Splice text into the draft textarea at its caret through execCommand, so
+ * the browser's native undo stack covers the edit (⌘Z inside the draft
+ * takes it back out). Falls back to a direct splice when the element is
+ * not editable — a draft that is open but not on screen.
+ */
+function insertIntoDraftTextarea(text: string): void {
+  const el = draftTextarea.value;
+  if (!el || !store.draft) {
+    const result = insertDraftText(text);
+    if (!result.ok) {
+      flashNotice(result.reason === "sending" ? t("files.draftSending") : t("files.noDraftTarget"));
+    }
+    return;
+  }
+  el.focus();
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const before = el.value.slice(0, start);
+  const after = el.value.slice(end);
+  // A newline before only when the previous line has content; one after
+  // keeps following text on its own line.
+  const insert = `${before === "" || before.endsWith("\n") ? "" : "\n"}${text}\n`;
+  if (document.execCommand("insertText", false, insert)) {
+    // The input event already synced the store; the caret sits after the
+    // inserted line, ready to keep typing.
+    return;
+  }
+  el.value = `${before}${insert}${after}`;
+  setDraftText(el.value);
+  const caret = before.length + insert.length;
+  el.setSelectionRange(caret, caret);
+}
+
 /** Foot left side: tool count plus the run's wall time and output tokens when known. */
 function footMeta(node: TurnNode): string {
   const bits = [
@@ -1297,14 +1999,14 @@ function footMeta(node: TurnNode): string {
 /**
  * Running is tracked per SESSION, but only the tip card is the run in
  * progress — lighting every past turn of the session too made finished
- * cards look stuck at 运行中 while a later turn streams.
+ * cards look stuck at running while a later turn streams.
  */
 function isNodeRunning(node: TurnNode): boolean {
   return Boolean(store.running[node.sessionId]) && isSessionTip(node);
 }
 
 /**
- * The "刚跑完" tint rides the same tip-only rule as running: one card per
+ * The "just ran" tint rides the same tip-only rule as running: one card per
  * session at most, and it yields as soon as a newer run takes the tip.
  */
 function isNodeRecent(node: TurnNode): boolean {

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { OpenCodeDescriptor } from "../shared/agent-descriptor.js";
 import { createOpencodeClient } from "../shared/opencode-client.js";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -448,6 +449,19 @@ export async function ensureOpencodeServer(
   if (await isFullyReady(client, baseUrl, protocol)) {
     return { spawned: true, baseUrl, ...(options.password ? { password: options.password } : {}) };
   }
+  // cmd.exe reports a missing command as exit code 9009 — its message text is
+  // locale-dependent, so the code is the only reliable marker. Worded with an
+  // ENOENT token so the caller's missing-CLI early abort fires on Windows
+  // (where shell:true hides the spawn's own ENOENT) instead of walking every
+  // candidate port.
+  if (isCmdNotFound(child.exitCode)) {
+    return fail(
+      missingCliMessage(
+        "opencode serve",
+        `Install it, or start it manually with: opencode serve --port ${port}`,
+      ),
+    );
+  }
   if (await isReachable(client)) {
     return fail(
       `${baseUrl} is held by a server that does not behave like opencode (REST answers but the event stream does not). Free up port ${port} or start opencode on another port.`,
@@ -456,7 +470,7 @@ export async function ensureOpencodeServer(
   const detail = stderrTail.trim();
   return fail(
     `opencode server did not become ready on ${baseUrl}${
-      detail ? `：${detail}` : ""
+      detail ? ` (${detail})` : ""
     }. Is the "opencode" CLI on PATH? Start it manually with: opencode serve --port ${port}`,
   );
 }

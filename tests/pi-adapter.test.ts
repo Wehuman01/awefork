@@ -215,7 +215,7 @@ describe("createPiAdapter messages()", () => {
 
   it("throws for a session id the store does not know", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.messages("nope")).rejects.toThrow(/不存在/);
+    await expect(adapter.messages("nope")).rejects.toThrow("pi session nope does not exist");
   });
 });
 
@@ -325,7 +325,7 @@ describe("createPiAdapter prompt() and abort()", () => {
   it("refuses to prompt a session the store does not know", async () => {
     const { adapter, rpc } = await makeHarness([]);
     // No fixture seeded, so nothing is readable and no child should spawn.
-    await expect(adapter.prompt("nope", "hi")).rejects.toThrow(/不存在/);
+    await expect(adapter.prompt("nope", "hi")).rejects.toThrow("pi session nope does not exist");
     expect(rpc.children).toHaveLength(0);
   });
 
@@ -351,7 +351,9 @@ describe("createPiAdapter prompt() and abort()", () => {
 
   it("throws when aborting a session with no running child", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.abort("s1-mixed")).rejects.toThrow("该会话当前没有正在运行的回合");
+    await expect(adapter.abort("s1-mixed")).rejects.toThrow(
+      "this session has no turn running right now",
+    );
   });
 
   it("concurrent prompts on one session share a single spawned child", async () => {
@@ -554,6 +556,21 @@ describe("createPiAdapter idle child reaping", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops children on keep-alive dispose because quitting also exits awefork", async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, rpc } = await makeHarness(["s1-mixed"]);
+      await adapter.prompt("s1-mixed", "hi", null);
+      rpc.children[0]?.fire({ type: "agent_end" });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      adapter.dispose({ keepAlive: true });
+      expect(rpc.children[0]?.killed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── fork() ───────────────────────────────────────────────────────────────────
@@ -590,7 +607,9 @@ describe("createPiAdapter fork()", () => {
 
   it("refuses to fork at a message that is not a branch root", async () => {
     const { adapter } = await makeHarness(["s5-fork"]);
-    await expect(adapter.fork("s5-fork", "ghost")).rejects.toThrow(/找不到/);
+    await expect(adapter.fork("s5-fork", "ghost")).rejects.toThrow(
+      "cannot find message ghost in the session",
+    );
   });
 
   it("empty-context fork starts a fresh session — no branch copy, lineage kept", async () => {
@@ -704,11 +723,103 @@ describe("createPiAdapter renameSession and unsupported surfaces", () => {
 
   it("refuses delete / export / single-message delete / interaction reply", async () => {
     const { adapter } = await makeHarness(["s1-mixed"]);
-    await expect(adapter.deleteSession("s1-mixed")).rejects.toThrow(/删除/);
-    await expect(adapter.deleteMessage("s1-mixed", "c-u1")).rejects.toThrow(/删除原语/);
-    await expect(adapter.exportSession("s1-mixed", null)).rejects.toThrow(/不支持导出/);
-    await expect(adapter.respondInteraction("r1", { decision: "deny" })).rejects.toThrow(
-      /交互请求/,
+    await expect(adapter.deleteSession("s1-mixed")).rejects.toThrow(
+      "pi has no native whole-session delete primitive, delete the session file by hand",
     );
+    await expect(adapter.deleteMessage("s1-mixed", "c-u1")).rejects.toThrow(
+      "pi has no native single-message delete primitive",
+    );
+    await expect(adapter.exportSession("s1-mixed", null)).rejects.toThrow(
+      "pi cannot export a detached native session",
+    );
+    await expect(adapter.respondInteraction("r1", { decision: "deny" })).rejects.toThrow(
+      "pi has no server-initiated interaction requests",
+    );
+  });
+});
+
+// ── compaction ───────────────────────────────────────────────────────────────
+
+describe("createPiAdapter compress()", () => {
+  it("runs pi's compact command on the session's own child and announces it", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    await adapter.compress("s1-mixed", { providerId: "anthropic", modelId: "claude-sonnet" });
+
+    expect(childOf(harness).calls.map((c) => c.type)).toEqual(["compact"]);
+    expect(events).toEqual([{ type: "session.compressed", sessionId: "s1-mixed" }]);
+  });
+
+  it("names a rejected compact with the session and rethrows", async () => {
+    const { adapter, rpc } = await makeHarness(["s1-mixed"], {
+      request: (command) => {
+        if (command.type === "compact") throw new Error("Nothing to compact (session too small)");
+        return null;
+      },
+    });
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    await expect(
+      adapter.compress("s1-mixed", { providerId: "anthropic", modelId: "claude-sonnet" }),
+    ).rejects.toThrow("Nothing to compact (session too small)");
+    expect(events).toEqual([
+      {
+        type: "server.error",
+        sessionId: "s1-mixed",
+        message: "pi compact failed: Nothing to compact (session too small)",
+      },
+    ]);
+    // The failed attempt still reaps the child it spawned.
+    expect(rpc.children).toHaveLength(1);
+  });
+});
+
+describe("createPiAdapter prompt() images", () => {
+  it("sends staged images as pi ImageContent blocks", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "看这张图", null, [
+      { mime: "image/png", filename: "a.png", dataUrl: "data:image/png;base64,QUJD" },
+      { mime: "image/jpeg", filename: "b.jpg", dataUrl: "data:image/jpeg;base64,R0lGODlh" },
+    ]);
+
+    expect(childOf(harness).calls).toEqual([
+      {
+        type: "prompt",
+        message: "看这张图",
+        images: [
+          { type: "image", data: "QUJD", mimeType: "image/png" },
+          { type: "image", data: "R0lGODlh", mimeType: "image/jpeg" },
+        ],
+      },
+    ]);
+  });
+
+  it("omits images when the prompt carries none, so the payload stays minimal", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "hi", null, []);
+
+    expect(childOf(harness).calls[0]).toEqual({ type: "prompt", message: "hi" });
+  });
+
+  it("inlines text attachments as named sections — pi has no file part", async () => {
+    const harness = await makeHarness(["s1-mixed"]);
+    const { adapter } = harness;
+
+    await adapter.prompt("s1-mixed", "读一下这个文件", null, [
+      { mime: "text/plain", filename: "notes.md", dataUrl: "data:text/plain;base64,aGVsbG8=" },
+    ]);
+
+    expect(childOf(harness).calls[0]).toEqual({
+      type: "prompt",
+      message: "读一下这个文件\n\n--- notes.md ---\nhello",
+    });
   });
 });

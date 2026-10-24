@@ -7,8 +7,7 @@ import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 /**
  * The renderer state module is a singleton, so every test boots a fresh
  * instance via vi.resetModules + dynamic import, backed by a scripted
- * window.awefork. Asks never auto-deny: they wait for the user until the turn
- * settles, so fake timers only ever assert that nothing fires on its own.
+ * window.awefork. Fake timers drive the 30s auto-deny deadline.
  */
 
 const SESSION: SessionSummary = {
@@ -247,18 +246,19 @@ describe("renderer interaction state", () => {
     expect(h.api.setTagColor).toHaveBeenCalledWith("codex", "执行", 210);
   });
 
-  it("queues an interaction request with no auto-deny deadline", async () => {
+  it("queues an interaction request and exposes its auto-deny deadline", async () => {
     const h = await bootState();
     h.send("codex", { type: "interaction.requested", request: commandApproval("req-1") });
 
     expect(h.store.interactions.codex).toHaveLength(1);
     expect(h.store.interactions.codex[0]?.kind).toBe("command-approval");
+    expect(h.store.interactionDeadlines["codex:req-1"]).toBeTypeOf("number");
     // Duplicate deliveries (a replayed envelope) must not queue twice.
     h.send("codex", { type: "interaction.requested", request: commandApproval("req-1") });
     expect(h.store.interactions.codex).toHaveLength(1);
   });
 
-  it("sends an explicit deny exactly once and never a late one", async () => {
+  it("sends an explicit deny exactly once and never fires the late timer", async () => {
     const h = await bootState();
     h.send("codex", { type: "interaction.requested", request: commandApproval("req-1") });
     const request = h.store.interactions.codex[0];
@@ -268,21 +268,32 @@ describe("renderer interaction state", () => {
       { backend: "codex", requestId: "req-1", response: { decision: "deny" } },
     ]);
     expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactionDeadlines["codex:req-1"]).toBeUndefined();
 
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.replies).toHaveLength(1); // no timer fires after the reply
+    expect(h.replies).toHaveLength(1); // the cleared timer stayed cleared
   });
 
-  it("waits for the user indefinitely — nothing auto-denies", async () => {
+  it("auto-denies once at the 30s deadline and cleans up", async () => {
     const h = await bootState();
     h.send("codex", { type: "interaction.requested", request: commandApproval("req-1") });
 
-    await vi.advanceTimersByTimeAsync(600_000);
+    await vi.advanceTimersByTimeAsync(29_999);
     expect(h.replies).toHaveLength(0);
     expect(h.store.interactions.codex).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.replies).toEqual([
+      { backend: "codex", requestId: "req-1", response: { decision: "deny" } },
+    ]);
+    expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactionDeadlines["codex:req-1"]).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.replies).toHaveLength(1);
   });
 
-  it("keeps a background backend's ask queued on its own partition", async () => {
+  it("routes a background backend's timeout reply to its own backend", async () => {
     const h = await bootState(); // active backend is codex
     h.send("opencode", {
       type: "interaction.requested",
@@ -292,9 +303,10 @@ describe("renderer interaction state", () => {
     expect(h.store.interactions.codex).toHaveLength(0);
     expect(h.store.interactions.opencode).toHaveLength(1);
 
-    await vi.advanceTimersByTimeAsync(600_000);
-    expect(h.replies).toHaveLength(0);
-    expect(h.store.interactions.opencode).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.replies).toEqual([
+      { backend: "opencode", requestId: "bg-1", response: { decision: "deny" } },
+    ]);
   });
 
   it("drops a session's pending interactions when the turn goes idle", async () => {
@@ -305,10 +317,9 @@ describe("renderer interaction state", () => {
     h.send("codex", { type: "session.idle", sessionId: "s1" });
     expect(h.store.interactions.codex.map((item) => item.requestId)).toEqual(["req-2"]);
 
-    // The survivor keeps waiting; idle for another session must not reply.
-    await vi.advanceTimersByTimeAsync(600_000);
+    // The survivor keeps its timer; idle for another session must not reply.
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(h.replies).toHaveLength(0);
-    expect(h.store.interactions.codex).toHaveLength(1);
   });
 
   it("drops every queued interaction on a connection-level server error", async () => {
@@ -318,6 +329,7 @@ describe("renderer interaction state", () => {
 
     h.send("codex", { type: "server.error", message: "codex: stream dead" });
     expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactionDeadlines).toEqual({});
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.replies).toHaveLength(0);
@@ -334,6 +346,8 @@ describe("renderer interaction state", () => {
       message: "codex: turn failed",
     });
     expect(h.store.interactions.codex.map((item) => item.requestId)).toEqual(["req-2"]);
+    expect(h.store.interactionDeadlines["codex:req-2"]).toBeTypeOf("number");
+    expect(h.store.interactionDeadlines["codex:req-1"]).toBeUndefined();
   });
 
   it("queues an opencode permission ask with no auto-deny timer or deadline", async () => {
@@ -341,9 +355,10 @@ describe("renderer interaction state", () => {
     h.send("opencode", { type: "interaction.requested", request: opencodePermission("perm-1") });
 
     expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["perm-1"]);
+    expect(h.store.interactionDeadlines["opencode:perm-1"]).toBeUndefined();
 
     // The server holds the run open until the user answers, so the ask must
-    // outlive any fixed window — now the contract for every ask.
+    // outlive the 30s window codex approvals are capped by.
     await vi.advanceTimersByTimeAsync(120_000);
     expect(h.replies).toHaveLength(0);
     expect(h.store.interactions.opencode).toHaveLength(1);
@@ -376,9 +391,10 @@ describe("renderer interaction state", () => {
     h.send("opencode", { type: "server.error", message: "opencode: stream dead" });
 
     expect(h.store.interactions.opencode).toHaveLength(0);
+    expect(h.store.interactionDeadlines).toEqual({});
   });
 
-  it("answers an opencode permission ask with no late timer", async () => {
+  it("answers an opencode permission ask without arming a late timer", async () => {
     const h = await bootState();
     // The inline card only ever renders the active backend's queue, and
     // respondInteraction routes back through the active backend — the ask
@@ -391,6 +407,7 @@ describe("renderer interaction state", () => {
       { backend: "codex", requestId: "perm-1", response: { decision: "always" } },
     ]);
     expect(h.store.interactions.codex).toHaveLength(0);
+    expect(h.store.interactionDeadlines["codex:perm-1"]).toBeUndefined();
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.replies).toHaveLength(1);
@@ -415,9 +432,10 @@ describe("renderer interaction state", () => {
     h.send("opencode", { type: "interaction.requested", request: opencodeForm("frm-1") });
 
     expect(h.store.interactions.opencode.map((item) => item.requestId)).toEqual(["frm-1"]);
+    expect(h.store.interactionDeadlines["opencode:frm-1"]).toBeUndefined();
 
     // The server holds the run open until the form is answered, so it must
-    // outlive any fixed window — now the contract for every ask.
+    // outlive the 30s window codex approvals are capped by.
     await vi.advanceTimersByTimeAsync(120_000);
     expect(h.replies).toHaveLength(0);
     expect(h.store.interactions.opencode).toHaveLength(1);

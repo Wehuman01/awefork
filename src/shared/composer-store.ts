@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
-import type { ModelChoice, PersistedComposer, PersistedDraft } from "./types.js";
+import type { ForkContextMode, ModelChoice, PersistedComposer, PersistedDraft } from "./types.js";
 import { enqueueWrite } from "./write-queue.js";
 
 /**
@@ -26,6 +26,8 @@ function sanitizeDraft(value: unknown): PersistedDraft | null {
   if (typeof v.sessionId !== "string") return null;
   const atMessageId = typeof v.atMessageId === "string" ? v.atMessageId : null;
   const text = typeof v.text === "string" ? v.text : "";
+  const contextMode: ForkContextMode | undefined =
+    v.contextMode === "inherit" || v.contextMode === "none" ? v.contextMode : undefined;
   const attachments = Array.isArray(v.attachments)
     ? v.attachments.filter(
         (a): a is PersistedDraft["attachments"][number] =>
@@ -37,7 +39,24 @@ function sanitizeDraft(value: unknown): PersistedDraft | null {
           typeof (a as Record<string, unknown>).dataUrl === "string",
       )
     : [];
-  return { sessionId: v.sessionId, atMessageId, text, model: sanitizeModel(v.model), attachments };
+  return {
+    sessionId: v.sessionId,
+    atMessageId,
+    ...(contextMode ? { contextMode } : {}),
+    text,
+    model: sanitizeModel(v.model),
+    attachments,
+  };
+}
+
+function sanitizeStashedDrafts(value: unknown): Record<string, PersistedDraft> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const stashed: Record<string, PersistedDraft> = {};
+  for (const [key, draft] of Object.entries(value)) {
+    const sanitized = sanitizeDraft(draft);
+    if (sanitized) stashed[key] = sanitized;
+  }
+  return stashed;
 }
 
 function sanitizePaneModels(value: unknown): Record<string, ModelChoice> {
@@ -69,10 +88,15 @@ export async function readComposer(filePath: string): Promise<PersistedComposer 
     const v = parsed as Record<string, unknown>;
     return {
       draft: sanitizeDraft(v.draft),
+      ...(v.stashed === undefined ? {} : { stashed: sanitizeStashedDrafts(v.stashed) }),
       paneModels: sanitizePaneModels(v.paneModels),
       lastModel: sanitizeModel(v.lastModel),
       favoriteModels: sanitizeModelList(v.favoriteModels),
       recentModels: sanitizeModelList(v.recentModels),
+      selectedDirectory:
+        typeof v.selectedDirectory === "string" && v.selectedDirectory !== ""
+          ? v.selectedDirectory
+          : null,
     };
   } catch {
     return null;

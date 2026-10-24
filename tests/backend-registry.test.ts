@@ -11,8 +11,10 @@ import type { CodexJsonRpc } from "../src/main/codex-jsonrpc";
 import {
   readBackendSelection,
   readOpencodePort,
+  readQuitKeepAlive,
   writeBackendSelection,
   writeOpencodePort,
+  writeQuitKeepAlive,
 } from "../src/main/settings-store";
 import type { BackendEventEnvelope } from "../src/shared/backend";
 
@@ -374,7 +376,7 @@ describe("event envelopes", () => {
       {
         backend: "codex",
         eventId: expect.stringMatching(/^e[0-9a-f]{12}-1$/),
-        event: { type: "server.error", message: expect.stringContaining("连接中断") },
+        event: { type: "server.error", message: expect.stringContaining("connection lost") },
       },
     ]);
 
@@ -446,7 +448,9 @@ describe("switcher data and selection", () => {
     );
     const { backends } = await registry.listBackends();
     expect(backends[0]).toMatchObject({ installed: true, version: "1.19.2" });
-    expect(backends[0]?.versionWarning).toMatch(/1\.19\.2.*已测试的版本区间/);
+    expect(backends[0]?.versionWarning).toMatch(
+      /1\.19\.2.*outside the version ranges awefork has tested/,
+    );
     // Out of range is a warning, not a refusal: selecting still succeeds.
     await expect(registry.select("opencode")).resolves.toEqual({ ok: true });
   });
@@ -464,6 +468,36 @@ describe("switcher data and selection", () => {
     );
     const { backends } = await registry.listBackends();
     expect(backends[0]).toMatchObject({ installed: true, version: null, versionWarning: null });
+  });
+
+  it("reprobe drops the cached opencode probe after a mid-session install", async () => {
+    const notInstalled = (
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(new Error("ENOENT"), "", "");
+    };
+    const installed = (
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(null, "1.18.30\n", "");
+    };
+    mocks.execFile.mockImplementation(notInstalled);
+    expect((await registry.listBackends()).backends[0]).toMatchObject({ installed: false });
+    // The session probe is cached — an install landing mid-session stays
+    // invisible until reprobe() (what the install IPC fires) drops the cache.
+    mocks.execFile.mockImplementation(installed);
+    expect((await registry.listBackends()).backends[0]).toMatchObject({ installed: false });
+    registry.reprobe();
+    expect((await registry.listBackends()).backends[0]).toMatchObject({
+      installed: true,
+      version: "1.18.30",
+    });
   });
 
   it("select probes before persisting; a missing CLI keeps the old selection", async () => {
@@ -485,7 +519,7 @@ describe("switcher data and selection", () => {
   it("rejects an unknown backend id outright", async () => {
     const result = await registry.select("claude" as "codex");
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/未知后端/);
+    expect(result.error).toMatch(/unknown backend/);
   });
 
   it("refuses to select opencode when its CLI is missing", async () => {
@@ -577,9 +611,9 @@ describe("capabilities and store paths", () => {
     expect(await registry.capabilities("codex")).toEqual({
       deleteMessage: false,
       deleteSession: true,
-      attachments: false,
+      attachments: true,
       fileChanges: false,
-      compress: false,
+      compress: true,
       exportBranch: false,
     });
     expect(await registry.capabilities("opencode")).toEqual({
@@ -690,5 +724,93 @@ describe("interaction replies route by backend", () => {
     // No permission.asked preceded it, so nothing is pending and nothing is
     // POSTed — the contract makes an unknown id a silent no-op.
     await expect(adapter.respondInteraction("any", { decision: "deny" })).resolves.toBeUndefined();
+  });
+});
+
+describe("running-session tracking and quit keep-alive", () => {
+  /** A codex client that captures the adapter's notification handler. */
+  function notifyingCodexClient(): {
+    client: CodexJsonRpc;
+    notify: (method: string, params: unknown) => void;
+  } {
+    let onNotify: ((method: string, params: unknown) => void) | null = null;
+    const client: CodexJsonRpc = {
+      request: vi.fn().mockResolvedValue({ data: [], nextCursor: null }),
+      setNotificationHandler: vi.fn((handler: (method: string, params: unknown) => void) => {
+        onNotify = handler;
+      }),
+      setRequestHandler: vi.fn(),
+      dispose: vi.fn(),
+    };
+    return {
+      client,
+      notify: (method, params) => {
+        if (!onNotify) throw new Error("adapter never installed a notification handler");
+        onNotify(method, params);
+      },
+    };
+  }
+
+  it("counts a run from message.started to session.idle, per backend", async () => {
+    const { client, notify } = notifyingCodexClient();
+    mocks.ensureCodexServer.mockResolvedValue({ client, version: null, authMessage: null });
+    const adapter = await registry.get("codex");
+    await adapter.listSessions();
+
+    expect(registry.runningSessions()).toEqual([]);
+    notify("turn/started", { threadId: "s1", turn: { id: "t1" } });
+    expect(registry.runningSessions()).toEqual([{ backend: "codex", sessionId: "s1" }]);
+    notify("turn/completed", { threadId: "s1" });
+    expect(registry.runningSessions()).toEqual([]);
+  });
+
+  it("clears a run on a session-scoped server.error", async () => {
+    const { client, notify } = notifyingCodexClient();
+    mocks.ensureCodexServer.mockResolvedValue({ client, version: null, authMessage: null });
+    const adapter = await registry.get("codex");
+    await adapter.listSessions();
+
+    notify("turn/started", { threadId: "s1", turn: { id: "t1" } });
+    adapter.prompt("s1", "hello", null).catch(() => {});
+    notify("error", { threadId: "s1", error: { message: "boom" } });
+    expect(registry.runningSessions()).toEqual([]);
+  });
+
+  it("dispose stops the servers by default and keeps them with keepAlive", async () => {
+    expect(registry.quitKeepAlive()).toBe(false);
+    registry.dispose();
+    expect(mocks.stopManagedServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopCodexServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopZcodeServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopPiChildren).toHaveBeenCalledTimes(1);
+
+    registry.dispose({ keepAlive: true });
+    // No further stop calls: keepAlive leaves every spawned server running.
+    expect(mocks.stopManagedServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopCodexServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopZcodeServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopPiChildren).toHaveBeenCalledTimes(1);
+  });
+
+  it("setQuitKeepAlive caches immediately and persists to settings.json", async () => {
+    registry.setQuitKeepAlive(true);
+    expect(registry.quitKeepAlive()).toBe(true);
+    // The persist is fire-and-forget through the serialized write queue.
+    await vi.waitFor(async () => {
+      expect(await readQuitKeepAlive(join(userDataDir, "settings.json"))).toBe(true);
+    });
+    // The persisted setting governs a plain dispose() too.
+    registry.dispose();
+    expect(mocks.stopManagedServer).not.toHaveBeenCalled();
+  });
+
+  it("loads the persisted setting at startup so a fresh registry keeps servers alive", async () => {
+    await writeQuitKeepAlive(join(userDataDir, "settings.json"), true);
+    const fresh = createBackendRegistry(userDataDir);
+    // The startup read is async; a loaded event loop needs more than one tick.
+    await vi.waitFor(() => expect(fresh.quitKeepAlive()).toBe(true));
+    fresh.dispose();
+    expect(mocks.stopManagedServer).not.toHaveBeenCalled();
+    expect(mocks.stopCodexServer).not.toHaveBeenCalled();
   });
 });

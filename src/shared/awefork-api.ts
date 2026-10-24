@@ -6,6 +6,15 @@ import type {
 } from "./backend.js";
 import type { LineDiffResult } from "./diff.js";
 import type {
+  DirListing,
+  FileEntry,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "./file-types.js";
+import type {
   OverviewLedgerSnapshot,
   OverviewReadEntry,
   OverviewReadLedger,
@@ -237,10 +246,65 @@ export interface AweforkApi {
   openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
+  /**
+   * One-click install of a supported agent CLI's latest version (npm -g).
+   * {ok:false,error} when the backend has no one-command install (zcode) or
+   * the install command failed; on success a backends() re-probe sees it.
+   */
+  installBackend(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
+  /** Whether the first-run agent-install guide already ran (persisted). */
+  onboardingDone(): Promise<boolean>;
+  /** Mark the first-run guide as run — shown or skipped, it never returns. */
+  finishOnboarding(): Promise<void>;
+  /**
+   * Whether quitting keeps the spawned backends alive so in-flight turns
+   * finish in the background (persisted in settings.json; default false).
+   */
+  quitKeepAlive(): Promise<boolean>;
+  setQuitKeepAlive(value: boolean): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Sessions with a run in flight across every backend — what quitting would
+   * interrupt, and what keep-alive would let finish in the background.
+   */
+  runningSessionCount(): Promise<number>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
-  /** Native folder picker for ＋ 新目录; null when the user canceled. */
+  /** Native folder picker for the ＋ New directory entry; null when canceled. */
   pickDirectory(): Promise<string | null>;
+  /** Open the app data folder (settings storage) in the OS file manager. */
+  openAppData(): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * File browser surface (read-only, backend-free). Every fallible call
+   * answers with an FsResult so the UI can phrase the failure; browsing
+   * never touches the agent's project directory.
+   */
+  listDir(target: string): Promise<FsResult<DirListing>>;
+  statFile(target: string): Promise<FsResult<FileStat>>;
+  readTextPreview(target: string, maxBytes?: number): Promise<FsResult<TextPreview>>;
+  readImagePreview(target: string, maxBytes?: number): Promise<FsResult<ImagePreview>>;
+  /**
+   * Whole-file bytes as a data URL, for the renderer's PDF rasterizer. The
+   * mime is supplied by the caller because only the renderer knows which
+   * parser will read the result.
+   */
+  readFileAsDataUrl(
+    target: string,
+    mime: string,
+    maxBytes?: number,
+  ): Promise<FsResult<{ path: string; dataUrl: string; bytes: number }>>;
+  /** Project-relative path; value null = no relative path exists (cross-drive). */
+  relativeToRoot(root: string, target: string): Promise<FsResult<string | null>>;
+  searchFiles(root: string, query: string, options?: SearchOptions): Promise<FsResult<FileEntry[]>>;
+  /** Home directory, anchoring the file panel's common locations. */
+  homePath(): Promise<string>;
+  /** Reveal an entry in the OS file manager. */
+  showInFolder(target: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Resolve the real path of a File dropped in from outside the app (Finder).
+   * null when the OS will not name it — the caller says so instead of
+   * inventing a path or silently turning the drop into an attachment.
+   */
+  pathForFile(file: File): string | null;
   /**
    * Write text to a user-chosen path through a native save dialog. {ok:false}
    * when the dialog is canceled; {ok:false,error} when the write fails.
@@ -250,6 +314,8 @@ export interface AweforkApi {
     content: string,
   ): Promise<{ ok: boolean; path?: string; error?: string }>;
   openExternal(url: string): Promise<void>;
+  /** Mirror the renderer palette into native window chrome (title bar). */
+  setTheme(theme: "light" | "dark"): Promise<void>;
   convertDocument(filename: string, bytes: Uint8Array): Promise<string>;
   checkUpdates(respectSkip: boolean): Promise<CheckUpdatesResult>;
   skipUpdate(version: string): Promise<{ ok: boolean; error?: string }>;

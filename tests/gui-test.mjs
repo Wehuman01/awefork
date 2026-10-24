@@ -133,7 +133,7 @@ async function retry(fn, timeout = 20_000, label) {
 /** Set a form control's value the Vue v-model way: prototype setter + input event. */
 const fillTextarea = (selector, text) => `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
-  if (!el) return false;
+  if (!el) throw new Error("missing " + ${JSON.stringify(selector)});
   const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
   set.call(el, ${JSON.stringify(text)});
   el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -162,6 +162,24 @@ try {
   await cdp.open();
   await cdp.send("Runtime.enable");
 
+  // 0. The file browser is a labs experiment, off by default, and its main
+  //    column and sidebar tabs only exist behind that gate. Seed the switch
+  //    on and reload once so every section below runs against the same app
+  //    a user who flipped it would have. The seed retries because the CDP
+  //    target can surface while the window is still its pre-navigation
+  //    document, where localStorage is denied.
+  await retry(
+    () =>
+      cdp.evaluate(
+        `localStorage.setItem("awefork:settings", ${JSON.stringify(
+          JSON.stringify({ labs: { fileBrowser: true } }),
+        )})`,
+      ),
+    30_000,
+    "seed the labs switch",
+  );
+  await cdp.evaluate(`location.reload()`);
+
   // 1. Boot: mock adapter answers, canvas and sidebar actually rendered.
   await retry(async () => {
     const boot = await cdp.evaluate(`({
@@ -188,7 +206,10 @@ try {
   const prompt = `gui-smoke-${Date.now()}`;
   await retry(() => cdp.evaluate(fillTextarea(".chat-input textarea", prompt)), 5000, "composer fill");
   await cdp.evaluate(`document.querySelector(".chat-input .send").click()`);
-  await retry(() => cdp.evaluate(`Boolean(document.querySelector(".chat-input .abort"))`), 10_000, "running state");
+  await retry(async () => {
+    const running = await cdp.evaluate(`Boolean(document.querySelector(".chat-input .abort"))`);
+    if (!running) throw new Error("composer not in running state yet");
+  }, 10_000, "running state");
   check("sent prompt flips composer into running state", true);
   await retry(async () => {
     const done = await cdp.evaluate(`({
@@ -269,17 +290,171 @@ try {
   await retry(async () => {
     // The forked session inherits the cut prefix, so its canvas node is a
     // turn (not a stub) under the demo-fork id the mock adapter hands out.
-    const forked = await cdp.evaluate(`({
+    const forked = await cdp.evaluate(`(() => {
+      // The demo parent has tags; answer its inheritance prompt before the
+      // fork request can proceed. Keep asserting the resulting node below.
+      document.querySelector('.fork-tag-dialog .interaction-allow')?.click();
+      return {
       node: Boolean(document.querySelector('.turn[data-node-id^="demo-fork-"]')),
       draftGone: !document.querySelector(".draft"),
-    })`);
+      };
+    })()`);
     if (!forked.node || !forked.draftGone) {
       throw new Error(`fork not grown: ${JSON.stringify(forked)}`);
     }
   }, 15_000, "fork grown");
   check("draft send forks a new branch onto the canvas", true);
 
-  // 6. No error toast survived the whole run.
+  // 4b. File browser panel: the tabs switch the middle column and the
+  //     sidebar, and the panel mounts with its states. The demo adapter has
+  //     no filesystem, so the listing answers "not found" — the panel must
+  //     phrase that, not crash or spin. The preview pane is on demand (it
+  //     mounts for a previewed file, and every demo read answers
+  //     not-found), so its absence is the correct state here.
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".fb"));
+  })()`), 5000, "files tab opens the browser");
+  const fbStates = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      visible: Boolean(document.querySelector(".fb")),
+      canvasHidden: document.querySelector(".viewport")?.offsetParent === null,
+      error: document.querySelector(".fb-state.err")?.textContent ?? "",
+      crumbs: document.querySelectorAll(".fb-crumb").length,
+      quick: Boolean(document.querySelector(".fb-quick-input")),
+      tabs: document.querySelectorAll(".fb-tab:not(.fb-tab-new)").length,
+      preview: Boolean(document.querySelector(".fb-preview")),
+    })`);
+    if (!state.visible || !state.canvasHidden || !state.quick || state.tabs < 1) {
+      throw new Error(`file panel incomplete: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "file panel states");
+  check("files tab shows the browser and hides the canvas", true);
+  check("a missing listing is phrased, not spun", fbStates.error.length > 0, fbStates.error);
+  check("path breadcrumbs render for the landing directory", fbStates.crumbs >= 1, `${fbStates.crumbs} crumbs`);
+  check("the preview pane waits for a file instead of squatting", fbStates.preview === false);
+
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("sidebar files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".ft"));
+  })()`), 5000, "sidebar files tab");
+  const tree = await retry(
+    () =>
+      cdp.evaluate(`({
+        tree: Boolean(document.querySelector(".ft")),
+        places: document.querySelectorAll(".ft-row").length,
+        sessionsHidden: document.querySelector(".sidebar-sessions")?.offsetParent === null,
+      })`),
+    5000,
+    "sidebar file tab",
+  );
+  check("sidebar files tab shows common places", tree.tree && tree.places >= 4 && tree.sessionsHidden, JSON.stringify(tree));
+  await cdp.evaluate(`[...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("会话")).click()`);
+  await cdp.evaluate(`[...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("画布")).click()`);
+
+  // 4c. Path drop: an internal payload lands in the draft it is dropped on
+  //     as verbatim text — no attachment chip, no send — and the drop
+  //     affordance lights the target while the drag is over it.
+  const DROP_PATH = "/demo/shop-api/docs/interaction-notes.md";
+  /**
+   * Dispatch a path drag onto the element `elExpr` resolves to in the page.
+   * The highlight is read after a frame, because Vue applies the class on
+   * its next tick rather than inside the event handler.
+   */
+  const dropOnto = (elExpr, paths, files = false) =>
+    cdp.evaluate(`(async () => {
+      const el = (${elExpr});
+      if (!el) return { ok: false, why: "target missing" };
+      const dt = new DataTransfer();
+      if (${JSON.stringify(paths)}.length > 0) {
+        dt.setData("application/x-awefork-path", JSON.stringify(${JSON.stringify(paths)}));
+      }
+      if (${JSON.stringify(files)}) {
+        dt.items.add(new File(["x"], "from-finder.md", { type: "text/markdown" }));
+      }
+      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      const highlighted = el.classList.contains("drop-on");
+      el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return { ok: true, highlighted };
+    })()`);
+
+  await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
+  await retry(() => cdp.evaluate(fillTextarea(".draft textarea", "请帮我看一下这个文件：")), 5000, "draft fill");
+  const dropped = await retry(async () => {
+    const result = await dropOnto(`document.querySelector(".draft")`, [DROP_PATH]);
+    if (!result.ok) throw new Error(result.why);
+    return result;
+  }, 5000, "internal drop on draft");
+  check("dragover highlights the draft as a drop target", dropped.highlighted === true);
+  const draftText = await retry(
+    () => cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`),
+    5000,
+    "draft value",
+  );
+  check(
+    "path lands as plain text on its own line",
+    draftText === `请帮我看一下这个文件：\n${DROP_PATH}\n`,
+    JSON.stringify(draftText),
+  );
+  check(
+    "no attachment chip was staged",
+    (await cdp.evaluate(`document.querySelectorAll(".draft .att-chip").length`)) === 0,
+  );
+  check(
+    "the draft was not sent",
+    (await cdp.evaluate(`Boolean(document.querySelector(".draft"))`)) === true,
+  );
+
+  // 4d. Dropping on another turn retargets the draft (continue/fork), and
+  //     the first draft's unsent text is parked, not lost.
+  const retargeted = await retry(async () => {
+    const result = await dropOnto(`document.querySelectorAll(".turn")[1]`, [DROP_PATH]);
+    if (!result.ok) throw new Error(result.why);
+    return result;
+  }, 5000, "drop on turn card");
+  check("drop on a turn card is accepted", retargeted.ok === true);
+  await retry(async () => {
+    const text = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+    if (!text.includes(DROP_PATH)) throw new Error(`retarget draft missing path: ${JSON.stringify(text)}`);
+  }, 5000, "retargeted draft");
+  await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "back to first target");
+  const restored = await retry(
+    () => cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`),
+    5000,
+    "parked draft",
+  );
+  check(
+    "the first draft's unsent text survived the retarget",
+    restored === `请帮我看一下这个文件：\n${DROP_PATH}\n`,
+    JSON.stringify(restored),
+  );
+
+  // 4e. An external drop the OS cannot name inserts nothing and says so.
+  const beforeExternal = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+  await retry(async () => {
+    const result = await dropOnto(`document.querySelector(".draft")`, [], true);
+    if (!result.ok) throw new Error(result.why);
+  }, 5000, "external drop");
+  const notice = await retry(async () => {
+    const text = await cdp.evaluate(`document.querySelector(".banner-files")?.textContent ?? ""`);
+    if (text === "") throw new Error("no notice after the drop");
+    return text;
+  }, 5000, "unnamed-drop notice");
+  const afterExternal = await cdp.evaluate(`document.querySelector(".draft textarea")?.value ?? ""`);
+  check("an unnamed external drop inserts nothing", beforeExternal === afterExternal);
+  check(
+    "the unnamed-drop notice says the paths could not be resolved",
+    notice.includes("拿不到") || notice.includes("Could not resolve"),
+    notice,
+  );
+
+  // 5. No error toast survived the whole run.
   const errorToast = await cdp.evaluate(`document.querySelector(".toast.banner-error")?.textContent ?? ""`);
   check("no error toast raised", errorToast === "", errorToast);
 
@@ -299,7 +474,8 @@ try {
   const sidebarHandleCenter = () =>
     cdp.evaluate(`(() => {
       const r = document.querySelectorAll(".shell .col-handle")[0].getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      // The fold button occupies the handle's middle and stops mousedown.
+      return { x: r.x + r.width / 2, y: r.y + r.height / 3 };
     })()`);
   const mouse = (type, params) => cdp.send("Input.dispatchMouseEvent", { type, ...params });
   async function dragSidebarHandle(dx) {
@@ -362,16 +538,36 @@ try {
   check("reload restores the dragged width", near(reloadedWidth, 420), `${reloadedWidth}px`);
 
   const canvasBefore = await panelWidth(".viewport");
-  await dblclickSidebarHandle();
-  await expectWidth(".sidebar", 0, "double-click collapses the sidebar");
+  // Reload can leave the page without focus, and Input.dispatchMouseEvent
+  // then drops presses before they reach the DOM (verified with capture-phase
+  // window listeners: not even a mousedown arrives). Bring the page back to
+  // the front first; the retry below re-issues the gesture anyway.
+  await cdp.send("Page.bringToFront");
+  // A reload can leave the renderer unfocused, and Chromium then drops
+  // Input.dispatchMouseEvent presses before they reach the DOM (verified: not
+  // even a capture-phase mousedown arrives, and togglePanel never runs). Focus
+  // emulation makes the page accept input regardless of real window focus.
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // Input.dispatchMouseEvent can race the fresh document right after a
+  // reload: the press is lost before it ever reaches the DOM (verified with
+  // capture-phase window listeners — no mousedown at all). Re-issue the same
+  // gesture like the drag checks do; the width assertions stay as strict.
+  await retry(async () => {
+    await dblclickSidebarHandle();
+    const collapsed = await panelWidth(".sidebar");
+    if (!near(collapsed, 0)) throw new Error(`double-click collapses the sidebar: ${collapsed}px, want 0px`);
+  }, 5000, "double-click collapses the sidebar");
   await retry(async () => {
     const grown = await panelWidth(".viewport");
     if (!near(grown, canvasBefore + 420, 4)) {
       throw new Error(`canvas did not absorb the freed pixels: ${grown}px, want ${canvasBefore + 420}px`);
     }
   }, 5000, "canvas absorbs the freed pixels");
-  await dblclickSidebarHandle();
-  await expectWidth(".sidebar", 420, "double-click restores the sidebar");
+  await retry(async () => {
+    await dblclickSidebarHandle();
+    const restored = await panelWidth(".sidebar");
+    if (!near(restored, 420)) throw new Error(`double-click restores the sidebar: ${restored}px, want 420px`);
+  }, 5000, "double-click restores the sidebar");
   await retry(async () => {
     const back = await panelWidth(".viewport");
     if (!near(back, canvasBefore, 4)) throw new Error(`canvas did not return the pixels: ${back}px`);

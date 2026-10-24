@@ -79,3 +79,29 @@ export async function writeOpencodePort(filePath: string, port: number): Promise
   if (safe === null) return;
   await patchSettings(filePath, { opencodePort: safe });
 }
+
+/**
+ * "Quit keeps backends alive": when true, quitting awefork leaves the spawned
+ * app-servers running so their in-flight turns finish (results land in each
+ * backend's own session files). Default false — quitting kills the children.
+ */
+export async function readQuitKeepAlive(filePath: string): Promise<boolean> {
+  return (await readSettings(filePath)).quitKeepAlive === true;
+}
+
+export async function writeQuitKeepAlive(filePath: string, value: boolean): Promise<void> {
+  await patchSettings(filePath, { quitKeepAlive: value });
+}
+
+/**
+ * Whether the first-run agent-install guide already ran (shown or skipped).
+ * Once true the welcome dialog never comes back — the settings page's
+ * per-agent install button covers later installs.
+ */
+export async function readOnboardingDone(filePath: string): Promise<boolean> {
+  return (await readSettings(filePath)).onboardingDone === true;
+}
+
+export async function writeOnboardingDone(filePath: string): Promise<void> {
+  await patchSettings(filePath, { onboardingDone: true });
+}

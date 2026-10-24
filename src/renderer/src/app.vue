@@ -53,7 +53,38 @@
           @dblclick.stop
         >{{ panels.sidebar.collapsed ? "›" : "‹" }}</button>
       </div>
-      <SessionCanvas />
+      <div class="main-col">
+        <nav class="main-tabs" :aria-label="t('files.mainViewLabel')">
+          <button
+            type="button"
+            class="main-tab"
+            :class="{ on: mainView === 'canvas' }"
+            :aria-pressed="mainView === 'canvas'"
+            @click="setMainView('canvas')"
+            @dragenter="onTabDragEnter('canvas', $event)"
+            @dragover.prevent="onTabDragOver('canvas', $event)"
+            @dragleave="onTabDragLeave"
+            @drop="onTabDrop"
+            >{{ t("files.tabCanvas") }}</button
+          >
+          <button
+            v-if="fileBrowserEnabled"
+            type="button"
+            class="main-tab"
+            :class="{ on: mainView === 'files' }"
+            :aria-pressed="mainView === 'files'"
+            @click="setMainView('files')"
+            @dragenter="onTabDragEnter('files', $event)"
+            @dragover.prevent="onTabDragOver('files', $event)"
+            @dragleave="onTabDragLeave"
+            @drop="onTabDrop"
+            >{{ t("files.tabFiles") }}</button
+          >
+        </nav>
+        <CanvasTabs v-show="mainView === 'canvas'" class="story-tabs-slot" />
+        <SessionCanvas v-show="mainView === 'canvas'" class="main-body" />
+        <FileBrowser v-show="mainView === 'files'" class="main-body" />
+      </div>
       <div
         class="col-handle"
         :title="t('app.dragHandle')"
@@ -73,10 +104,12 @@
       <BranchContext :style="panelStyle('context')" />
     </div>
     <CommandPalette />
-    <InteractionDialog />
     <ForkTagDialog />
     <CompressDialog />
+    <WelcomeDialog />
     <HistoryPanel />
+    <FileMenu />
+    <SettingsPage />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -109,8 +142,17 @@
     <div v-if="store.compressedToast" class="toast banner-update" role="status" aria-live="polite">
       {{ store.compressedToast }}
     </div>
+    <div v-if="store.infoToast" class="toast banner-update" role="status" aria-live="polite">
+      {{ store.infoToast }}
+    </div>
     <div v-if="historyStore.toast" class="toast banner-update" role="status" aria-live="polite">
       {{ historyStore.toast }}
+    </div>
+    <!-- The files notice is flashed from the canvas drop handler as often as
+         from the browser, so it lives here rather than inside the panel —
+         a notice nobody can see is not a notice. -->
+    <div v-if="files.notice" class="toast banner-files" role="status" aria-live="polite">
+      {{ files.notice }}
     </div>
   </div>
 </template>
@@ -118,14 +160,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import BranchContext from "./components/branch-context.vue";
+import CanvasTabs from "./components/canvas-tabs.vue";
 import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
+import FileBrowser from "./components/file-browser.vue";
+import FileMenu from "./components/file-menu.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
-import InteractionDialog from "./components/interaction-dialog.vue";
 import SessionCanvas from "./components/session-canvas.vue";
+import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
+import WelcomeDialog from "./components/welcome-dialog.vue";
+import { files, isPathDrag } from "./files";
 import {
   history as historyStore,
   redoSteps,
@@ -134,7 +181,18 @@ import {
   undoTo,
 } from "./history";
 import { t } from "./i18n";
-import { PANEL_LIMITS, panelStyle, panels, persistLayout, togglePanel } from "./layout";
+import {
+  fileBrowserEnabled,
+  type MainView,
+  mainView,
+  PANEL_LIMITS,
+  panelStyle,
+  panels,
+  persistLayout,
+  setMainView,
+  togglePanel,
+  toggleSettings,
+} from "./layout";
 import {
   dismissActionError,
   dismissUpdateBanner,
@@ -158,9 +216,14 @@ const downloadSummary = computed(() => {
 onMounted(() => {
   void init();
   window.addEventListener("keydown", onKeydown);
+  // A drag that ends anywhere (a cancel, a drop outside) must not leave a
+  // pending tab switch armed.
+  window.addEventListener("dragend", cancelTabHover);
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("dragend", cancelTabHover);
+  cancelTabHover();
   if (activeDrag) {
     window.removeEventListener("mousemove", activeDrag.move);
     window.removeEventListener("mouseup", activeDrag.up);
@@ -172,6 +235,13 @@ onUnmounted(() => {
 function onKeydown(event: KeyboardEvent): void {
   if (!(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();
+  // ⌘, is the platform convention for settings and works from anywhere,
+  // including while the panel's own search box has focus.
+  if (key === ",") {
+    event.preventDefault();
+    toggleSettings();
+    return;
+  }
   if (key === "h" && event.shiftKey) {
     event.preventDefault();
     toggleHistoryPanel();
@@ -194,6 +264,54 @@ function onKeydown(event: KeyboardEvent): void {
 // The in-flight drag's window listeners; only one drag can be live at a time,
 // and an unmount mid-drag must drop them instead of leaking the closures.
 let activeDrag: { move: (event: MouseEvent) => void; up: () => void } | null = null;
+
+/**
+ * Dragging a file over a middle-column tab switches to that view after a
+ * beat, so a file dragged out of the file panel can reach a canvas draft
+ * without dropping it first. Plain drags (text, links) never trigger this.
+ */
+const TAB_HOVER_MS = 650;
+let tabHoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelTabHover(): void {
+  if (tabHoverTimer === null) return;
+  clearTimeout(tabHoverTimer);
+  tabHoverTimer = null;
+}
+
+function onTabDragEnter(view: MainView, event: DragEvent): void {
+  if (!isPathDrag(event)) return;
+  cancelTabHover();
+  tabHoverTimer = setTimeout(() => {
+    tabHoverTimer = null;
+    setMainView(view);
+  }, TAB_HOVER_MS);
+}
+
+function onTabDragOver(view: MainView, event: DragEvent): void {
+  if (!isPathDrag(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  // The pointer moved within the tab; restart the beat so the switch only
+  // fires for a deliberate hover.
+  if (tabHoverTimer === null) {
+    tabHoverTimer = setTimeout(() => {
+      tabHoverTimer = null;
+      setMainView(view);
+    }, TAB_HOVER_MS);
+  }
+}
+
+function onTabDragLeave(): void {
+  cancelTabHover();
+}
+
+function onTabDrop(event: DragEvent): void {
+  // The tab declared itself a drop target in dragover; without this the
+  // browser default (open the file) would navigate the renderer away.
+  event.preventDefault();
+  cancelTabHover();
+}
 
 function startDrag(side: "sidebar" | "context", event: MouseEvent): void {
   if (event.button !== 0) return;

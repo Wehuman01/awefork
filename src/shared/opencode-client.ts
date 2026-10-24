@@ -113,6 +113,8 @@ interface OcV1ProviderModel {
   name?: string;
   variants?: Record<string, unknown>;
   capabilities?: { attachment?: boolean };
+  /** Context/output caps from the provider's model catalog, when it ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 /** One model row of v2's flat /api/model list. */
@@ -123,6 +125,8 @@ interface OcV2Model {
   name?: string;
   variants?: { id?: string }[];
   capabilities?: { input?: string[] };
+  /** Context/output caps from the model catalog, when it ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 /** Safety stop for cursor paging: no real account pages past this. */
@@ -199,6 +203,13 @@ export interface OpencodeClient {
    * chose not to fill. Same 404-means-settled contract as `formReply`.
    */
   formCancel(sessionId: string, formId: string): Promise<void>;
+  /**
+   * GET /api/form — every form ask still awaiting a reply. A fresh client
+   * rehydrates its pending panels from this list: the `form.created` frames it
+   * missed (app restart, dropped event stream) never re-emit. A form absent
+   * from the list has already settled.
+   */
+  forms(): Promise<unknown[]>;
 }
 
 /**
@@ -471,6 +482,7 @@ export function createOpencodeClient(
             modelName: model.name || modelId,
             variants: orderVariants((model.variants ?? []).map((v) => v.id ?? "")),
             attachment: (model.capabilities?.input ?? []).includes("image"),
+            ...(model.limit?.context ? { contextWindow: model.limit.context } : {}),
           });
         }
         return options;
@@ -489,6 +501,7 @@ export function createOpencodeClient(
             modelName: model.name || id,
             variants: orderVariants(Object.keys(model.variants ?? {})),
             attachment: model.capabilities?.attachment === true,
+            ...(model.limit?.context ? { contextWindow: model.limit.context } : {}),
           });
         }
       }
@@ -666,5 +679,6 @@ export function createOpencodeClient(
         undefined,
         "sessionFormCancel",
       ),
+    forms: () => request(endpoint("forms"), undefined, undefined, undefined, "forms"),
   };
 }

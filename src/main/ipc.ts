@@ -1,4 +1,13 @@
-import { BrowserWindow, dialog, type IpcMainInvokeEvent, ipcMain, shell } from "electron";
+import { join } from "node:path";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  nativeTheme,
+  shell,
+} from "electron";
 import { canonicalizeStoredArchive, setArchived } from "../shared/archive-store.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 import {
@@ -17,6 +26,16 @@ import {
   readSnapshotBlob,
   sessionChangesDir,
 } from "../shared/file-changes.js";
+import type {
+  DirListing,
+  FileEntry,
+  FileError,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "../shared/file-types.js";
 import { lineageForDisplay, readLineage } from "../shared/lineage-store.js";
 import { isLocalPath } from "../shared/local-path.js";
 import { pruneSessionMarks, pruneTurnMark, readMarks, toggleMark } from "../shared/marks-store.js";
@@ -47,6 +66,7 @@ import type {
   PersistedComposer,
   PromptAttachment,
 } from "../shared/types.js";
+import { installBackend } from "./agent-installer.js";
 import type { BackendRegistry } from "./backend-registry.js";
 import {
   codexHomeForSession,
@@ -54,9 +74,19 @@ import {
   terminalDefaultCodexHome,
 } from "./codex-homes.js";
 import { convertDocumentToText } from "./document-convert.js";
+import {
+  listDirectory,
+  readFileAsDataUrl,
+  readImagePreview,
+  readTextPreview,
+  relativeToRoot,
+  searchFiles,
+  statPath,
+} from "./file-browser.js";
 import { createMessageSearcher, type MessageSearcher } from "./message-search.js";
 import { findPiSessionFile } from "./pi-server.js";
 import { openSessionInTerminal } from "./session-terminal.js";
+import { readOnboardingDone, writeOnboardingDone } from "./settings-store.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
 import { downloadAndInstallUpdate } from "./update-install.js";
 import { resolveZcodeCli } from "./zcode-server.js";
@@ -101,8 +131,16 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
  *   capabilities  -> { deleteMessage, attachments }
+ * Agent install + first-run guide:
+ *   installBackend -> { ok, error? }   npm -g latest; drops the cached probe
+ *   onboardingDone -> boolean          first-run guide already ran (persisted)
+ *   finishOnboarding -> void           mark the guide as run, never show again
  * App-level (backend-free): openExternal, openPath, pickDirectory,
  * convertDocument, checkUpdates, skipUpdate, openRelease, downloadUpdate.
+ * File browser (also backend-free, read-only): listDir, statFile,
+ * readTextPreview, readImagePreview, relativeToRoot, searchFiles, homePath,
+ * showInFolder — each answering an FsResult (or a plain value) built by
+ * file-browser.ts.
  * Update download progress arrives on channel "awefork:update-progress" as
  * {downloaded,total}. Events are forwarded on channel "awefork:event" as
  * {backend, event}.
@@ -119,6 +157,7 @@ export function registerIpc(
   registry: BackendRegistry,
   openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
   overviewLedger?: OverviewLedgerStore,
+  userDataDir = app.getPath("userData"),
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
@@ -235,6 +274,11 @@ export function registerIpc(
     );
   }
 
+  ipcMain.handle("awefork:setTheme", (_event: IpcMainInvokeEvent, value: unknown) => {
+    // Mirror the renderer's palette choice into native window chrome.
+    nativeTheme.themeSource = value === "dark" ? "dark" : "light";
+  });
+
   ipcMain.handle("awefork:ready", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
     try {
       await withAdapter(storeBackend(backend));
@@ -347,7 +391,7 @@ export function registerIpc(
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
       if (!(await registry.capabilities(id)).exportBranch) {
-        throw new Error("这个后端不支持导出独立会话");
+        throw new Error("this backend cannot export a detached session");
       }
       return adapter.exportSession(sessionId, atMessageId);
     },
@@ -412,7 +456,7 @@ export function registerIpc(
       const id = storeBackend(backend);
       const adapter = await withAdapter(id);
       if (!(await registry.capabilities(id)).compress) {
-        throw new Error("这个后端不支持会话压缩");
+        throw new Error("this backend cannot compress sessions");
       }
       await adapter.compress(sessionId, model);
     },
@@ -473,7 +517,8 @@ export function registerIpc(
       const adapter = await withAdapter(id);
       const sessions = await adapter.listSessions();
       const session = sessions.find((entry) => entry.id === sessionId);
-      if (!session) return { ok: false, error: `会话 ${sessionId} 不存在，可能已被删除` };
+      if (!session)
+        return { ok: false, error: `session ${sessionId} not found — it may have been deleted` };
       let codexHome: string | null = null;
       let codexProviderOverride: string | null = null;
       if (id === "codex") {
@@ -634,10 +679,10 @@ export function registerIpc(
     },
   );
 
-  // Directories the user registered by hand (＋ 新目录): they render as a
-  // sidebar group even before the first conversation exists there. Stored and
-  // served canonicalized, so a hand-added spelling matches the session rows'
-  // directories however the shell reported them.
+  // Directories the user registered by hand (the ＋ New directory entry): they
+  // render as a sidebar group even before the first conversation exists there.
+  // Stored and served canonicalized, so a hand-added spelling matches the
+  // session rows' directories however the shell reported them.
   ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
     loadCanonicalDirs(backend),
   );
@@ -727,7 +772,7 @@ export function registerIpc(
   ipcMain.handle(
     "awefork:selectBackend",
     async (_event: IpcMainInvokeEvent, backend: BackendId) => {
-      if (!isBackendId(backend)) return { ok: false, error: `未知后端：${String(backend)}` };
+      if (!isBackendId(backend)) return { ok: false, error: `unknown backend: ${String(backend)}` };
       return registry.select(backend);
     },
   );
@@ -748,6 +793,35 @@ export function registerIpc(
     registry.capabilities(storeBackend(backend)),
   );
 
+  // ── agent install + first-run guide ────────────────────────────────────
+
+  // One-click CLI install (npm -g, latest). The cached opencode probe would
+  // keep answering "not installed" after a successful install, so drop it on
+  // success and let the renderer's refresh re-read the truth.
+  ipcMain.handle("awefork:installBackend", async (_event: IpcMainInvokeEvent, backend: unknown) => {
+    if (!isBackendId(backend)) return { ok: false, error: `unknown backend: ${String(backend)}` };
+    const result = await installBackend(backend);
+    if (result.ok) registry.reprobe();
+    return result;
+  });
+
+  const onboardingPath = join(userDataDir, "settings.json");
+  ipcMain.handle("awefork:onboardingDone", () => readOnboardingDone(onboardingPath));
+  ipcMain.handle("awefork:finishOnboarding", () => writeOnboardingDone(onboardingPath));
+
+  // Quit behavior: whether quitting leaves the spawned backends running so
+  // in-flight turns finish in the background. Read is served from the
+  // registry's cache (persisted-backed); write persists it.
+  ipcMain.handle("awefork:quitKeepAlive", () => registry.quitKeepAlive());
+  ipcMain.handle("awefork:setQuitKeepAlive", (_event: IpcMainInvokeEvent, value: unknown) => {
+    if (typeof value !== "boolean") return { ok: false, error: "expected a boolean" };
+    registry.setQuitKeepAlive(value);
+    return { ok: true };
+  });
+  // Runs in flight across every backend — the top bar counts them before
+  // offering to turn keep-alive on, so the user knows what will survive.
+  ipcMain.handle("awefork:runningSessionCount", () => registry.runningSessions().length);
+
   // ── app-level ────────────────────────────────────────────────────────────
 
   // Local file references in replies (agent output is full of them — Windows
@@ -756,16 +830,17 @@ export function registerIpc(
   // renderer's parser used, so nothing reaches the OS that the markdown
   // view wouldn't have linked itself.
   ipcMain.handle("awefork:openPath", async (_event: IpcMainInvokeEvent, target: string) => {
-    if (!isLocalPath(target)) return { ok: false, error: "不是本地路径" };
+    if (!isLocalPath(target)) return { ok: false, error: "not a local path" };
     const error = await shell.openPath(target);
     return error ? { ok: false, error } : { ok: true };
   });
 
-  // Native folder picker behind ＋ 新目录 — anchored to the requesting window
-  // so the dialog stays with the app. Null on cancel, first pick otherwise.
+  // Native folder picker behind the ＋ New directory entry — anchored to the
+  // requesting window so the dialog stays with the app. Null on cancel, first
+  // pick otherwise.
   ipcMain.handle("awefork:pickDirectory", async (event: IpcMainInvokeEvent) => {
     const options: Electron.OpenDialogOptions = {
-      title: "选择要添加的项目目录",
+      title: "Choose a project directory to add",
       properties: ["openDirectory", "createDirectory"],
     };
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -773,6 +848,70 @@ export function registerIpc(
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options);
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  // ── file browser (backend-free, read-only) ────────────────────────────
+  // Directory listings, metadata, bounded previews, the project-relative
+  // path and the quick search all live in file-browser.ts: absolute paths
+  // only, nothing executed, nothing written. Every handler answers with an
+  // FsResult so the renderer can phrase failures instead of catching throws.
+
+  ipcMain.handle("awefork:listDir", (_event: IpcMainInvokeEvent, target: string) =>
+    listDirectory(target),
+  );
+
+  ipcMain.handle("awefork:statFile", (_event: IpcMainInvokeEvent, target: string) =>
+    statPath(target),
+  );
+
+  ipcMain.handle(
+    "awefork:readTextPreview",
+    (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
+      readTextPreview(target, maxBytes),
+  );
+
+  ipcMain.handle(
+    "awefork:readImagePreview",
+    (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
+      readImagePreview(target, maxBytes),
+  );
+
+  // Whole-file bytes for the renderer's PDF rasterizer. The mime comes from
+  // the caller because only the renderer knows which parser will read it.
+  ipcMain.handle(
+    "awefork:readFileAsDataUrl",
+    (_event: IpcMainInvokeEvent, target: string, mime: string, maxBytes?: number) =>
+      readFileAsDataUrl(target, mime, maxBytes),
+  );
+
+  ipcMain.handle(
+    "awefork:relativeToRoot",
+    (_event: IpcMainInvokeEvent, root: string, target: string) => relativeToRoot(root, target),
+  );
+
+  ipcMain.handle(
+    "awefork:searchFiles",
+    (_event: IpcMainInvokeEvent, root: string, query: string, options?: SearchOptions) =>
+      searchFiles(root, query, options),
+  );
+
+  // The home directory anchors the file panel's common locations; the
+  // renderer has no other way to name it.
+  ipcMain.handle("awefork:homePath", () => app.getPath("home"));
+
+  // The settings page's Storage section opens the app data folder; "~" fails
+  // the openPath gate and names the wrong folder anyway.
+  ipcMain.handle("awefork:openAppData", async () => {
+    const error = await shell.openPath(app.getPath("userData"));
+    return error ? { ok: false, error } : { ok: true };
+  });
+
+  // Reveal an entry in the OS file manager — the one file action that
+  // leaves the app, and the only one routed through shell besides openPath.
+  ipcMain.handle("awefork:showInFolder", (_event: IpcMainInvokeEvent, target: string) => {
+    if (!isLocalPath(target)) return { ok: false, error: "not a local path" };
+    shell.showItemInFolder(target);
+    return { ok: true };
   });
 
   // Word/RTF attachments are converted here in the main process; the renderer

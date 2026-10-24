@@ -1,4 +1,6 @@
+import { rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { readLineage, recordFork } from "../src/shared/lineage-store.js";
 import type { AgentEvent } from "../src/shared/types.js";
 import {
   createZcodeAdapter,
@@ -362,7 +364,7 @@ describe("zcode adapter", () => {
     const errorEvent = failEvents.find((event) => event.type === "server.error");
     expect(errorEvent).toMatchObject({ sessionId: "sess_y" });
     if (errorEvent?.type === "server.error") {
-      expect(errorEvent.message).toContain("正在运行");
+      expect(errorEvent.message).toContain("already has a turn running");
     }
   });
 
@@ -636,11 +638,129 @@ describe("zcode adapter", () => {
   it("rejects the operations the backend cannot do", async () => {
     const { options } = fakeOptions();
     const adapter = createZcodeAdapter(options);
-    await expect(adapter.deleteSession("sess_x")).rejects.toThrow("zcode");
     await expect(adapter.deleteMessage("sess_x", "msg_1")).rejects.toThrow("zcode");
-    await expect(adapter.renameSession("sess_x", "新标题")).rejects.toThrow("zcode");
     await expect(adapter.exportSession("sess_x", null)).rejects.toThrow("zcode");
     await expect(adapter.respondInteraction("req", { decision: "deny" })).rejects.toThrow();
+  });
+
+  it("renames a session through the v4 command channel", async () => {
+    const { client, calls } = fakeClient({
+      replies: { "v4/command": { commandId: "cmd_1", status: "accepted" } },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    await createZcodeAdapter(options).renameSession("sess_x", "新标题");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("v4/command");
+    expect(calls[0].params).toMatchObject({
+      clientId: "awefork",
+      sessionId: "sess_x",
+      type: "renameSession",
+      payload: { title: "新标题" },
+    });
+  });
+
+  it("deletes a session through the v4 command channel and drops lineage", async () => {
+    const lineagePath = `/tmp/lineage-zcode-delete-${Date.now()}.json`;
+    const { client, calls } = fakeClient({
+      replies: { "v4/command": { commandId: "cmd_1", status: "accepted" } },
+    });
+    const { options } = fakeOptions({ lineagePath });
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    await recordFork(lineagePath, "sess_child", {
+      parentId: "sess_x",
+      atMessageId: "msg_u1",
+      createdAt: 1_750_000_000_000,
+    });
+    await adapter.deleteSession("sess_x");
+    expect(calls[0].method).toBe("v4/command");
+    expect(calls[0].params).toMatchObject({
+      sessionId: "sess_x",
+      type: "deleteSession",
+      payload: {},
+    });
+    // The parent's entry must go: the row is gone from session/list, so a
+    // lineage row for it would render a fork of a deleted session.
+    const lineage = await readLineage(lineagePath);
+    expect(lineage.sess_x).toBeUndefined();
+    // Children of the deleted session keep their own rows.
+    expect(lineage.sess_child).toBeDefined();
+    await rm(lineagePath, { force: true });
+  });
+
+  it("surfaces a failed v4 command instead of reporting success", async () => {
+    const { client } = fakeClient({
+      replies: {
+        "v4/command": {
+          commandId: "cmd_1",
+          status: "failed",
+          reasonCode: "fault.command.executionFailed",
+          message: "Session not found after write: sess_x",
+        },
+      },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    await expect(adapter.renameSession("sess_x", "标题")).rejects.toThrow(
+      "Session not found after write",
+    );
+    await expect(adapter.deleteSession("sess_x")).rejects.toThrow("Session not found after write");
+  });
+
+  it("compacts through session/compact after subscribing", async () => {
+    const { client, calls } = fakeClient({
+      replies: { "session/compact": { compact: { state: "accepted" } } },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+
+    await adapter.compress("sess_x", {
+      providerId: "builtin:bigmodel-coding-plan",
+      modelId: "GLM-5.3",
+    });
+
+    // Subscribe first: without it the session_compacted frame never arrives
+    // and the run would hang in "running" forever.
+    expect(calls.map((c) => c.method)).toEqual(["session/subscribe", "session/compact"]);
+    expect(calls[0].params).toEqual({ sessionId: "sess_x", deliveryKind: "desktop-continuous" });
+    expect(calls[1].params).toMatchObject({ sessionId: "sess_x" });
+    // session/compact is not a v4 command — the v4 envelope of that name
+    // reports a session it cannot find (verified live against 0.17.0).
+    expect(calls.some((c) => c.method === "v4/command")).toBe(false);
+  });
+
+  it("names a failed compact with the session", async () => {
+    const { client } = fakeClient({
+      replies: { "session/compact": new Error("cannot compact while a prompt is running") },
+    });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    await expect(
+      adapter.compress("sess_x", {
+        providerId: "builtin:bigmodel-coding-plan",
+        modelId: "GLM-5.3",
+      }),
+    ).rejects.toThrow("cannot compact while a prompt is running");
+  });
+
+  it("turns a session_compacted frame into session.compressed", async () => {
+    const { client, emit } = fakeClient({ replies: {} });
+    const { options } = fakeOptions();
+    options.client = async () => client;
+    const adapter = createZcodeAdapter(options);
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+
+    emit("session/event", { sessionId: "sess_x", type: "session_compacted", payload: {} });
+
+    expect(events).toEqual([
+      { type: "session.updated", sessionId: "sess_x" },
+      { type: "session.compressed", sessionId: "sess_x" },
+    ]);
   });
 
   it("drops model-only harness rows but keeps real and legacy user rows", async () => {

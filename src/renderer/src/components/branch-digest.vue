@@ -23,6 +23,12 @@
           <span class="digest-glyph" :class="{ root: !digest.forkedFrom }">{{
             digest.forkedFrom ? "⎇" : "●"
           }}</span>
+          <span
+            v-if="digest.context === 'none'"
+            class="digest-cut"
+            :title="t('cut.markerTitle')"
+            >✂</span
+          >
           <span class="digest-title" :title="digest.title">{{ digest.title }}</span>
           <span
             v-if="canCompare(digest)"
@@ -47,6 +53,9 @@
         >
           {{ t("branch.attempt", { n: digest.attempt }) }}
         </span>
+        <span v-if="digest.context === 'none'" class="digest-ctx">{{
+          t("cut.digestChip")
+        }}</span>
         <span class="digest-meta">
           {{
             t("branch.rowMeta", {

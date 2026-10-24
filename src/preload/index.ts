@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AweforkApi,
   BodySearchRequest,
@@ -15,6 +15,15 @@ import type {
   BackendsResult,
 } from "../shared/backend.js";
 import type { LineDiffResult } from "../shared/diff.js";
+import type {
+  DirListing,
+  FileEntry,
+  FileStat,
+  FsResult,
+  ImagePreview,
+  SearchOptions,
+  TextPreview,
+} from "../shared/file-types.js";
 import type {
   OverviewLedgerSnapshot,
   OverviewReadEntry,
@@ -170,15 +179,55 @@ const api: AweforkApi = {
     ipcRenderer.invoke("awefork:openAgentWindow", backend),
   capabilities: (backend: BackendId): Promise<BackendCapabilities> =>
     ipcRenderer.invoke("awefork:capabilities", backend),
+  installBackend: (backend: BackendId): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:installBackend", backend),
+  onboardingDone: (): Promise<boolean> => ipcRenderer.invoke("awefork:onboardingDone"),
+  finishOnboarding: (): Promise<void> => ipcRenderer.invoke("awefork:finishOnboarding"),
+  quitKeepAlive: (): Promise<boolean> => ipcRenderer.invoke("awefork:quitKeepAlive"),
+  setQuitKeepAlive: (value: boolean): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:setQuitKeepAlive", value),
+  runningSessionCount: (): Promise<number> => ipcRenderer.invoke("awefork:runningSessionCount"),
   openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("awefork:openPath", target),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("awefork:pickDirectory"),
+  openAppData: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:openAppData"),
+  listDir: (target: string): Promise<FsResult<DirListing>> =>
+    ipcRenderer.invoke("awefork:listDir", target),
+  statFile: (target: string): Promise<FsResult<FileStat>> =>
+    ipcRenderer.invoke("awefork:statFile", target),
+  readTextPreview: (target: string, maxBytes?: number): Promise<FsResult<TextPreview>> =>
+    ipcRenderer.invoke("awefork:readTextPreview", target, maxBytes),
+  readImagePreview: (target: string, maxBytes?: number): Promise<FsResult<ImagePreview>> =>
+    ipcRenderer.invoke("awefork:readImagePreview", target, maxBytes),
+  readFileAsDataUrl: (
+    target: string,
+    mime: string,
+    maxBytes?: number,
+  ): Promise<FsResult<{ path: string; dataUrl: string; bytes: number }>> =>
+    ipcRenderer.invoke("awefork:readFileAsDataUrl", target, mime, maxBytes),
+  relativeToRoot: (root: string, target: string): Promise<FsResult<string | null>> =>
+    ipcRenderer.invoke("awefork:relativeToRoot", root, target),
+  searchFiles: (
+    root: string,
+    query: string,
+    options?: SearchOptions,
+  ): Promise<FsResult<FileEntry[]>> =>
+    ipcRenderer.invoke("awefork:searchFiles", root, query, options),
+  homePath: (): Promise<string> => ipcRenderer.invoke("awefork:homePath"),
+  showInFolder: (target: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:showInFolder", target),
+  // webUtils.getPathForFile is the only sanctioned way to name a File that
+  // arrived from outside the app; the legacy File.path is non-standard.
+  pathForFile: (file: File): string | null => webUtils.getPathForFile(file),
   saveTextFile: (
     defaultName: string,
     content: string,
   ): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke("awefork:saveTextFile", defaultName, content),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("awefork:openExternal", url),
+  setTheme: (theme: "light" | "dark"): Promise<void> =>
+    ipcRenderer.invoke("awefork:setTheme", theme),
   convertDocument: (filename: string, bytes: Uint8Array): Promise<string> =>
     ipcRenderer.invoke("awefork:convertDocument", filename, bytes),
   checkUpdates: (respectSkip: boolean): Promise<CheckUpdatesResult> =>

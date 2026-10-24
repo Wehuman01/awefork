@@ -13,8 +13,8 @@ const ALL_SCOPES: ScopeSet = { title: true, tag: true, body: true };
 const LOCAL_ONLY: ScopeSet = { title: true, tag: true, body: false };
 
 const ctx = (overrides: Partial<LocalMatchContext> = {}): LocalMatchContext => ({
-  title: "登录重试逻辑",
-  tags: ["bug", "性能"],
+  title: "Login retry logic",
+  tags: ["bug", "perf"],
   directory: "/Users/peng/Desktop/Project/wehuman/awefork",
   pinned: false,
   fork: false,
@@ -31,9 +31,9 @@ describe("parseSearchQuery", () => {
   });
 
   it("collects plain terms and lowercases them", () => {
-    const parsed = parseSearchQuery("重试 Retry");
+    const parsed = parseSearchQuery("Retry retry");
     expect(parsed.includes).toEqual([
-      { text: "重试", scope: null },
+      { text: "retry", scope: null },
       { text: "retry", scope: null },
     ]);
   });
@@ -47,11 +47,11 @@ describe("parseSearchQuery", () => {
   });
 
   it("supports #tag and the prefix scopes", () => {
-    const parsed = parseSearchQuery("#Bug body:超时 title:登录 dir:awefork");
+    const parsed = parseSearchQuery("#Bug body:timeout title:login dir:awefork");
     expect(parsed.includes).toEqual([
       { text: "bug", scope: "tag" },
-      { text: "超时", scope: "body" },
-      { text: "登录", scope: "title" },
+      { text: "timeout", scope: "body" },
+      { text: "login", scope: "title" },
       { text: "awefork", scope: "dir" },
     ]);
   });
@@ -62,13 +62,13 @@ describe("parseSearchQuery", () => {
   });
 
   it("collects negated tokens as excludes, quoted or bare", () => {
-    const parsed = parseSearchQuery('重试 -登录 -"精确 排除"');
-    expect(parsed.includes).toEqual([{ text: "重试", scope: null }]);
-    expect(parsed.excludes).toEqual(["登录", "精确 排除"]);
+    const parsed = parseSearchQuery('retry -login -"exact exclude"');
+    expect(parsed.includes).toEqual([{ text: "retry", scope: null }]);
+    expect(parsed.excludes).toEqual(["login", "exact exclude"]);
   });
 
   it("maps is: aliases to flags", () => {
-    const parsed = parseSearchQuery("is:收藏 is:fork is:running");
+    const parsed = parseSearchQuery("is:pinned is:fork is:running");
     expect([...parsed.flags].sort()).toEqual(["fork", "pinned", "running"]);
   });
 
@@ -93,18 +93,18 @@ describe("parseSearchQuery", () => {
   });
 
   it("applies a prefix across whitespace and full-width colons", () => {
-    // "body: 演" — the space after the colon must not drop the scope.
-    expect(parseSearchQuery("body: 演").includes).toEqual([{ text: "演", scope: "body" }]);
+    // "body: run" — the space after the colon must not drop the scope.
+    expect(parseSearchQuery("body: run").includes).toEqual([{ text: "run", scope: "body" }]);
     // CJK keyboards emit full-width colons.
-    expect(parseSearchQuery("body:超时").includes).toEqual([{ text: "超时", scope: "body" }]);
-    expect(parseSearchQuery("is:收藏").flags.has("pinned")).toBe(true);
-    expect(parseSearchQuery("# 性能").includes).toEqual([{ text: "性能", scope: "tag" }]);
+    expect(parseSearchQuery("body:timeout").includes).toEqual([{ text: "timeout", scope: "body" }]);
+    expect(parseSearchQuery("is:pinned").flags.has("pinned")).toBe(true);
+    expect(parseSearchQuery("# perf").includes).toEqual([{ text: "perf", scope: "tag" }]);
   });
 });
 
 describe("gatesOk", () => {
   it("rejects a session missing any required flag", () => {
-    const parsed = parseSearchQuery("is:收藏");
+    const parsed = parseSearchQuery("is:pinned");
     expect(gatesOk(parsed, ctx({ pinned: true }))).toBe(true);
     expect(gatesOk(parsed, ctx())).toBe(false);
   });
@@ -116,17 +116,17 @@ describe("gatesOk", () => {
 
   it("never gates a plain term on the directory path", () => {
     // The regression: unscoped terms leaked into the dir gate, so any query
-    // word absent from every directory path ("awesh", CJK words) hid all
-    // sessions — and words that happened to sit in a path ("awes" inside
+    // word absent from every directory path ("awesh", multi-word terms) hid
+    // all sessions — and words that happened to sit in a path ("awes" inside
     // …/awesome/…) passed only that directory's sessions.
     expect(gatesOk(parseSearchQuery("awesh"), ctx())).toBe(true);
-    expect(gatesOk(parseSearchQuery("登录"), ctx())).toBe(true);
+    expect(gatesOk(parseSearchQuery("login"), ctx())).toBe(true);
     expect(gatesOk(parseSearchQuery("awes dir:awefork"), ctx())).toBe(true);
     expect(gatesOk(parseSearchQuery("awes dir:elsewhere"), ctx())).toBe(false);
   });
 
   it("vetoes the session when an exclude hits title, tags, or directory", () => {
-    expect(gatesOk(parseSearchQuery("-登录"), ctx())).toBe(false);
+    expect(gatesOk(parseSearchQuery("-login"), ctx())).toBe(false);
     expect(gatesOk(parseSearchQuery("-bug"), ctx())).toBe(false);
     expect(gatesOk(parseSearchQuery("-/elsewhere/"), ctx())).toBe(true);
   });
@@ -134,15 +134,15 @@ describe("gatesOk", () => {
 
 describe("localTextMatched", () => {
   it("matches unscoped terms across title and tags", () => {
-    const parsed = parseSearchQuery("重试");
+    const parsed = parseSearchQuery("retry");
     expect(localTextMatched(parsed, ctx(), ALL_SCOPES)).toBe(true);
-    expect(localTextMatched(parsed, ctx({ title: "别的" }), ALL_SCOPES)).toBe(false);
+    expect(localTextMatched(parsed, ctx({ title: "other" }), ALL_SCOPES)).toBe(false);
   });
 
   it("requires every unscoped term inside ONE scope", () => {
-    // 重试 is in the title, bug is a tag — no single local scope has both.
-    expect(localTextMatched(parseSearchQuery("重试 bug"), ctx(), ALL_SCOPES)).toBe(false);
-    expect(localTextMatched(parseSearchQuery("登录 重试"), ctx(), ALL_SCOPES)).toBe(true);
+    // retry is in the title, bug is a tag — no single local scope has both.
+    expect(localTextMatched(parseSearchQuery("retry bug"), ctx(), ALL_SCOPES)).toBe(false);
+    expect(localTextMatched(parseSearchQuery("login retry"), ctx(), ALL_SCOPES)).toBe(true);
   });
 
   it("honors scope pinning", () => {
@@ -151,9 +151,9 @@ describe("localTextMatched", () => {
   });
 
   it("never counts a scope that owes no terms", () => {
-    // Only title:登录 exists; tags owe nothing and must not satisfy the query.
-    expect(localTextMatched(parseSearchQuery("title:登录"), ctx(), ALL_SCOPES)).toBe(true);
-    expect(localTextMatched(parseSearchQuery("title:超时"), ctx(), ALL_SCOPES)).toBe(false);
+    // Only title:login exists; tags owe nothing and must not satisfy the query.
+    expect(localTextMatched(parseSearchQuery("title:login"), ctx(), ALL_SCOPES)).toBe(true);
+    expect(localTextMatched(parseSearchQuery("title:timeout"), ctx(), ALL_SCOPES)).toBe(false);
   });
 
   it("matches everything when there are no include terms", () => {
@@ -161,30 +161,30 @@ describe("localTextMatched", () => {
   });
 
   it("skips disabled scopes", () => {
-    const parsed = parseSearchQuery("重试");
+    const parsed = parseSearchQuery("retry");
     expect(localTextMatched(parsed, ctx(), { title: false, tag: true, body: false })).toBe(false);
   });
 });
 
 describe("bodySearchTerms", () => {
   it("merges unscoped and body-scoped terms", () => {
-    expect(bodySearchTerms(parseSearchQuery("body:超时 重试 title:登录"))).toEqual([
-      "超时",
-      "重试",
+    expect(bodySearchTerms(parseSearchQuery("body:timeout retry title:login"))).toEqual([
+      "timeout",
+      "retry",
     ]);
   });
 
   it("returns null when the body owes nothing", () => {
-    expect(bodySearchTerms(parseSearchQuery("title:登录 is:fork"))).toBeNull();
+    expect(bodySearchTerms(parseSearchQuery("title:login is:fork"))).toBeNull();
     expect(bodySearchTerms(parseSearchQuery(""))).toBeNull();
   });
 });
 
 describe("firstMatchRange", () => {
   it("finds the earliest term occurrence", () => {
-    expect(firstMatchRange("登录重试逻辑", ["重试", "登录"])).toEqual({
+    expect(firstMatchRange("Login retry logic", ["retry", "login"])).toEqual({
       start: 0,
-      length: 2,
+      length: 5,
     });
   });
 

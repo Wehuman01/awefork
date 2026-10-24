@@ -125,6 +125,21 @@ describe("ensureCodexServer per-home slots", () => {
     }
     expect(exits).toBe(1);
   });
+
+  it("surfaces cmd's exit 9009 as ENOENT instead of a generic startup failure", async () => {
+    // On Windows the npm .cmd shim runs under cmd.exe, which reports a
+    // missing command as exit 9009 and never surfaces the child's own
+    // ENOENT. The message must carry the ENOENT token so the registry's
+    // missing-CLI early abort can tell it apart from a broken install.
+    const child = fakeCodexChild({});
+    child.exitCode = 9009;
+    // The child dies right after the spawn, the way cmd.exe does.
+    setTimeout(() => child.emit("exit", 9009, null), 0);
+
+    await expect(
+      ensureCodexServer(() => {}, spawnFnReturning(child), undefined, 500),
+    ).rejects.toThrow(/ENOENT \(cmd exit 9009\)/);
+  });
 });
 
 describe("ensureCodexServer auth probe", () => {
@@ -187,7 +202,7 @@ describe("ensureCodexServer auth probe", () => {
       "account/read": { __error__: "no auth credentials" },
     });
     const result = await ensureCodexServer(() => {}, spawnFnReturning(child));
-    expect(result.authMessage).toMatch(/codex login（no auth credentials）/);
+    expect(result.authMessage).toMatch(/codex login in a terminal first \(no auth credentials\)/);
   });
 });
 

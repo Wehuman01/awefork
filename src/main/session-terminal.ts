@@ -183,19 +183,22 @@ export async function openSessionInTerminal(
   deps: SessionTerminalDeps = {},
 ): Promise<SessionTerminalResult> {
   if (!SAFE_SESSION_ID.test(request.sessionId)) {
-    return { ok: false, error: `会话 ID 含意外字符，拒绝写入终端脚本：${request.sessionId}` };
+    return {
+      ok: false,
+      error: `session id contains unexpected characters, refusing to write the terminal script: ${request.sessionId}`,
+    };
   }
   if (!request.directory) {
-    return { ok: false, error: "会话没有工作目录，无法在终端中打开" };
+    return { ok: false, error: "session has no working directory, cannot open a terminal" };
   }
   if (request.backend === "pi" && !request.sessionFile) {
     // pi has no resume-by-id flag; it needs the absolute path to the JSONL.
-    return { ok: false, error: "找不到该会话的记录文件，无法在终端打开" };
+    return { ok: false, error: "cannot find this session's record file, cannot open a terminal" };
   }
   if (request.backend === "zcode" && !request.zcodeCli) {
     // zcode is not on PATH; the terminal only has `node`, so we need the
     // bundled zcode.cjs path to invoke it.
-    return { ok: false, error: "未找到 zcode CLI 路径，无法在终端打开" };
+    return { ok: false, error: "no zcode CLI path found, cannot open a terminal" };
   }
   const platform = deps.platform ?? process.platform;
   const exec = deps.exec ?? execFileAsync;
@@ -252,11 +255,14 @@ export async function openSessionInTerminal(
         if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
       }
     }
-    return { ok: false, error: "未找到可用的终端（尝试过 gnome-terminal、konsole、kitty 等）" };
+    return {
+      ok: false,
+      error: "no usable terminal found (tried gnome-terminal, konsole, kitty, …)",
+    };
   } catch (error) {
     return {
       ok: false,
-      error: `打开终端失败：${error instanceof Error ? error.message : String(error)}`,
+      error: `failed to open a terminal: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

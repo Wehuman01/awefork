@@ -58,7 +58,7 @@ export interface DisplayCell {
   error: string | null;
   /** 1-based index badge among the column's own turns; null = no badge. */
   badge: number | null;
-  /** "up" = an upstream branch's turn on the way to this one; "inherited" = copied 母本 prefix. */
+  /** "up" = an upstream branch's turn on the way to this one; "inherited" = copied original prefix. */
   flag: "up" | "inherited" | null;
 }
 </script>
@@ -80,13 +80,15 @@ const flagTitle = computed(() =>
 
 /**
  * Folded/open lives in the card itself: a click flips only this card, so one
- * column's expansion can never move the other's. Rows are keyed by position,
- * so a slot can be reused for a different card when the plan rebuilds — that
- * card starts folded rather than inheriting the previous one's state.
+ * column's expansion can never move the other's. A plan rebuild reuses the
+ * row's slot for a different card — that card starts folded, because the slot
+ * is keyed by (side, cell id): both the row index and the card itself must
+ * match before an expansion survives, and the two columns' ids are namespaced
+ * apart even when their sessions mint the same message ids.
  */
 const open = ref(false);
 watch(
-  () => props.cell?.id,
+  () => [props.side, props.cell?.id] as const,
   () => {
     open.value = false;
   },

@@ -89,38 +89,44 @@ export function backendCapabilities(
   switch (backend) {
     case "codex":
       // codex records fork parents itself, so no detached export; no
-      // single-message delete; no image round-trip.
+      // single-message delete. Compaction is thread/compact/start (a turn of
+      // its own, streamed like any run). Images ride turn/start's localImage
+      // input items (staged as files by main); non-image attachments have no
+      // file part, so the adapter inlines them into the prompt text.
       return {
         deleteMessage: false,
         deleteSession: true,
-        attachments: false,
+        attachments: true,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
     case "pi":
       // pi sessions are append-only files: no message delete, no session
       // delete primitive. Images round-trip through prompt images. A pi
       // branch copy bakes `parentSession` into the new file header, so the
-      // fork linkage is pi's — no detached export.
+      // fork linkage is pi's — no detached export. Compaction is the `compact`
+      // RPC command.
       return {
         deleteMessage: false,
         deleteSession: false,
         attachments: true,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
     case "zcode":
-      // The app-server protocol has no message/session delete; fork linkage
-      // lives in zcode's own store (forkedSessionId + parentSessionId), so a
-      // detached copy is not offered.
+      // Rename and whole-session delete ride the v4 command channel
+      // (`v4/command`), which the legacy session/* surface lacks; no
+      // single-message delete. Fork linkage lives in zcode's own store
+      // (forkedSessionId + parentSessionId), so a detached copy is not
+      // offered. Compaction is the legacy session/compact method.
       return {
         deleteMessage: false,
-        deleteSession: false,
+        deleteSession: true,
         attachments: false,
         fileChanges: false,
-        compress: false,
+        compress: true,
         exportBranch: false,
       };
   }
@@ -159,9 +165,16 @@ export function resolveStorePath(
   return exists(legacy) ? legacy : suffixed;
 }
 
+/**
+ * The join, done by hand: this module is compiled into the renderer too
+ * (the web tsconfig has no node types), so it cannot import node:path. The
+ * separator follows the directory's own style — a Windows userData path
+ * spells it with "\" throughout, and mixing in "/" would give the store
+ * files a name that differs from what an older awefork wrote, so the
+ * legacy-store lookup above could miss a file that is really there.
+ */
 function joinPath(directory: string, name: string): string {
   if (directory === "") return name;
-  return directory.endsWith("/") || directory.endsWith("\\")
-    ? `${directory}${name}`
-    : `${directory}/${name}`;
+  const separator = directory.includes("\\") && !directory.includes("/") ? "\\" : "/";
+  return directory.endsWith(separator) ? `${directory}${name}` : `${directory}${separator}${name}`;
 }

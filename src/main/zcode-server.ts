@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
+import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
 import { resolveSpawnEnv } from "./opencode-server.js";
 import {
   createZcodeJsonRpc,
@@ -33,11 +34,46 @@ export interface ZcodeCli {
   env?: Record<string, string>;
 }
 
-/** Candidate .cjs bundle paths, most common first. darwin-only for now. */
-function bundleCandidates(home: string, plat: NodeJS.Platform): string[] {
+/**
+ * Candidate .cjs bundle paths, most common first. Forward separators on
+ * purpose: node's fs accepts "/" on every platform, and tests simulate any
+ * platform from any host (host `join` would emit "\" on Windows).
+ */
+function bundleCandidates(
+  home: string,
+  plat: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = {},
+): string[] {
+  if (plat === "win32") {
+    // The install root follows the real environment, not a hardcoded C: —
+    // a machine that installs ZCode on another drive never sees C:. The
+    // per-machine folder is "ZCode" and the per-user one is "zcode", so
+    // each root carries its own folder name.
+    const roots: string[] = [];
+    for (const programFiles of [env.ProgramFiles, env["ProgramFiles(x86)"]]) {
+      if (typeof programFiles !== "string" || programFiles === "") continue;
+      roots.push(posix.join(programFiles.replaceAll("\\", "/"), "ZCode"));
+    }
+    for (const localAppData of [
+      env.LOCALAPPDATA,
+      posix.join(home.replaceAll("\\", "/"), "AppData", "Local"),
+    ]) {
+      if (typeof localAppData !== "string" || localAppData === "") continue;
+      roots.push(posix.join(localAppData.replaceAll("\\", "/"), "Programs", "zcode"));
+    }
+    // The default C: root stays as a last resort for a machine whose
+    // environment does not export ProgramFiles.
+    roots.push("C:/Program Files/ZCode");
+    const seen = new Set<string>();
+    return roots
+      .map((root) => posix.join(root, "resources", "glm", "zcode.cjs"))
+      .filter((path) => {
+        if (seen.has(path)) return false;
+        seen.add(path);
+        return true;
+      });
+  }
   if (plat !== "darwin") return [];
-  // POSIX separators on purpose: the layout is darwin's, and tests simulate
-  // darwin from any host (host `join` would emit "\" on Windows).
   return [
     "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
     posix.join(home, "Applications", "ZCode.app", "Contents", "Resources", "glm", "zcode.cjs"),
@@ -56,7 +92,7 @@ export async function resolveZcodeCli(
 ): Promise<ZcodeCli | null> {
   const override = env.AWEFORK_ZCODE_CLI;
   if (override && existsSync(override)) return scriptRunner(override, execFn);
-  const bundled = bundleCandidates(home, plat).find((path) => existsSync(path));
+  const bundled = bundleCandidates(home, plat, env).find((path) => existsSync(path));
   if (bundled) return scriptRunner(bundled, execFn);
   // A PATH install (future CLI distribution): let the loader find it.
   try {
@@ -82,19 +118,28 @@ export async function resolveZcodeCli(
  * Neither matches this bundle's layout (the catalog sits one level up, in
  * Resources/config/provider/), and once the runtime catalog cache in
  * ~/.zcode expires the CLI needs the file — a miss makes it exit 1 with
- * "无法定位 CLI ZCode Built-in Provider Config". The CLI accepts the path
+ * "cannot locate the CLI ZCode Built-in Provider Config". The CLI accepts the
+ * path
  * via ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (what the desktop app passes), so
  * hand it over whenever the file can be located next to the script.
  */
 function builtinProviderEnv(scriptPath: string): Record<string, string> {
-  // Same POSIX-separator rule as bundleCandidates: the catalog layout is
-  // part of the darwin bundle, and node's fs accepts "/" on every platform
-  // for an AWEFORK_ZCODE_CLI override.
-  const dir = posix.dirname(scriptPath);
+  // Forward-separator rule as bundleCandidates: node's fs accepts "/" on
+  // every platform, and normalizing "\" first lets a Windows-style
+  // AWEFORK_ZCODE_CLI override survive posix.dirname.
+  const script = scriptPath.replaceAll("\\", "/");
+  const dir = posix.dirname(script);
+  // posix.join, not posix.resolve: resolve treats a Windows drive path
+  // ("C:/Program Files/…") as relative and prefixes the cwd, so the
+  // "one level up" candidate never lands on the real Resources/config
+  // folder on Windows. join folds ".." without a cwd, and keeps the drive
+  // prefix intact.
+  const up = (levels: number): string =>
+    posix.join(dir, ...Array.from({ length: levels }, () => ".."));
   const candidates = [
     posix.join(dir, "provider", "zcode-builtin.json"),
-    posix.resolve(dir, "../../../../../config/provider/zcode-builtin.json"),
-    posix.resolve(dir, "../config/provider/zcode-builtin.json"),
+    posix.join(up(5), "config/provider/zcode-builtin.json"),
+    posix.join(up(1), "config/provider/zcode-builtin.json"),
   ];
   const found = candidates.find((path) => existsSync(path));
   return found ? { ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: found } : {};
@@ -198,7 +243,7 @@ export async function ensureZcodeServer(
   const cli = options.cli ?? (await resolveZcodeCli());
   if (!cli) {
     throw new Error(
-      "未找到 zcode CLI。安装 ZCode 桌面端后重试，或用 AWEFORK_ZCODE_CLI 指向 zcode.cjs。",
+      "zcode CLI not found. Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs.",
     );
   }
 
@@ -238,8 +283,11 @@ export async function ensureZcodeServer(
     child.on("exit", (code, signal) => {
       const detail = stderrTail.trim();
       lastExitDetail = detail
-        ? `（${detail}）`
-        : `（code=${code} signal=${signal}，stderr 无输出）`;
+        ? ` (${detail})`
+        : ` (code=${code} signal=${signal}, no stderr output)`;
+      // cmd.exe reports a missing command as exit code 9009 and never
+      // surfaces the child's own ENOENT (the shim runs under shell:true).
+      lastExitCode = code;
       console.error(
         `zcode app-server exited (code=${code} signal=${signal})${detail ? `: ${detail}` : ""}`,
       );
@@ -250,6 +298,8 @@ export async function ensureZcodeServer(
 
   /** stderr tail from the most recent child exit, for the throw sites below. */
   let lastExitDetail = "";
+  /** Exit code of the most recent child exit, for the 9009 diagnosis. */
+  let lastExitCode: number | null = null;
 
   const slotOf = (child: ChildProcess): ServerSlot | null => (slot?.child === child ? slot : null);
 
@@ -264,8 +314,19 @@ export async function ensureZcodeServer(
   // of letting the first request time out against a dead pipe.
   await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
   if (!slot.alive) {
+    // A missing CLI on Windows exits 9009 under cmd.exe; name that instead
+    // of the generic "exited right after launch", which reads like a broken
+    // install rather than an absent command.
+    if (isCmdNotFound(lastExitCode)) {
+      throw new Error(
+        missingCliMessage(
+          "zcode",
+          "Install the ZCode desktop app and retry, or point AWEFORK_ZCODE_CLI at zcode.cjs.",
+        ),
+      );
+    }
     throw new Error(
-      `zcode app-server 启动即退出${lastExitDetail}。请确认 ZCode 桌面端已正确安装（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
+      `zcode app-server exited right after launch${lastExitDetail}. Make sure the ZCode desktop app is installed correctly (AWEFORK_ZCODE_CLI can point at zcode.cjs).`,
     );
   }
 
@@ -280,7 +341,7 @@ export async function ensureZcodeServer(
   let respawning: Promise<ServerSlot> | null = null;
   const currentHandle: ZcodeServerHandle = {
     async client() {
-      if (stopped) throw new Error("zcode app-server 已停止");
+      if (stopped) throw new Error("zcode app-server has been stopped");
       if (!slot?.alive) {
         if (!respawning) {
           respawning = spawnChild().finally(() => {
@@ -291,7 +352,7 @@ export async function ensureZcodeServer(
         // stop() during the spawn must not install (and leak) the new child.
         if (stopped) {
           discardSlot(fresh);
-          throw new Error("zcode app-server 已停止");
+          throw new Error("zcode app-server has been stopped");
         }
         // Another caller installed a live slot while this spawn ran; drop ours.
         if (slot?.alive) {
@@ -303,11 +364,11 @@ export async function ensureZcodeServer(
         await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_GRACE_MS));
         if (stopped) {
           discardSlot(fresh);
-          throw new Error("zcode app-server 已停止");
+          throw new Error("zcode app-server has been stopped");
         }
         if (!fresh.alive) {
           throw new Error(
-            `zcode app-server 重启后立即退出${lastExitDetail}；请确认 ZCode 桌面端安装正常（AWEFORK_ZCODE_CLI 可指向 zcode.cjs）。`,
+            `zcode app-server exited right after restart${lastExitDetail}; make sure the ZCode desktop app is installed correctly (AWEFORK_ZCODE_CLI can point at zcode.cjs).`,
           );
         }
         if (slot?.alive) {

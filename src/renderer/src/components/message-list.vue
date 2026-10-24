@@ -3,14 +3,19 @@
     <slot name="context" />
     <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
       <template v-if="message.role === 'user'">
-        <!-- 压缩标记行：不是对话内容，是"此前的历史已折叠为摘要"的分界线 -->
+        <!-- compression marker row: not conversation content, a divider marking
+             "the earlier history has been folded into a summary" -->
         <div v-if="message.compaction" class="compaction-banner" role="separator">
           <span class="compaction-glyph">🧹</span>
           <span class="compaction-text">{{ t("msg.compactionBanner") }}</span>
         </div>
         <div v-else class="message-row user-row">
           <div class="user-body">
-            <MarkdownView :source="message.text" user />
+            <details v-if="message.id === collapsedUserMessageId" class="message-source-input">
+              <summary>{{ collapsedUserMessageLabel }}</summary>
+              <MarkdownView :source="message.text" user />
+            </details>
+            <MarkdownView v-else :source="message.text" user />
             <p v-if="message.attachmentNames.length > 0" class="att-row">
               <span v-for="(name, i) in message.attachmentNames" :key="i" class="att-chip">
                 📎 {{ name }}
@@ -32,8 +37,8 @@
               @click="copyMessage(message)"
             >{{ copiedId === message.id ? "✓" : "⧉" }}</button>
             <p v-if="message.toolNames.length > 0" class="tool-row">
-              <span v-for="name in message.toolNames" :key="name" class="tool-chip lav">{{
-                name
+              <span class="tool-chip lav" :title="message.toolNames.join(' · ')">{{
+                toolSummary(message.toolNames)
               }}</span>
             </p>
             <details v-if="message.thinking" class="thought">
@@ -61,10 +66,24 @@
         <div class="message-body">
           <p class="tool-row"><span class="tool-chip running">running…</span></p>
           <template v-for="row in liveRows" :key="row.part.partId">
+            <!-- A live tool part streams as a chip while the turn runs; the
+                 settled row's full tool list lands via the idle reload. -->
             <p v-if="row.part.kind === 'tool'" class="tool-row">
               <span class="tool-chip" :class="row.part.endedAt === null ? 'running' : 'lav'">
                 {{ row.part.text }}{{ row.part.endedAt === null ? "…" : "" }}
               </span>
+            </p>
+            <!-- Reasoning with no readable text (codex encrypts its
+                 chain-of-thought): a quiet one-liner that says it thought and
+                 for how long, never a box the reader can open onto nothing. -->
+            <p
+              v-else-if="row.blankThinking"
+              class="thought-bare"
+              :class="{ done: row.part.endedAt !== null }"
+            >
+              <span v-if="row.part.endedAt === null" class="spinner" aria-hidden="true"></span>
+              <span class="thought-title">{{ row.title }}</span>
+              <span v-if="row.duration" class="thought-meta">· {{ row.duration }}</span>
             </p>
             <details
               v-else-if="row.part.kind === 'thinking'"
@@ -99,7 +118,8 @@ import type { SessionSummary } from "../../../shared/types";
 import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
 import type { LivePart, ReadonlyChatMessage } from "../state";
-import { thoughtSummary } from "../thought";
+import { hasReadableThought, thoughtSummary } from "../thought";
+import { toolSummary } from "../tool-summary";
 import { MarkdownView } from "./markdown-view";
 
 const props = defineProps<{
@@ -109,6 +129,8 @@ const props = defineProps<{
   /** The run's live parts in arrival order — each step's thinking and reply interleaved. */
   streamParts: readonly LivePart[];
   error: string | null;
+  collapsedUserMessageId?: string | null;
+  collapsedUserMessageLabel?: string;
 }>();
 
 /** A failed reply row offers its own retry jump; the host opens the draft. */
@@ -123,6 +145,9 @@ const liveRows = computed(() => {
   return parts.map((part) => ({
     part,
     ...thoughtSummary(part),
+    // A thinking part with nothing readable in it (codex's encrypted
+    // reasoning) renders as a one-liner instead of an expandable shell.
+    blankThinking: part.kind === "thinking" && !hasReadableThought(part.text),
     caret: part.partId === caretPartId,
   }));
 });
@@ -207,3 +232,8 @@ onUnmounted(() => {
   if (copiedTimer) clearTimeout(copiedTimer);
 });
 </script>
+
+<style scoped>
+.message-source-input > summary { cursor: pointer; font-size: 12px; font-weight: 650; }
+.message-source-input[open] > summary { margin-bottom: 10px; }
+</style>

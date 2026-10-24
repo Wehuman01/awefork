@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createCodexAdapter } from "../shared/codex-adapter.js";
+import { readLineage } from "../shared/lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -10,6 +11,7 @@ import type {
   PromptAttachment,
   SessionSummary,
 } from "../shared/types.js";
+import { stageCodexImages } from "./codex-attachments.js";
 import {
   type CodexHome,
   DEFAULT_HOME_ID,
@@ -17,6 +19,7 @@ import {
   discoverCodexHomes,
   findRolloutRelPath,
 } from "./codex-homes.js";
+import { readTurnContexts } from "./codex-rollout.js";
 import { ensureCodexServer } from "./codex-server.js";
 
 export interface CodexMultiHomeOptions {
@@ -105,6 +108,20 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       lineagePath: options.lineagePath,
       cliVersion: version,
       authMessage: home.id === DEFAULT_HOME_ID ? authMessage : null,
+      // Images ride turn/start's localImage items, which take file paths —
+      // main stages the staged data URLs as files codex can read.
+      stageImages: stageCodexImages,
+      // Each home reads its own rollouts: the per-turn model settings live
+      // beside the session they belong to.
+      turnContexts: (sessionId) => readTurnContexts(home.path, sessionId),
+      // A fork cut inside prompt()'s writer-conflict recovery is registered
+      // here, not through the facade's fork() — without this the new branch
+      // stays absent from thread/list (it carries only copied prefix turns)
+      // and the renderer cannot select the session its run moved to.
+      forkCreated: (forked) => {
+        owners.set(forked.id, home.id);
+        unlistedSessions.set(forked.id, { summary: forked, createdAt: Date.now() });
+      },
     });
   };
 
@@ -124,7 +141,7 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     if (homeId === DEFAULT_HOME_ID && entry.connected) {
       emit({
         type: "server.error",
-        message: "codex app-server 连接中断，将在下次操作时重启",
+        message: "codex app-server connection lost, it will restart on the next action",
       });
     }
   }
@@ -196,10 +213,15 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
   function importToDefault(sessionId: string, ownerId: string): void {
     if (ownerId === DEFAULT_HOME_ID) return;
     const source = homesOf().find((h) => h.id === ownerId);
-    if (!source) throw new Error(`会话 ${sessionId} 的来源账号 ${ownerId} 不存在，无法继续`);
+    if (!source)
+      throw new Error(
+        `account ${ownerId} for session ${sessionId} does not exist, cannot continue`,
+      );
     const rel = findRolloutRelPath(source.path, sessionId);
     if (!rel) {
-      throw new Error(`找不到会话 ${sessionId} 的记录文件，无法用默认账号继续`);
+      throw new Error(
+        `cannot find the record file for session ${sessionId}, cannot continue with the default account`,
+      );
     }
     const dest = join(defaultHome(), "sessions", rel);
     if (!existsSync(dest)) {
@@ -283,10 +305,13 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     async fork(sessionId, atMessageId, forkOptions) {
       // An empty-context fork copies nothing, so there is no rollout to
       // import into the default home — it starts wherever its parent lives.
+      let ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
       if (forkOptions?.context !== "none") {
-        importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+        importToDefault(sessionId, ownerId);
+        ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
       }
       const forked = await (await adapterFor(sessionId)).fork(sessionId, atMessageId, forkOptions);
+      owners.set(forked.id, ownerId);
       unlistedSessions.set(forked.id, { summary: forked, createdAt: Date.now() });
       return forked;
     },
@@ -326,8 +351,12 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     },
 
     async prompt(sessionId, text, model, attachments) {
-      // Continuing a foreign session switches it to the default account.
-      importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+      const lineage = await readLineage(options.lineagePath);
+      if (lineage[sessionId]?.context !== "none") {
+        // Foreign history must move to the default account before a turn.
+        // An empty-context fork has no rollout yet and stays in its home.
+        importToDefault(sessionId, owners.get(sessionId) ?? DEFAULT_HOME_ID);
+      }
       await (await adapterFor(sessionId)).prompt(sessionId, text, model, attachments);
     },
 

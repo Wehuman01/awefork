@@ -4,25 +4,13 @@
     <template v-if="compare">
       <div class="cmp-head">
         <span class="cmp-head-title">{{ compare.plan ? t("branch.compareTitle") : t("branch.freeTitle") }}</span>
-        <div v-if="compare.plan" class="cmp-pager">
-          <button
-            type="button"
-            class="nav-btn"
-            :title="t('branch.prevPair')"
-            :disabled="pagerPos === 0"
-            @click="stepPager(-1)"
-          >‹</button>
-          <span class="cmp-pager-pos">{{
-            pairRows.length === 0 ? "0 / 0" : `${pagerPos + 1} / ${pairRows.length}`
-          }}</span>
-          <button
-            type="button"
-            class="nav-btn"
-            :title="t('branch.nextPair')"
-            :disabled="pagerPos >= pairRows.length - 1"
-            @click="stepPager(1)"
-          >›</button>
-        </div>
+        <button
+          type="button"
+          class="nav-btn"
+          :class="{ 'sync-on': syncScroll }"
+          :title="t('branch.syncScrollTitle')"
+          @click="syncScroll = !syncScroll"
+        >{{ syncScroll ? "⇅" : "↕" }}</button>
         <button
           type="button"
           class="nav-btn"
@@ -31,25 +19,39 @@
         >✕</button>
       </div>
 
-      <div class="cmp-body" :class="{ free: !compare.plan }">
+      <div class="cmp-body">
         <div class="cmp-cols">
-          <div class="cmp-colcard left">
+          <div
+            class="cmp-colcard left"
+            :class="{ 'empty-ctx': isEmptyContext(compare.pair.leftId) }"
+          >
             <span v-if="store.selectedId === compare.pair.leftId" class="cmp-now">{{ t("branch.current") }}</span>
-            <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">{{
-              sideTitle(compare.pair.leftId)
-            }}</span>
+            <span class="cmp-colname" :title="sideTitle(compare.pair.leftId)">
+              <span v-if="isEmptyContext(compare.pair.leftId)" class="cut-glyph">✂</span>
+              {{ sideTitle(compare.pair.leftId) }}
+            </span>
             <span class="cmp-colmeta">{{ colMeta(0) }}</span>
-          </div>
-          <div class="cmp-colcard right">
-            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">{{ t("branch.current") }}</span>
-            <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">{{
-              sideTitle(compare.pair.rightId)
+            <span v-if="isEmptyContext(compare.pair.leftId)" class="cmp-cutnote">{{
+              t("cut.compareNote")
             }}</span>
+          </div>
+          <div
+            class="cmp-colcard right"
+            :class="{ 'empty-ctx': isEmptyContext(compare.pair.rightId) }"
+          >
+            <span v-if="store.selectedId === compare.pair.rightId" class="cmp-now">{{ t("branch.current") }}</span>
+            <span class="cmp-colname" :title="sideTitle(compare.pair.rightId)">
+              <span v-if="isEmptyContext(compare.pair.rightId)" class="cut-glyph">✂</span>
+              {{ sideTitle(compare.pair.rightId) }}
+            </span>
             <span class="cmp-colmeta">{{ colMeta(1) }}</span>
+            <span v-if="isEmptyContext(compare.pair.rightId)" class="cmp-cutnote">{{
+              t("cut.compareNote")
+            }}</span>
           </div>
         </div>
 
-        <!-- 同源: aligned pairs from the shared fork anchor -->
+        <!-- same-origin: aligned pairs from the shared fork anchor -->
         <template v-if="compare.plan">
           <button
             v-if="compare.plan.common.length > 0"
@@ -73,27 +75,32 @@
             >{{ t("branch.samePrompt") }}</span>
           </div>
 
-          <div v-if="pairRows.length === 0" class="cmp-empty">
+          <div v-if="pairColumns.length === 0" class="cmp-empty">
             {{ t("branch.emptyAfterFork") }}
           </div>
-          <div v-else class="cmp-pairs">
+          <div v-else class="cmp-free">
             <div
-              v-for="(row, i) in pairRows"
-              :key="i"
-              :ref="(el) => setPairEl(i, el)"
-              class="pair"
+              v-for="(col, ci) in pairColumns"
+              :key="col.id"
+              :ref="(el) => setColEl(ci, el)"
+              class="cmp-fcol"
+              :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
+              <!-- No column head here: the aligned header cards above already
+                   name both sides and mark the current one, and "selected" would
+                   tear the lens down mid-comparison. -->
               <CmpCell
-                v-for="side in sides"
-                :key="side"
-                :cell="row[side]"
-                :side="side"
+                v-for="cell in col.cells"
+                :key="cell.id"
+                :cell="cell"
+                :side="sideOf(ci)"
               />
             </div>
           </div>
         </template>
 
-        <!-- 不同源: two independent timelines, no pairing -->
+        <!-- different-origin: two independent timelines, no pairing -->
         <template v-else>
           <div class="cmp-forkline">
             <span class="cmp-fork-glyph">⇄</span>
@@ -110,7 +117,8 @@
               :key="col.id"
               :ref="(el) => setColEl(ci, el)"
               class="cmp-fcol"
-              :class="sides[ci]"
+              :class="sideOf(ci)"
+              @scroll="onColScroll(ci, $event)"
             >
               <div class="cmp-fcol-head">
                 <button
@@ -153,7 +161,7 @@
       <div class="ctx-head">
         <span class="ctx-icon">💬</span>
         <div class="ctx-headings">
-          <div class="ctx-title">{{ t("branch.contextTitle") }}</div>
+          <div class="ctx-title">{{ currentParallelGroup && showParallelResults ? pt("title") : t("branch.contextTitle") }}</div>
           <div class="ctx-sub" :title="selectedSession?.title ?? ''">
             <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || t("branch.pickNode") }}
           </div>
@@ -224,18 +232,58 @@
         <span v-if="isRunning" class="ctx-running">{{ t("branch.running") }}</span>
       </div>
 
+      <!-- The marker's meaning in words, on its own row: the head is already
+           tight with the nav buttons, and squeezing this in turned the title
+           into a vertical strip on a narrow pane. -->
+      <div v-if="isEmptyContext(store.selectedId) && !(currentParallelGroup && showParallelResults)" class="ctx-cut-note">
+        <span class="ctx-cut-glyph">✂</span>
+        <span>{{ t("cut.paneNote") }}</span>
+      </div>
+
       <div v-if="store.messagesError" class="banner banner-error">{{ store.messagesError }}</div>
 
+      <div v-if="currentParallelGroup" class="parallel-reading-tabs">
+        <button type="button" :class="{ on: showParallelResults }" :aria-pressed="showParallelResults" @click="showParallelResults = true">✦ {{ pt("summaryTab") }}</button>
+        <button type="button" :class="{ on: !showParallelResults }" :aria-pressed="!showParallelResults" @click="showParallelResults = false">{{ pt("conversationTab") }}</button>
+      </div>
+      <ParallelResults
+        v-if="currentParallelGroup && showParallelResults"
+        :group="currentParallelGroup"
+        :summary-model-label="parallelSummaryModelLabel"
+        :viewing-session-id="store.selectedId"
+        @open="openParallelSource"
+        @compare="compareParallelSources"
+        @summarize="summarizeCurrentGroup"
+        @retry="retryParallelSource"
+        @stop="stopParallelSource"
+      />
       <MessageList
-        v-if="selectedSession"
+        v-else-if="selectedSession"
         :session="selectedSession"
         :messages="paneMessages"
+        :collapsed-user-message-id="parallelSummaryInputId"
+        :collapsed-user-message-label="pt('summaryInput')"
         :running="isRunning"
         :stream-parts="store.streamParts"
         :error="null"
         @retry="retry"
       >
-        <template v-if="contextTurns.length > 0 || omittedCount > 0" #context>
+        <template v-if="isEmptyContext(store.selectedId)" #context>
+          <!-- An empty-context branch carries none of these ancestors, so the
+               pane does not list them as numbered context steps at all: it
+               names where the branch split off and stops there. -->
+          <div class="chain">
+            <div class="chain-label">{{ t("cut.chainLabel") }}</div>
+            <div class="chain-lineage">
+              <span class="chain-lineage-glyph">⎇</span>
+              <span class="chain-lineage-body">
+                <span class="chain-title">{{ t("cut.splitFrom", { title: cutParentTitle }) }}</span>
+                <span class="chain-preview">{{ t("cut.chainGhost") }}</span>
+              </span>
+            </div>
+          </div>
+        </template>
+        <template v-else-if="contextTurns.length > 0 || omittedCount > 0" #context>
           <div class="chain">
             <div class="chain-label">{{ t("branch.chainLabel") }}</div>
             <p v-if="omittedCount > 0" class="chain-omitted">{{ t("branch.chainOmitted", { n: omittedCount }) }}</p>
@@ -280,15 +328,21 @@
         v-if="selectedSession"
         ref="chatInputEl"
         :running="isRunning"
+        :parallel-sending="parallelSending || (showParallelResults && parallelRoundBusy)"
+        :backend="store.activeBackend"
         :model="paneModel"
         :models="store.models"
         :favorite-models="store.favoriteModels"
         :recent-models="store.recentModels"
         :allow-attachments="store.capabilities.attachments"
+        :context="paneContextUsage"
+        :can-compress="store.capabilities.compress"
+        :send-parallel="settings.labs.parallelModels ? sendParallel : undefined"
         @send="send"
         @abort="abort"
         @set-model="onSetModel"
         @toggle-favorite="toggleFavoriteModel"
+        @compress="compress"
       />
     </template>
   </aside>
@@ -301,6 +355,9 @@ import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
+import { type ParallelSummarySettings, parallelGroupBusy } from "../parallel-groups";
+import { pt } from "../parallel-i18n";
+import { settings } from "../settings";
 import {
   abortRun,
   abortRunFor,
@@ -310,22 +367,30 @@ import {
   compareWithParent,
   composerModelFor,
   compressSession,
+  enterCompare,
   exitCompare,
   exportBranchMarkdown,
   inlineHostVisible,
+  isEmptyContext,
   isTurnMarked,
   paneComposerModel,
+  paneContextUsage,
   paneMessages,
   paneTurn,
+  parallelGroupForSession,
+  retryParallelTarget,
   retryTurn,
   selectedSession,
   selectSession,
   selectTurn,
   sendComparePrompt,
   sendPanePrompt,
+  sendParallelPrompt,
   setPaneModel,
   stepTurn,
+  stopParallelTarget,
   store,
+  summarizeParallelGroup,
   tagBg,
   tagColor,
   tagsOf,
@@ -339,6 +404,7 @@ import CompareComposer from "./compare-composer.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import InteractionInline from "./interaction-inline.vue";
 import MessageList from "./message-list.vue";
+import ParallelResults from "./parallel-results.vue";
 
 const pane = computed(() => paneTurn.value);
 
@@ -359,7 +425,69 @@ function toggleMark(): void {
 const selectedTags = computed(() => (store.selectedId ? tagsOf(store.selectedId) : []));
 
 const chatInputEl = ref<{ focus: () => void } | null>(null);
-// 新增对话 landed: the fresh session is selected and mounted by now — put the
+const parallelSending = ref(false);
+const currentParallelGroup = computed(() =>
+  parallelGroupForSession(store.activeBackend, store.selectedId),
+);
+const showParallelResults = ref(true);
+const parallelSummaryInputId = computed(() => {
+  const group = currentParallelGroup.value;
+  const version = group?.summaryVersions.find((item) => item.sessionId === store.selectedId);
+  if (!version || !store.selectedId) return null;
+  return (
+    store.messagesBySession[store.selectedId]?.find((message) => message.role === "user")?.id ??
+    null
+  );
+});
+const parallelRoundBusy = computed(() =>
+  Boolean(currentParallelGroup.value && parallelGroupBusy(currentParallelGroup.value)),
+);
+const parallelSummaryModelLabel = computed(() => {
+  const model = currentParallelGroup.value?.settings.model;
+  if (!model) return t("input.parallelDefaultSummaryModel");
+  return (
+    store.models.find(
+      (item) => item.providerId === model.providerId && item.modelId === model.modelId,
+    )?.modelName ?? model.modelId
+  );
+});
+watch(
+  () => [store.selectedId, currentParallelGroup.value?.id] as const,
+  () => {
+    const group = currentParallelGroup.value;
+    const selected = store.selectedId;
+    // A summary session of ANY version opens the reading view, not just the
+    // newest one: the canvas draws every version as its own summary card, so
+    // landing on an older card must show what that card promised.
+    showParallelResults.value = Boolean(
+      group &&
+        (selected === group.anchorSessionId ||
+          selected === group.summarySessionId ||
+          group.summaryVersions.some((version) => version.sessionId === selected)),
+    );
+  },
+  { immediate: true },
+);
+async function openParallelSource(sessionId: string): Promise<void> {
+  await selectSession(sessionId);
+  showParallelResults.value = false;
+}
+function compareParallelSources(sessionIds: [string, string]): void {
+  void enterCompare(sessionIds[0], sessionIds[1]);
+}
+function summarizeCurrentGroup(): void {
+  const group = currentParallelGroup.value;
+  if (group) void summarizeParallelGroup(group.id);
+}
+function retryParallelSource(targetId: string): void {
+  const group = currentParallelGroup.value;
+  if (group) void retryParallelTarget(group.id, targetId);
+}
+function stopParallelSource(targetId: string): void {
+  const group = currentParallelGroup.value;
+  if (group) void stopParallelTarget(group.id, targetId);
+}
+// a new conversation landed: the fresh session is selected and mounted by now — put the
 // caret in the pane composer so its first prompt starts with a keystroke.
 watch(
   () => store.composerFocusRequest,
@@ -373,7 +501,8 @@ watch(
 
 /**
  * The open comparison. `plan` is null when the two sessions never meet —
- * 不同源 renders as two free side-by-side timelines instead of aligned pairs.
+ * A different-origin pair renders as two free side-by-side timelines instead of
+ * aligned pairs.
  */
 const compare = computed(() => {
   const pair = store.compare;
@@ -412,29 +541,38 @@ function sideOf(index: number): (typeof sides)[number] {
   return index === 0 ? "left" : "right";
 }
 
-const pairRows = computed(() => {
+/**
+ * The aligned mode's two columns. Each side's divergent turns become one
+ * column, so the lists flow independently: opening a card on one side never
+ * stretches the other side's row or pushes its next turn out of view. The
+ * pairing is kept as the "up" flag — a turn that belongs to the upstream
+ * branch rather than this side's own.
+ */
+const pairColumns = computed<FreeColumn[]>(() => {
   const current = compare.value;
   if (!current?.plan) return [];
   const plan = current.plan;
-  const cell = (node: TurnNode, side: (typeof sides)[number]): DisplayCell => ({
-    id: node.id,
-    title: node.title,
-    preview: node.preview,
-    toolNames: node.toolNames,
-    modelIds: node.modelIds,
-    durationMs: node.durationMs,
-    outputTokens: node.outputTokens,
-    error: node.error,
-    badge: badgeOf(node),
-    flag: node.sessionId !== current.pair[side === "left" ? "leftId" : "rightId"] ? "up" : null,
+  return sides.map((side) => {
+    const sideId = current.pair[side === "left" ? "leftId" : "rightId"];
+    const cells: DisplayCell[] = plan[side].map((node) => ({
+      id: node.id,
+      title: node.title,
+      preview: node.preview,
+      toolNames: node.toolNames,
+      modelIds: node.modelIds,
+      durationMs: node.durationMs,
+      outputTokens: node.outputTokens,
+      error: node.error,
+      badge: badgeOf(node),
+      flag: node.sessionId !== sideId ? "up" : null,
+    }));
+    const tokens = plan[side].reduce((sum, n) => sum + n.outputTokens, 0);
+    const errors = plan[side].filter((n) => n.error !== null).length;
+    const bits = [t("branch.turnsCount", { n: cells.length })];
+    if (tokens > 0) bits.push(formatTokens(tokens));
+    if (errors > 0) bits.push(`⚠ ${errors}`);
+    return { id: sideId, title: sideTitle(sideId), meta: bits.join(" · "), cells };
   });
-  const rows: { left: DisplayCell | null; right: DisplayCell | null }[] = [];
-  for (let i = 0; i < Math.max(plan.left.length, plan.right.length); i += 1) {
-    const l = plan.left[i];
-    const r = plan.right[i];
-    rows.push({ left: l ? cell(l, "left") : null, right: r ? cell(r, "right") : null });
-  }
-  return rows;
 });
 
 const samePrompt = computed(() => {
@@ -444,7 +582,7 @@ const samePrompt = computed(() => {
   return l != null && r != null && l.title !== "" && l.title === r.title;
 });
 
-/** Leading turns copied from the 母本 — none for roots and empty-context forks. */
+/** Leading turns copied from the original — none for roots and empty-context forks. */
 function inheritedTurns(sessionId: string, turns: Turn[]): number {
   const record = store.lineage[sessionId];
   if (!record || record.context === "none" || record.atMessageId == null) return 0;
@@ -460,17 +598,21 @@ interface FreeColumn {
 }
 
 /**
- * The free side-by-side columns (不同源): each session's whole timeline from
+ * The free side-by-side columns (different-origin): each session's whole timeline from
  * its own messages — no canvas graph needed, so the pair may cross stories.
  */
 const freeColumns = computed<FreeColumn[] | null>(() => {
   const current = compare.value;
   if (!current || current.plan) return null;
-  return [current.pair.leftId, current.pair.rightId].map((id) => {
+  return [current.pair.leftId, current.pair.rightId].map((id, ci) => {
     const turns = buildTurns(id, store.messagesBySession[id] ?? []);
     const inherited = inheritedTurns(id, turns);
+    // The side namespaces the id: two independent stories are free to mint the
+    // same message ids, and an unnamespaced collision would let one column's
+    // fold state ride on the other's card.
+    const side = sides[ci];
     const cells: DisplayCell[] = turns.map((turn, i) => ({
-      id: `${id}:${turn.messageId}`,
+      id: `${side}:${id}:${turn.messageId}`,
       title: turn.title,
       preview: turn.preview,
       toolNames: turn.toolNames,
@@ -481,8 +623,8 @@ const freeColumns = computed<FreeColumn[] | null>(() => {
       badge: i < inherited ? null : i - inherited + 1,
       flag: i < inherited ? "inherited" : null,
     }));
-    const tokens = turns.reduce((sum, t) => sum + t.outputTokens, 0);
-    const errors = turns.filter((t) => t.error !== null).length;
+    const tokens = turns.reduce((sum, turn) => sum + turn.outputTokens, 0);
+    const errors = turns.filter((turn) => turn.error !== null).length;
     const bits = [
       inherited > 0
         ? t("branch.turnsMeta", { n: turns.length, m: inherited })
@@ -544,21 +686,6 @@ function badgeOf(node: TurnNode): number {
 
 const prefixOpen = ref(false);
 
-const pagerPos = ref(0);
-const pairEls = new Map<number, Element>();
-
-function setPairEl(index: number, el: unknown): void {
-  if (el) pairEls.set(index, el as Element);
-  else pairEls.delete(index);
-}
-
-function stepPager(delta: number): void {
-  const count = pairRows.value.length;
-  if (count === 0) return;
-  pagerPos.value = Math.min(count - 1, Math.max(0, pagerPos.value + delta));
-  pairEls.get(pagerPos.value)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 const colEls = new Map<number, Element>();
 
 function setColEl(index: number, el: unknown): void {
@@ -571,6 +698,39 @@ function scrollLatest(index: number): void {
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 }
 
+/**
+ * Optional lockstep scrolling. Each column keeps its own height, so the two
+ * rarely match — syncing by pixel offset would stop the shorter column at its
+ * end while the other still had room. Progress ratio instead: scrolling one
+ * column carries the other to the same fraction of its own scrollable range,
+ * so both read "about as far along" whichever is longer.
+ */
+const syncScroll = ref(false);
+
+/** The column currently being dragged by the user, to avoid echo loops. */
+let syncingFrom: Element | null = null;
+
+function onColScroll(index: number, event: Event): void {
+  if (!syncScroll.value) return;
+  const source = event.currentTarget as HTMLElement | null;
+  if (!source || source === syncingFrom) return;
+  const span = source.scrollHeight - source.clientHeight;
+  if (span <= 0) return;
+  const ratio = source.scrollTop / span;
+  syncingFrom = source;
+  for (const [other, el] of colEls) {
+    if (other === index) continue;
+    const otherSpan = el.scrollHeight - el.clientHeight;
+    if (otherSpan <= 0) continue;
+    el.scrollTop = ratio * otherSpan;
+  }
+  // The scroll events this assignment fires land after the current one, so
+  // the guard is released on the next frame rather than synchronously.
+  requestAnimationFrame(() => {
+    syncingFrom = null;
+  });
+}
+
 /** Jump into one of the compared sessions — a fresh selection tears the lens down. */
 function selectColumn(sessionId: string): void {
   void selectSession(sessionId);
@@ -581,14 +741,12 @@ function selectColumn(sessionId: string): void {
 watch(
   () => store.compare,
   () => {
-    pagerPos.value = 0;
     prefixOpen.value = false;
-    pairEls.clear();
     colEls.clear();
   },
 );
 
-/** The selected branch's 母本, when it sits on this canvas — the ⇄ entry. */
+/** The selected branch's original, when it sits on this canvas — the ⇄ entry. */
 const compareParentId = computed(() => {
   const id = store.selectedId;
   if (!id || store.compare) return null;
@@ -610,6 +768,18 @@ const MAX_CONTEXT = 12;
 const omittedCount = computed(() => Math.max(0, activeChain.value.length - 1 - MAX_CONTEXT));
 const contextTurns = computed(() => activeChain.value.slice(0, -1).slice(-MAX_CONTEXT));
 const chainStart = computed(() => omittedCount.value + 1);
+
+/**
+ * Title of the branch an empty-context fork split off from. It comes from
+ * lineage rather than the chain: the chain's ancestors are exactly what this
+ * branch does not carry, so the pane names the parent instead of listing them.
+ */
+const cutParentTitle = computed(() => {
+  const id = store.selectedId;
+  const parentId = id ? store.lineage[id]?.parentId : undefined;
+  const title = parentId ? (store.sessions.find((s) => s.id === parentId)?.title ?? "") : "";
+  return title || t("cut.splitFromFallback");
+});
 
 function jumpTo(node: TurnNode): void {
   void selectTurn(node, { focusCanvas: true });
@@ -633,6 +803,21 @@ function send(text: string, attachments: PromptAttachment[]): void {
   void sendPanePrompt(text, attachments);
 }
 
+async function sendParallel(
+  text: string,
+  attachments: PromptAttachment[],
+  targets: readonly (ModelChoice | null)[],
+  summary: ParallelSummarySettings,
+): Promise<boolean> {
+  if (parallelSending.value) return false;
+  parallelSending.value = true;
+  try {
+    return await sendParallelPrompt(targets, text, attachments, summary);
+  } finally {
+    parallelSending.value = false;
+  }
+}
+
 function abort(): void {
   void abortRun();
 }
@@ -648,7 +833,10 @@ function exportMd(): void {
 
 function compress(): void {
   const id = store.selectedId;
-  if (id) void compressSession(id);
+  if (!id) return;
+  // Compress at the viewed position: the pane's current turn decides whether
+  // the summary forks off or lands in place (null = stub view, treated as tip).
+  void compressSession(id, pane.value?.turn.messageId ?? null);
 }
 
 const paneModel = paneComposerModel;
@@ -658,9 +846,9 @@ function onSetModel(model: ModelChoice | null): void {
 }
 
 // ←/→ walk turns without leaving the pane — but never while typing somewhere.
-// During an aligned comparison they page the pair rows; free side-by-side has
-// no pairing, so they do nothing there. Esc leaves the comparison (or cancels
-// a pending pick).
+// They do nothing while a comparison is open: both modes render two
+// independently scrolling columns, so there is no single list to walk. Esc
+// leaves the comparison (or cancels a pending pick).
 function onKeydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   const typing =
@@ -681,11 +869,9 @@ function onKeydown(event: KeyboardEvent): void {
   }
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   if (typing) return;
-  if (store.compare) {
-    event.preventDefault();
-    if (compare.value?.plan) stepPager(event.key === "ArrowLeft" ? -1 : 1);
-    return;
-  }
+  // Both compare modes are two independently scrolling columns now, so there
+  // is no row to page; the arrows keep their pane-only turn walking.
+  if (store.compare) return;
   if (!pane.value) return;
   event.preventDefault();
   stepTurn(event.key === "ArrowLeft" ? -1 : 1);

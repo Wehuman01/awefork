@@ -1,4 +1,5 @@
 import {
+  contextTokensOf,
   firstNumber,
   firstString,
   type OpenCodeDescriptor,
@@ -320,7 +321,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     if (fact) {
       const files = readPath(row, fact.path);
       if (!Array.isArray(files)) return [];
-      return files.map((f) => firstString(f, [fact.nameField]) ?? "附件");
+      return files.map((f) => firstString(f, [fact.nameField]) ?? "attachment");
     }
     const file = descriptor.messages.parts.file;
     return parts
@@ -339,6 +340,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         // that follows. v2 makes the marker the row itself, so it maps to the
         // same user-row shape v1 produces.
         const compaction = isCompactionRow(row, messageParts);
+        const contextTokens = contextTokensOf(m, descriptor.messages.usage);
         return {
           id: firstString(m, fields.id) ?? "",
           role: compaction
@@ -364,6 +366,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           completedAt: firstNumber(m, fields.completedAt),
           finish: firstString(m, fields.finish),
           outputTokens: firstNumber(m, fields.outputTokens),
+          ...(contextTokens !== null ? { contextTokens } : {}),
           error: firstString(m, fields.error),
           ...(compaction ? { compaction: true } : {}),
         };
@@ -509,7 +512,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
             return data
               ? {
                   mime,
-                  filename: firstString(f, [fact.nameField]) ?? "附件",
+                  filename: firstString(f, [fact.nameField]) ?? "attachment",
                   dataUrl: `data:${mime};base64,${data}`,
                 }
               : null;
@@ -772,6 +775,36 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         emitToAgentEvent(event, emit, partKinds, descriptor, onToolPart, permissionObserver);
       };
 
+      /**
+       * A restart or an event-stream outage misses the `form.created` frames
+       * of asks still pending server-side, and the server never re-emits them;
+       * the list route is the only way back. Runs on every connection and
+       * only adds: an ask the stream already delivered is deduped by
+       * `pendingForms`, and one absent from the list is left alone (the route
+       * scopes to the server's default location; a form from another
+       * directory must not be retired by its absence).
+       */
+      const rehydrateForms = async (): Promise<void> => {
+        if (!formObserver || !descriptor.endpoints.forms) return;
+        try {
+          const listed = await client.forms();
+          for (const raw of listed) {
+            const formId = firstString(raw, ["id"]);
+            const sessionId = firstString(raw, ["sessionID"]);
+            if (!formId || !sessionId || pendingForms.has(formId)) continue;
+            const fields = readPath(raw, "fields");
+            formObserver.onFormAsk({
+              sessionId,
+              formId,
+              title: firstString(raw, ["title"]) ?? "opencode.formTitleFallback",
+              fields: Array.isArray(fields) ? fields : [],
+            });
+          }
+        } catch {
+          // Best-effort recovery: the live stream stays authoritative.
+        }
+      };
+
       const connect = async () => {
         // One notice per outage, not one per 1s retry: the toast fires on the
         // streak's first failure, then a server.reconnected event on recovery
@@ -798,6 +831,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
               outageNotified = false;
               emit({ type: "server.reconnected" });
             }
+            void rehydrateForms();
             const reader = response.body.getReader();
             // Fresh parser per connection: a dropped stream can end mid-frame,
             // and the leftover half-frame would splice into the next

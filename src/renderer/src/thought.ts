@@ -21,6 +21,17 @@ export function thoughtTitle(text: string): string | null {
   return null;
 }
 
+/**
+ * Whether a reasoning part carries text a reader can actually see. codex
+ * sends its chain-of-thought encrypted — the rollout item holds only
+ * `encrypted_content` and an empty `summary` — so every reasoning part it
+ * emits is blank. Such a part still earns a live one-liner (the spinner is
+ * real progress), but never an expandable box that opens onto nothing.
+ */
+export function hasReadableThought(text: string): boolean {
+  return text.trim() !== "";
+}
+
 function thoughtDuration(part: {
   startedAt: number | null;
   endedAt: number | null;

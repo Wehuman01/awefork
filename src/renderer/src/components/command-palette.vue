@@ -21,6 +21,12 @@
             @click="run(item)"
           >
             <span class="palette-icon">{{ item.icon }}</span>
+            <span
+              v-if="item.emptyContext"
+              class="palette-cut"
+              :title="t('cut.markerTitle')"
+              >✂</span
+            >
             <span v-if="item.pinned" class="palette-pin" :title="t('palette.pinned')">📌</span>
             <span class="palette-label">{{ item.label }}</span>
             <span v-if="(item.tags?.length ?? 0) > 0" class="palette-tags">
@@ -52,11 +58,11 @@ import {
   compareWithParent,
   createSession,
   exitCompare,
+  isEmptyContext,
+  openSession,
   refreshSessions,
   requestCanvasFit,
-  selectSession,
   store,
-  switchDirectory,
   tagBg,
   tagColor,
   tagsOf,
@@ -71,6 +77,8 @@ interface PaletteItem {
   run: () => void;
   /** Session items only: the sidebar's pin badge rides along. */
   pinned?: boolean;
+  /** Session items only: the empty-context ✂ marker rides along. */
+  emptyContext?: boolean;
   /** Session items only: the sidebar's tag chips ride along. */
   tags?: string[];
 }
@@ -163,6 +171,7 @@ const items = computed<PaletteItem[]>(() => {
         label: s.title || "(untitled)",
         hint: shortDir(s.directory),
         pinned: store.pins.includes(s.id),
+        emptyContext: isEmptyContext(s.id),
         tags: tagsOf(s.id),
         run: () => void jumpToSession(s),
       }),
@@ -185,15 +194,17 @@ function close(): void {
 }
 
 async function jumpToSession(session: SessionSummary): Promise<void> {
-  if (session.directory !== store.selectedDirectory) {
-    await switchDirectory(session.directory);
-  }
-  await selectSession(session.id, { focus: true });
+  // openSession retargets the directory itself (both paths under it do), so
+  // no switchDirectory pre-step — that would park the outgoing tab on the
+  // directory's latest session before the jump lands.
+  await openSession(session.id, { focus: true });
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
-  // 组输入（中文输入法）期间的按键在操作候选词窗：Enter 确认候选、方向键
-  // 移动候选，都不该触发面板导航。keyCode 229 兜住 Safari 的合成键。
+  // Keys during IME composition operate the candidate window: Enter confirms a
+  // candidate, the arrow keys
+  // move it — neither should trigger panel navigation. keyCode 229 backstops
+  // Safari's composition keys.
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();

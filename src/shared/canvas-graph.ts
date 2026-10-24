@@ -1,5 +1,11 @@
 import { buildTurns, type Turn } from "./turns.js";
-import type { ChatMessage, LineageMap, ModelChoice, SessionSummary } from "./types.js";
+import type {
+  ChatMessage,
+  ForkContextMode,
+  LineageMap,
+  ModelChoice,
+  SessionSummary,
+} from "./types.js";
 
 /**
  * Turn-level graph for one project directory.
@@ -57,6 +63,13 @@ export interface GraphEdge {
   from: string;
   to: string;
   kind: "sequence" | "fork";
+  /**
+   * On a fork edge only: whether the child branch carries the parent's
+   * history. "none" marks an empty-context fork — the canvas draws such an
+   * edge severed, because context does not flow across it. Absent on
+   * sequence edges and on forks recorded before the field existed.
+   */
+  context?: ForkContextMode;
 }
 
 export interface TurnGraph {
@@ -215,8 +228,13 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     return node;
   };
 
-  const connect = (from: string | null, to: string, kind: GraphEdge["kind"]): void => {
-    if (from) edges.push({ from, to, kind });
+  const connect = (
+    from: string | null,
+    to: string,
+    kind: GraphEdge["kind"],
+    context?: ForkContextMode,
+  ): void => {
+    if (from) edges.push({ from, to, kind, ...(context ? { context } : {}) });
   };
 
   const visit = (
@@ -225,6 +243,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
     fromRow: number,
     sourceNodeId: string | null,
     edgeKind: GraphEdge["kind"],
+    edgeContext?: ForkContextMode,
   ): void => {
     if (visitedSessions.has(session.id)) return;
     visitedSessions.add(session.id);
@@ -244,7 +263,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
           id: `${session.id}::stub`,
           kind: "stub",
           messageId: null,
-          title: session.title || "空会话",
+          title: session.title || "empty session",
           preview: "",
           toolNames: [],
           modelIds: [],
@@ -254,12 +273,15 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
           outputTokens: 0,
           error: null,
         });
-        connect(sourceNodeId, stub.id, edgeKind);
+        connect(sourceNodeId, stub.id, edgeKind, edgeContext);
       }
     }
 
     let previousId = sourceNodeId;
     let previousKind = edgeKind;
+    // The fork's context rides on the edge INTO this session's first node
+    // (or its stub). Every later sequence edge stays plain.
+    let incomingContext = edgeContext;
     for (const [index, turn] of fresh.entries()) {
       const node = addNode(session, startCol + index, fromRow, {
         id: `${session.id}:${turn.messageId}`,
@@ -276,9 +298,10 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
         error: turn.error,
       });
       nodeByMessage.set(turn.messageId, node.id);
-      connect(previousId, node.id, index === 0 ? previousKind : "sequence");
+      connect(previousId, node.id, index === 0 ? previousKind : "sequence", incomingContext);
       previousId = node.id;
       previousKind = "sequence";
+      incomingContext = undefined;
       fromRow = node.row;
     }
 
@@ -291,6 +314,7 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
         forkNode ? forkNode.row + 1 : fromRow + 1,
         forkNode?.id ?? previousId,
         "fork",
+        record?.context,
       );
     }
   };
@@ -342,21 +366,48 @@ function sharedPrefixCount(
   // fork relationship, on every layout) doubled the graph's parsing cost.
   const childTurns = turnsOf.get(sessionId) ?? [];
   const parentTurns = turnsOf.get(parentId) ?? [];
-  const parentIds = new Set(parentTurns.map((t) => t.messageId));
-
-  let count = 0;
-  while (count < childTurns.length) {
-    const turn = childTurns[count];
-    if (!turn || !parentIds.has(turn.messageId)) break;
-    count += 1;
-  }
-  if (count > 0) return count;
-
-  const atMessageId = options.lineage[sessionId]?.atMessageId;
-  if (!atMessageId) return 0;
   // An empty-context fork carries no copied rows at all — every turn it has
   // is its own, no matter how the counts line up against the fork position.
   if (options.lineage[sessionId]?.context === "none") return 0;
+  if (childTurns.length === 0 || parentTurns.length === 0) return 0;
+
+  // 1. Ids survive the copy: exact and cheapest.
+  const parentIds = new Set(parentTurns.map((t) => t.messageId));
+  let byId = 0;
+  while (byId < childTurns.length) {
+    const turn = childTurns[byId];
+    if (!turn || !parentIds.has(turn.messageId)) break;
+    byId += 1;
+  }
+  if (byId > 0) return byId;
+
+  // 2. The fork re-keyed every copied row (opencode v2 and zcode both mint new
+  //    message ids on fork) so no id matches. A copy keeps each row's own
+  //    creation time and its prompt text, so a leading run agreeing on both is
+  //    the inherited prefix — this is what keeps a fork from redrawing its
+  //    ancestor's story. Requiring both (not just the time) means a coarse
+  //    clock cannot swallow the fork's own first turn by accident.
+  let byCopy = 0;
+  while (byCopy < childTurns.length) {
+    const childTurn = childTurns[byCopy];
+    const parentTurn = parentTurns[byCopy];
+    if (
+      !childTurn ||
+      !parentTurn ||
+      childTurn.createdAt !== parentTurn.createdAt ||
+      childTurn.title !== parentTurn.title
+    ) {
+      break;
+    }
+    byCopy += 1;
+  }
+  if (byCopy > 0) return byCopy;
+
+  // 3. Last resort: the recorded fork position, when the copy's ids and times
+  //    both drifted. A tip fork (atMessageId null) recorded no position, so
+  //    there is nothing left to trust and every turn counts as the child's own.
+  const atMessageId = options.lineage[sessionId]?.atMessageId;
+  if (!atMessageId) return 0;
   const index = parentTurns.findIndex((t) => t.messageId === atMessageId);
   if (index === -1) return 0;
   return Math.min(index + 1, childTurns.length);

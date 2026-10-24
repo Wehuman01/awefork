@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, nativeImage } from "electron";
+import { app, BrowserWindow, dialog, nativeImage } from "electron";
 import type { BackendId } from "../shared/backend.js";
 import { OverviewLedgerStore } from "../shared/overview-ledger.js";
 import { createBackendRegistry } from "./backend-registry.js";
@@ -20,7 +20,9 @@ registerIpc(registry, openAgentWindow, overviewLedger);
 registerSaveFileIpc();
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.
-setUpdaterExitHook(() => registry.dispose());
+// Keep-alive is forced off here on purpose: an update swap must not leave the
+// old install's servers behind to fight the new one over session files.
+setUpdaterExitHook(() => registry.dispose({ keepAlive: false }));
 
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no
@@ -150,6 +152,38 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+/**
+ * Quit gate: quitting kills every spawned backend, so a run in flight gets
+ * interrupted. When one is still going and the user has not opted into
+ * keep-alive, ask first — the checkbox turns keep-alive on for future quits
+ * (toggleable in the top bar). The main process cannot see the renderer's
+ * locale, so the dialog text carries both languages.
+ */
+let quitConfirmed = false;
+app.on("before-quit", (event) => {
+  const running = registry.runningSessions();
+  if (!quitConfirmed && running.length > 0 && !registry.quitKeepAlive()) {
+    event.preventDefault();
+    void dialog
+      .showMessageBox({
+        type: "warning",
+        message: `${running.length} 个会话仍在运行 / ${running.length} session(s) still running`,
+        detail:
+          "退出会中断 Pi 任务。/ Quitting interrupts Pi tasks." +
+          "\n后台保留时，其他后端的任务会在后台完成。/ With keep-alive, other backends finish in the background.",
+        buttons: ["退出并中断 / Quit and interrupt", "取消 / Cancel"],
+        defaultId: 1,
+        cancelId: 1,
+        checkboxLabel: "以后退出都在后台保留运行 / Keep runs alive after quit from now on",
+        checkboxChecked: false,
+      })
+      .then((choice) => {
+        if (choice.response !== 0) return;
+        if (choice.checkboxChecked) registry.setQuitKeepAlive(true);
+        quitConfirmed = true;
+        app.quit();
+      });
+    return;
+  }
   registry.dispose();
 });

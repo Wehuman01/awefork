@@ -58,6 +58,22 @@ export interface ChatMessage {
   finish: string | null;
   /** Output tokens of this assistant message; null on user rows or when unreported. */
   outputTokens: number | null;
+  /**
+   * How much of the model's context window this step left behind: its prompt
+   * (input + cached reads) plus what it generated. The pane composer's
+   * context meter reads the newest row that reports one. Absent on user rows
+   * and when the backend reports no usage.
+   */
+  contextTokens?: number | null;
+  /**
+   * The window `contextTokens` was measured against, when the backend reports
+   * the window alongside the usage instead of only through its model catalog.
+   * Codex is the case: its model list carries no window at all and the live
+   * `thread/tokenUsage/updated` frame is the only place one appears. A
+   * row-reported window wins over the catalog, because it is the window the
+   * backend actually measured this step against.
+   */
+  contextWindow?: number | null;
   /** Why the run failed (provider/API error reported by the backend); null when it didn't. */
   error: string | null;
   /**
@@ -78,6 +94,12 @@ export interface ModelOption {
   variants: readonly string[];
   /** Whether the model accepts file/image attachments. */
   attachment: boolean;
+  /**
+   * The model's context window in tokens; null when the backend's catalog
+   * doesn't say. The composer's context meter divides the session's usage
+   * by it.
+   */
+  contextWindow?: number | null;
 }
 
 /** The model to run a prompt with; null = the backend's configured default. */
@@ -87,6 +109,12 @@ export interface ModelChoice {
   /** Reasoning-effort variant for the run (e.g. "high"); null/absent = the model's default. */
   variant?: string | null;
 }
+
+/**
+ * How a multi-model round gets summarized once its answers land: "brief" and
+ * "standard" run a summary model, "none" leaves the answers unsummarized.
+ */
+export type ParallelSummaryLength = "brief" | "standard" | "none";
 
 /** An attachment sent with a prompt; `dataUrl` carries the bytes inline. */
 export interface PromptAttachment {
@@ -128,23 +156,38 @@ export interface PersistedDraft {
  */
 export interface PersistedComposer {
   draft: PersistedDraft | null;
+  /**
+   * Unsent drafts parked for other targets (draftKeyOf → draft), so
+   * switching between canvas targets and restarting the app both hand the
+   * text back. Optional: composer.json written before this field exists
+   * has none, and older readers ignore it.
+   */
+  stashed?: Record<string, PersistedDraft>;
   paneModels: Record<string, ModelChoice>;
   /**
    * The last model the user hand-picked in any composer. A brand-new session
    * (no turns, no pick of its own) starts from it instead of the agent's
-   * configured default; picking 默认模型 never overwrites the memory.
+   * configured default; picking "Default model" never overwrites the memory.
    */
   lastModel: ModelChoice | null;
   /**
-   * Models the user starred in a picker, shown above the catalog as the 常用
-   * group. Optional: composer.json written before this field exists has none.
+   * Models the user starred in a picker, shown above the catalog as the
+   * "Favorites" group. Optional: composer.json written before this field
+   * exists has none.
    */
   favoriteModels?: ModelChoice[];
   /**
    * The user's recent hand-picked models, most-recent-first, feeding the
-   * picker's 最近 group. Auto-maintained and capped; optional like the above.
+   * picker's "Recent" group. Auto-maintained and capped; optional like above.
    */
   recentModels?: ModelChoice[];
+  /**
+   * The project directory the workspace last had open, restored at boot so a
+   * new conversation lands in the project the user was working in instead of
+   * whatever cwd the agent server runs under. Optional: older files have
+   * none, and null means nothing worth remembering.
+   */
+  selectedDirectory?: string | null;
 }
 
 /** Fork lineage recorded by awefork when it forks a session. */
@@ -310,6 +353,19 @@ export type AgentEvent =
    */
   | { type: "server.error"; message: string; sessionId?: string | null }
   /**
+   * A writer-locked codex thread's prompt was continued in a fresh fork:
+   * `sessionId` is the locked thread, `forkedSessionId` the fork now running
+   * the turn. Not a failure — the renderer transfers the run to the fork and
+   * follows it there instead of settling the original as failed, which used
+   * to wipe the optimistic prompt row and strand the reply on a hidden branch.
+   */
+  | {
+      type: "session.branchContinued";
+      sessionId: string;
+      forkedSessionId: string;
+      message: string;
+    }
+  /**
    * The event stream reconnected after a reported server.error — the renderer
    * should drop the outage toast and refresh, since every event fired while
    * disconnected was missed.
@@ -324,7 +380,7 @@ export type AgentEvent =
 export interface AgentInteractionQuestion {
   /** Stable per-request question id; the answer map keys on it. */
   id: string;
-  /** Short heading the question renders under (e.g. "选一个文件"). */
+  /** Short heading the question renders under (e.g. "Pick a file"). */
   header: string;
   /** The actual question text the agent needs answered. */
   question: string;
@@ -454,7 +510,7 @@ export type AgentInteractionRequest = (
       kind: "permission-approval";
       title: string;
       detail: string;
-      /** The scope codex is requesting, human-readable (e.g. "写入 /Users/x/repo"). */
+      /** The scope codex is requesting, human-readable (e.g. "write /Users/x/repo"). */
       requested: string[];
       reason?: string;
     }
@@ -605,5 +661,6 @@ export interface AgentAdapter {
   abort(sessionId: string): Promise<void>;
   /** Subscribe to the normalized event feed. Returns an unsubscribe function. */
   subscribe(handler: (event: AgentEvent) => void): Promise<() => void>;
-  dispose(): void;
+  /** Keep backend-owned work running when the app is quitting in the background. */
+  dispose(options?: { keepAlive?: boolean }): void;
 }

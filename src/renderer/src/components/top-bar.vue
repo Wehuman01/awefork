@@ -21,7 +21,7 @@
              range still runs, but never silently — the full text sits in the
              title so one hover explains a misbehaving run. -->
         <span v-if="activeVersionWarning" class="backend-warn" :title="activeVersionWarning" role="status">⚠</span>
-        <span class="chev">{{ backendOpen ? "⌃" : "⌄" }}</span>
+        <span class="chev">{{ backendOpen ? "▾" : "▸" }}</span>
       </button>
       <div v-if="backendOpen" class="backend-menu" role="menu" :aria-label="t('topbar.backends')">
         <button
@@ -49,7 +49,7 @@
       <button type="button" class="project-pill" @click.stop="toggleOpen">
         <span>📁</span>
         <b>{{ shortPath(currentDirectory) }}</b>
-        <span class="chev">{{ open ? "⌃" : "⌄" }}</span>
+        <span class="chev">{{ open ? "▾" : "▸" }}</span>
       </button>
       <div v-if="open" class="project-menu">
         <button
@@ -71,22 +71,10 @@
     </div>
     <button
       type="button"
-      class="icon-btn multiwindow-btn"
-      :class="{ on: multiWindow }"
-      role="switch"
-      :aria-checked="multiWindow"
-      :title="multiWindow ? t('topbar.multiWindowOn') : t('topbar.multiWindowOff')"
-      @click="toggleMultiWindow"
-    >
-      <span class="multiwindow-track" aria-hidden="true"><span class="multiwindow-knob"></span></span>
-      {{ t("topbar.multiWindowLabel") }}
-    </button>
-    <button
-      type="button"
       class="icon-btn cmdk-btn"
-      :title="t('topbar.commandPalette')"
-      @click="togglePalette()"
-    >⌘K</button>
+      :title="themeTitle"
+      @click="cycleTheme"
+    >{{ themeGlyph() }}</button>
     <div class="lang-switch" role="group" aria-label="Language">
       <button
         type="button"
@@ -106,6 +94,15 @@
       >EN</button>
     </div>
     <HistoryButton />
+    <button
+      type="button"
+      class="icon-btn settings-btn"
+      :class="{ on: settingsOpen }"
+      :title="t('topbar.settings', { mod: modKey })"
+      :aria-label="t('topbar.settings', { mod: modKey })"
+      :aria-expanded="settingsOpen"
+      @click="toggleSettings()"
+    >⚙</button>
     <div class="version-wrap" @click.stop>
       <button type="button" class="version-btn" @click="toggleVersionMenu">
         <span>{{ versionLabel }}</span>
@@ -114,6 +111,40 @@
       <div v-if="versionOpen" class="version-menu">
         <button type="button" class="version-item" @click="runManualCheck">Check for updates</button>
       </div>
+    </div>
+
+    <!-- Switching backends reshapes the whole workspace, so every pick — in
+         either multi-window mode — confirms first instead of acting on the
+         click alone. -->
+    <div
+      v-if="pendingBackend"
+      class="interaction-backdrop"
+      role="presentation"
+      @click="cancelBackendSwitch"
+    >
+      <section
+        class="interaction-dialog backend-confirm"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('topbar.confirmKicker')"
+        @click.stop
+      >
+        <p class="interaction-kicker">{{ t("topbar.confirmKicker") }}</p>
+        <h2>{{ confirmTitle }}</h2>
+        <ul class="compress-points">
+          <li>{{ confirmPoint1 }}</li>
+          <li>{{ t(multiWindow ? "topbar.confirmOpenPoint2" : "topbar.confirmSwitchPoint2") }}</li>
+        </ul>
+        <div class="interaction-actions">
+          <button type="button" class="interaction-deny" @click="cancelBackendSwitch">
+            {{ t("topbar.confirmCancel") }}
+          </button>
+          <button type="button" class="interaction-allow" @click="confirmBackendSwitch">
+            {{ t(multiWindow ? "topbar.confirmOpen" : "topbar.confirmSwitch") }}
+          </button>
+        </div>
+        <p class="interaction-timeout">{{ t("topbar.confirmEsc") }}</p>
+      </section>
     </div>
   </header>
 </template>
@@ -124,7 +155,9 @@ import type { BackendId } from "../../../shared/backend";
 import logoUrl from "../assets/logo.svg";
 import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
-import { togglePalette } from "../layout";
+import { settingsOpen, toggleSettings } from "../layout";
+import { modKey } from "../platform-key";
+import { settings } from "../settings";
 import {
   checkForUpdates,
   directories,
@@ -134,19 +167,16 @@ import {
   switchBackend,
   switchDirectory,
 } from "../state";
+import { cycleTheme, theme, themeGlyph } from "../theme";
 import HistoryButton from "./history-button.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);
 const backendOpen = ref(false);
-// Shared through localStorage so the preference survives restarts and applies
-// to every window — new agent windows open by the main process read it at
-// their own boot.
-const multiWindow = ref(localStorage.getItem("awefork:multiWindow") === "1");
-function toggleMultiWindow(): void {
-  multiWindow.value = !multiWindow.value;
-  localStorage.setItem("awefork:multiWindow", multiWindow.value ? "1" : "0");
-}
+// Multi-window mode lives in the settings page (canvas section); the top bar
+// only reads it, because the backend-switch confirmation below changes shape
+// with it.
+const multiWindow = computed(() => settings.canvas.multiWindow);
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
 const backendList = computed(() => store.backendList);
@@ -162,6 +192,13 @@ const activeLabel = computed(
 // The version button is always there (so manual checks stay reachable); a
 // placeholder stands in until the first check fills the real version in.
 const versionLabel = computed(() => `v${store.currentVersion ?? "—"}`);
+// The theme button cycles light → dark → system, so its hint names the state
+// it is in, not just the state it would switch to.
+const themeTitle = computed(() => {
+  const preference = settings.appearance.theme;
+  if (preference === "system") return t("topbar.themeSystem");
+  return preference === "dark" ? t("topbar.themeOff") : t("topbar.themeOn");
+});
 
 function toggleOpen(): void {
   open.value = !open.value;
@@ -178,8 +215,36 @@ function toggleBackendMenu(): void {
   if (backendOpen.value) void refreshBackendList();
 }
 
+const pendingBackend = ref<BackendId | null>(null);
+const confirmTitle = computed(() =>
+  t(multiWindow.value ? "topbar.confirmOpenTitle" : "topbar.confirmSwitchTitle", {
+    label: backendLabel(pendingBackend.value),
+  }),
+);
+const confirmPoint1 = computed(() =>
+  t(multiWindow.value ? "topbar.confirmOpenPoint1" : "topbar.confirmSwitchPoint1", {
+    label: backendLabel(pendingBackend.value),
+    current: activeLabel.value,
+  }),
+);
+
+function backendLabel(backend: BackendId | null): string {
+  return backendList.value.find((entry) => entry.id === backend)?.label ?? backend ?? "";
+}
+
 async function pickBackend(backend: BackendId): Promise<void> {
   backendOpen.value = false;
+  pendingBackend.value = backend;
+}
+
+function cancelBackendSwitch(): void {
+  pendingBackend.value = null;
+}
+
+async function confirmBackendSwitch(): Promise<void> {
+  const backend = pendingBackend.value;
+  pendingBackend.value = null;
+  if (!backend) return;
   // One switch, two behaviors: off = the in-place switch the app has always
   // had; on = every pick focuses (or opens) that agent's dedicated window.
   if (multiWindow.value) {
@@ -205,6 +270,18 @@ function closeOnOutsideClick(): void {
   backendOpen.value = false;
 }
 
-onMounted(() => document.addEventListener("click", closeOnOutsideClick));
-onUnmounted(() => document.removeEventListener("click", closeOnOutsideClick));
+function closeOnEscape(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    pendingBackend.value = null;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("click", closeOnOutsideClick);
+  document.addEventListener("keydown", closeOnEscape);
+});
+onUnmounted(() => {
+  document.removeEventListener("click", closeOnOutsideClick);
+  document.removeEventListener("keydown", closeOnEscape);
+});
 </script>

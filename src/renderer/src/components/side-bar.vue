@@ -1,5 +1,25 @@
 <template>
   <aside class="sidebar">
+    <nav class="side-tabs" :aria-label="t('files.sidebarViewLabel')">
+      <button
+        type="button"
+        class="side-tab"
+        :class="{ on: sidebarView === 'sessions' }"
+        :aria-pressed="sidebarView === 'sessions'"
+        @click="setSidebarView('sessions')"
+        >{{ t("files.tabSessions") }}</button
+      >
+      <button
+        v-if="fileBrowserEnabled"
+        type="button"
+        class="side-tab"
+        :class="{ on: sidebarView === 'files' }"
+        :aria-pressed="sidebarView === 'files'"
+        @click="setSidebarView('files')"
+        >{{ t("files.tabFiles") }}</button
+      >
+    </nav>
+    <div v-show="sidebarView === 'sessions'" class="sidebar-sessions">
     <div class="search-row">
       <div class="search">
         <span>⌕</span>
@@ -75,17 +95,17 @@
       </div>
       <div class="boost-head">{{ t("sidebar.syntax") }}</div>
       <dl class="boost-syntax">
-        <dt><code>body:词</code></dt>
+        <dt><code>body:word</code></dt>
         <dd>{{ t("sidebar.synBody") }}</dd>
-        <dt><code>#标签</code></dt>
+        <dt><code>#tag</code></dt>
         <dd>{{ t("sidebar.synTag") }}</dd>
-        <dt><code>title:词</code></dt>
+        <dt><code>title:word</code></dt>
         <dd>{{ t("sidebar.synTitle") }}</dd>
-        <dt><code>dir:目录</code></dt>
+        <dt><code>dir:path</code></dt>
         <dd>{{ t("sidebar.synDir") }}</dd>
-        <dt><code>"精确短语"</code></dt>
+        <dt><code>"exact phrase"</code></dt>
         <dd>{{ t("sidebar.synPhrase") }}</dd>
-        <dt><code>-词</code></dt>
+        <dt><code>-word</code></dt>
         <dd>{{ t("sidebar.synExclude") }}</dd>
       </dl>
       <p class="boost-note">{{ t("sidebar.bodyNote") }}</p>
@@ -157,6 +177,10 @@
             @click="openFavorite(sess)"
           >
             <span class="fav-dot"></span>
+            <span v-if="sess.origin === 'fork'" class="fork-glyph">⎇</span>
+            <span v-if="isEmptyContext(sess.id)" class="cut-glyph" :title="t('cut.markerTitle')"
+              >✂</span
+            >
             <span class="fav-name">{{ sess.title || "(untitled)" }}</span>
             <span
               v-for="tag in rowTags(sess.id, 1).tags"
@@ -277,10 +301,17 @@
                 }"
                 :title="row.session.title || '(untitled)'"
                 @click="onRowClick(row.session.id)"
+                @auxclick="onRowAuxClick(row.session.id, $event)"
                 @contextmenu.prevent="openMenu(row.session, $event.clientX, $event.clientY)"
               >
                 <span class="dot"></span>
                 <span v-if="row.session.origin === 'fork'" class="fork-glyph">⎇</span>
+                <span
+                  v-if="isEmptyContext(row.session.id)"
+                  class="cut-glyph"
+                  :title="t('cut.markerTitle')"
+                  >✂</span
+                >
                 <span class="sess-name">
                   <template
                     v-for="(segment, index) in titleSegments(row.session.title)"
@@ -409,6 +440,8 @@
       </div>
     </div>
 
+    <SessionFileDock />
+
     <div
       v-if="menu"
       class="ctx-menu"
@@ -417,7 +450,8 @@
       @mousedown.stop
       @keydown.tab="trapMenuTab"
     >
-      <!-- 置顶只留在侧边栏会话行的菜单里；画布右键不提供 -->
+      <!-- pinning stays in the sidebar row menu only; canvas right-click does not
+           offer it -->
       <button
         v-if="!menu.fromCanvas"
         type="button"
@@ -438,6 +472,9 @@
       </button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="beginRename">{{
         t("sidebar.rename")
+      }}</button>
+      <button type="button" role="menuitem" class="ctx-menu-item" @click="openInNewTabFromMenu">{{
+        t("sidebar.openInNewTab")
       }}</button>
       <button type="button" role="menuitem" class="ctx-menu-item" @click="openTagMenu">{{
         t("sidebar.setTags")
@@ -679,7 +716,7 @@
               type="button"
               class="pal-swatch pal-auto"
               :class="{ picked: newTagHue === null }"
-              :style="{ '--auto-c': tagColor(newTagText.trim() || '新标签') }"
+              :style="{ '--auto-c': tagColor(newTagText.trim() || 'new tag') }"
               :title="t('sidebar.autoColor')"
               :aria-label="t('sidebar.autoColor')"
               @click="newTagHue = null"
@@ -759,6 +796,8 @@
         </div>
       </div>
     </div>
+    </div>
+    <FileTree v-show="sidebarView === 'files'" class="sidebar-files" />
   </aside>
 </template>
 
@@ -782,7 +821,8 @@ import {
 import type { SessionSummary } from "../../../shared/types";
 import { relTime, shortPath } from "../format";
 import { listSep, t } from "../i18n";
-import { panels, persistLayout } from "../layout";
+import { fileBrowserEnabled, panels, persistLayout, setSidebarView, sidebarView } from "../layout";
+import { settings } from "../settings";
 import {
   addDirectory,
   allTags,
@@ -803,8 +843,11 @@ import {
   favoriteSessions,
   forkTagPrefOf,
   hueOf,
+  isEmptyContext,
   isTurnMarked,
   jumpToMessage,
+  openCanvasTab,
+  openSession,
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
@@ -812,7 +855,6 @@ import {
   renameSession,
   restoreDirectory,
   restoreSession,
-  selectSession,
   sessionGroups,
   setForkTagPref,
   setSessionTags,
@@ -830,6 +872,8 @@ import {
   turnGraph,
   visibleSessions,
 } from "../state";
+import FileTree from "./file-tree.vue";
+import SessionFileDock from "./session-file-dock.vue";
 
 const query = ref("");
 const searchInputEl = ref<HTMLInputElement | null>(null);
@@ -847,8 +891,8 @@ function clearQuery(): void {
 
 // ── enhanced search (✦) ─────────────────────────────────────────────
 
-/** Which surfaces plain terms search; 正文 is opt-in (a scan costs a round-trip per session). */
-const searchScopes = reactive<ScopeSet>({ title: true, tag: true, body: false });
+/** Which surfaces plain terms search; body is opt-in (a scan costs a round-trip per session). */
+const searchScopes = reactive<ScopeSet>({ ...settings.search.scopes });
 const boostOpen = ref(false);
 
 /** Pin a search to one project directory. Empty = search every project (default). */
@@ -856,7 +900,38 @@ const projectScope = ref<string>("");
 /** Options: every directory the sidebar knows about, in session-recency order. */
 const projectOptions = computed(() => sessionGroups.value.map((group) => group.directory));
 /** How many sessions to scan for body hits; "all" means no cap. */
-const searchLimit = ref<string>("1000");
+const searchLimit = ref<string>(settings.search.cap > 0 ? String(settings.search.cap) : "all");
+
+// The ✦ panel's per-search knobs double as the next search's defaults, so a
+// choice made in the panel and the same row in settings never disagree.
+watch(searchScopes, () => {
+  settings.search.scopes = { ...searchScopes };
+});
+watch(searchLimit, (value) => {
+  settings.search.cap = value === "all" ? 0 : Number(value);
+});
+// The settings page writes settings.search.* directly; without this mirror
+// its changes never reach the live ✦ panel (the sidebar never remounts).
+// Same-value writes don't retrigger the outbound watches, so no loop.
+watch(
+  () => settings.search.cap,
+  (cap) => {
+    searchLimit.value = cap > 0 ? String(cap) : "all";
+  },
+);
+watch(
+  () => ({ ...settings.search.scopes }),
+  (scopes) => {
+    for (const key of Object.keys(scopes) as (keyof ScopeSet)[]) {
+      searchScopes[key] = scopes[key];
+    }
+  },
+);
+
+/** The panel's cap row showing exactly what settings stores (0 renders "all"). */
+const searchLimitDefault = computed(() =>
+  settings.search.cap > 0 ? String(settings.search.cap) : "all",
+);
 
 const parsedQuery = computed(() => parseSearchQuery(query.value));
 
@@ -878,7 +953,7 @@ const boostActive = computed(
     boostOpen.value ||
     projectScope.value !== "" ||
     searchScopes.body ||
-    searchLimit.value !== "1000" ||
+    searchLimit.value !== searchLimitDefault.value ||
     parsedQuery.value.flags.size > 0 ||
     parsedQuery.value.excludes.length > 0 ||
     parsedQuery.value.includes.some((term) => term.scope !== null),
@@ -900,16 +975,16 @@ const boostOffDefault = computed(
     !searchScopes.title ||
     !searchScopes.tag ||
     searchScopes.body ||
-    searchLimit.value !== "1000",
+    searchLimit.value !== searchLimitDefault.value,
 );
 
-/** One click back to 标题+标签、全部项目、上限 1000. */
+/** One click back to title+tag, all projects, the configured cap. */
 function resetBoost(): void {
   searchScopes.title = true;
   searchScopes.tag = true;
   searchScopes.body = false;
   projectScope.value = "";
-  searchLimit.value = "1000";
+  searchLimit.value = searchLimitDefault.value;
 }
 
 // ── body scan (main-process, two-phase) ─────────────────────────────
@@ -928,7 +1003,7 @@ function clearBodySearch(): void {
   bodyScanning.value = false;
 }
 
-/** Body scan runs when 正文 is checked OR a body: term states the intent outright. */
+/** Body scan runs when body is checked OR a body: term states the intent outright. */
 const bodyScopeWanted = computed(
   () => searchScopes.body || parsedQuery.value.includes.some((term) => term.scope === "body"),
 );
@@ -1069,7 +1144,7 @@ function jumpToHit(hit: BodySearchHit): void {
   void jumpToMessage(hit.sessionId, hit.messageId);
 }
 
-/** The whole project list folds under the 项目 header, Cursor-style. */
+/** The whole project list folds under the Project header, Cursor-style. */
 const projectsOpen = ref(true);
 
 // ── tag filter shelf ────────────────────────────────────────────────
@@ -1146,7 +1221,7 @@ const menu = ref<{
   title: string;
   x: number;
   y: number;
-  /** Canvas right-click: 重命名 must reveal the sidebar row first. */
+  /** Canvas right-click: rename must reveal the sidebar row first. */
   fromCanvas: boolean;
   /** The session's directory — opens its group when revealing the row. */
   directory: string | null;
@@ -1221,7 +1296,7 @@ function compareFromMenu(): void {
 function onRowClick(sessionId: string): void {
   const from = store.comparePickFrom;
   if (from == null || !directorySessions.value.some((s) => s.id === sessionId)) {
-    void selectSession(sessionId, { focus: true });
+    void openSession(sessionId, { focus: true });
     return;
   }
   if (sessionId === from) {
@@ -1229,6 +1304,19 @@ function onRowClick(sessionId: string): void {
     return;
   }
   void enterCompare(from, sessionId);
+}
+
+/** Middle-click opens the story in a new canvas tab, browser-style. */
+function onRowAuxClick(sessionId: string, event: MouseEvent): void {
+  if (event.button !== 1) return;
+  event.preventDefault();
+  void openCanvasTab(sessionId);
+}
+
+function openInNewTabFromMenu(): void {
+  const id = menu.value?.sessionId;
+  closeMenu();
+  if (id) void openCanvasTab(id);
 }
 
 function toggleMarkFromMenu(): void {
@@ -1311,14 +1399,16 @@ function cancelRename(): void {
   renaming.value = null;
 }
 
-/** 组输入期间的回车在确认候选词，不是提交重命名（见 chat-input 的 onEnterKey）。 */
+/** Enter during IME composition confirms a candidate word instead of submitting
+ * the rename (see chat-input's onEnterKey). */
 function onRenameEnter(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
   commitRename();
 }
 
-/** 组输入期间的 Esc 在关候选词窗，第一次不该顺手关掉重命名。 */
+/** Esc during IME composition closes the candidate window; the first press must
+ * not also close the rename. */
 function onRenameEsc(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
@@ -1378,7 +1468,7 @@ function beginDelete(): void {
   void deleteSession(active.sessionId);
 }
 
-// ── tag editor (右键 → 设置标签) ─────────────────────────────────────
+// ── tag editor (right-click → set tag) ─────────────────────────────────────
 
 const tagMenu = ref<{ sessionId: string; x: number; y: number } | null>(null);
 const newTagText = ref("");
@@ -1407,7 +1497,7 @@ const menuTags = computed(() => {
 });
 
 /** Hue the auto cell would give the tag being typed, before it exists. */
-const newTagAutoHue = computed(() => hueOf(newTagText.value.trim() || "新标签"));
+const newTagAutoHue = computed(() => hueOf(newTagText.value.trim() || "new tag"));
 
 /** Live hue while dragging the edit slider; lands on release. */
 const hueDrag = ref<number | null>(null);
@@ -1519,7 +1609,7 @@ async function confirmDelLocal(tag: string): Promise<void> {
 
 /**
  * Delete the tag everywhere; a filter sitting on it clears via the watcher.
- * The toast in state offers 撤销 for a few seconds after.
+ * The toast in state offers Undo for a few seconds after.
  */
 function confirmDelAll(tag: string): void {
   delConfirm.value = null;
@@ -1620,7 +1710,7 @@ function beginArchive(): void {
 }
 
 /** Right-click create: the new session lands in this directory and becomes
- * the open project — selectSession inside createSession switches to it. */
+ * the open project — createSession's landing logic opens it on screen. */
 function beginDirCreate(): void {
   const active = dirMenu.value;
   if (!active) return;
@@ -1658,8 +1748,9 @@ function beginDirArchive(): void {
 const favOpen = ref(true);
 
 function openFavorite(session: SessionSummary): void {
-  // selectSession switches directory itself when the star lives elsewhere.
-  void selectSession(session.id, { focus: true });
+  // Both paths under openSession switch the directory themselves when the
+  // star lives elsewhere.
+  void openSession(session.id, { focus: true });
 }
 
 function unpinFavorite(sessionId: string): void {
@@ -1805,7 +1896,7 @@ const visibleGroups = computed<SessionGroup[]>(() => {
   );
 });
 
-// ── branch collapse (折叠 fork 子树) ────────────────────────────────
+// ── branch collapse (collapse a fork subtree) ────────────────────────────────
 
 /** Session ids whose subtree the user folded; everything renders open by default. */
 const collapsedBranches = ref<Record<string, true>>({});

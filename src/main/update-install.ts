@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { type FileHandle, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
-import { normalizeVersion } from "./update-check.js";
+import { normalizeVersion, updateAssetFilename, updateAssetUrl } from "./update-check.js";
 
 /**
  * "Download the new version and swap it in" lives in the main process: the
@@ -18,8 +18,6 @@ import { normalizeVersion } from "./update-check.js";
  * quarantine attribute, so the replacement launches under the same Gatekeeper
  * posture as the copy the user originally installed.
  */
-
-const RELEASES_DOWNLOAD_BASE = "https://github.com/wehuman01/awefork/releases/download";
 
 /**
  * Main registers backend teardown here: the macOS relaunch path exits with
@@ -38,31 +36,6 @@ export interface UpdateDownloadProgress {
 }
 
 type InstallResult = { ok: boolean; error?: string };
-
-/** Filename of the release artifact for a platform, or null when unsupported. */
-export function updateAssetFilename(
-  version: string,
-  platform: NodeJS.Platform = process.platform,
-  arch: string = process.arch,
-): string | null {
-  const normalized = normalizeVersion(version);
-  if (!normalized) return null;
-  if (platform === "darwin") return `awefork-${normalized}-${arch}.dmg`;
-  if (platform === "win32") return `awefork-${normalized}-${arch}-setup.exe`;
-  return null;
-}
-
-/** Download URL of a platform artifact, built only from a validated semver. */
-export function updateAssetUrl(
-  version: string,
-  platform: NodeJS.Platform = process.platform,
-  arch: string = process.arch,
-): string | null {
-  const normalized = normalizeVersion(version);
-  const filename = updateAssetFilename(version, platform, arch);
-  if (!normalized || !filename) return null;
-  return `${RELEASES_DOWNLOAD_BASE}/v${normalized}/${filename}`;
-}
 
 /** .../awefork.app/Contents/MacOS/awefork -> .../awefork.app, or null outside a bundle. */
 export function macosAppBundle(exePath: string): string | null {

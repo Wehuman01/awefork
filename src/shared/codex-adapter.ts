@@ -1,4 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
+import { withInlineFiles } from "./inline-attachments.js";
 import { recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
@@ -33,6 +34,15 @@ export interface CodexRpc {
   ) => void;
 }
 
+/**
+ * One turn's model settings as the session's rollout recorded them at the
+ * turn's start. `effort` is the reasoning variant shown beside the model.
+ */
+export interface CodexTurnSettings {
+  model: string | null;
+  effort: string | null;
+}
+
 export interface CodexAdapterOptions {
   client: CodexRpc;
   /** Path to the lineage sidecar file (per-backend). */
@@ -41,6 +51,36 @@ export interface CodexAdapterOptions {
   cliVersion?: string | null;
   /** One-time auth banner (codex installed but not logged in). */
   authMessage?: string | null;
+  /**
+   * Stage image attachments as files and hand back the paths codex's
+   * `localImage` turn input reads. Injected from main — shared/ imports no
+   * node built-ins. Absent means images cannot be staged and are skipped.
+   */
+  stageImages?: (images: readonly PromptAttachment[]) => StagedCodexImages;
+  /**
+   * Per-turn model settings for a session, keyed by turn id — what each turn
+   * actually ran with, which only the rollout records. The app-server exposes
+   * the model at thread level alone (`thread/read` carries the CURRENT
+   * settings), so without this a mid-session switch relabels every earlier
+   * turn of the session with the new model. Turns with no entry fall back to
+   * the thread's settings.
+   */
+  turnContexts?: (sessionId: string) => Promise<Record<string, CodexTurnSettings>>;
+  /**
+   * A fork this adapter cut on its own (the writer-conflict continuation),
+   * reported so the host can list it before codex's `thread/list` projects
+   * it. A fork carrying only copied prefix turns is absent from that listing
+   * until its first own turn, which would leave the renderer unable to select
+   * the branch the run just moved to.
+   */
+  forkCreated?: (forked: SessionSummary) => void;
+}
+
+/** Image attachments written as files for one turn's `localImage` items. */
+export interface StagedCodexImages {
+  paths: string[];
+  /** Removes the staged files; safe to call more than once. */
+  cleanup: () => void;
 }
 
 interface CodexThread {
@@ -64,6 +104,37 @@ interface CodexTurn {
   error?: { message?: string } | null;
   startedAt?: number;
   completedAt?: number | null;
+  /**
+   * Per-turn token usage. codex 0.163's `thread/turns/list` omits it and its
+   * rollout writes it as an untyped `token_count` event, so this stays absent
+   * in practice; `thread/tokenUsage/updated` is where the numbers actually
+   * arrive and the adapter records them per thread (see usageByThread) for
+   * `messages()` to fold back onto the newest turn.
+   */
+  usage?: CodexTokenUsage | null;
+}
+
+/**
+ * codex's token accounting (`thread/tokenUsage/updated`): a breakdown per
+ * response, with `total` accumulating across the thread and `last` scoped to
+ * the turn that just finished. `totalTokens` is the backend's own sum.
+ * `modelContextWindow` is the window the backend just measured against —
+ * codex's model catalog carries no window of its own, so this frame is the
+ * only place the meter can learn it.
+ */
+interface CodexTokenUsage {
+  total?: CodexTokenBreakdown | null;
+  last?: CodexTokenBreakdown | null;
+  modelContextWindow?: number | null;
+}
+
+interface CodexTokenBreakdown {
+  totalTokens?: number | null;
+  inputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  cacheWriteInputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningOutputTokens?: number | null;
 }
 
 interface CodexItem {
@@ -74,9 +145,10 @@ interface CodexItem {
    * Reasoning/userMessage content. Codex 0.154 sends reasoning content as
    * plain string[]; some builds wrap it as {text}[] — both are accepted.
    */
-  content?: (string | { text?: string })[];
+  content?: (string | { text?: string; type?: string; path?: string })[];
   summary?: string[];
-  command?: string;
+  /** Joined command line, or argv words — codex builds differ. */
+  command?: string | string[];
   server?: string;
   tool?: string;
 }
@@ -103,11 +175,12 @@ interface PendingInteraction {
  * Shared with main's codex-server (its startup banner uses the same line) so
  * a run-time auth failure and the connect-time banner read identically.
  */
-export const CODEX_NOT_LOGGED_IN_MESSAGE = "codex 未登录或无可用账号：请先在终端运行 codex login";
+export const CODEX_NOT_LOGGED_IN_MESSAGE =
+  "codex is not logged in or has no usable account: run codex login in a terminal first";
 
 /** Shown when another codex process owns the thread's writer. */
 export const OWNED_ELSEWHERE_MESSAGE =
-  "该会话正被另一个 codex 实例写入（例如 aweswitch 里的会话），暂时无法继续；关闭那边后再试";
+  "this session is being written by another codex instance (e.g. a session in aweswitch) and cannot continue; close that one and retry";
 
 const PAGE_LIMIT = 100;
 
@@ -117,13 +190,63 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   let emitEvent: ((event: AgentEvent) => void) | null = null;
   /** threadId → its in-flight turn id (interrupt needs the pair). */
   const activeTurns = new Map<string, string>();
+  /**
+   * threadId → the newest usage the live `thread/tokenUsage/updated` frame
+   * reported, plus the turn it arrived on. codex persists usage only as an
+   * untyped `token_count` rollout event and `thread/turns/list` drops it, so
+   * the live frame is the only place the meter can read it; keeping the pair
+   * lets `messages()` stamp it onto the turn that produced it (and lets a
+   * reload keep showing the footprint instead of losing it with the frame).
+   */
+  const usageByThread = new Map<string, { turnId: string; usage: CodexTokenUsage }>();
   /** threadId → itemId → containing turn id, rebuilt whenever turns load. */
   const turnIndex = new Map<string, Map<string, string>>();
   const pendingInteractions = new Map<string, PendingInteraction>();
+  /**
+   * threadId → image files staged for the thread's in-flight turn. codex
+   * reads them while the turn runs; they are released when it ends. A second
+   * prompt on the same thread replaces (and releases) the previous staging.
+   */
+  const stagedByThread = new Map<string, StagedCodexImages>();
   let nextInteractionId = 1;
   let forkFallbackLogged = false;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
+
+  const releaseStaging = (threadId: string): void => {
+    const staged = stagedByThread.get(threadId);
+    if (!staged) return;
+    stagedByThread.delete(threadId);
+    staged.cleanup();
+  };
+
+  /** Replace any staging this thread still holds, then take the new one. */
+  const registerStaging = (threadId: string, staged: StagedCodexImages): void => {
+    releaseStaging(threadId);
+    stagedByThread.set(threadId, staged);
+  };
+
+  /**
+   * turn/start's input items: staged images first as `localImage` paths, the
+   * prompt text last with non-image attachments inlined — codex has no file
+   * part to hang them on, the same trade pi makes.
+   */
+  const buildTurnInput = (
+    text: string,
+    attachments: readonly PromptAttachment[] | undefined,
+  ): { input: Record<string, unknown>[]; staged: StagedCodexImages | null } => {
+    const images = (attachments ?? []).filter((a) => a.mime.startsWith("image/"));
+    const staged = images.length > 0 ? (options.stageImages?.(images) ?? null) : null;
+    const imageItems = (staged?.paths ?? []).map((path) => ({ type: "localImage", path }));
+    const textItem = {
+      type: "text",
+      text: withInlineFiles(
+        text,
+        (attachments ?? []).filter((a) => !a.mime.startsWith("image/")),
+      ),
+    };
+    return { input: [...imageItems, textItem], staged };
+  };
 
   /**
    * A failed turn/start may be auth, but the RPC error text can't say which.
@@ -153,7 +276,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       // wrapping it as "not logged in" would send the user after codex
       // login for a crashed app-server.
       if (message.includes("connection lost") || message.includes("not connected")) return null;
-      return `${CODEX_NOT_LOGGED_IN_MESSAGE}（${message}）`;
+      return `${CODEX_NOT_LOGGED_IN_MESSAGE} (${message})`;
     }
   };
 
@@ -162,7 +285,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
 
   const mapThread = (thread: CodexThread): SessionSummary => ({
     id: thread.id,
-    title: thread.name || thread.preview || "(未命名会话)",
+    title: thread.name || thread.preview || "(untitled session)",
     directory: thread.cwd ?? "",
     parentSessionId: thread.forkedFromId ?? thread.parentThreadId ?? null,
     origin: thread.forkedFromId ? "fork" : thread.parentThreadId ? "subagent" : "root",
@@ -269,11 +392,61 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return lookup();
   }
 
-  function mapTurn(turn: CodexTurn, thread: CodexThread | null): ChatMessage[] {
+  /**
+   * The turn's footprint in the model's context window, same rule as
+   * opencode/zcode: the backend's own total when it reports one, else the sum of
+   * the parts it reports (cached reads count — they are part of what the next
+   * prompt carries). The usage comes from the live `thread/tokenUsage/updated`
+   * frame (see usageByThread): codex 0.163's `thread/turns/list` reports none.
+   */
+  function contextTokensOfUsage(usage: CodexTokenUsage | null | undefined): number | null {
+    if (!usage) return null;
+    // `total` accumulates the whole thread, so a later turn would inflate the
+    // meter; `last` is the turn's own step. Prefer `last` when both exist, but
+    // fall back to `total` for a notification that only carried it.
+    const breakdown = usage.last ?? usage.total;
+    if (!breakdown) return null;
+    if (typeof breakdown.totalTokens === "number") return breakdown.totalTokens;
+    const parts = [
+      breakdown.inputTokens,
+      breakdown.outputTokens,
+      breakdown.reasoningOutputTokens,
+      breakdown.cachedInputTokens,
+      breakdown.cacheWriteInputTokens,
+    ];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+
+  /**
+   * The window the frame measured against, if it carried one. codex's
+   * `model/list` has no window field at all (verified against 0.163), so the
+   * live usage frame is the only per-model window available to the meter.
+   */
+  function windowOfUsage(usage: CodexTokenUsage | null | undefined): number | null {
+    const window = usage?.modelContextWindow;
+    return typeof window === "number" && window > 0 ? window : null;
+  }
+
+  function mapTurn(
+    turn: CodexTurn,
+    thread: CodexThread | null,
+    turnSettings?: CodexTurnSettings,
+  ): ChatMessage[] {
     const items = turn.items ?? [];
     const startedAt = secToMs(turn.startedAt) ?? Date.now();
-    const modelId = thread?.model ?? null;
-    const variant = thread?.reasoningEffort ?? null;
+    // The turn's own recorded settings win: the thread carries only the latest
+    // ones, so trusting it here would rewrite every earlier turn's model on
+    // each switch.
+    const modelId = turnSettings?.model ?? thread?.model ?? null;
+    const variant = turnSettings?.effort ?? thread?.reasoningEffort ?? null;
     const rows: ChatMessage[] = [];
 
     const userItem = items.find((i) => i.type === "userMessage");
@@ -291,7 +464,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         modelId,
         providerId: "codex",
         variant,
-        attachmentNames: [],
+        attachmentNames: imageNamesOf(userItem.content),
         createdAt: startedAt,
         completedAt: null,
         finish: null,
@@ -314,6 +487,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       ...new Set(items.map(toolNameOfItem).filter((name): name is string => name !== null)),
     ];
     const error = turn.error?.message ?? null;
+    const contextTokens = contextTokensOfUsage(turn.usage);
     // A turn whose assistant side produced nothing visible (yet) yields no
     // assistant row — empty rows would flicker above the live stream.
     if (text || thinking || toolNames.length > 0 || error) {
@@ -331,6 +505,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         completedAt: secToMs(turn.completedAt),
         finish: turn.status === "completed" ? "stop" : null,
         outputTokens: null,
+        ...(contextTokens !== null ? { contextTokens } : {}),
         error,
       });
     }
@@ -370,6 +545,37 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   }
 
   /**
+   * Copy a thread this server may not write to, for prompt's writer-conflict
+   * recovery. A full-history fork (no cut point, no context switch) so the
+   * new thread carries everything the locked one had; the copy's title is
+   * derived the same way listSessions derives it. Returns null when the fork
+   * itself is refused — the caller then reports the original conflict.
+   */
+  async function forkForContinuation(sessionId: string): Promise<SessionSummary | null> {
+    try {
+      const response = await client.request<{ thread?: CodexThread }>("thread/fork", {
+        threadId: sessionId,
+      });
+      const thread = response?.thread;
+      if (!thread) return null;
+      await recordFork(lineagePath, thread.id, {
+        parentId: sessionId,
+        atMessageId: null,
+        createdAt: secToMs(thread.createdAt) ?? Date.now(),
+      });
+      const forked = mapThread(thread);
+      // Report the fork before the turn starts on it: the caller emits
+      // session.branchContinued right after, and the renderer selects the
+      // fork it names — a branch thread/list has not projected yet would
+      // otherwise be unselectable, hiding the reply the run just moved there.
+      options.forkCreated?.(forked);
+      return forked;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * A refused writer is a real, actionable state: another codex process
    * (typically an aweswitch session) owns the thread. Say so rather than
    * echoing codex's wording about writers and locks.
@@ -381,7 +587,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
 
   function isNotMaterialized(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return message.includes("is not materialized yet");
+    // 0.154 said "is not materialized yet"; 0.163's thread/resume says
+    // "no rollout found for thread id" for the same state.
+    return message.includes("is not materialized yet") || message.includes("no rollout found");
   }
 
   return {
@@ -408,7 +616,25 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     async messages(sessionId) {
       const thread = await readThread(sessionId);
       const turns = await listTurns(sessionId);
-      return turns.flatMap((turn) => mapTurn(turn, thread));
+      const turnSettings = (await options.turnContexts?.(sessionId)) ?? {};
+      const rows = turns.flatMap((turn) => mapTurn(turn, thread, turnSettings[turn.id]));
+      // Fold the live usage frame back onto the turn it arrived on: without
+      // this the meter goes blank after every reload, because the turn list
+      // itself carries no usage on 0.163.
+      const recorded = usageByThread.get(sessionId);
+      if (!recorded) return rows;
+      const index = rows.findIndex((row) => row.role === "assistant" && row.id === recorded.turnId);
+      const row = rows[index];
+      if (row) {
+        const contextTokens = contextTokensOfUsage(recorded.usage);
+        const contextWindow = windowOfUsage(recorded.usage);
+        rows[index] = {
+          ...row,
+          ...(contextTokens === null ? {} : { contextTokens }),
+          ...(contextWindow === null ? {} : { contextWindow }),
+        };
+      }
+      return rows;
     },
 
     // codex does not round-trip sent bytes; retry prefill is text-only.
@@ -520,10 +746,34 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       throw new Error("codex does not support exporting a detached session");
     },
 
-    // codex has no compaction primitive; the renderer hides the affordance
-    // (capabilities.compress === false) and this throws if ever reached.
-    async compress() {
-      throw new Error("codex does not support session compaction");
+    /**
+     * codex compacts by starting a turn of its own: `thread/compact/start`
+     * asks the app-server to fold the thread into a summary, and the work then
+     * arrives as an ordinary turn (a `contextCompaction` item, its own
+     * tokenUsage frame, then turn/completed). Fire-and-forget like prompt: the
+     * request returns empty, and the stream plus the session.idle that
+     * turn/completed emits carry the outcome. The model argument is unused —
+     * codex always summarizes with the thread's own model.
+     */
+    async compress(sessionId) {
+      try {
+        await resumeThread(sessionId);
+      } catch (error) {
+        if (!isNotMaterialized(error)) {
+          if (isWriterConflict(error)) throw new Error(OWNED_ELSEWHERE_MESSAGE);
+          throw error;
+        }
+      }
+      try {
+        await client.request("thread/compact/start", { threadId: sessionId }, 30_000);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (isWriterConflict(error)) throw new Error(OWNED_ELSEWHERE_MESSAGE);
+        throw new Error(`codex compact failed: ${detail}`);
+      }
+      // The compaction turn is asynchronous; announce it the same way opencode
+      // does so the renderer's compress flow (toast + reload) behaves alike.
+      emit({ type: "session.compressed", sessionId });
     },
 
     async deleteSession(sessionId) {
@@ -541,21 +791,43 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       await client.request("thread/name/set", { threadId: sessionId, name: title });
     },
 
-    async prompt(sessionId, text, model) {
-      const params: Record<string, unknown> = {
-        threadId: sessionId,
-        input: [{ type: "text", text }],
+    async prompt(sessionId, text, model, attachments) {
+      const { input, staged } = buildTurnInput(text, attachments);
+      const turnParams = (threadId: string) => {
+        const params: Record<string, unknown> = {
+          threadId,
+          input,
+        };
+        if (model?.modelId) params.model = model.modelId;
+        if (model?.variant) params.effort = model.variant;
+        return params;
       };
-      if (model?.modelId) params.model = model.modelId;
-      if (model?.variant) params.effort = model.variant;
+      // Claim the slot before the call: a staging this thread still holds
+      // belongs to a finished turn (its end frame may have been dropped).
+      if (staged) registerStaging(sessionId, staged);
       try {
         // turn/start only sees threads this server has loaded, and reading a
         // thread no longer loads it (readThread deliberately avoids the
         // writer). Taking the writer here is correct: a turn appends to the
-        // rollout. Idempotent when the thread is already loaded.
-        await resumeThread(sessionId);
-        const response = await client.request<{ turn?: { id?: string } }>("turn/start", params);
-        if (response?.turn?.id) activeTurns.set(sessionId, response.turn.id);
+        // rollout. Idempotent when the thread is already loaded. A brand-new
+        // thread/start session has no rollout until its first turn, and
+        // thread/resume refuses it — that refusal is not an error, the
+        // turn/start below is what materializes the rollout.
+        try {
+          await resumeThread(sessionId);
+        } catch (error) {
+          if (!isNotMaterialized(error)) throw error;
+        }
+        const response = await client.request<{ turn?: { id?: string } }>(
+          "turn/start",
+          turnParams(sessionId),
+        );
+        if (response?.turn?.id) {
+          activeTurns.set(sessionId, response.turn.id);
+          return;
+        }
+        // No turn came back: nothing will ever read the staged files.
+        releaseStaging(sessionId);
       } catch (error) {
         // Request-level failures (auth, unknown thread) have no notification;
         // surface them with the session id so the renderer settles the run —
@@ -563,6 +835,40 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         // prompt() resolves, so a swallowed error would leave a phantom run
         // polling for a turn that never started.
         const detail = error instanceof Error ? error.message : String(error);
+        if (isWriterConflict(error)) {
+          // codex 0.163's managed app-server daemon keeps a thread's writer
+          // lock open long after its turn finished (verified on 0.163: the
+          // rollout's last write was minutes stale, yet the lock fd stayed
+          // open), so "close the other window and retry" is advice the user
+          // cannot follow. thread/fork is not gated on that lock — it copies
+          // the rollout into a fresh thread id — so continue the run there:
+          // the user keeps their message, and the fork carries the history
+          // the locked thread held.
+          const forked = await forkForContinuation(sessionId);
+          if (forked) {
+            try {
+              await client.request("turn/start", turnParams(forked.id));
+            } catch (forkError) {
+              releaseStaging(sessionId);
+              throw forkError instanceof Error ? forkError : new Error(String(forkError));
+            }
+            // The turn now runs on the fork, so the staged files outlive the
+            // fork's turn end, not the locked thread's.
+            if (staged) {
+              stagedByThread.delete(sessionId);
+              registerStaging(forked.id, staged);
+            }
+            emit({
+              type: "session.branchContinued",
+              sessionId,
+              forkedSessionId: forked.id,
+              message: `${OWNED_ELSEWHERE_MESSAGE}; continued in the new branch ${forked.id}`,
+            });
+            return;
+          }
+        }
+        // The turn never started: nothing will read the staged files.
+        releaseStaging(sessionId);
         const authDetail = await authFailureDetail();
         emit({
           type: "server.error",
@@ -594,7 +900,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         if (!stopped.flag) handler(event);
       };
       client.setNotificationHandler((method, params) => {
-        emitCodexNotification(method, params, emit, activeTurns);
+        emitCodexNotification(method, params, emit, activeTurns, usageByThread, (threadId) =>
+          releaseStaging(threadId),
+        );
       });
       client.setRequestHandler?.((method, params) => {
         const requestId = `codex-interaction-${nextInteractionId++}`;
@@ -604,9 +912,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
           // AND toast it — a silent refusal would look like a hung turn.
           emit({
             type: "server.error",
-            message: `codex 请求了 awefork 无法展示的交互（${method}），已拒绝`,
+            message: `codex asked for an interaction awefork cannot display (${method}), so it was declined`,
           });
-          return Promise.reject(new Error(`awefork 无法处理 codex 请求 ${method}`));
+          return Promise.reject(new Error(`awefork cannot handle the codex request ${method}`));
         }
         return new Promise<unknown>((resolve) => {
           pendingInteractions.set(requestId, { method, resolve });
@@ -628,6 +936,8 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     dispose() {
       emitEvent = null;
       pendingInteractions.clear();
+      for (const staged of stagedByThread.values()) staged.cleanup();
+      stagedByThread.clear();
       client.setNotificationHandler(() => {});
       client.setRequestHandler?.(undefined);
     },
@@ -668,6 +978,9 @@ function emitCodexNotification(
   params: unknown,
   emit: (event: AgentEvent) => void,
   activeTurns: Map<string, string>,
+  usageByThread: Map<string, { turnId: string; usage: CodexTokenUsage }>,
+  /** Fires where a thread's turn is over — success, idle twin, or failure. */
+  onTurnEnd?: (threadId: string) => void,
 ): void {
   const p = (params ?? {}) as {
     threadId?: string;
@@ -681,6 +994,7 @@ function emitCodexNotification(
     willRetry?: boolean;
     error?: { message?: string };
     status?: { type?: string };
+    tokenUsage?: CodexTokenUsage | null;
   };
   const threadId = typeof p.threadId === "string" ? p.threadId : null;
   switch (method) {
@@ -688,6 +1002,8 @@ function emitCodexNotification(
       if (p.willRetry) break;
       const message = p.error?.message ?? "unknown codex error";
       emit({ type: "server.error", sessionId: threadId, message: `codex: ${message}` });
+      // A fatal error ends the turn too — its staged files are done for.
+      if (threadId) onTurnEnd?.(threadId);
       break;
     }
     case "turn/started": {
@@ -707,6 +1023,7 @@ function emitCodexNotification(
           message: `codex: ${p.turn.error.message}`,
         });
       }
+      onTurnEnd?.(threadId);
       emit({ type: "session.idle", sessionId: threadId });
       break;
     }
@@ -721,8 +1038,20 @@ function emitCodexNotification(
         // completed frame leaves a stale turnId that a later abort would
         // interrupt (and surface as a raw codex error).
         activeTurns.delete(threadId);
+        onTurnEnd?.(threadId);
         emit({ type: "session.idle", sessionId: threadId });
       }
+      break;
+    }
+    case "thread/tokenUsage/updated": {
+      // codex persists usage only as an untyped rollout event and its turn
+      // list drops it, so this frame is the meter's only source. Record it
+      // against the turn it arrived on, then nudge the renderer to reload so
+      // the meter paints without waiting for the idle reload.
+      const turnId = p.turnId ?? activeTurns.get(threadId ?? "") ?? null;
+      if (!threadId || !turnId || !p.tokenUsage) break;
+      usageByThread.set(threadId, { turnId, usage: p.tokenUsage });
+      emit({ type: "session.updated", sessionId: threadId });
       break;
     }
     case "item/agentMessage/delta": {
@@ -850,12 +1179,14 @@ function emitCodexNotification(
 
 /**
  * Tool chip names for ChatMessage.toolNames (first-seen order) and for the
- * live tool parts streamed while a turn runs.
+ * live tool parts streamed while a turn runs. commandExecution carries a
+ * short command preview — a stack of identical "shell" chips says nothing
+ * about what the turn is doing.
  */
 function toolNameOfItem(item: CodexItem): string | null {
   switch (item.type) {
     case "commandExecution":
-      return "shell";
+      return commandChipLabel(item.command);
     case "fileChange":
       return "patch";
     case "mcpToolCall":
@@ -872,6 +1203,19 @@ function toolNameOfItem(item: CodexItem): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * "shell · rg login" — the command collapsed to one line, truncated to a
+ * pill-sized preview. Some codex builds send argv as string[], others as a
+ * joined string; either is accepted. No readable command falls back to the
+ * bare tool name.
+ */
+function commandChipLabel(command?: string | string[]): string {
+  const raw = Array.isArray(command) ? command.join(" ") : command;
+  const line = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  if (!line) return "shell";
+  return `shell · ${line.length > 24 ? `${line.slice(0, 24)}…` : line}`;
 }
 
 /**
@@ -893,6 +1237,23 @@ function reasoningTextOf(item: CodexItem): string {
   return [reasoningContentOf(item), reasoningSummaryOf(item)].filter(Boolean).join("\n\n");
 }
 
+/**
+ * Filenames of the images a user turn carried. codex echoes each back as a
+ * `localImage` part holding the staged file's path; staging names files
+ * after the originals, so the path's basename is the name the composer
+ * showed and history shows the same chip.
+ */
+function imageNamesOf(content: CodexItem["content"]): string[] {
+  const names: string[] = [];
+  for (const part of content ?? []) {
+    if (typeof part === "string" || part.type !== "localImage") continue;
+    if (typeof part.path !== "string") continue;
+    const name = part.path.split(/[\\/]/).pop();
+    if (name) names.push(name);
+  }
+  return names;
+}
+
 function interactionRequest(
   requestId: string,
   method: string,
@@ -909,8 +1270,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "command-approval",
-        title: "允许执行命令？",
-        detail: reason ?? "Codex 请求执行一条命令。",
+        title: "Run this command?",
+        detail: reason ?? "Codex is asking to run a command.",
         command,
         cwd: typeof p.cwd === "string" ? p.cwd : undefined,
         reason,
@@ -921,8 +1282,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "file-approval",
-        title: "允许修改文件？",
-        detail: reason ?? "Codex 请求修改文件。",
+        title: "Edit these files?",
+        detail: reason ?? "Codex is asking to edit files.",
         grantRoot: typeof p.grantRoot === "string" ? p.grantRoot : undefined,
         reason,
       };
@@ -931,8 +1292,8 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "permission-approval",
-        title: "允许额外权限？",
-        detail: reason ?? "Codex 请求扩大本回合权限。",
+        title: "Grant extra permissions?",
+        detail: reason ?? "Codex is asking to widen this turn's permissions.",
         requested: permissionSummary(p.permissions),
         reason,
       };
@@ -946,7 +1307,7 @@ function interactionRequest(
             return [
               {
                 id,
-                header: typeof q.header === "string" ? q.header : "需要你的输入",
+                header: typeof q.header === "string" ? q.header : "Your input is needed",
                 question: questionText,
                 options: Array.isArray(q.options)
                   ? q.options.flatMap((option) => {
@@ -971,7 +1332,7 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "user-input",
-        title: "Codex 需要你的输入",
+        title: "Codex needs your input",
         detail: reason ?? "",
         questions,
       };
@@ -981,7 +1342,7 @@ function interactionRequest(
         requestId,
         sessionId,
         kind: "mcp-elicitation",
-        title: "MCP 服务请求输入",
+        title: "MCP server requests input",
         detail: typeof p.message === "string" ? p.message : (reason ?? ""),
         serverName: typeof p.serverName === "string" ? p.serverName : "MCP",
       };
@@ -1005,15 +1366,15 @@ function interactionReply(method: string, response: AgentInteractionResponse): u
     case "mcpServer/elicitation/request":
       return { action: allowed ? "accept" : "decline" };
     default:
-      return { decision: { denied: { rejection: "用户拒绝了该操作" } } };
+      return { decision: { denied: { rejection: "the user declined this action" } } };
   }
 }
 
 function permissionSummary(value: unknown): string[] {
-  if (!value || typeof value !== "object") return ["额外权限"];
+  if (!value || typeof value !== "object") return ["extra permissions"];
   const permissions = value as Record<string, unknown>;
   const result: string[] = [];
-  if (permissions.fileSystem) result.push("文件系统访问");
-  if (permissions.network) result.push("网络访问");
-  return result.length > 0 ? result : ["额外权限"];
+  if (permissions.fileSystem) result.push("file system access");
+  if (permissions.network) result.push("network access");
+  return result.length > 0 ? result : ["extra permissions"];
 }

@@ -1,5 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
-import { recordFork } from "./lineage-store.js";
+import { recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -87,7 +87,13 @@ interface ZcodeMessage {
       options?: { reasoningLevel?: string } | null;
     } | null;
     time?: { created?: number; completed?: number | null } | null;
-    tokens?: { output?: number | null } | null;
+    tokens?: {
+      total?: number | null;
+      input?: number | null;
+      output?: number | null;
+      reasoning?: number | null;
+      cache?: { read?: number | null; write?: number | null } | null;
+    } | null;
     finish?: string | null;
     error?: { message?: string; data?: { message?: string } } | null;
     /** Runtime-injected rows carry metadata with a visibility flag. */
@@ -123,6 +129,8 @@ interface ZcodeProviderModel {
   name?: string;
   reasoning?: { variants?: string[] } | null;
   modalities?: { input?: string[] } | null;
+  /** Context/output caps from the v2 provider config, when it ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 interface ZcodeProviderEntry {
@@ -142,13 +150,31 @@ interface ZcodeCatalogModel {
   providerLabel?: string | null;
   reasoning?: { levels?: Array<{ value?: string }> | null } | null;
   properties?: { inputFormat?: { supportsImage?: boolean } | null } | null;
+  /** Context/output caps, when the runtime catalog ships them. */
+  limit?: { context?: number; output?: number };
 }
 
 const SESSION_EVENT_METHOD = "session/event";
 
+/**
+ * The v4 command channel. zcode's legacy session/* methods cover only the
+ * turn lifecycle (create/resume/list/send/stop/fork/compact/setModel/…);
+ * session bookkeeping — rename, delete — lives on the v4 gateway's command
+ * envelope, which the desktop client itself drives. Verified live against
+ * zcode 0.17.0: `v4/command` with type "renameSession"/"deleteSession".
+ */
+const COMMAND_METHOD = "v4/command";
+
 /** How long fork() waits for a running parent session to settle. */
 const FORK_BUSY_WAIT_MS = 10 * 60 * 1000;
 const FORK_BUSY_POLL_MS = 1000;
+
+/** What v4/command answers with; `status: "failed"` carries the reason. */
+interface ZcodeCommandResult {
+  status?: string;
+  reasonCode?: string;
+  message?: string;
+}
 
 export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   const now = options.now ?? Date.now;
@@ -170,7 +196,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       kind === "subagent_child" ? "subagent" : kind === "fork" || parent ? "fork" : "root";
     return {
       id: row.sessionId ?? "",
-      title: row.title || "(未命名会话)",
+      title: row.title || "(untitled session)",
       directory,
       parentSessionId: parent,
       origin,
@@ -226,7 +252,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   const createSessionIn = async (directory?: string | null): Promise<SessionSummary> => {
     const client = await options.client();
     const workspacePath = directory || options.homeDirectory || "";
-    if (!workspacePath) throw new Error("zcode 需要一个工作目录才能新建会话");
+    if (!workspacePath) throw new Error("zcode needs a working directory to create a session");
     const created = await client.request<{ session?: ZcodeSessionRow } | ZcodeSessionRow>(
       "session/create",
       { workspace: { workspaceKey: workspacePath, workspacePath } },
@@ -234,8 +260,38 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     );
     const row = (created as { session?: ZcodeSessionRow })?.session ?? (created as ZcodeSessionRow);
     const summary = mapSessionRow(row ?? {});
-    if (!summary.id) throw new Error("zcode session/create 未返回会话 id");
+    if (!summary.id) throw new Error("zcode session/create returned no session id");
     return summary;
+  };
+
+  /**
+   * One v4 command envelope. The server replies `{status, …}` with the
+   * commandId echoed; a `status: "failed"` frame is an application-level
+   * rejection (unknown session, persistence mismatch) and must surface as an
+   * error, not a silent success — the renderer only refreshes on resolve.
+   */
+  const runCommand = async (
+    type: "renameSession" | "deleteSession",
+    sessionId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> => {
+    const client = await options.client();
+    const result = await client.request<ZcodeCommandResult | null>(
+      COMMAND_METHOD,
+      {
+        commandId: `awefork-${type}-${sessionId}-${now()}`,
+        clientId: "awefork",
+        sessionId,
+        type,
+        payload,
+        issuedAt: now(),
+      },
+      30_000,
+    );
+    if (result?.status && result.status !== "accepted") {
+      const detail = result.message ?? result.reasonCode ?? result.status;
+      throw new Error(`zcode ${type} failed: ${detail}`);
+    }
   };
 
   const promptTextOf = (parts: ZcodeMessage["parts"]): string =>
@@ -244,6 +300,32 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       .map((part) => part.text)
       .join("\n")
       .trim();
+
+  /**
+   * zcode reports the step's whole footprint directly (`tokens.total`) and
+   * its `input` already includes the cached reads — unlike opencode, so the
+   * total wins and the parts never sum with it.
+   */
+  function zcodeContextTokens(tokens: NonNullable<ZcodeMessage["info"]>["tokens"]): number | null {
+    if (!tokens) return null;
+    if (typeof tokens.total === "number") return tokens.total;
+    const parts = [
+      tokens.input,
+      tokens.output,
+      tokens.reasoning,
+      tokens.cache?.read,
+      tokens.cache?.write,
+    ];
+    let sum = 0;
+    let seen = false;
+    for (const part of parts) {
+      if (typeof part === "number") {
+        sum += part;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
 
   function mapMessage(message: ZcodeMessage): ChatMessage[] {
     const info = message.info ?? {};
@@ -270,7 +352,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         variant,
         attachmentNames: (parts ?? [])
           .filter((part) => part.type === "file")
-          .map((part) => part.filename ?? "附件"),
+          .map((part) => part.filename ?? "attachment"),
         createdAt,
         completedAt: null,
         finish: null,
@@ -306,6 +388,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       (typeof info.error?.data?.message === "string" && info.error.data.message) ||
       (typeof info.error?.message === "string" && info.error.message) ||
       null;
+    const contextTokens = zcodeContextTokens(info.tokens);
     // A turn whose assistant side produced nothing visible yields no row —
     // empty rows would flicker above the live stream (same as codex).
     if (text || thinking || toolNames.length > 0 || error) {
@@ -323,6 +406,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         completedAt: info.time?.completed ?? null,
         finish: info.finish === "tool-calls" ? "tool-calls" : info.finish ? "stop" : null,
         outputTokens: typeof info.tokens?.output === "number" ? info.tokens.output : null,
+        ...(contextTokens !== null ? { contextTokens } : {}),
         error,
       });
     }
@@ -339,13 +423,13 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       .map((message) => message.info ?? {})
       .filter((info) => info.role === "user" || info.role === "assistant")
       .map((info) => ({ role: info.role ?? "", id: info.id ?? info.messageId ?? "" }));
-    if (rows.length === 0) throw new Error("会话没有任何消息，无法分叉");
+    if (rows.length === 0) throw new Error("session has no messages, cannot fork");
     const last = rows[rows.length - 1];
-    if (!last) throw new Error("会话没有任何消息，无法分叉");
+    if (!last) throw new Error("session has no messages, cannot fork");
     if (!atMessageId) return { cutId: last.id };
     const anchorIndex = rows.findIndex((row) => row.id === atMessageId);
     if (anchorIndex < 0) {
-      throw new Error(`未找到消息 ${atMessageId}，刷新会话后重试`);
+      throw new Error(`cannot find message ${atMessageId}, refresh the session and retry`);
     }
     // Keep the anchor turn whole: walk to the last assistant row before the
     // next user message. A turn with no reply yet cuts at the user row.
@@ -357,7 +441,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       cutIndex = i;
     }
     const cut = rows[cutIndex];
-    if (!cut?.id) throw new Error("未找到可用的分叉切点，刷新会话后重试");
+    if (!cut?.id) throw new Error("no usable fork cut point, refresh the session and retry");
     return { cutId: cut.id };
   };
 
@@ -430,6 +514,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           .map((level) => level.value)
           .filter((value): value is string => typeof value === "string" && value !== ""),
         attachment: entry.properties?.inputFormat?.supportsImage ?? false,
+        ...(entry.limit?.context ? { contextWindow: entry.limit.context } : {}),
       }));
   };
 
@@ -489,12 +574,19 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           emit({ type: "session.idle", sessionId });
           emit({ type: "session.updated", sessionId });
           break;
+        // A compaction finished: the summary turn is written and later
+        // prompts carry it instead of the folded history. Reload + toast.
+        case "session.compacted":
+        case "session_compacted":
+          emit({ type: "session.updated", sessionId });
+          emit({ type: "session.compressed", sessionId });
+          break;
         case "turn.failed":
         case "turn_error":
           emit({
             type: "server.error",
             sessionId,
-            message: frame.payload?.message ?? frame.payload?.error?.message ?? "zcode 回合失败",
+            message: frame.payload?.message ?? frame.payload?.error?.message ?? "zcode turn failed",
           });
           emit({ type: "session.idle", sessionId });
           break;
@@ -571,6 +663,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
             modelName: model.name ?? modelId,
             variants: model.reasoning?.variants ?? [],
             attachment: model.modalities?.input?.includes("image") ?? false,
+            ...(model.limit?.context ? { contextWindow: model.limit.context } : {}),
           });
         }
       }
@@ -582,7 +675,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     },
 
     async fork(sessionId, atMessageId, forkOptions) {
-      // 空上下文 fork: session/create in the parent's own workspace (found
+      // empty-context fork: session/create in the parent's own workspace (found
       // via session/list; the home directory is the fallback). No native
       // fork call — lineage alone links the branch to the cut point.
       if (forkOptions?.context === "none") {
@@ -600,7 +693,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
       }
       const parentMessages = await fetchMessages(sessionId);
       const { cutId } = cutMessageIdOf(parentMessages, atMessageId);
-      if (!cutId) throw new Error("未找到可用的分叉切点，刷新会话后重试");
+      if (!cutId) throw new Error("no usable fork cut point, refresh the session and retry");
       const client = await options.client();
       // opencode forks a running session instantly; zcode refuses with
       // "Cannot fork while a prompt is running". The cut point is already
@@ -619,14 +712,15 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
         const detail = error instanceof Error ? error.message : String(error);
         if (!/prompt is running|fork while/i.test(detail)) throw error;
         const settled = await waitForSessionIdle(sessionId, FORK_BUSY_WAIT_MS);
-        if (!settled) throw new Error("会话仍在运行，暂时无法分叉；请稍后重试");
+        if (!settled)
+          throw new Error("session is still running, cannot fork yet; retry in a moment");
         forked = await forkOnce();
       }
       const forkedId = forked?.forkedSessionId;
-      if (!forkedId) throw new Error("zcode session/fork 未返回新会话 id");
+      if (!forkedId) throw new Error("zcode session/fork returned no new session id");
       const summary: SessionSummary = {
         id: forkedId,
-        title: "(未命名会话)",
+        title: "(untitled session)",
         directory: "",
         parentSessionId: sessionId,
         origin: "fork",
@@ -645,27 +739,51 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
     // parentSessionId), so a detached copy cannot be produced — the renderer
     // hides the export affordance (capabilities.exportBranch === false).
     async exportSession() {
-      throw new Error("zcode 不支持导出独立会话");
+      throw new Error("zcode cannot export a detached session");
     },
 
-    // The app-server protocol has no compaction primitive; the renderer hides
-    // the affordance (capabilities.compress === false).
-    async compress() {
-      throw new Error("zcode 暂不支持会话压缩");
+    /**
+     * Fold the session's history into a summary through zcode's own compaction
+     * primitive. It is a dedicated method, not a v4 command: `session/compact`
+     * (verified live against 0.17.0 — the v4 command of the same name only
+     * answers the desktop client's envelope and reports a session it cannot
+     * find). The method submits a `/compact` turn in the background and
+     * returns immediately with the post-compaction snapshot; the summary then
+     * arrives through the normal turn stream, and `session_compacted` closes
+     * it, which the event mapping turns into session.compressed.
+     */
+    async compress(sessionId, _model) {
+      const client = await options.client();
+      try {
+        await ensureSubscribed(sessionId);
+        await client.request<{ compact?: { state?: string } } | null>(
+          "session/compact",
+          { sessionId, inputId: `awefork-compact-${now()}` },
+          60_000,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        emit({ type: "server.error", sessionId, message: `zcode compact failed: ${detail}` });
+        throw new Error(`zcode compact failed: ${detail}`);
+      }
     },
 
-    // The app-server protocol has no delete primitives; the renderer hides
-    // the affordances (capabilities.deleteSession/deleteMessage === false).
-    async deleteSession() {
-      throw new Error("zcode 暂不支持删除会话");
+    // Session bookkeeping rides the v4 command channel (the same one the
+    // desktop client drives): there is no session/delete or session/rename
+    // method on the legacy surface. Delete is a soft delete server-side
+    // (time_deleted), which drops the row from session/list — what awefork's
+    // refresh reads.
+    async deleteSession(sessionId) {
+      await runCommand("deleteSession", sessionId, {});
+      await removeFork(options.lineagePath, sessionId);
     },
 
     async deleteMessage() {
-      throw new Error("zcode 暂不支持删除单条消息");
+      throw new Error("zcode does not support deleting a single message yet");
     },
 
-    async renameSession() {
-      throw new Error("zcode 暂不支持重命名会话");
+    async renameSession(sessionId, title) {
+      await runCommand("renameSession", sessionId, { title });
     },
 
     async prompt(sessionId, text, model) {
@@ -704,15 +822,30 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
           type: "server.error",
           sessionId,
           message: detail.includes("already running")
-            ? "该会话已有正在运行的回合"
+            ? "this session already has a turn running"
             : `zcode prompt failed: ${detail}`,
         });
         throw error instanceof Error ? error : new Error(detail);
       }
     },
 
+    // The ZCode Protocol does carry server→client interaction requests
+    // (interaction/requestPermission, interaction/requestUserInput), but two
+    // verified facts rule out implementing this through the existing pipe:
+    //   1. zcode-jsonrpc answers ONLY the two methods in its SAFE_REPLIES
+    //      allowlist and rejects every other server request with
+    //      method-not-found, so a permission ask never reaches this adapter.
+    //   2. Live probing (0.17.0, build mode and guarded mode, a turn that
+    //      actually invoked Bash) produced zero interaction frames — the
+    //      only server requests were session/requestRuntimePreferences and
+    //      interaction/requestOfficialMcpAuthHeaders, both already safe-
+    //      answered by the transport.
+    // Wiring it up would mean relaxing the allowlist so an unanswered
+    // permission could block a turn — a worse failure than today's, where
+    // the transport refuses visibly and the tool call fails fast. The
+    // renderer never queues a zcode ask, so this stays unreachable.
     async respondInteraction() {
-      throw new Error("zcode 没有等待答复的交互");
+      throw new Error("zcode has no interaction awaiting a reply");
     },
 
     async abort(sessionId) {
