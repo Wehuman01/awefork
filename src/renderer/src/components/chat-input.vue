@@ -201,6 +201,7 @@ import type {
 } from "../../../shared/types";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
 import type { ContextUsage } from "../context-usage";
+import { type ArrivingItem, splitArrivingItems } from "../drop-split";
 import { formatTokenCount } from "../format";
 import { t } from "../i18n";
 import {
@@ -514,7 +515,7 @@ function onPaste(event: ClipboardEvent): void {
     // Swallow the paste either way: a pasted file would otherwise land as
     // nothing (or garbage) in the textarea once we refuse it.
     event.preventDefault();
-    addFiles(files);
+    void acceptArrivingFiles(files, data?.items);
     return;
   }
   const el = textareaEl.value;
@@ -573,12 +574,81 @@ function onDragOver(): void {
   if (props.allowAttachments) dragOver.value = true;
 }
 
-function onDrop(event: DragEvent): void {
+async function onDrop(event: DragEvent): Promise<void> {
   dragOver.value = false;
-  if (!props.allowAttachments) return;
-  const files = event.dataTransfer?.files;
-  if (!files || files.length === 0) return;
-  addFiles(files);
+  const dt = event.dataTransfer;
+  if (!dt || dt.files.length === 0) return;
+  await acceptArrivingFiles(dt.files, dt.items);
+}
+
+/**
+ * A drop or paste batch: directories land as absolute path text, files stage
+ * as attachments. The path route is plain text, so it runs even where the
+ * backend takes no attachments at all.
+ */
+async function acceptArrivingFiles(
+  files: FileList | File[],
+  items: DataTransferItemList | undefined,
+): Promise<void> {
+  const list = [...files];
+  const flags = await readDirectoryFlags(list, items);
+  const arriving: ArrivingItem[] = list.map((file, index) => ({
+    file,
+    isDirectory: flags[index] ?? null,
+  }));
+  const { pathText, files: rest } = splitArrivingItems(arriving, resolveFilePath);
+  if (pathText !== "") insertPathsAtCaret(pathText);
+  if (rest.length > 0) addFiles(rest);
+}
+
+function resolveFilePath(file: File): string | null {
+  return window.awefork.pathForFile(file);
+}
+
+/**
+ * Per-item directory flags for an arriving batch, index-aligned with
+ * `files`. webkitGetAsEntry is the only thing that can tell a directory
+ * from a file before reading it; a transfer that will not say (a synthetic
+ * one) yields nulls, and the splitter then keeps everything a file.
+ */
+function readDirectoryFlags(
+  files: readonly File[],
+  items: DataTransferItemList | undefined,
+): Promise<(boolean | null)[]> {
+  const fileItems = items ? Array.from(items).filter((item) => item.kind === "file") : [];
+  if (fileItems.length !== files.length) return Promise.resolve(files.map(() => null));
+  return Promise.all(
+    fileItems.map(
+      (item) =>
+        new Promise<boolean | null>((resolve) => {
+          const withEntry = item as DataTransferItem & {
+            webkitGetAsEntry?: () => { isDirectory: boolean } | null;
+          };
+          try {
+            const entry = withEntry.webkitGetAsEntry?.();
+            resolve(entry ? entry.isDirectory : null);
+          } catch {
+            resolve(null);
+          }
+        }),
+    ),
+  );
+}
+
+/**
+ * Absolute paths land verbatim, each on its own line, spliced in through
+ * insertText so the native undo stack covers the edit.
+ */
+function insertPathsAtCaret(pathText: string): void {
+  const el = textareaEl.value;
+  if (!el) {
+    // Preview mode: the textarea is swapped out, so append to the draft.
+    text.value = text.value === "" ? `${pathText}\n` : `${text.value}\n${pathText}\n`;
+    return;
+  }
+  const before = text.value.slice(0, el.selectionStart);
+  const prefix = before === "" || before.endsWith("\n") ? "" : "\n";
+  insertAtCaret(el, `${prefix}${pathText}\n`);
 }
 
 onUnmounted(() => {
