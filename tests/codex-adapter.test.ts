@@ -94,6 +94,18 @@ const THREAD_FIXTURE = {
   updatedAt: 1726000042,
 };
 
+/** A later turn of the same thread, sent after the model was switched. */
+const SWITCHED_TURN_FIXTURE = {
+  id: "turn-2",
+  status: "completed",
+  startedAt: 1726000100,
+  completedAt: 1726000110,
+  items: [
+    { type: "userMessage", id: "u2", content: [{ text: "换个模型继续" }] },
+    { type: "agentMessage", id: "a2", text: "好，换这个" },
+  ],
+};
+
 function turnPageFixture(turns: unknown[]) {
   return { data: turns, nextCursor: null };
 }
@@ -438,6 +450,67 @@ describe("createCodexAdapter messages()", () => {
 
     const rows = await adapter.messages("s1");
     expect(rows[1].contextTokens).toBeUndefined();
+  });
+
+  it("attributes each turn the model its own rollout turn_context recorded", async () => {
+    // Regression: a model switched mid-session left every earlier turn of the
+    // session displaying the thread's new model — the canvas card, the message
+    // list and the composer's branch mirror all read it from there. The
+    // thread/read answer below is the post-switch state; the first turn must
+    // keep the settings it actually ran with.
+    const { client } = fakeClient({
+      "thread/read": () => ({
+        thread: {
+          ...THREAD_FIXTURE,
+          model: "stepfun-cn-2/step-5-preview",
+          reasoningEffort: "high",
+        },
+      }),
+      "thread/turns/list": () => turnPageFixture([TURN_FIXTURE, SWITCHED_TURN_FIXTURE]),
+    });
+    const asked: string[] = [];
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      turnContexts: async (sessionId) => {
+        asked.push(sessionId);
+        return {
+          "turn-1": { model: "gpt-6.1-sol", effort: "ultra" },
+          "turn-2": { model: "stepfun-cn-2/step-5-preview", effort: "high" },
+        };
+      },
+    });
+
+    const rows = await adapter.messages("s1");
+    expect(asked).toEqual(["s1"]);
+    expect(rows.map((row) => [row.id, row.modelId, row.variant])).toEqual([
+      ["u1", "gpt-6.1-sol", "ultra"],
+      ["turn-1", "gpt-6.1-sol", "ultra"],
+      ["u2", "stepfun-cn-2/step-5-preview", "high"],
+      ["turn-2", "stepfun-cn-2/step-5-preview", "high"],
+    ]);
+  });
+
+  it("falls back to the thread's settings for turns the rollout has no context for", async () => {
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () => turnPageFixture([TURN_FIXTURE, SWITCHED_TURN_FIXTURE]),
+    });
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      turnContexts: async () => ({
+        "turn-1": { model: "gpt-6.1-sol", effort: "ultra" },
+      }),
+    });
+
+    const rows = await adapter.messages("s1");
+    expect(rows.map((row) => [row.id, row.modelId, row.variant])).toEqual([
+      ["u1", "gpt-6.1-sol", "ultra"],
+      ["turn-1", "gpt-6.1-sol", "ultra"],
+      ["u2", "gpt-5-codex", "high"],
+      ["turn-2", "gpt-5-codex", "high"],
+    ]);
   });
 });
 

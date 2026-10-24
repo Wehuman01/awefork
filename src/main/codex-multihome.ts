@@ -18,6 +18,7 @@ import {
   discoverCodexHomes,
   findRolloutRelPath,
 } from "./codex-homes.js";
+import { readTurnContexts } from "./codex-rollout.js";
 import { ensureCodexServer } from "./codex-server.js";
 
 export interface CodexMultiHomeOptions {
@@ -109,6 +110,9 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       // Images ride turn/start's localImage items, which take file paths —
       // main stages the staged data URLs as files codex can read.
       stageImages: stageCodexImages,
+      // Each home reads its own rollouts: the per-turn model settings live
+      // beside the session they belong to.
+      turnContexts: (sessionId) => readTurnContexts(home.path, sessionId),
     });
   };
 
