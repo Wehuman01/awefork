@@ -7364,6 +7364,10 @@ code.md-code {
    (minimap node fills, banner/danger washes, the file-changes card's
    lavender-tinted paper) get explicit dark counterparts here. */
 
+html[data-theme="dark"] .topbar-status.bad .status-dot {
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
 html[data-theme="dark"] .ctx-menu-item.danger:hover,
 html[data-theme="dark"] .banner-error {
   background: var(--danger-soft);

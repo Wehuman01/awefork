@@ -13,8 +13,9 @@ import type {
 /**
  * pi implementation of AgentAdapter.
  *
- * Background: the `@mariozechner/pi-coding-agent` CLI ("pi") stores each
- * conversation as an append-only JSONL file under
+ * Background: the `pi` CLI (npm: @earendil-works/pi-coding-agent, formerly
+ * @mariozechner/pi-coding-agent) stores each conversation as an append-only
+ * JSONL file under
  * `$PI_CODING_AGENT_DIR/sessions/<encoded-cwd>/`. Executing a prompt taps a
  * separate `pi --mode rpc` child over newline JSON, whose lifecycle this
  * adapter manages and pools (an idle child is reaped after a quiet window).

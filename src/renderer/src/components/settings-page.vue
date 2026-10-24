@@ -253,6 +253,8 @@ import {
   archivedSessionViews,
   checkForUpdates,
   installBackend,
+  installingLabel,
+  refreshBackendList,
   store,
   switchBackend,
   toggleFavoriteModel,
@@ -467,7 +469,7 @@ function backendSection(): SectionDef {
         title: entry.label,
         desc,
         buttonLabel: installing
-          ? t("settings.installingBackend")
+          ? installingLabel(t("settings.installingBackend"))
           : t("settings.installLatest", { label: entry.label }),
         apply: () => void installBackend(entry.id as BackendId),
       };
@@ -1285,6 +1287,9 @@ watch(settingsOpen, (open) => {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
+  // The page mounts fresh on every open (v-if on settingsOpen): a CLI
+  // installed in a terminal since the last look shows its version here.
+  void refreshBackendList();
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);

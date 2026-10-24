@@ -1153,6 +1153,23 @@ export function opencodeVersionWarning(version: string | null): string | null {
   return `opencode ${version} is outside the version ranges awefork has tested (${ranges}); if a run never settles or the reply comes back empty, switch to a tested version`;
 }
 
+/**
+ * The oldest pi release whose `--mode rpc` surface awefork drives (spawn,
+ * prompt, compact, session files) is known to work — the version the adapter
+ * was written against. Older installs get a warning, not a block.
+ *
+ * No upper bound on purpose: the package moved from @mariozechner to
+ * @earendil-works with the 1.x line, which is the current latest. Warning on
+ * the newest release would only cry wolf — the probe can't know more.
+ */
+export const PI_MIN_VERSION = "0.55.3";
+
+export function piVersionWarning(version: string | null): string | null {
+  if (version === null) return null;
+  if (compareTriples(versionTriple(version), versionTriple(PI_MIN_VERSION)) >= 0) return null;
+  return `pi ${version} is older than ${PI_MIN_VERSION}, the oldest release awefork's RPC driving is verified against; upgrade pi if a run never settles`;
+}
+
 // ---------------------------------------------------------------------------
 // Generic read helpers: the interpretation half of the data/code split. They
 // take `unknown` on purpose — tolerance for shape drift is the whole point.

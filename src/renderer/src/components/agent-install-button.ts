@@ -1,7 +1,7 @@
 import { defineComponent, h } from "vue";
 import type { BackendId } from "../../../shared/backend";
 import { t } from "../i18n";
-import { installBackend, store } from "../state";
+import { installBackend, installingLabel, store } from "../state";
 
 /**
  * One install button: "installing…" while its npm install runs, then a fresh
@@ -26,7 +26,7 @@ export const AgentInstallButton = defineComponent({
           disabled: store.installingBackend !== null,
           onClick: () => void installBackend(props.backend),
         },
-        installing ? t("onboard.installing") : t("onboard.install"),
+        installing ? installingLabel(t("onboard.installing")) : t("onboard.install"),
       );
     };
   },

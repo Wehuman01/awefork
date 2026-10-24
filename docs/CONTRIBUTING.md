@@ -127,6 +127,7 @@ overlay reads and writes to backend-specific files.
    reverted and re-asked inside the same session show every attempt in order;
    dead-branch filtering is future work.
 
+
 ### Session overview
 
 The overview uses idle as the baseline for history with no observed run. Unknown requires an explicit backend status or a persisted marker for a run whose ending was never confirmed. An idle event clears that marker without creating a result for a run this app did not watch end. Idle does not establish whether an external terminal is active; external event coverage depends on the backend.

@@ -344,6 +344,37 @@ describe("createCodexJsonRpc", () => {
     vi.useRealTimers();
   });
 
+  it("re-arms the backstop while a renderer window is alive, then declines once it is gone", async () => {
+    vi.useFakeTimers();
+    const { stdin, stdout, written } = fakeStreams();
+    let alive = true;
+    const rpc = createCodexJsonRpc(stdin, stdout, {
+      onNotification: () => {},
+      rendererAlive: () => alive,
+    });
+    rpc.setRequestHandler(() => new Promise<unknown>(() => {}));
+    stdout.emit(
+      "data",
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 34,
+        method: "item/commandExecution/requestApproval",
+        params: {},
+      })}\n`,
+    );
+    // A live renderer owns the ask: the backstop keeps re-arming, however
+    // long the user takes (auto-deny "never" must not be bypassed here).
+    vi.advanceTimersByTime(600_000);
+    expect(written).toHaveLength(0);
+    alive = false;
+    vi.advanceTimersByTime(59_999);
+    expect(written).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(JSON.parse(written[0] ?? "{}").result).toEqual({ decision: "decline" });
+    rpc.dispose();
+    vi.useRealTimers();
+  });
+
   it("cancels a user-input request that outlives the deadline instead of guessing an answer", async () => {
     vi.useFakeTimers();
     const { stdin, stdout, written } = fakeStreams();

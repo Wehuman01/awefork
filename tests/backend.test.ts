@@ -1,5 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { backendCapabilities, isBackendId, resolveStorePath } from "../src/shared/backend";
+import {
+  agentInstallHint,
+  agentPackage,
+  backendCapabilities,
+  isBackendId,
+  resolveStorePath,
+} from "../src/shared/backend";
+
+describe("agent packages", () => {
+  it("points every npm-shipped CLI at its package", () => {
+    expect(agentPackage("opencode")?.pkg).toBe("opencode-ai");
+    expect(agentPackage("codex")?.pkg).toBe("@openai/codex");
+    expect(agentPackage("zcode")).toBeNull();
+  });
+
+  it("points pi at the new scope and remembers the legacy one", () => {
+    // @mariozechner/pi-coding-agent froze at 0.73.1; the project publishes
+    // @earendil-works/pi-coding-agent (1.x) now, and the swap has to
+    // uninstall the old global package that still owns the `pi` bin.
+    expect(agentPackage("pi")?.pkg).toBe("@earendil-works/pi-coding-agent");
+    expect(agentPackage("pi")?.legacyPkg).toBe("@mariozechner/pi-coding-agent");
+  });
+
+  it("quotes the install command every missing-CLI hint shares", () => {
+    expect(agentInstallHint("pi")).toBe(
+      "Install it with: npm install -g @earendil-works/pi-coding-agent",
+    );
+    expect(agentInstallHint("zcode")).toBeNull();
+  });
+});
 
 describe("isBackendId", () => {
   it("accepts the two known backends and rejects everything else", () => {

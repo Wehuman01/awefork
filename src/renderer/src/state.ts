@@ -227,6 +227,12 @@ interface AppState {
   backendList: BackendInfo[];
   /** The agent whose one-click install is running; null = none. */
   installingBackend: BackendId | null;
+  /**
+   * Seconds the running install has been going. npm works silently for
+   * minutes on a cold cache; without this the install button looks frozen
+   * and gets clicked again, which the guard swallows — nothing happens.
+   */
+  installElapsedSec: number;
   /** First-run agent-install guide; shows until installed, skipped, or the flag persists. */
   onboardingVisible: boolean;
   /** Feature surface of the active backend; hides affordances it lacks. */
@@ -460,6 +466,7 @@ const state = reactive<AppState>({
   activeBackend: "opencode",
   backendList: [],
   installingBackend: null,
+  installElapsedSec: 0,
   onboardingVisible: false,
   capabilities: {
     deleteMessage: true,
@@ -1388,6 +1395,7 @@ export async function init(): Promise<void> {
  * backend is not touched — only the probes refresh.
  */
 export async function refreshBackendList(): Promise<void> {
+  lastBackendRefreshAt = Date.now();
   try {
     const { backends } = await window.awefork.backends();
     state.backendList = backends;
@@ -1396,15 +1404,43 @@ export async function refreshBackendList(): Promise<void> {
   }
 }
 
+/** Alt-tabbing back into the app must not spawn a probe storm. */
+const BACKEND_REFRESH_MIN_INTERVAL_MS = 30_000;
+let lastBackendRefreshAt = 0;
+
+/**
+ * Probe refresh for the moments nobody thinks to open the switcher: the
+ * settings page opening, the window regaining focus after a CLI was
+ * installed in a terminal. Throttled, so focus churn costs one probe per
+ * half minute at most.
+ */
+export async function refreshBackendListIfStale(): Promise<void> {
+  if (Date.now() - lastBackendRefreshAt < BACKEND_REFRESH_MIN_INTERVAL_MS) return;
+  await refreshBackendList();
+}
+
+/** The in-flight install label, with elapsed seconds once npm has been
+ *  running long enough that a bare "installing…" reads as frozen. */
+export function installingLabel(base: string): string {
+  return state.installElapsedSec > 0 ? `${base} ${state.installElapsedSec}s` : base;
+}
+
+let installTimer: ReturnType<typeof setInterval> | null = null;
+
 /**
  * One-click install of an agent CLI's latest version. On success the fresh
  * probe fills backendList right away (main dropped its cached "not
- * installed"); a failure surfaces through the shared toast slot.
+ * installed"); a failure surfaces through the shared toast slot, with the
+ * npm error mapped to the action that fixes it where main can tell.
  */
 export async function installBackend(backend: BackendId): Promise<void> {
   if (state.installingBackend !== null) return;
   state.installingBackend = backend;
   state.actionError = null;
+  state.installElapsedSec = 0;
+  installTimer = setInterval(() => {
+    state.installElapsedSec += 1;
+  }, 1000);
   try {
     const result = await window.awefork.installBackend(backend);
     if (!result.ok) {
@@ -1416,6 +1452,11 @@ export async function installBackend(backend: BackendId): Promise<void> {
     state.actionError =
       error instanceof Error ? error.message : t("state.installFailed", { backend });
   } finally {
+    if (installTimer !== null) {
+      clearInterval(installTimer);
+      installTimer = null;
+    }
+    state.installElapsedSec = 0;
     state.installingBackend = null;
   }
 }
@@ -2731,6 +2772,31 @@ function handleEvent(backend: BackendId, event: AgentEvent, eventId?: string): v
       } else {
         void refreshOverviewSessions();
       }
+      break;
+    }
+    case "session.branchContinued": {
+      // The prompt hit a writer-locked thread and now runs on a fresh fork.
+      // Treat it as the run moving house, not a failure: the optimistic
+      // prompt row survives, the run and watchdog transfer to the fork, and
+      // the pane follows the fork so the reply streams where the user is
+      // looking instead of on a hidden branch.
+      //
+      // The notice rides infoToast, not actionError: this event arrives
+      // inside prompt(), and the send's own success path clears actionError
+      // on the way out — an error banner here would be wiped before it ever
+      // painted. Nothing failed, either.
+      flashInfoToast(event.message);
+      stopWatch(backend, event.sessionId);
+      setRunning(backend, event.sessionId, false);
+      dropSessionInteractions(backend, event.sessionId);
+      setRunning(backend, event.forkedSessionId, true);
+      // Slack covers a turn that completes between prompt and this event;
+      // the fork's copied history all completed minutes before "now".
+      watchCompletion(backend, event.forkedSessionId, Date.now() - 5_000);
+      void refreshSessions().then(() => {
+        if (backend !== state.activeBackend || state.selectedId !== event.sessionId) return;
+        void followContinuedBranch(event.sessionId, event.forkedSessionId);
+      });
       break;
     }
     case "session.branchContinued": {

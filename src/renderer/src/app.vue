@@ -198,6 +198,7 @@ import {
   dismissUpdateBanner,
   init,
   openReleaseNotes,
+  refreshBackendListIfStale,
   skipUpdateVersion,
   startUpdateDownload,
   store,
@@ -219,16 +220,24 @@ onMounted(() => {
   // A drag that ends anywhere (a cancel, a drop outside) must not leave a
   // pending tab switch armed.
   window.addEventListener("dragend", cancelTabHover);
+  // Coming back from a terminal where a CLI was just installed: the
+  // switcher's rows re-probe (throttled) instead of waiting for a restart.
+  window.addEventListener("focus", onWindowFocus);
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("dragend", cancelTabHover);
+  window.removeEventListener("focus", onWindowFocus);
   cancelTabHover();
   if (activeDrag) {
     window.removeEventListener("mousemove", activeDrag.move);
     window.removeEventListener("mouseup", activeDrag.up);
   }
 });
+
+function onWindowFocus(): void {
+  void refreshBackendListIfStale();
+}
 
 // ── Ctrl/⌘+Z: undo the most recent history entry. While typing, the
 // keystroke stays a native text undo. ⌘/Ctrl+Shift+H toggles the history panel.
