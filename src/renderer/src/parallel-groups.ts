@@ -18,6 +18,8 @@ export interface ParallelTarget {
   model: ModelChoice | null;
   label: string;
   status: "preparing" | "running" | "done" | "failed" | "unknown";
+  /** True between the user's stop click and the run actually settling. */
+  stopping?: boolean;
   text: string;
   error: string | null;
   sentAt: number;

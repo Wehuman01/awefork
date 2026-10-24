@@ -16,6 +16,7 @@ const emit = defineEmits<{
   compare: [sessionIds: [string, string]];
   summarize: [];
   retry: [targetId: string];
+  stop: [targetId: string];
 }>();
 const selected = ref<string[]>([]);
 
@@ -226,7 +227,8 @@ function excerpt(target: ParallelTarget): string {
         <p v-if="target.error" class="error-note">{{ target.error }}</p>
         <div class="source-actions">
           <button v-if="target.sessionId" class="text-button" type="button" @click="emit('open', target.sessionId)">{{ pt('openBranch') }}</button>
-          <button v-if="target.status === 'failed' || target.status === 'unknown'" class="text-button" type="button" :disabled="busy" @click="emit('retry', target.id)">{{ pt('retry') }}</button>
+          <button v-if="target.status === 'failed' || target.status === 'unknown'" class="text-button" type="button" @click="emit('retry', target.id)">{{ pt('retry') }}</button>
+          <button v-if="target.status === 'running'" class="text-button" type="button" :disabled="target.stopping" @click="emit('stop', target.id)">{{ pt('stop') }}</button>
         </div>
       </article>
     </section>

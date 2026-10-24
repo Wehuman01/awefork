@@ -4836,12 +4836,37 @@ async function waitForParallelSettle(
   return true;
 }
 
+/** Target ids (`groupId:targetId`) the user asked to stop; read at collection. */
+const stoppingRequested = new Set<string>();
+
+function finishStoppedTarget(group: ParallelGroup, target: ParallelTarget): void {
+  const key = `${group.id}:${target.id}`;
+  const stopped = stoppingRequested.delete(key);
+  target.stopping = false;
+  if (stopped) {
+    target.status = "failed";
+    target.text = "";
+    target.error = t("state.parallelTargetStopped");
+    return;
+  }
+  target.status = "unknown";
+  target.error = t("state.parallelTargetTimeout");
+}
+
 async function collectParallelTarget(group: ParallelGroup, target: ParallelTarget): Promise<void> {
   if (target.status !== "running" || !target.sessionId) return;
   const sessionId = target.sessionId;
   if (!(await waitForParallelSettle(group.backend, sessionId))) {
-    target.status = "unknown";
-    target.error = t("state.parallelTargetTimeout");
+    // The backend may still be chewing on the run; stop it so a retry does
+    // not stack a second task on top of the first.
+    if (!target.stopping) {
+      try {
+        await window.awefork.abort(group.backend, sessionId);
+      } catch {
+        /* The run is already being given up on; a failed cancel changes nothing. */
+      }
+    }
+    finishStoppedTarget(group, target);
     return;
   }
   // Idle can precede the backend's final message snapshot briefly.
@@ -4850,6 +4875,14 @@ async function collectParallelTarget(group: ParallelGroup, target: ParallelTarge
       const messages = await window.awefork.messages(group.backend, sessionId);
       const result = parallelReply(messages, group.prompt, target.baselineMessageIds);
       if (result.status !== "unknown" || attempt === 2) {
+        // A user-stopped run usually settles without a completed frame, which
+        // would otherwise read as an unexplained timeout; say what happened.
+        if (result.status === "unknown" && stoppingRequested.has(`${group.id}:${target.id}`)) {
+          finishStoppedTarget(group, target);
+          return;
+        }
+        stoppingRequested.delete(`${group.id}:${target.id}`);
+        target.stopping = false;
         target.status = result.status;
         target.text = result.text;
         // A silent run can settle through the watchdog with no error of its
@@ -4860,6 +4893,7 @@ async function collectParallelTarget(group: ParallelGroup, target: ParallelTarge
       }
     } catch (error) {
       if (attempt === 2) {
+        target.stopping = false;
         target.status = "unknown";
         target.error = error instanceof Error ? error.message : String(error);
         return;
@@ -4892,26 +4926,47 @@ async function finishParallelRound(group: ParallelGroup): Promise<void> {
   }
 }
 
-/** A retry gets a fresh native fork; an earlier failed attempt is kept intact. */
+/**
+ * A retry gets a fresh native fork; an earlier failed attempt is kept intact.
+ * Allowed while other targets are still running: the round's own collector
+ * skips settled targets, and this retry's finishParallelRound refreshes the
+ * summary once its answer lands, so a late retry never blocks the round.
+ */
 export async function retryParallelTarget(groupId: string, targetId: string): Promise<void> {
   const group = parallelGroups.find((item) => item.id === groupId);
   const target = group?.targets.find((item) => item.id === targetId);
-  if (
-    !group ||
-    !target ||
-    parallelGroupBusy(group) ||
-    !["failed", "unknown"].includes(target.status)
-  )
-    return;
-  // Claim the target before the first await: parallelGroupBusy reads status,
-  // and startParallelTarget only flips it to "preparing" after its own awaits,
-  // so two quick clicks would otherwise both pass the guard above.
+  if (!group || !target || !["failed", "unknown"].includes(target.status)) return;
+  // Claim the target before the first await: startParallelTarget only flips
+  // status to "preparing" after its own awaits, so two quick clicks would
+  // otherwise both pass the guard above.
   target.status = "preparing";
   target.error = null;
   await startParallelTarget(group, target);
   if (group.backend === state.activeBackend) await refreshSessions();
   await collectParallelTarget(group, target);
   await finishParallelRound(group);
+}
+
+/**
+ * Stop one running target's backend run. The round's collector observes the
+ * settle and records the stop as a retryable failure instead of a timeout.
+ */
+export async function stopParallelTarget(groupId: string, targetId: string): Promise<void> {
+  const group = parallelGroups.find((item) => item.id === groupId);
+  const target = group?.targets.find((item) => item.id === targetId);
+  if (!group || !target || target.status !== "running" || !target.sessionId || target.stopping)
+    return;
+  target.stopping = true;
+  stoppingRequested.add(`${groupId}:${targetId}`);
+  try {
+    await window.awefork.abort(group.backend, target.sessionId);
+  } catch (error) {
+    target.stopping = false;
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  // Settle and collection are the round collector's job; if the backend never
+  // reports the abort, the round deadline still bounds the wait.
 }
 
 const parallelSummaryJobs = new Map<string, Promise<void>>();

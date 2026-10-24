@@ -255,6 +255,7 @@
         @compare="compareParallelSources"
         @summarize="summarizeCurrentGroup"
         @retry="retryParallelSource"
+        @stop="stopParallelSource"
       />
       <MessageList
         v-else-if="selectedSession"
@@ -387,6 +388,7 @@ import {
   sendParallelPrompt,
   setPaneModel,
   stepTurn,
+  stopParallelTarget,
   store,
   summarizeParallelGroup,
   tagBg,
@@ -480,6 +482,10 @@ function summarizeCurrentGroup(): void {
 function retryParallelSource(targetId: string): void {
   const group = currentParallelGroup.value;
   if (group) void retryParallelTarget(group.id, targetId);
+}
+function stopParallelSource(targetId: string): void {
+  const group = currentParallelGroup.value;
+  if (group) void stopParallelTarget(group.id, targetId);
 }
 // a new conversation landed: the fresh session is selected and mounted by now — put the
 // caret in the pane composer so its first prompt starts with a keystroke.

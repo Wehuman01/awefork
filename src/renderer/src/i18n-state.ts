@@ -37,14 +37,6 @@ export const dict: Record<string, Entry> = {
     zh: "这个会话上一轮多模型发送还没有结束，稍后再试。",
     en: "A parallel round from this session is still running. Try again once it settles.",
   },
-  "state.parallelForkFailed": {
-    zh: "无法为所选模型创建回答分支。",
-    en: "Could not create answer branches for the selected models.",
-  },
-  "state.parallelPartialFailure": {
-    zh: "{n} 个回答未能启动；已继续汇总成功的回答。",
-    en: "{n} replies could not start; summarizing the replies that did.",
-  },
   "state.parallelNoReplies": {
     zh: "没有收到可汇总的回答。",
     en: "No usable replies were received to summarize.",
@@ -56,6 +48,10 @@ export const dict: Record<string, Entry> = {
   "state.parallelTargetTimeout": {
     zh: "这个模型长时间没有回报结果，可能后端已断开。可以单独重试。",
     en: "This model never reported back — the backend may have dropped. Retry it on its own.",
+  },
+  "state.parallelTargetStopped": {
+    zh: "这个模型的回答已手动停止。可以单独重试。",
+    en: "This model's answer was stopped by hand. Retry it on its own.",
   },
   "state.parallelSummaryTimeout": {
     zh: "汇总长时间没有完成，可能后端已断开。回答已保留，可重新汇总。",

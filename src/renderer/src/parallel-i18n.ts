@@ -71,6 +71,7 @@ const dictionary = {
   openBranch: { zh: "打开分支", en: "Open branch" },
   openSummary: { zh: "打开汇总分支", en: "Open summary branch" },
   retry: { zh: "重试", en: "Retry" },
+  stop: { zh: "停止", en: "Stop" },
   defaultVariant: { zh: "默认参数", en: "Default settings" },
   selectCompare: { zh: "选择 {model} 以对比", en: "Select {model} for comparison" },
   compareHint: { zh: "选两份已完成的回答并排对比", en: "Select two completed answers to compare" },

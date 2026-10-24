@@ -565,8 +565,7 @@ describe("parallel reading groups", () => {
     await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
     const group = required(h.state.parallelGroups[0]);
     const failed = required(group.targets[1]);
-    // The round must be idle before a retry is allowed at all; settle the
-    // healthy branch and its summary first.
+    // Settle the healthy branch and its summary first for a clean baseline.
     await settle(h, "fork-1", "回答甲");
     await settle(h, required(group.summarySessionId), "第一版汇总");
     h.promptFailures.clear();
@@ -580,5 +579,52 @@ describe("parallel reading groups", () => {
     expect(h.prompt).toHaveBeenCalledWith("codex", failed.sessionId, QUESTION, MODELS[1], []);
     // Claimed synchronously, so a third click cannot slip in either.
     expect(failed.status).not.toBe("failed");
+  });
+
+  it("stops a running target from the panel and records it as a retryable stop", async () => {
+    const h = await bootState();
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const stopped = required(group.targets[0]);
+    expect(stopped.status).toBe("running");
+    // Settle the healthy branch first: the long advance below must not let
+    // the watchdog settle THIS target's run before the stop is recorded.
+    await settle(h, "fork-2", "未受影响的回答");
+    await h.state.stopParallelTarget(group.id, stopped.id);
+    expect(stopped.stopping).toBe(true);
+    // The abort itself settles nothing in this harness; the deadline is what
+    // ends the wait, and the stop must read as a stop — not a timeout.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(stopped.status).toBe("failed");
+    expect(stopped.stopping).toBeFalsy();
+    expect(stopped.error).toContain("重试");
+    expect(required(group.targets[1]).status).toBe("done");
+    await settle(h, required(group.summarySessionId), "只有一份回答的汇总");
+    expect(group.summaryText).toBe("只有一份回答的汇总");
+  });
+
+  it("retries a failed target while the round's other targets are still running", async () => {
+    const h = await bootState();
+    h.promptFailures.add(h.key("codex", "fork-2"));
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const failed = required(group.targets[1]);
+    expect(failed.status).toBe("failed");
+    expect(required(group.targets[0]).status).toBe("running");
+    h.promptFailures.clear();
+    h.prompt.mockClear();
+    const retry = h.state.retryParallelTarget(group.id, failed.id);
+    await vi.advanceTimersByTimeAsync(0);
+    // A fresh fork took the retry while the round was still busy.
+    expect(h.prompt).toHaveBeenCalledTimes(1);
+    expect(h.prompt).toHaveBeenCalledWith("codex", "fork-3", QUESTION, MODELS[1], []);
+    // Retry's answer first, then the healthy branch: both sources are done by
+    // the time either finishParallelRound proceeds, so exactly one summary is
+    // created instead of an early one-source summary that would be replaced.
+    await settle(h, "fork-3", "重试后的回答");
+    await settle(h, "fork-1", "第一份回答");
+    await settle(h, required(group.summarySessionId), "两份回答的汇总");
+    await retry;
+    expect(group.summarySourceIds).toEqual(group.targets.map((target) => target.id));
   });
 });
