@@ -26,11 +26,36 @@ import type {
   TextPreview,
 } from "../../shared/file-types";
 import { t } from "./i18n";
+import { renderPdfPages } from "./pdf-preview";
 import { settings } from "./settings";
+
+/** The main process' own ceiling for a whole-document read; kept in sync here. */
+const MAX_PDF_BYTES = 64 * 1024 * 1024;
+
+/** Lowercased extension, or "" for a dotless name. */
+function extensionOf(path: string): string {
+  const dot = path.lastIndexOf(".");
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return dot > slash ? path.slice(dot).toLowerCase() : "";
+}
+
+/** Decode a data URL's base64 payload; null when the shape is not one. */
+function dataUrlToBytes(dataUrl: string): Uint8Array | null {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  try {
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
 
 export type FileView = "list" | "grid";
 
-export type PreviewStatus = "loading" | "text" | "image" | "error";
+export type PreviewStatus = "loading" | "text" | "image" | "pdf" | "error";
 
 export interface PreviewState {
   path: string;
@@ -40,6 +65,10 @@ export interface PreviewState {
   dataUrl?: string;
   bytes?: number;
   error?: FileError;
+  /** PDF: one rendered page image per entry, plus the page on screen. */
+  pages?: string[];
+  page?: number;
+  pageCount?: number;
 }
 
 /** One browsing position: where it is, how it got there, and what it shows. */
@@ -67,6 +96,13 @@ export interface FileTab {
   preview: PreviewState | null;
   /** Preview pane width in px; the split drag writes it. */
   previewWidth: number;
+  /**
+   * Reading mode: the listing has folded away and the preview owns the
+   * middle column. Per tab, and deliberately NOT reset when the preview
+   * changes — stepping to the next file with ↑/↓ keeps the reader reading.
+   * It dies with the preview (clearPreview) or an explicit exit.
+   */
+  reading: boolean;
   /** Listing scroll offset, restored when the tab comes back. */
   scrollTop: number;
   /** Per-tab request sequence numbers, so a tab's own responses stay its own. */
@@ -153,6 +189,7 @@ function makeTab(dir: string | null): FileTab {
     quickError: null,
     preview: null,
     previewWidth: DEFAULT_PREVIEW_WIDTH,
+    reading: false,
     scrollTop: 0,
     previewSeq: 0,
     listSeq: 0,
@@ -485,6 +522,35 @@ export function clearPreview(): void {
   if (!tab) return;
   tab.previewSeq += 1;
   tab.preview = null;
+  // Nothing left to read: the folded-away listing comes back.
+  tab.reading = false;
+}
+
+/**
+ * Reading mode folds the listing away and lets the preview own the middle
+ * column. Entering needs a preview to read; leaving is always allowed (Esc,
+ * the return bar, the ⤢ toggle). Switching files does not leave — the flag
+ * lives on the tab, not on the preview object.
+ */
+export function enterReading(): void {
+  const tab = activeTab();
+  if (!tab || tab.preview === null) return;
+  tab.reading = true;
+}
+
+export function exitReading(): void {
+  const tab = activeTab();
+  if (tab) tab.reading = false;
+}
+
+export function toggleReading(): void {
+  const tab = activeTab();
+  if (!tab) return;
+  if (tab.reading) {
+    tab.reading = false;
+    return;
+  }
+  if (tab.preview !== null) tab.reading = true;
 }
 
 export function setFilter(value: string): void {
@@ -546,6 +612,7 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     if (tab.error?.code === "not-a-directory") {
       tab.error = null;
       await previewOnTab(tab, entry);
+      tab.reading = true;
     }
     return;
   }
@@ -559,7 +626,10 @@ export async function openEntry(entry: FileEntry): Promise<void> {
       return;
     }
   }
+  // A double-click is a request to read, not just to peek: the listing
+  // folds away and the preview owns the middle column.
   await previewOnTab(tab, entry);
+  tab.reading = true;
 }
 
 /**
@@ -606,6 +676,39 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
   // "binary" from the text fallback below would misname the problem.
   if (image && !image.ok && image.error.code === "too-large") {
     tab.preview = { path: entry.path, status: "error", error: image.error };
+    return;
+  }
+  // A PDF is rasterized in the renderer, so the document's bytes come over
+  // once and the pages are produced there. The document cap lives in the
+  // main process; this branch only decides the file is one.
+  if (extensionOf(entry.path) === ".pdf") {
+    const doc = await window.awefork
+      .readFileAsDataUrl(entry.path, "application/pdf", MAX_PDF_BYTES)
+      .catch(() => null);
+    if (seq !== tab.previewSeq) return;
+    const read = doc?.ok ? doc : null;
+    const bytes = read ? dataUrlToBytes(read.value.dataUrl) : null;
+    const rendered = bytes ? await renderPdfPages(bytes) : null;
+    if (seq !== tab.previewSeq) return;
+    if (rendered && rendered.pages.length > 0) {
+      tab.preview = {
+        path: entry.path,
+        status: "pdf",
+        pages: rendered.pages,
+        page: 0,
+        pageCount: rendered.pageCount,
+        bytes: read?.value.bytes,
+      };
+      return;
+    }
+    // Unreadable, over the cap, or nothing rendered. A PDF must not fall
+    // through to the text reader — its bytes would preview as noise — so it
+    // lands on the error pane, which offers the system open.
+    tab.preview = {
+      path: entry.path,
+      status: "error",
+      error: doc && !doc.ok ? doc.error : { code: "binary" },
+    };
     return;
   }
   const text = await window.awefork

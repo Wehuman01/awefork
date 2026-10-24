@@ -28,6 +28,8 @@ import { MAX_ENTRIES } from "../shared/file-types.js";
 export const MAX_PREVIEW_BYTES = 512 * 1024;
 /** Image previews come back as data URLs, so they get their own smaller cap. */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** PDFs are parsed in the renderer, so the whole document crosses IPC once. */
+export const MAX_PDF_BYTES = 64 * 1024 * 1024;
 /** Quick search visits at most this many entries before giving up. */
 const SEARCH_BUDGET = 50_000;
 
@@ -236,6 +238,36 @@ export async function readImagePreview(
   const cap = Math.min(Math.max(Math.trunc(maxBytes) || MAX_IMAGE_BYTES, 1), MAX_IMAGE_BYTES);
   try {
     // stat (not lstat) so symlinked images resolve to the file they name.
+    const stat = await fs.stat(file);
+    if (stat.isDirectory()) return fail({ code: "not-a-directory" });
+    if (stat.size > cap) return fail({ code: "too-large" });
+    const bytes = await fs.readFile(file);
+    return ok({
+      path: file,
+      dataUrl: `data:${mime};base64,${bytes.toString("base64")}`,
+      bytes: stat.size,
+    });
+  } catch (error) {
+    return fail(fsError(error));
+  }
+}
+
+/**
+ * A bounded read of a whole file, as a data URL, for the renderer-side PDF
+ * renderer. PDFs are parsed in the renderer (pdfjs needs a DOM canvas to
+ * rasterize), so this hands over the bytes rather than a rendered page —
+ * still read-only, still capped, still answering with an FsResult.
+ */
+export async function readFileAsDataUrl(
+  target: string,
+  mime: string,
+  maxBytes: number = MAX_PDF_BYTES,
+): Promise<FsResult<{ path: string; dataUrl: string; bytes: number }>> {
+  const file = usablePath(target);
+  if (!file) return fail({ code: "unknown", message: "not an absolute path" });
+  const cap = Math.min(Math.max(Math.trunc(maxBytes) || MAX_PDF_BYTES, 1), MAX_PDF_BYTES);
+  try {
+    // stat (not lstat) so a symlinked document resolves to what it names.
     const stat = await fs.stat(file);
     if (stat.isDirectory()) return fail({ code: "not-a-directory" });
     if (stat.size > cap) return fail({ code: "too-large" });

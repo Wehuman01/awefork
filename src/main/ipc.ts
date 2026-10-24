@@ -67,6 +67,7 @@ import {
 import { convertDocumentToText } from "./document-convert.js";
 import {
   listDirectory,
+  readFileAsDataUrl,
   readImagePreview,
   readTextPreview,
   relativeToRoot,
@@ -723,6 +724,14 @@ export function registerIpc(
     "awefork:readImagePreview",
     (_event: IpcMainInvokeEvent, target: string, maxBytes?: number) =>
       readImagePreview(target, maxBytes),
+  );
+
+  // Whole-file bytes for the renderer's PDF rasterizer. The mime comes from
+  // the caller because only the renderer knows which parser will read it.
+  ipcMain.handle(
+    "awefork:readFileAsDataUrl",
+    (_event: IpcMainInvokeEvent, target: string, mime: string, maxBytes?: number) =>
+      readFileAsDataUrl(target, mime, maxBytes),
   );
 
   ipcMain.handle(

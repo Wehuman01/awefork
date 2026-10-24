@@ -266,6 +266,16 @@ export interface AweforkApi {
   statFile(target: string): Promise<FsResult<FileStat>>;
   readTextPreview(target: string, maxBytes?: number): Promise<FsResult<TextPreview>>;
   readImagePreview(target: string, maxBytes?: number): Promise<FsResult<ImagePreview>>;
+  /**
+   * Whole-file bytes as a data URL, for the renderer's PDF rasterizer. The
+   * mime is supplied by the caller because only the renderer knows which
+   * parser will read the result.
+   */
+  readFileAsDataUrl(
+    target: string,
+    mime: string,
+    maxBytes?: number,
+  ): Promise<FsResult<{ path: string; dataUrl: string; bytes: number }>>;
   /** Project-relative path; value null = no relative path exists (cross-drive). */
   relativeToRoot(root: string, target: string): Promise<FsResult<string | null>>;
   searchFiles(root: string, query: string, options?: SearchOptions): Promise<FsResult<FileEntry[]>>;
