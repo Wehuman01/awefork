@@ -33,6 +33,15 @@ export interface CodexRpc {
   ) => void;
 }
 
+/**
+ * One turn's model settings as the session's rollout recorded them at the
+ * turn's start. `effort` is the reasoning variant shown beside the model.
+ */
+export interface CodexTurnSettings {
+  model: string | null;
+  effort: string | null;
+}
+
 export interface CodexAdapterOptions {
   client: CodexRpc;
   /** Path to the lineage sidecar file (per-backend). */
@@ -41,6 +50,15 @@ export interface CodexAdapterOptions {
   cliVersion?: string | null;
   /** One-time auth banner (codex installed but not logged in). */
   authMessage?: string | null;
+  /**
+   * Per-turn model settings for a session, keyed by turn id — what each turn
+   * actually ran with, which only the rollout records. The app-server exposes
+   * the model at thread level alone (`thread/read` carries the CURRENT
+   * settings), so without this a mid-session switch relabels every earlier
+   * turn of the session with the new model. Turns with no entry fall back to
+   * the thread's settings.
+   */
+  turnContexts?: (sessionId: string) => Promise<Record<string, CodexTurnSettings>>;
 }
 
 interface CodexThread {
@@ -353,11 +371,18 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return typeof window === "number" && window > 0 ? window : null;
   }
 
-  function mapTurn(turn: CodexTurn, thread: CodexThread | null): ChatMessage[] {
+  function mapTurn(
+    turn: CodexTurn,
+    thread: CodexThread | null,
+    turnSettings?: CodexTurnSettings,
+  ): ChatMessage[] {
     const items = turn.items ?? [];
     const startedAt = secToMs(turn.startedAt) ?? Date.now();
-    const modelId = thread?.model ?? null;
-    const variant = thread?.reasoningEffort ?? null;
+    // The turn's own recorded settings win: the thread carries only the latest
+    // ones, so trusting it here would rewrite every earlier turn's model on
+    // each switch.
+    const modelId = turnSettings?.model ?? thread?.model ?? null;
+    const variant = turnSettings?.effort ?? thread?.reasoningEffort ?? null;
     const rows: ChatMessage[] = [];
 
     const userItem = items.find((i) => i.type === "userMessage");
@@ -544,7 +569,8 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     async messages(sessionId) {
       const thread = await readThread(sessionId);
       const turns = await listTurns(sessionId);
-      const rows = turns.flatMap((turn) => mapTurn(turn, thread));
+      const turnSettings = (await options.turnContexts?.(sessionId)) ?? {};
+      const rows = turns.flatMap((turn) => mapTurn(turn, thread, turnSettings[turn.id]));
       // Fold the live usage frame back onto the turn it arrived on: without
       // this the meter goes blank after every reload, because the turn list
       // itself carries no usage on 0.163.
