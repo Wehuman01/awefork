@@ -253,7 +253,6 @@ import {
   archivedSessionViews,
   checkForUpdates,
   installBackend,
-  refreshBackendList,
   store,
   switchBackend,
   toggleFavoriteModel,
@@ -435,7 +434,7 @@ function text(
 
 // ── section builders ────────────────────────────────────────────────
 
-/** Backend rows: one per probed CLI, plus the compat notice and a re-probe. */
+/** Backend rows: one per probed CLI, plus the two backend-wide toggles. */
 function backendSection(): SectionDef {
   const active = store.activeBackend;
   const rows: Row[] = store.backendList.map((entry) => {
@@ -513,13 +512,6 @@ function backendSection(): SectionDef {
         quitKeepAlive.value = next;
         void window.awefork?.setQuitKeepAlive(next);
       },
-    ),
-    button(
-      "backend.reprobe",
-      t("settings.backend"),
-      t("settings.backendSwitchNote"),
-      t("settings.manage"),
-      () => void refreshBackendList(),
     ),
   );
   return {
