@@ -8661,6 +8661,14 @@ html[data-theme="dark"] ::selection {
   cursor: copy;
 }
 
+/* The browser is one whole-view drop target — a drop anywhere in it opens
+   the path in its own new tab — so the ring sits inside the view, which
+   fills the middle column to its edges. */
+.fb.drop-on {
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+}
+
 /* ── dark mode ──────────────────────────────────────────────────────── */
 
 html[data-theme="dark"] .fb {

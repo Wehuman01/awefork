@@ -143,6 +143,19 @@ function activeTab(): FileTab | null {
 }
 
 /**
+ * The reactive row for a tab that was just created and activated. The object
+ * pushed into the store is still raw: navigating it directly mutates outside
+ * Vue's tracking, and the view then keeps rendering whatever the last tracked
+ * change left behind — a fresh tab stuck parked, or stuck on "loading", no
+ * matter where its navigation actually landed. Reading the row back through
+ * the store is what makes the navigation's own writes (browsing, loading,
+ * error) re-render.
+ */
+function reactiveRow(created: FileTab): FileTab {
+  return activeTab() ?? created;
+}
+
+/**
  * The tab an entry jump binds to. A dock click or a context-menu preview can
  * arrive before the browser view has mounted and called ensureBrowsing, so a
  * missing tab is created rather than dropping the click. Callers bind once
@@ -156,7 +169,7 @@ function requireTab(): FileTab {
   const tab = makeTab(null);
   files.tabs.push(tab);
   files.activeTabId = tab.id;
-  return tab;
+  return reactiveRow(tab);
 }
 
 /**
@@ -266,10 +279,10 @@ export async function openFileTab(dir?: string): Promise<void> {
   await initFiles();
   const active = activeTab();
   const target = dir ?? active?.browsing ?? files.homePath ?? "/";
-  const tab = makeTab(null);
-  files.tabs.push(tab);
-  files.activeTabId = tab.id;
-  await browseTabTo(tab, target);
+  const created = makeTab(null);
+  files.tabs.push(created);
+  files.activeTabId = created.id;
+  await browseTabTo(reactiveRow(created), target);
 }
 
 /** Open `dir` in its own tab unless a tab already shows it. */
@@ -280,6 +293,37 @@ export async function openFileTabFor(dir: string): Promise<void> {
     return;
   }
   await openFileTab(dir);
+}
+
+/**
+ * Open dropped paths, one new tab each, in drop order — the file browser's
+ * landing for a path dragged out of the sidebar (or in from the Finder).
+ *
+ * A directory becomes a tab position, reusing a tab that already shows it
+ * (the rule the context menu's "open in new tab" follows: browsing the same
+ * directory twice has nothing to say). A file always gets a fresh tab of its
+ * parent directory with the file previewed — the parent is only where the
+ * file lives, and a drop is a request not to disturb what is on screen.
+ *
+ * A stat decides which; a path that is neither (vanished between the drag
+ * and the drop) opens as a directory anyway and lands on its own tab's
+ * not-found error, which carries a breadcrumb the user can correct.
+ * Identical paths open once; the last path ends up the active tab.
+ */
+export async function openPathsInNewTabs(paths: readonly string[]): Promise<void> {
+  for (const path of [...new Set(paths)]) {
+    const stat = await window.awefork.statFile(path).catch(() => null);
+    if (stat?.ok && stat.value.exists && !stat.value.isDir) {
+      const parent = parentOf(path);
+      if (parent !== null) await openFileTab(parent);
+      // previewEntry binds to the tab that is active now — the one just
+      // opened — and its parent landing is already there, so the file is
+      // previewed without a second navigation.
+      await previewEntry(entryFromPath(path));
+      continue;
+    }
+    await openFileTabFor(path);
+  }
 }
 
 export async function activateFileTab(tabId: string): Promise<void> {
@@ -308,7 +352,7 @@ export async function closeFileTab(tabId: string): Promise<void> {
     const tab = makeTab(null);
     files.tabs.push(tab);
     files.activeTabId = tab.id;
-    await browseTabTo(tab, files.homePath ?? "/");
+    await browseTabTo(reactiveRow(tab), files.homePath ?? "/");
     return;
   }
   if (files.activeTabId === tabId) {

@@ -1,5 +1,12 @@
 <template>
-  <div v-if="tab" class="fb">
+  <div
+    v-if="tab"
+    class="fb"
+    :class="{ 'drop-on': pathDragOver }"
+    @dragover="onPathDragOver"
+    @dragleave="onPathDragLeave"
+    @drop="onPathDrop"
+  >
     <div class="fb-tabs" role="tablist" :aria-label="t('files.tabsLabel')">
       <button
         v-for="entry in files.tabs"
@@ -319,10 +326,13 @@ import {
   goForward,
   goToPath,
   goUp,
+  isPathDrag,
   nestedListingRows,
   openEntry,
   openFileTab,
+  openPathsInNewTabs,
   quickSearch,
+  readPathDrop,
   refresh,
   revealEntry,
   selectOrPreviewEntry,
@@ -449,6 +459,46 @@ function startSplitDrag(event: MouseEvent): void {
 /** Middle-click closes, like the canvas tabs. */
 function onTabAuxClick(tabId: string, event: MouseEvent): void {
   if (event.button === 1) void closeFileTab(tabId);
+}
+
+// ── path drops ────────────────────────────────────────────────────────
+// The whole browser is one drop target: a path dragged out of the sidebar
+// (or in from the Finder) opens in its own new tab. The middle-column tab
+// strip already switches to this view mid-drag, so the gesture is "drag,
+// hover the 文件 tab, drop anywhere here".
+
+const pathDragOver = ref(false);
+
+function onPathDragOver(event: DragEvent): void {
+  if (!isPathDrag(event)) return;
+  // preventDefault is what makes this element a drop target at all.
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  pathDragOver.value = true;
+}
+
+function onPathDragLeave(event: DragEvent): void {
+  // Leaving for a child (a row, the preview) is not leaving the browser.
+  const related = event.relatedTarget as Node | null;
+  const root = event.currentTarget as HTMLElement | null;
+  if (related && root?.contains(related)) return;
+  pathDragOver.value = false;
+}
+
+async function onPathDrop(event: DragEvent): Promise<void> {
+  pathDragOver.value = false;
+  const drop = readPathDrop(event);
+  if (!drop) return;
+  // Declared a drop target in dragover; without this the browser default
+  // (open the file) would navigate the renderer away.
+  event.preventDefault();
+  if (drop.paths.length === 0) {
+    // Files arrived but the OS would not name them — say so, and never
+    // invent a path or open a tab on nothing.
+    flashNotice(t("files.dropNoPath"));
+    return;
+  }
+  await openPathsInNewTabs(drop.paths);
 }
 
 /** ↑ / ↓ walk the rows and preview the file the focus lands on. */

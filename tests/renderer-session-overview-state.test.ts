@@ -337,6 +337,44 @@ describe("overview rows over the store", () => {
     expect(h.store.overviewRead["opencode:s1"]?.failed).toBe(true);
   });
 
+  it("keeps one revision when main already recorded the result", async () => {
+    // Regression: the settle was folded locally before its IPC and main's
+    // answer was merged by max revision. Whenever main deduped the mint —
+    // another window had already recorded this message, or this window had
+    // observed it earlier — the local copy kept the phantom revision. `seen`
+    // could never reach it, so the row stayed 新结果 in that window until it
+    // restarted, no matter which window the user viewed the result in.
+    const h = await bootState();
+    await h.api.overviewRecordSettle("opencode", "s1", false, "message:opencode:s1:m2");
+    expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(1);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
+
+    await runAndSettle(h, "opencode", "s1");
+
+    expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(1);
+    // Viewing it clears the badge instead of chasing a revision only this
+    // window believes in.
+    await h.state.selectSession("s1");
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("read");
+    expect(h.state.overviewStats.value.unread).toBe(0);
+  });
+
+  it("records the result locally when the ledger write fails", async () => {
+    // The offline path keeps its own fold: an unreachable main process still
+    // shows the badge, and the boot merge carries the revision back later.
+    const h = await bootState();
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    api.overviewRecordSettle = async () => {
+      throw new Error("main gone");
+    };
+
+    await runAndSettle(h, "opencode", "s1");
+
+    expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(1);
+    expect(h.store.overviewRead["opencode:s1"]?.settleId).toBe("message:opencode:s1:m2");
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
+  });
+
   it("calls a silent watchdog timeout unknown instead of minting a result", async () => {
     const h = await bootState();
     h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });

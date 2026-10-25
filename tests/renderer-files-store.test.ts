@@ -809,6 +809,68 @@ describe("path drags", () => {
   });
 });
 
+describe("dropped paths", () => {
+  it("opens a dropped directory in its own new tab, the old one untouched", async () => {
+    const h = await bootFiles();
+    await h.mod.browseTo("/home/demo");
+    await h.mod.openPathsInNewTabs(["/a/docs"]);
+
+    expect(h.files.tabs).toHaveLength(2);
+    expect(active(h.mod).browsing).toBe("/a/docs");
+    // The tab the drop interrupted keeps its position — and its history,
+    // which a drop must never write into.
+    expect(h.files.tabs[0].browsing).toBe("/home/demo");
+    expect(h.files.tabs[0].history).toEqual([]);
+  });
+
+  it("opens a dropped file on a new tab of its parent directory, previewed", async () => {
+    const h = await bootFiles();
+    await h.mod.browseTo("/home/demo");
+    await h.mod.openPathsInNewTabs(["/a/readme.md"]);
+
+    expect(h.files.tabs).toHaveLength(2);
+    expect(active(h.mod).browsing).toBe("/a");
+    expect(active(h.mod).selectedPath).toBe("/a/readme.md");
+    expect(active(h.mod).preview?.status).toBe("text");
+    expect(active(h.mod).preview?.text).toBe("text of /a/readme.md");
+    // Reading mode is a double-click's intent; a drop only jumps.
+    expect(active(h.mod).reading).toBe(false);
+  });
+
+  it("focuses a tab that already shows the dropped directory instead of duplicating it", async () => {
+    const h = await bootFiles();
+    await h.mod.openFileTab("/a/docs");
+    await h.mod.openFileTab("/home/demo");
+    await h.mod.openPathsInNewTabs(["/a/docs"]);
+
+    expect(h.files.tabs).toHaveLength(3);
+    expect(h.files.activeTabId).toBe(h.files.tabs[1].id);
+  });
+
+  it("opens several paths in drop order — the last one active, duplicates once", async () => {
+    const h = await bootFiles();
+    await h.mod.openPathsInNewTabs(["/a/docs", "/a/docs", "/a/readme.md"]);
+
+    expect(h.files.tabs.map((tab) => tab.browsing)).toEqual([null, "/a/docs", "/a"]);
+    expect(active(h.mod).selectedPath).toBe("/a/readme.md");
+  });
+
+  it("lands a vanished path on its own tab's not-found error", async () => {
+    const h = await bootFiles({
+      listings: { "/a/gone.md": { ok: false, error: { code: "not-found" } } },
+    });
+    // Consume the default answer first, then queue the vanished one for the
+    // store's own stat call.
+    const probe = await h.api.statFile("/probe");
+    h.api.statFile.mockResolvedValueOnce({ ok: true, value: { ...probe.value, exists: false } });
+    await h.mod.openPathsInNewTabs(["/a/gone.md"]);
+
+    expect(h.files.tabs).toHaveLength(2);
+    expect(active(h.mod).browsing).toBe("/a/gone.md");
+    expect(active(h.mod).error?.code).toBe("not-found");
+  });
+});
+
 describe("sidebar tree", () => {
   it("loads children on first expand and folds on the second", async () => {
     const h = await bootFiles({
