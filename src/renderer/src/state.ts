@@ -1757,17 +1757,31 @@ export async function activateCanvasTab(tabId: string): Promise<void> {
 /**
  * Open a story in a tab: dedupes on the story root (one story, one tab —
  * activating an existing tab just moves its selection), else spawns a new
- * tab next to the active one.
+ * tab next to the active one. `markSeen: false` keeps the landing quiet for
+ * callers that pin their own read watermark (the overview's jump).
  */
-export async function openCanvasTab(sessionId: string): Promise<void> {
+export async function openCanvasTab(
+  sessionId: string,
+  options: { markSeen?: boolean } = {},
+): Promise<void> {
   syncActiveTab();
   const root = storyRootOf(visibleSessions.value, state.lineage, sessionId);
   const existing = root ? state.canvasTabs.find((t) => t.rootId === root) : undefined;
   if (existing) {
+    // One story, one tab: activating it moves the selection, never spawns a
+    // second tab for the same story.
     await activateCanvasTab(existing.id);
     if (existing.id === state.activeCanvasTabId && state.selectedId !== sessionId) {
-      await selectSession(sessionId, { focus: true });
+      await selectSession(sessionId, { focus: true, markSeen: options.markSeen });
     }
+    return;
+  }
+  // A blank active tab holds nothing to preserve: landing in it keeps an empty
+  // tab out of the strip (a freshly entered workspace, a tab the user just
+  // opened) instead of parking one beside the story.
+  const active = activeCanvasTab.value;
+  if (active && active.selectedId === null) {
+    await selectSession(sessionId, { focus: true, markSeen: options.markSeen });
     return;
   }
   canvasTabSeq += 1;
@@ -1783,7 +1797,7 @@ export async function openCanvasTab(sessionId: string): Promise<void> {
   state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at + 1, 0, tab);
   state.activeCanvasTabId = tab.id;
   state.canvasTabRestoreRequest = { tabId: tab.id, nonce: Date.now() };
-  await selectSession(sessionId, { focus: true });
+  await selectSession(sessionId, { focus: true, markSeen: options.markSeen });
 }
 
 /**
@@ -6960,11 +6974,14 @@ export function overviewPendingAsk(
  * Navigate to one overview row: its agent's workspace, the session, and the
  * latest turn. Follows the documented order — fix the target, switch and verify
  * the switch really landed (switchBackend reports failures through actionError
- * instead of throwing), re-confirm the session is visible, then select. The
- * panel closes and the result is marked seen only once the selection and its
- * messages are actually in place; otherwise it stays open with a retryable
- * error and the unread watermark untouched. A failed cross-agent jump returns
- * to its original workspace unless a newer navigation has taken over.
+ * instead of throwing), re-confirm the session is visible, then land. The
+ * landing follows the tab preference: with sessionsInNewTab an already-open
+ * story is reached by switching to the tab that owns it and a story with no tab
+ * opens a fresh one, without it the active tab switches in place. The panel
+ * closes and the result is marked seen only once the selection and its messages
+ * are actually in place; otherwise it stays open with a retryable error and the
+ * unread watermark untouched. A failed cross-agent jump returns to its original
+ * workspace unless a newer navigation has taken over.
  */
 export async function jumpToOverviewSession(
   backend: BackendId,
@@ -7020,10 +7037,17 @@ export async function jumpToOverviewSession(
       return false;
     }
     const revision = state.overviewRead[overviewKey(backend, sessionId)]?.revision ?? 0;
-    // The overview pins the revision it was showing, so selectSession must not
-    // advance the watermark on its own: a result that landed while the
-    // messages were loading has to stay unread.
-    await selectSession(sessionId, { markSeen: false });
+    // Where the jump lands follows the tab preference: sessionsInNewTab routes
+    // through a tab — a story already open just switches to the tab that owns
+    // it, a new one gets a fresh tab — while the preference off keeps the plain
+    // in-tab switch. Either way the overview pins the revision it was showing,
+    // so the landing must not advance the watermark on its own: a result that
+    // landed while the messages were loading has to stay unread.
+    if (settings.canvas.sessionsInNewTab) {
+      await openCanvasTab(sessionId, { markSeen: false });
+    } else {
+      await selectSession(sessionId, { markSeen: false });
+    }
     if (!navigationStillCurrent()) return false;
     if (state.selectedId !== sessionId) {
       state.overview.error = t("overview.jumpMissing");

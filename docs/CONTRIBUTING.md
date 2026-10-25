@@ -134,6 +134,8 @@ The overview uses idle as the baseline for history with no observed run. Unknown
 
 The main process owns `overview-read.json`, including result revisions, seen watermarks, and unfinished-run markers. Only an observed ending creates a result. A successful jump marks only the revision shown when the target starts loading. A failed cross-agent jump restores the original workspace and keeps the panel and unread results; a newer workspace navigation takes precedence. A failed return is shown in the panel.
 
+Where a jump lands follows the "open sessions in new tabs" preference, the same rule a list click uses. With it on, a story that already has a tab is reached by switching to that tab — one story never owns two — a story with no tab opens a fresh one, and a blank active tab is reused rather than left beside the new one. With it off the jump switches the active tab in place. A jump to the session already on screen switches nothing and reloads nothing; the panel still closes and the latest turn is still focused.
+
 ### Adding an agent backend
 
 Implement `AgentAdapter` in `src/shared/`, add its ID and capability row in

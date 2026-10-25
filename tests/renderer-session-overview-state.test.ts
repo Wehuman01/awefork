@@ -207,6 +207,37 @@ function expectFailedNavigation(
   expect(original.markSeen).not.toHaveBeenCalled();
 }
 
+/**
+ * Seed the tab preference before the state module boots: settings are read
+ * from storage at import time, so the flag has to be in place before
+ * bootState imports the module under test.
+ */
+function seedTabPreference(sessionsInNewTab: boolean): void {
+  (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
+    "awefork:settings",
+    JSON.stringify({ labs: { sessionOverview: true }, canvas: { sessionsInNewTab } }),
+  );
+}
+
+/** Two unrelated stories in the active backend, so a jump has somewhere to go. */
+async function bootTwoStories(sessionsInNewTab: boolean) {
+  seedTabPreference(sessionsInNewTab);
+  const h = await bootState();
+  const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+  const sessions = api.sessions;
+  api.sessions = async (backend: BackendId) =>
+    backend === "opencode"
+      ? {
+          sessions: [OPENCODE_S1, { ...OPENCODE_S1, id: "s2", title: "另一条故事" }],
+          lineage: {},
+        }
+      : sessions(backend);
+  await h.state.refreshSessions();
+  await h.state.selectSession("s1");
+  await vi.advanceTimersByTimeAsync(0);
+  return h;
+}
+
 /** started → idle, flushing the async finishRun chain. */
 async function runAndSettle(
   h: Awaited<ReturnType<typeof bootState>>,
@@ -463,6 +494,71 @@ describe("overview navigation", () => {
     expect(h.store.turnJumpRequest?.nodeId).toBe(h.store.selectedTurnId);
     expect(h.store.overview.open).toBe(false);
     expect(rowOf(h, "codex", "c1")?.status).toBe("read");
+    // The freshly entered workspace owns one blank tab, and the jump lands in
+    // it: opening a second tab there would only leave an empty one behind.
+    expect(h.store.canvasTabs.length).toBe(1);
+  });
+
+  it("opens the target's story in a new tab when the tab preference is on", async () => {
+    const h = await bootTwoStories(true);
+    expect(h.store.canvasTabs.length).toBe(1);
+
+    const landed = await h.state.jumpToOverviewSession("opencode", "s2");
+
+    expect(landed).toBe(true);
+    expect(h.store.selectedId).toBe("s2");
+    expect(h.store.overview.open).toBe(false);
+    // The story the user was reading stays parked in its own tab.
+    expect(h.store.canvasTabs.length).toBe(2);
+    expect(h.store.canvasTabs[0]?.selectedId).toBe("s1");
+    expect(h.store.canvasTabs[1]?.selectedId).toBe("s2");
+  });
+
+  it("switches in place when the tab preference is off", async () => {
+    const h = await bootTwoStories(false);
+    expect(h.store.canvasTabs.length).toBe(1);
+
+    const landed = await h.state.jumpToOverviewSession("opencode", "s2");
+
+    expect(landed).toBe(true);
+    expect(h.store.selectedId).toBe("s2");
+    expect(h.store.overview.open).toBe(false);
+    expect(h.store.canvasTabs.length).toBe(1);
+    expect(h.store.canvasTabs[0]?.selectedId).toBe("s2");
+  });
+
+  it("switches to the tab an already-open story owns instead of duplicating it", async () => {
+    const h = await bootTwoStories(true);
+    await h.state.openCanvasTab("s2");
+    expect(h.store.canvasTabs.length).toBe(2);
+    // Back to the s1 tab, then jump to s2: the jump activates s2's tab.
+    await h.state.activateCanvasTab(h.store.canvasTabs[0]?.id ?? "");
+    expect(h.store.selectedId).toBe("s1");
+
+    const landed = await h.state.jumpToOverviewSession("opencode", "s2");
+
+    expect(landed).toBe(true);
+    expect(h.store.selectedId).toBe("s2");
+    expect(h.store.overview.open).toBe(false);
+    // One story, one tab — the strip never grows a second s2.
+    expect(h.store.canvasTabs.length).toBe(2);
+    expect(h.store.canvasTabs.filter((t) => t.rootId === "s2").length).toBe(1);
+  });
+
+  it("lands quietly when the target is already the session on screen", async () => {
+    const h = await bootTwoStories(true);
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    const messages = vi.fn(api.messages);
+    api.messages = messages;
+
+    const landed = await h.state.jumpToOverviewSession("opencode", "s1");
+
+    expect(landed).toBe(true);
+    expect(h.store.selectedId).toBe("s1");
+    expect(h.store.overview.open).toBe(false);
+    // Already on screen: nothing to switch to, no new tab, no reload.
+    expect(h.store.canvasTabs.length).toBe(1);
+    expect(messages).not.toHaveBeenCalled();
   });
 
   it("keeps the panel and the unread badge when the session is gone", async () => {
@@ -591,12 +687,14 @@ describe("overview navigation", () => {
       h.api.sessions = async (backend) =>
         backend === "pi"
           ? { sessions: [{ ...OPENCODE_S1, id: "p1" }], lineage: {} }
-          : sessions(backend);
+          : backend === "codex"
+            ? { sessions: [CODEX_C1, { ...CODEX_C1, id: "c2" }], lineage: {} }
+            : sessions(backend);
       const messages = h.api.messages;
       const loading = deferred<void>();
       const pending = deferred<ChatMessage[]>();
       h.api.messages = async (backend, sessionId) => {
-        if (backend === "codex" && sessionId === "c1") {
+        if (backend === "codex" && sessionId === "c2") {
           loading.resolve();
           return pending.promise;
         }
@@ -614,7 +712,7 @@ describe("overview navigation", () => {
       });
       h.api.selectBackend = selectBackend;
 
-      const jump = h.state.jumpToOverviewSession("codex", "c1");
+      const jump = h.state.jumpToOverviewSession("codex", "c2");
       await loading.promise;
       const manualSwitch = h.state.switchBackend("pi");
       if (switchPending) await switching.promise;
@@ -654,12 +752,25 @@ describe("overview navigation", () => {
     const h = await bootState();
     h.state.openOverviewPanel();
     await vi.advanceTimersByTimeAsync(0);
+    // A second story, selected, so the jump to s1 really loads its messages
+    // (a jump to the session already on screen switches nothing and reloads
+    // nothing — there is no load to land a result in).
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    const sessions = api.sessions;
+    api.sessions = async (backend: BackendId) =>
+      backend === "opencode"
+        ? {
+            sessions: [OPENCODE_S1, { ...OPENCODE_S1, id: "s2", title: "另一条故事" }],
+            lineage: {},
+          }
+        : sessions(backend);
+    await h.state.refreshSessions();
+    await h.state.selectSession("s2");
     await runAndSettle(h, "opencode", "s1");
     expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
 
     // A second run settles while the jump's message load is in flight; the
     // jump pinned revision 1, so revision 2 has to stay unread.
-    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
     const originalMessages = api.messages;
     api.messages = async (backend: BackendId, sessionId: string) => {
       if (sessionId === "s1") {
