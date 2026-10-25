@@ -22,10 +22,12 @@ import {
   isBackendId,
   resolveStorePath,
 } from "../shared/backend.js";
+import { createClaudeAdapter } from "../shared/claude-adapter.js";
 import { createOpencodeAdapter } from "../shared/opencode-adapter.js";
 import { createPiAdapter } from "../shared/pi-adapter.js";
 import type { AgentAdapter } from "../shared/types.js";
 import { createZcodeAdapter } from "../shared/zcode-adapter.js";
+import { claudeNodeSeams, probeClaude } from "./claude-server.js";
 import { createCodexMultiHomeAdapter } from "./codex-multihome.js";
 import { isCodexInstalled, stopCodexServer } from "./codex-server.js";
 import {
@@ -423,16 +425,27 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
                 subscribeAdapter("zcode", adapter);
                 return adapter;
               })
-            : // pi: browsing reads the session files directly; RPC children
-              // live only while a run is in flight plus a short idle window.
-              Promise.resolve().then(async () => {
-                const adapter = createPiAdapter({
-                  lineagePath: storePaths("pi").lineage,
-                  ...(await piNodeSeams()),
+            : // claude: streaming children are spawned lazily per session;
+              // browsing reads the transcript store directly.
+              backend === "claudecode"
+              ? Promise.resolve().then(async () => {
+                  const adapter = createClaudeAdapter({
+                    lineagePath: storePaths("claudecode").lineage,
+                    ...(await claudeNodeSeams()),
+                  });
+                  subscribeAdapter("claudecode", adapter);
+                  return adapter;
+                })
+              : // pi: browsing reads the session files directly; RPC children
+                // live only while a run is in flight plus a short idle window.
+                Promise.resolve().then(async () => {
+                  const adapter = createPiAdapter({
+                    lineagePath: storePaths("pi").lineage,
+                    ...(await piNodeSeams()),
+                  });
+                  subscribeAdapter("pi", adapter);
+                  return adapter;
                 });
-                subscribeAdapter("pi", adapter);
-                return adapter;
-              });
     // A failed spawn must not be cached as the permanent truth; drop it so
     // the next call retries (matches the lazy re-spawn contract).
     promise.catch(() => adapters.delete(backend));
@@ -446,12 +459,13 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     fileChangesDir: fileChangesRoot,
 
     async listBackends() {
-      const [selected, opencode, codexInstalled, pi, zcode] = await Promise.all([
+      const [selected, opencode, codexInstalled, pi, zcode, claude] = await Promise.all([
         readBackendSelection(settingsPath),
         probeOpencodeCached(),
         isCodexInstalled(),
         probePi(),
         probeZcode(),
+        probeClaude(),
       ]);
       return {
         selected,
@@ -468,6 +482,13 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
             label: BACKEND_LABELS.codex,
             installed: codexInstalled,
             version: null,
+            versionWarning: null,
+          },
+          {
+            id: "claudecode",
+            label: BACKEND_LABELS.claudecode,
+            installed: claude.installed,
+            version: claude.version,
             versionWarning: null,
           },
           {
@@ -497,9 +518,11 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
           ? await isCodexInstalled()
           : backend === "zcode"
             ? (await probeZcode()).installed
-            : backend === "pi"
-              ? (await probePi()).installed
-              : (await reprobeOpencode()).installed;
+            : backend === "claudecode"
+              ? (await probeClaude()).installed
+              : backend === "pi"
+                ? (await probePi()).installed
+                : (await reprobeOpencode()).installed;
       if (!installed) {
         // zcode ships with its desktop app, so its hint is bespoke; opencode
         // can also be run by hand as a server; every other CLI quotes the

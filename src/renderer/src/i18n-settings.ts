@@ -172,6 +172,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "OpenAI 的 Codex CLI。",
     en: "OpenAI's Codex CLI.",
   },
+  "onboard.desc.claudecode": {
+    zh: "Anthropic 的 Claude Code CLI。",
+    en: "Anthropic's Claude Code CLI.",
+  },
   "onboard.desc.pi": {
     zh: "轻量的 pi 编码智能体。",
     en: "The lightweight pi coding agent.",

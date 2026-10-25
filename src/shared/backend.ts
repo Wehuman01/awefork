@@ -6,7 +6,7 @@ import type { AgentEvent } from "./types.js";
  * end (renderer → preload → IPC → registry); the main process never has a
  * "current" mode beyond the persisted selection read at boot.
  */
-export type BackendId = "opencode" | "codex" | "pi" | "zcode";
+export type BackendId = "opencode" | "codex" | "pi" | "zcode" | "claudecode";
 
 /** One entry of awefork:backends — what the top-bar switcher renders. */
 export interface BackendInfo {
@@ -70,10 +70,17 @@ export const BACKEND_LABELS: Record<BackendId, string> = {
   codex: "codex",
   pi: "pi",
   zcode: "zcode",
+  claudecode: "claude code",
 };
 
 export function isBackendId(value: unknown): value is BackendId {
-  return value === "opencode" || value === "codex" || value === "pi" || value === "zcode";
+  return (
+    value === "opencode" ||
+    value === "codex" ||
+    value === "pi" ||
+    value === "zcode" ||
+    value === "claudecode"
+  );
 }
 
 /**
@@ -102,6 +109,7 @@ export const AGENT_PACKAGES: Partial<Record<BackendId, AgentPackage>> = {
     pkg: "@earendil-works/pi-coding-agent",
     legacyPkg: "@mariozechner/pi-coding-agent",
   },
+  claudecode: { pkg: "@anthropic-ai/claude-code" },
 };
 
 /** The npm package for a backend, or null when it has no one-click install. */
@@ -172,6 +180,23 @@ export function backendCapabilities(
         fileChanges: false,
         compress: true,
         exportBranch: false,
+      };
+    case "claudecode":
+      // Claude Code's CLI has no per-session/per-message delete primitive, but
+      // it does rename (a `rename_session` control request persists a
+      // `custom-title` row) and it does fork at a cut point
+      // (`--resume-session-at`). The fork's lineage is awefork's own sidecar,
+      // so a detached export is possible too. Attachments round-trip as base64
+      // blocks in the transcript (images only; documents inline into the
+      // prompt text). Compaction is the /compact slash command. Permission
+      // asks arrive as can_use_tool control frames.
+      return {
+        deleteMessage: false,
+        deleteSession: false,
+        attachments: true,
+        fileChanges: false,
+        compress: true,
+        exportBranch: true,
       };
   }
   const descriptor =

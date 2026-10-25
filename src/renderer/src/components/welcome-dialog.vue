@@ -50,7 +50,9 @@ import { AgentInstallButton } from "./agent-install-button";
 
 // The non-recommended agents worth offering on first run: only the missing,
 // one-click-installable ones — zcode ships with its desktop app, and an
-// installed CLI needs nothing.
+// installed CLI needs nothing. claude code is npm-installable like codex and
+// pi, so it belongs here; excluding it left `onboard.desc.claudecode` with no
+// consumer and hid the one agent whose install button works.
 const others = computed(() =>
   store.backendList.filter(
     (entry) => entry.id !== "opencode" && entry.id !== "zcode" && !entry.installed,
