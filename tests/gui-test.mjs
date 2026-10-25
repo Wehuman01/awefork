@@ -454,6 +454,66 @@ try {
     notice,
   );
 
+  // 4f. The file browser is a drop target too: a path dropped anywhere in
+  //     it opens in its own new tab, and the whole view lights while the
+  //     drag is over it. The demo adapter has no filesystem — its stat
+  //     answers "vanished" — so the drop lands on a fresh tab showing that
+  //     state; what is under test is the wiring (highlight, new tab, the
+  //     dropped path's own tab ending active and rendered).
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".fb"));
+  })()`), 5000, "files tab for the browser drop");
+  const browserTabsBefore = await cdp.evaluate(
+    `document.querySelectorAll(".fb-tab:not(.fb-tab-new)").length`,
+  );
+  const browserDrop = await retry(async () => {
+    const result = await dropOnto(`document.querySelector(".fb")`, [DROP_PATH]);
+    if (!result.ok) throw new Error(result.why);
+    return result;
+  }, 5000, "drop on the file browser");
+  check("dragover highlights the whole browser as a drop target", browserDrop.highlighted === true);
+  const browserTabs = await retry(async () => {
+    const tabs = await cdp.evaluate(`({
+      count: document.querySelectorAll(".fb-tab:not(.fb-tab-new)").length,
+      active: document.querySelector(".fb-tab.on .fb-tab-title")?.textContent ?? "",
+      activeBrowsing: document.querySelector(".fb-tab.on")?.getAttribute("title") ?? "",
+    })`);
+    if (tabs.count !== browserTabsBefore + 1) {
+      throw new Error(`no new tab after the drop: ${JSON.stringify(tabs)}`);
+    }
+    // A tab that renders parked (or stuck loading) is the reactivity slip
+    // this gesture first exposed: the store navigated a raw row.
+    if (tabs.activeBrowsing === "") {
+      throw new Error(`the new tab rendered parked: ${JSON.stringify(tabs)}`);
+    }
+    return tabs;
+  }, 5000, "new browser tab");
+  check(
+    "a dropped path opens its own new tab and becomes the active one",
+    browserTabs.active.includes("interaction-notes.md"),
+    JSON.stringify(browserTabs),
+  );
+
+  // The ＋ button opens a tab through the same path, so it carries the same
+  // regression guard: its new tab must render the position it navigated to.
+  const plusTab = await retry(async () => {
+    await cdp.evaluate(`document.querySelector(".fb-tab-new").click()`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const state = await cdp.evaluate(`({
+      activeBrowsing: document.querySelector(".fb-tab.on")?.getAttribute("title") ?? "",
+      body: document.querySelector(".fb-state")?.textContent ?? "",
+    })`);
+    if (state.activeBrowsing === "") {
+      throw new Error(`the ＋ tab rendered parked: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 5000, "plus tab renders its position");
+  check("the ＋ tab renders the position it navigated to", plusTab.activeBrowsing !== "");
+  await cdp.evaluate(`[...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("画布")).click()`);
+
   // 5. No error toast survived the whole run.
   const errorToast = await cdp.evaluate(`document.querySelector(".toast.banner-error")?.textContent ?? ""`);
   check("no error toast raised", errorToast === "", errorToast);
