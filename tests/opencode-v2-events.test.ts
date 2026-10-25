@@ -393,3 +393,112 @@ describe("v2 refresh and ignore sets", () => {
     expect(toolFrames).toEqual([]);
   });
 });
+
+describe("v2 subagent action feed", () => {
+  /**
+   * The subagent's own tool frames arrive on the same unfiltered /event feed
+   * with the CHILD session's id — verified against a real opencode database
+   * (part.session_id and its message.session_id are both the child). The
+   * translator claims them for the parent's task card, because the frame that
+   * would name the child session (`metadata.sessionId`) only arrives when the
+   * task completes.
+   */
+  const taskCalled = (id = "call_task", agent = "explore"): V2Frame =>
+    frame(
+      "session.tool.called",
+      {
+        sessionID: SESSION,
+        assistantMessageID: MESSAGE,
+        id,
+        name: "task",
+        input: { agent, description: "Inspect", prompt: "Look." },
+      },
+      1000,
+    );
+
+  const childTool = (
+    session: string,
+    tool: string,
+    input: Record<string, unknown> = {},
+    created = 2000,
+  ): V2Frame =>
+    frame(
+      "session.tool.called",
+      { sessionID: session, assistantMessageID: "msg_child", id: `call_${tool}`, name: tool, input },
+      created,
+    );
+
+  const taskSuccess = (childSessionId: string, created = 5000): V2Frame =>
+    frame(
+      "session.tool.success",
+      {
+        sessionID: SESSION,
+        assistantMessageID: MESSAGE,
+        id: "call_task",
+        content: [{ type: "text", text: "Done." }],
+        metadata: { sessionId: childSessionId },
+      },
+      created,
+    );
+
+  const actions = (events: AgentEvent[]) =>
+    events.filter((event) => event.type === "message.subagentAction");
+
+  it("feeds the running task card the subagent's live action", () => {
+    const { translate, events } = setup();
+    translate(taskCalled());
+    translate(childTool("ses_child", "read", { filePath: "auth/router.go" }, 2000));
+    translate(childTool("ses_child", "grep", { pattern: "middleware" }, 3000));
+    const fed = actions(events);
+    expect(fed).toHaveLength(2);
+    expect(fed[0]).toMatchObject({
+      sessionId: SESSION,
+      partId: "call_task",
+      action: "read router.go",
+      toolCount: 1,
+      childSessionId: "ses_child",
+    });
+    expect(fed[1]).toMatchObject({ action: "grep", toolCount: 2 });
+  });
+
+  it("keeps the action on the card when the task completes", () => {
+    const { translate, events } = setup();
+    translate(taskCalled());
+    translate(childTool("ses_child", "read", { filePath: "auth/router.go" }));
+    translate(taskSuccess("ses_child"));
+    const cards = events.filter((event) => event.type === "message.toolCall");
+    expect(cards).toHaveLength(2);
+    expect(cards[1]).toMatchObject({
+      call: { status: "completed", childSessionId: "ses_child", action: "read router.go", toolCount: 1 },
+    });
+  });
+
+  it("ignores a child session that already finished its task", () => {
+    const { translate, events } = setup();
+    translate(taskCalled());
+    translate(taskSuccess("ses_child"));
+    // A late frame from the settled subagent must not feed a new claim.
+    translate(childTool("ses_child", "read", { filePath: "stale.go" }, 6000));
+    expect(actions(events)).toEqual([]);
+  });
+
+  it("does not feed the parent's own tools to the claim", () => {
+    const { translate, events } = setup();
+    translate(taskCalled());
+    translate(childTool(SESSION, "read", { filePath: "mine.go" }));
+    expect(actions(events)).toEqual([]);
+  });
+
+  it("does not feed anything when no task is running", () => {
+    const { translate, events } = setup();
+    translate(childTool("ses_child", "read", { filePath: "orphan.go" }));
+    expect(actions(events)).toEqual([]);
+  });
+
+  it("keeps the command's first line in the action label", () => {
+    const { translate, events } = setup();
+    translate(taskCalled());
+    translate(childTool("ses_child", "bash", { command: "npm test\nnpm run build" }));
+    expect(actions(events)[0]).toMatchObject({ action: "bash npm test" });
+  });
+});

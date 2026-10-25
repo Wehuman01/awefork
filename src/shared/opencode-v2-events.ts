@@ -90,6 +90,25 @@ interface ToolCall {
 }
 
 /**
+ * A subagent the parent dispatched and whose session this translator has
+ * claimed from the feed. `childSessionId` stays null until the completing
+ * frame names it (`metadata.sessionId`), so a running subagent's action is
+ * attributed through this claim rather than a real session link.
+ */
+interface SubagentClaim {
+  /** Parent-side task part id the claim belongs to. */
+  partId: string;
+  /** Session the task ran in. */
+  parentSessionId: string;
+  /** The claimed subagent session, once a frame named it. */
+  childSessionId: string | null;
+  /** Distinct tool names seen in the claimed session, first-seen order. */
+  tools: string[];
+  /** Readable label of the most recent action, for the collapsed card. */
+  action: string | null;
+}
+
+/**
  * Translate one v2 frame. Tool state is kept across frames (a `tool.success`
  * carries no input, so the path learned at `tool.called` is what the recorder
  * needs), pruned per session when its run settles.
@@ -98,6 +117,16 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
   const { descriptor, emit } = deps;
   const { events } = descriptor;
   const toolCalls = new Map<string, ToolCall>();
+  /**
+   * The one subagent claim being fed right now. A parent dispatches tasks one
+   * at a time in practice, and the completing frame is what names the child
+   * session — so a claim is cut at `tool.called` and settled at
+   * `tool.success`/`failed`. Parallel dispatches simply do not get an action
+   * feed: an ambiguous claim shows nothing rather than the wrong agent's work.
+   */
+  let claim: SubagentClaim | null = null;
+  /** Child sessions already fed into a claim, so one session claims once. */
+  const claimedSessions = new Set<string>();
 
   const sessionId = (props: Record<string, unknown>): string | null =>
     firstString(props, events.sessionIdPaths);
@@ -247,8 +276,117 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
     const raw = taskSnapshotOf(props, stateKey, remembered, input, createdAt, frameCreated, tool);
     const call = subagentCallOf(raw, callId, tool, fact);
     if (!call) return null;
-    emit({ type: "message.toolCall", sessionId: id, messageId: message, partId: callId, call });
+    emit({
+      type: "message.toolCall",
+      sessionId: id,
+      messageId: message,
+      partId: callId,
+      call: withClaimedAction(call, stateKey),
+    });
     return call;
+  };
+
+  /**
+   * Stitch the live claim onto a parent-side task card. A completing frame
+   * names the child session, so the claim is settled (and any action already
+   * fed through is kept); a running frame carries whatever the claim saw.
+   */
+  const withClaimedAction = (
+    call: SubagentCall,
+    stateKey: "running" | "completed" | "error",
+  ): SubagentCall => {
+    const active = claim;
+    if (!active || active.partId !== call.partId) {
+      if (stateKey !== "running") settleClaim(call);
+      return call;
+    }
+    if (stateKey === "running") return call;
+    settleClaim(call);
+    return { ...call, action: active.action, toolCount: active.tools.length };
+  };
+
+  /** Close the open claim once its task card settled, keeping its session fed. */
+  const settleClaim = (call: SubagentCall): void => {
+    if (!claim) return;
+    const childSessionId = call.childSessionId;
+    if (childSessionId) {
+      claim.childSessionId = childSessionId;
+      claimedSessions.add(childSessionId);
+    }
+    claim = null;
+  };
+
+  /**
+   * A tool frame from a session that is not the one the parent ran in: the
+   * subagent doing the delegated work. Only the open claim may be fed, and
+   * only while that claim has not settled, so a finished subagent's late
+   * frames cannot be attributed to the next task. Repeated calls from the
+   * same claimed session each update the action.
+   */
+  const feedSubagentAction = (
+    props: Record<string, unknown>,
+    tool: string,
+    input: unknown,
+    frameCreated: number | null,
+  ): void => {
+    const active = claim;
+    if (!active) return;
+    const childSessionId = sessionId(props);
+    if (!childSessionId || childSessionId === active.parentSessionId) return;
+    if (active.childSessionId === null) {
+      if (claimedSessions.has(childSessionId)) return;
+      active.childSessionId = childSessionId;
+    } else if (active.childSessionId !== childSessionId) {
+      return;
+    }
+    if (!active.tools.includes(tool)) active.tools.push(tool);
+    active.action = subagentActionLabel(tool, input);
+    emitClaim(active, frameCreated);
+  };
+
+  /**
+   * Cut a claim for a task the parent just dispatched. Nothing is published
+   * yet — the card already shows its own "running for" line, and an action
+   * event with no action behind it would be noise.
+   */
+  const openClaim = (
+    props: Record<string, unknown>,
+    tool: string,
+    _frameCreated: number | null,
+  ): void => {
+    const parentSessionId = sessionId(props);
+    const partId = typeof props.id === "string" ? props.id : null;
+    if (!parentSessionId || !partId) return;
+    claim = { partId, parentSessionId, childSessionId: null, tools: [], action: tool };
+  };
+
+  /** Publish the claim's current action onto the parent's live card feed. */
+  const emitClaim = (active: SubagentClaim, frameCreated: number | null): void => {
+    emit({
+      type: "message.subagentAction",
+      sessionId: active.parentSessionId,
+      partId: active.partId,
+      action: active.action,
+      toolCount: active.tools.length,
+      childSessionId: active.childSessionId,
+      at: frameCreated,
+    });
+  };
+
+  /**
+   * One readable line for a tool call: the tool name, plus the path or command
+   * it is working on when the frame carries one. Deliberately short — this is
+   * the collapsed card's only status line.
+   */
+  const subagentActionLabel = (tool: string, input: unknown): string => {
+    const command = firstString(input, ["command", "cmd"]);
+    if (typeof command === "string" && command !== "") {
+      const head = command.trim().split("\n")[0] ?? "";
+      return `${tool} ${head.length > 48 ? `${head.slice(0, 48)}…` : head}`;
+    }
+    const filePath = firstString(input, ["filePath", "path", "file_path", "filename"]);
+    if (filePath) return `${tool} ${filePath.split("/").pop() ?? filePath}`;
+    return tool;
   };
 
   const dropSessionTools = (session: string): void => {
@@ -376,18 +514,27 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
           frame.created,
         );
         return;
-      case "session.tool.called":
+      case "session.tool.called": {
+        const tool = typeof props.name === "string" ? props.name : "";
         if (id && deps.onToolCalled) {
           deps.onToolCalled(
             id,
-            typeof props.name === "string" ? props.name : "",
+            tool,
             props.input,
             typeof props.id === "string" ? props.id : null,
           );
         }
+        // A task frame opens the claim; a frame from any other session feeds
+        // the open claim, which is the subagent doing the delegated work.
+        if (tool === descriptor.messages.parts.tool.task?.name) {
+          openClaim(props, tool, frame.created);
+        } else {
+          feedSubagentAction(props, tool, props.input, frame.created);
+        }
         emitTask(props, "running", undefined, frame.created);
         recordTool(props, "running", undefined, frame.created);
         return;
+      }
       case "session.tool.success": {
         const callId = typeof props.id === "string" ? props.id : null;
         const key = id && callId ? `${id}\u0000${callId}` : null;

@@ -227,3 +227,73 @@ describe("renderer task cards", () => {
     expect(h.store.subagentView).toBeNull();
   });
 });
+
+describe("renderer subagent action feed", () => {
+  it("lands a live action on the running card and names the child session", async () => {
+    const h = await bootState();
+    h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.send({
+      type: "message.toolCall",
+      sessionId: "s1",
+      messageId: "m2",
+      partId: "prt-task-1",
+      // A running card has no child session yet — the completing frame names it.
+      call: { ...CALL, status: "running", result: null, endedAt: null, childSessionId: null },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    h.send({
+      type: "message.subagentAction",
+      sessionId: "s1",
+      partId: "prt-task-1",
+      action: "read router.go",
+      toolCount: 3,
+      childSessionId: "ses_child",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const card = h.store.liveToolCalls[0]?.call;
+    expect(card?.action).toBe("read router.go");
+    expect(card?.toolCount).toBe(3);
+    // The claim is what lets the drill-in open while the subagent still runs.
+    expect(card?.childSessionId).toBe("ses_child");
+  });
+
+  it("does not invent a card for an action frame with no task behind it", async () => {
+    const h = await bootState();
+    h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
+    await vi.advanceTimersByTimeAsync(0);
+    h.send({
+      type: "message.subagentAction",
+      sessionId: "s1",
+      partId: "prt-none",
+      action: "read router.go",
+      toolCount: 1,
+      childSessionId: "ses_child",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.store.liveToolCalls).toHaveLength(0);
+  });
+
+  it("keeps a child session the completing frame already named", async () => {
+    const h = await bootState();
+    h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.send({
+      type: "message.toolCall",
+      sessionId: "s1",
+      messageId: "m2",
+      partId: "prt-task-1",
+      call: { ...CALL, status: "completed" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    h.send({
+      type: "message.subagentAction",
+      sessionId: "s1",
+      partId: "prt-task-1",
+      action: "read router.go",
+      toolCount: 2,
+      childSessionId: "ses_other",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    // The settled card's own session wins over a late claim.
+    expect(h.store.liveToolCalls[0]?.call.childSessionId).toBe("s1-sub");
+  });
+});

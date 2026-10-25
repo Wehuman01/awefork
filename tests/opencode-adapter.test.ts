@@ -578,6 +578,8 @@ describe("opencode adapter", () => {
         status: "completed",
         result: "Done.",
         childSessionId: "ses_child",
+        action: null,
+        toolCount: 0,
         modelId: "glm/review",
         startedAt: 1000,
         endedAt: 2000,

@@ -60,6 +60,10 @@ export function subagentCallOf(
     status,
     result,
     childSessionId,
+    // Live feed fields: the translator fills these as the subagent works;
+    // a snapshot read off the wire has neither.
+    action: null,
+    toolCount: 0,
     modelId: firstString(part, fact.modelIdPaths),
     startedAt: firstNumber(part, [fact.startedAtPath]),
     endedAt: firstNumber(part, [fact.endedAtPath]),

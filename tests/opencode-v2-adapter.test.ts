@@ -456,6 +456,8 @@ describe("v2 message mapping", () => {
             status: "completed",
             result: "Done.",
             childSessionId: "ses_child",
+            action: null,
+            toolCount: 0,
             modelId: "glm/review",
             startedAt: 10,
             endedAt: 21,

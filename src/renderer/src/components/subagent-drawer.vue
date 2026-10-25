@@ -67,24 +67,50 @@ watch(
     }
     loading.value = true;
     messages.value = [];
-    window.awefork
-      .messages(store.activeBackend, next.sessionId)
-      .then((rows) => {
-        // A slow load can race a close; only the view still naming this
-        // session may publish into the drawer.
-        if (view.value?.sessionId === next.sessionId) messages.value = rows;
-      })
-      .catch((cause: unknown) => {
-        if (view.value?.sessionId === next.sessionId) {
-          error.value = cause instanceof Error ? cause.message : String(cause);
-        }
-      })
-      .finally(() => {
-        if (view.value?.sessionId === next.sessionId) loading.value = false;
-      });
+    load(next.sessionId);
   },
   { immediate: true },
 );
+
+/** Read the child session's transcript; a slow read cannot outlive its view. */
+function load(sessionId: string): void {
+  window.awefork
+    .messages(store.activeBackend, sessionId)
+    .then((rows) => {
+      if (view.value?.sessionId === sessionId) messages.value = rows;
+    })
+    .catch((cause: unknown) => {
+      if (view.value?.sessionId === sessionId) {
+        error.value = cause instanceof Error ? cause.message : String(cause);
+      }
+    })
+    .finally(() => {
+      if (view.value?.sessionId === sessionId) loading.value = false;
+    });
+}
+
+// A subagent still running keeps writing into its own session, so an open
+// drawer polls rather than showing a frozen snapshot. The parent's run ending
+// settles the card, which closes the drawer — no poll outlives the view.
+let poll: ReturnType<typeof setInterval> | null = null;
+watch(
+  () => (view.value ? store.liveToolCalls.some((row) => row.call.childSessionId === view.value?.sessionId) : false),
+  (running) => {
+    if (poll !== null) {
+      clearInterval(poll);
+      poll = null;
+    }
+    const sessionId = view.value?.sessionId;
+    if (running && sessionId) {
+      poll = setInterval(() => load(sessionId), 2000);
+    }
+  },
+  { immediate: true },
+);
+
+onUnmounted(() => {
+  if (poll !== null) clearInterval(poll);
+});
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape" && store.subagentView) closeSubagentSession();

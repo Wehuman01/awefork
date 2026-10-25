@@ -1034,6 +1034,48 @@ function applyToolCall(
 }
 
 /**
+ * The subagent behind a live task card moved. The frame carries the parent's
+ * session (the card lives there), so the action lands on that card — and a
+ * child session the frame named is also recorded, which is what lets the
+ * drill-in open while the subagent is still running.
+ */
+function applySubagentAction(
+  backend: BackendId,
+  frame: {
+    sessionId: string;
+    partId: string;
+    action: string | null;
+    toolCount: number;
+    childSessionId: string | null;
+  },
+): void {
+  const key = streamKey(backend, frame.sessionId);
+  if (!isRunning(backend, frame.sessionId) && !toolCallBuffers.has(key)) return;
+  const calls = toolCallBuffers.get(key) ?? [];
+  const index = calls.findIndex((row) => row.call.partId === frame.partId);
+  if (index < 0) return;
+  const row = calls[index];
+  if (!row) return;
+  publishToolCalls(
+    backend,
+    frame.sessionId,
+    calls.map((item, i) =>
+      i === index
+        ? {
+            messageId: item.messageId,
+            call: {
+              ...item.call,
+              action: frame.action,
+              toolCount: frame.toolCount,
+              childSessionId: item.call.childSessionId ?? frame.childSessionId,
+            },
+          }
+        : item,
+    ),
+  );
+}
+
+/**
  * Fold one delta or full-snapshot frame into the session's live part list.
  * Deltas append to (or create) the part; snapshots REPLACE its content — the
  * frame carries the whole part, so a delta lost to an SSE gap self-heals the
@@ -2864,6 +2906,10 @@ function handleEvent(
     }
     case "message.toolCall": {
       applyToolCall(backend, event.sessionId, event);
+      break;
+    }
+    case "message.subagentAction": {
+      applySubagentAction(backend, event);
       break;
     }
     case "session.idle": {

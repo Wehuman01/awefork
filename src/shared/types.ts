@@ -47,6 +47,10 @@ export interface SubagentCall {
   result: string | null;
   /** Child session id, when the backend names the drill-in target. */
   childSessionId: string | null;
+  /** Live action the subagent is on, observed from the parent's event feed. */
+  action: string | null;
+  /** Distinct tools the subagent has invoked so far, as observed from the parent. */
+  toolCount: number;
   /** Model that served the subagent. */
   modelId: string | null;
   /** Delegation times in ms; null while unreported. */
@@ -358,6 +362,20 @@ export type AgentEvent =
       partId: string;
       call: SubagentCall;
     }
+    /**
+     * A subagent the parent dispatched moved: it claimed a child session, or
+     * invoked another tool. Rides the parent's session so the live card can
+     * show what the delegated work is doing right now.
+     */
+    | {
+        type: "message.subagentAction";
+        sessionId: string;
+        partId: string;
+        action: string | null;
+        toolCount: number;
+        childSessionId: string | null;
+        at: number | null;
+      }
   /**
    * A manually-triggered session compaction finished: the backend folded the
    * session's history into a summary (a compaction marker row + summary

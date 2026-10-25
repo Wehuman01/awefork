@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Subagent task cards surface delegated runs** — opencode v1/v2 Task-tool calls now render as live cards with agent, title, elapsed time, dispatch prompt, result/error, and model. Completed cards can open a read-only child-session drawer without changing the selected branch; ordinary tool calls keep the grouped summary chip, and a task-only assistant row no longer disappears when it has no reply text.
+- **A running subagent's card shows what it is doing** — the subagent's own tool frames arrive on the same unfiltered event feed under the child session's id, and the translator claims them for the parent's card: the collapsed card shows the current action (`read router.go`, `bash npm test`) and a tool count, the expanded card keeps the live action above the dispatch prompt, and the child session the frames named is what lets the drill-in open while the subagent still runs (polling its transcript every 2s). A claim is conservative by design — only the open task's parent may be fed, and a session that already finished its task is never re-attributed, so parallel dispatches show nothing rather than the wrong agent's work.
 
 ## v0.4.6
 

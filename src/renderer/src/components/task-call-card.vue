@@ -11,12 +11,20 @@
       <span class="task-call-dot" :class="call.status" aria-hidden="true"></span>
       <span v-if="agentLabel" class="task-call-agent">{{ agentLabel }}</span>
       <span class="task-call-title">{{ titleLabel }}</span>
-      <span v-if="isActive" class="task-call-meta">
+      <!-- Running: what the subagent is on right now, observed from the
+           parent's event feed. Settled: the tool count it took. -->
+      <span v-if="isActive && call.action" class="task-call-action">
+        <span class="spinner" aria-hidden="true"></span>{{ call.action }}
+      </span>
+      <span v-else-if="isActive" class="task-call-meta">
         <span class="spinner" aria-hidden="true"></span>{{ t("task.runningFor") }} {{ elapsedLabel }}
+      </span>
+      <span v-else-if="call.toolCount > 0" class="task-call-meta">
+        {{ t("task.toolCount", { n: call.toolCount }) }} · {{ settledMeta }}
       </span>
       <span v-else class="task-call-meta">{{ settledMeta }}</span>
       <button
-        v-if="call.childSessionId && !isActive"
+        v-if="call.childSessionId"
         type="button"
         class="task-call-open"
         :title="t('task.openTitle')"
@@ -27,10 +35,21 @@
     <div v-if="expanded" class="task-call-body">
       <p v-if="call.prompt" class="task-call-k">{{ t("task.prompt") }}</p>
       <p v-if="call.prompt" class="task-call-prompt">{{ call.prompt }}</p>
-      <p v-if="resultLabel" class="task-call-k">{{ call.status === "error" ? t("task.error") : t("task.result") }}</p>
-      <p v-if="resultLabel" class="task-call-result" :class="{ danger: call.status === 'error' }">
-        {{ resultLabel }}
-      </p>
+      <!-- Running: the live action, so an expanded card reads as progress
+           rather than a static prompt. -->
+      <template v-if="isActive">
+        <p class="task-call-k">{{ t("task.currentAction") }}</p>
+        <p class="task-call-action-line">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="pre-wrap">{{ call.action ?? t("task.waitingForAction") }}</span>
+        </p>
+      </template>
+      <template v-else>
+        <p v-if="resultLabel" class="task-call-k">{{ call.status === "error" ? t("task.error") : t("task.result") }}</p>
+        <p v-if="resultLabel" class="task-call-result" :class="{ danger: call.status === 'error' }">
+          {{ resultLabel }}
+        </p>
+      </template>
     </div>
   </div>
 </template>
