@@ -451,6 +451,44 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
     }
   }
 
+  /**
+   * A brand-new native session in the parent's directory: the outcome of
+   * every fork whose history copy is skipped. Lineage still records the cut
+   * so the canvas hangs the branch right where the fork happened.
+   * `context` only distinguishes the ✂ empty-context fork (a marker users
+   * chose) from an empty parent (nothing existed to inherit).
+   */
+  async function forkWithoutHistory(
+    sessionId: string,
+    atMessageId: string | null,
+    context: "none" | "inherit",
+  ): Promise<SessionSummary> {
+    const parent = mapSession(await client.session(sessionId));
+    const created = mapSession(await client.createSession(parent.directory || undefined));
+    await recordFork(options.lineagePath, created.id, {
+      parentId: sessionId,
+      atMessageId,
+      createdAt: created.createdAt,
+      ...(context === "none" ? { context: "none" as const } : {}),
+    });
+    return { ...created, origin: "fork", parentSessionId: sessionId };
+  }
+
+  /**
+   * A parent with no conversation has no history to copy — and the server
+   * rejects its fork outright (400 "Cannot fork empty session"). The probe
+   * reads the same mapped conversation the canvas shows (bookkeeping rows
+   * are not history); a probe that fails says "unknown", so the real fork
+   * call surfaces its own error instead of a guess.
+   */
+  async function parentIsEmpty(sessionId: string): Promise<boolean> {
+    try {
+      return mapMessages(await client.messages(sessionId)).length === 0;
+    } catch {
+      return false;
+    }
+  }
+
   return {
     kind: "opencode",
 
@@ -548,15 +586,16 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // directory. Nothing is copied, but lineage still records the cut so
       // the canvas hangs the branch right where the fork card floated.
       if (forkOptions?.context === "none") {
-        const parent = mapSession(await client.session(sessionId));
-        const created = mapSession(await client.createSession(parent.directory || undefined));
-        await recordFork(options.lineagePath, created.id, {
-          parentId: sessionId,
-          atMessageId,
-          createdAt: created.createdAt,
-          context: "none",
-        });
-        return { ...created, origin: "fork", parentSessionId: sessionId };
+        return forkWithoutHistory(sessionId, atMessageId, "none");
+      }
+      // An empty session has nothing to copy, so the fork path above would
+      // only earn the server's refusal. A fresh session in the parent's
+      // directory is the same result: the first multi-model question forks
+      // an empty anchor once per target, and a canvas fork of a brand-new
+      // session lands here too. Lineage records an ordinary inherit — the
+      // parent had no history to drop, so the ✂ marker would be a lie.
+      if (await parentIsEmpty(sessionId)) {
+        return forkWithoutHistory(sessionId, atMessageId, "inherit");
       }
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
       const forked = await forkOrAdopt(sessionId, cut);
@@ -577,6 +616,14 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
       // an anchor the server no longer has must fail loudly here, before any
       // copy exists) — but the copy lands as a plain root session the TUI or
       // any other opencode client can continue.
+      // An empty session has nothing to copy and the server refuses its fork,
+      // so the export is a plain new session in the parent's directory — no
+      // fork link to detach, no lineage to record.
+      if (await parentIsEmpty(sessionId)) {
+        const parent = mapSession(await client.session(sessionId));
+        const created = mapSession(await client.createSession(parent.directory || undefined));
+        return { ...created, origin: "root", parentSessionId: null };
+      }
       const cut = atMessageId ? await findCutMessageId(sessionId, atMessageId) : null;
       const exported = await forkOrAdopt(sessionId, cut);
       const id = firstString(exported, descriptor.sessions.fields.id) ?? "";

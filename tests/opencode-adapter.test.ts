@@ -285,6 +285,19 @@ function startFakeServer(state: FakeState): Promise<{
           return;
         }
         const source = state.messages[sessionId] ?? [];
+        // The real server refuses to copy a session with no messages: there
+        // is nothing to fork. awefork must answer such a fork itself.
+        if (source.length === 0) {
+          res.writeHead(400);
+          res.end(
+            JSON.stringify({
+              _tag: "InvalidRequestError",
+              message: `Cannot fork empty session: ${sessionId}`,
+              kind: "empty_session",
+            }),
+          );
+          return;
+        }
         const cutIndex = cut ? source.findIndex((m) => m.info.id === cut) : -1;
         const kept = cutIndex >= 0 ? source.slice(0, cutIndex) : source;
         const id = `fork-${state.forkCalls.length}`;
@@ -786,6 +799,50 @@ describe("opencode adapter", () => {
     // Lineage still points at the cut, so the canvas hangs the branch there.
     const lineage = await readLineage(lineagePath);
     expect(lineage[forked.id]).toMatchObject({ parentId: "s1", atMessageId: "u2" });
+  });
+
+  // ── an empty parent: the server refuses the copy (400 empty_session) ────
+  // The first multi-model question forks the brand-new (still empty) anchor
+  // once per target, so this refusal used to fail every answer of the round.
+
+  /** State with one session that has no messages at all. */
+  function emptyParentState(): FakeState {
+    const state = baseState();
+    state.sessions.push({
+      id: "s-empty",
+      title: "new session",
+      directory: "/repo",
+      time: { created: 5, updated: 5 },
+    });
+    return state;
+  }
+
+  it("fork of an empty session starts a fresh session in the parent's directory", async () => {
+    const state = emptyParentState();
+    const { adapter, lineagePath } = await newAdapter(state);
+    const forked = await adapter.fork("s-empty", null);
+
+    // The native fork is never attempted — the server would refuse it.
+    expect(state.forkCalls).toEqual([]);
+    expect(state.createCalls).toEqual(["/repo"]);
+    expect(forked).toMatchObject({ origin: "fork", parentSessionId: "s-empty" });
+    expect(await adapter.messages(forked.id)).toEqual([]);
+    // Recorded as an ordinary fork: the parent had no history to drop, so the
+    // ✂ empty-context marker would misreport a choice nobody made.
+    const lineage = await readLineage(lineagePath);
+    expect(lineage[forked.id]).toMatchObject({ parentId: "s-empty", atMessageId: null });
+    expect(lineage[forked.id]?.context).toBeUndefined();
+  });
+
+  it("exportSession of an empty session lands as a plain root — no lineage", async () => {
+    const state = emptyParentState();
+    const { adapter, lineagePath } = await newAdapter(state);
+    const exported = await adapter.exportSession("s-empty", null);
+
+    expect(state.forkCalls).toEqual([]);
+    expect(state.createCalls).toEqual(["/repo"]);
+    expect(exported).toMatchObject({ origin: "root", parentSessionId: null });
+    expect(await readLineage(lineagePath)).toEqual({});
   });
 
   it("exportSession copies through the turn as a detached root — no lineage", async () => {
