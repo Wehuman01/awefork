@@ -151,6 +151,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   // The ledger persists through localStorage; keep every test isolated.
   const map = new Map<string, string>();
+  // The overview is a labs feature — off by default. It must be on in storage
+  // before the settings module boots (state reads it at import time), or
+  // refreshOverviewSessions turns into a no-op and no row ever lists.
+  map.set("awefork:settings", JSON.stringify({ labs: { sessionOverview: true } }));
   (globalThis as unknown as { localStorage: unknown }).localStorage = {
     getItem: (key: string) => map.get(key) ?? null,
     setItem: (key: string, value: string) => void map.set(key, value),

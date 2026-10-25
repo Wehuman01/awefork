@@ -2445,13 +2445,13 @@ function settleRun(
   // overwritten by an idle that follows it).
   const key = overviewKey(backend, sessionId);
   const unknownRunId = state.overviewUnknown[key];
-  const observedRunId =
-    runId ??
-    overviewRunIds.get(streamKey(backend, sessionId)) ??
-    (reason === "settled" ? unknownRunId : undefined);
+  // Run evidence must come from this window: a run id it observed starting,
+  // or the empty marker a local prompt minted before the shared start event.
+  // A marker restored from the ledger is a claim about a past run, not
+  // evidence — an idle frame alone must not turn it into a result.
+  const observedRunId = runId ?? overviewRunIds.get(streamKey(backend, sessionId));
   const matchingUnknown =
-    unknownRunId !== undefined &&
-    (unknownRunId === "" || observedRunId === undefined || unknownRunId === observedRunId);
+    unknownRunId !== undefined && (unknownRunId === "" || unknownRunId === observedRunId);
   // An explicit idle can confirm a run that the watchdog already moved to
   // unknown. It still cannot create a result for a session with no run evidence.
   const observed = isRunning(backend, sessionId) || (reason === "settled" && matchingUnknown);
@@ -2794,6 +2794,13 @@ function handleEvent(
     }
     case "session.idle": {
       const runId = sharedRunId ?? overviewRunIds.get(streamKey(backend, event.sessionId));
+      // An explicit idle also resolves an unfinished run this window never
+      // observed — a marker restored after a restart, or a run another window
+      // watched. Drop the marker without minting a result: only the window
+      // that watched the run has the evidence to record how it ended.
+      if (!isRunning(backend, event.sessionId)) {
+        setOverviewUnknown(backend, event.sessionId, false, runId ?? undefined);
+      }
       stopWatch(backend, event.sessionId);
       // The turn finished, so any queued approval/input it blocked on is gone
       // (codex only ends a turn after its server requests resolve or time out).
