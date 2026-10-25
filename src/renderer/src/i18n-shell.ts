@@ -59,6 +59,15 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "attachments.docName": { zh: "文档", en: "document" },
   "attachments.thisFile": { zh: "该文件", en: "this file" },
 
+  // ── attachment-preview.ts (click-a-chip-to-see-it overlay) ───────────
+  "attachments.preview": { zh: "点击预览这张图片", en: "Click to preview this image" },
+  "attachments.previewLoading": { zh: "正在读取图片…", en: "Reading the image…" },
+  "attachments.previewClose": { zh: "关闭预览", en: "Close preview" },
+  "attachments.previewUnavailable": {
+    zh: "此后端不保留已发送图片的字节，无法预览。",
+    en: "This backend keeps no bytes for a sent image, so it cannot be previewed.",
+  },
+
   // ── format.ts (relative time) ────────────────────────────────────────
   "format.justNow": { zh: "刚刚", en: "just now" },
   "format.minutesAgo": { zh: "{n}分钟前", en: "{n} min ago" },

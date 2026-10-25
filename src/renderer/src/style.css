@@ -6037,6 +6037,7 @@ code.md-code {
   background: var(--card);
   border-radius: 9px;
   padding: 2px 4px 2px 3px;
+  font-family: inherit;
   font-size: 11px;
   font-weight: 700;
   color: var(--ink-soft);
@@ -6078,6 +6079,114 @@ code.md-code {
   color: var(--ink-faint);
 }
 
+/* The image part of a composer chip opens the preview overlay; the chip's
+   remove button stays outside it, so the two never fight for a click. */
+.att-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
+}
+
+/* ── attachment preview overlay ───────────────────────────────────────── */
+
+.att-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 16, 30, 0.45);
+}
+
+.att-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: min(920px, 100%);
+  max-height: 100%;
+  margin: 0;
+  border: 1px solid var(--primary-border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.28),
+    var(--shadow-card);
+  overflow: hidden;
+}
+
+.att-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.att-preview-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.att-preview-x {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.att-preview-x:hover {
+  background: var(--danger-soft);
+  color: var(--danger-deep);
+}
+
+.att-preview-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
+}
+
+.att-preview-body img {
+  max-width: 100%;
+  max-height: min(76vh, 900px);
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.att-preview-status {
+  margin: 0;
+  padding: 28px 8px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.att-preview-error {
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.6;
+}
+
 .chat-input.dragging {
   outline: 2px dashed var(--primary-border);
   outline-offset: 2px;
@@ -6098,6 +6207,11 @@ code.md-code {
   background: var(--primary-soft);
   border-color: transparent;
   color: var(--primary-deep);
+  cursor: zoom-in;
+}
+
+.att-row .att-chip:hover {
+  border-color: var(--primary-border);
 }
 
 /* message row: the compaction marker line a summarize inserted — not a

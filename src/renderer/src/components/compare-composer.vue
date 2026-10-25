@@ -70,9 +70,20 @@
 
     <div v-if="attachments.length > 0 || notice || unsupportedImageTargets.length > 0" class="chat-input-atts">
       <span v-for="attachment in attachments" :key="attachment.id" class="att-chip">
-        <img v-if="attachment.mime.startsWith('image/')" :src="attachment.dataUrl" class="att-thumb" alt="" />
-        <span v-else class="att-ico">📎</span>
-        <span class="att-name" :title="attachment.name">{{ attachment.name }}</span>
+        <button
+          v-if="attachment.mime.startsWith('image/')"
+          type="button"
+          class="att-open"
+          :title="t('attachments.preview')"
+          @click="openLocalAttachmentPreview(attachment.name, attachment.dataUrl)"
+        >
+          <img :src="attachment.dataUrl" class="att-thumb" alt="" />
+          <span class="att-name">{{ attachment.name }}</span>
+        </button>
+        <template v-else>
+          <span class="att-ico">📎</span>
+          <span class="att-name" :title="attachment.name">{{ attachment.name }}</span>
+        </template>
         <button type="button" class="att-x" :title="t('compare.remove')" @click="removeAttachment(attachment.id)">✕</button>
       </span>
       <span v-if="notice" class="att-notice">{{ notice }}</span>
@@ -105,6 +116,7 @@
 import { computed, ref, watch } from "vue";
 import { ATTACHMENT_ACCEPT } from "../../../shared/attachment-kinds";
 import type { ModelChoice, ModelOption, PromptAttachment } from "../../../shared/types";
+import { openLocalAttachmentPreview } from "../attachment-preview";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
 import { listSep, t } from "../i18n";
 import {

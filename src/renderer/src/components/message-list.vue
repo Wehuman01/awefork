@@ -17,9 +17,15 @@
             </details>
             <MarkdownView v-else :source="message.text" user />
             <p v-if="message.attachmentNames.length > 0" class="att-row">
-              <span v-for="(name, i) in message.attachmentNames" :key="i" class="att-chip">
-                📎 {{ name }}
-              </span>
+              <button
+                v-for="(name, i) in message.attachmentNames"
+                :key="i"
+                type="button"
+                class="att-chip att-chip-btn"
+                :title="t('attachments.preview')"
+                @click="previewAttachment(message, i)"
+                >📎 {{ name }}</button
+              >
             </p>
           </div>
           <span class="avatar user">🍑</span>
@@ -115,9 +121,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { SessionSummary } from "../../../shared/types";
+import { previewSentAttachment } from "../attachment-preview";
 import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
 import type { LivePart, ReadonlyChatMessage } from "../state";
+import { store } from "../state";
 import { hasReadableThought, thoughtSummary } from "../thought";
 import { toolSummary } from "../tool-summary";
 import { MarkdownView } from "./markdown-view";
@@ -135,6 +143,21 @@ const props = defineProps<{
 
 /** A failed reply row offers its own retry jump; the host opens the draft. */
 const emit = defineEmits<{ retry: [] }>();
+
+/**
+ * A chip is a name until it is clicked: the overlay fetches the bytes behind
+ * it (or falls back to the send-time copy) and shows the image, or says the
+ * backend kept no bytes for it.
+ */
+function previewAttachment(message: ReadonlyChatMessage, index: number): void {
+  void previewSentAttachment({
+    backend: store.activeBackend,
+    sessionId: props.session?.id,
+    messageId: message.id,
+    names: message.attachmentNames,
+    index,
+  });
+}
 
 /** Per-part render models: collapse-header summary plus the streaming caret flag. */
 const liveRows = computed(() => {

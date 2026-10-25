@@ -136,9 +136,20 @@
     />
     <div v-if="attachments.length > 0 || notice" class="chat-input-atts">
       <span v-for="a in attachments" :key="a.id" class="att-chip">
-        <img v-if="a.mime.startsWith('image/')" :src="a.dataUrl" class="att-thumb" alt="" />
-        <span v-else class="att-ico">📎</span>
-        <span class="att-name" :title="a.name">{{ a.name }}</span>
+        <button
+          v-if="a.mime.startsWith('image/')"
+          type="button"
+          class="att-open"
+          :title="t('attachments.preview')"
+          @click="openLocalAttachmentPreview(a.name, a.dataUrl)"
+        >
+          <img :src="a.dataUrl" class="att-thumb" alt="" />
+          <span class="att-name">{{ a.name }}</span>
+        </button>
+        <template v-else>
+          <span class="att-ico">📎</span>
+          <span class="att-name" :title="a.name">{{ a.name }}</span>
+        </template>
         <button type="button" class="att-x" :title="t('input.remove')" @click="removeAttachment(a.id)">✕</button>
       </span>
       <span v-if="notice" class="att-notice">{{ notice }}</span>
@@ -199,6 +210,7 @@ import type {
   ParallelSummaryLength,
   PromptAttachment,
 } from "../../../shared/types";
+import { openLocalAttachmentPreview } from "../attachment-preview";
 import { type DraftAttachment, readAttachments, toPromptAttachments } from "../attachments";
 import type { ContextUsage } from "../context-usage";
 import { type ArrivingItem, splitArrivingItems } from "../drop-split";

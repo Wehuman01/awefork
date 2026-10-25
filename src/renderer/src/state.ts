@@ -49,6 +49,7 @@ import type {
   SessionSummary,
 } from "../../shared/types";
 import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
+import { rememberSentAttachments } from "./attachment-preview";
 import {
   type ContextUsage,
   contextUsageOf,
@@ -5218,6 +5219,9 @@ async function sendPromptToBackend(
   if (backend === state.activeBackend) {
     appendLocalMessage(sessionId, text, model, attachments, backend);
   }
+  // A chip's preview needs the bytes somewhere: backends that drop them have
+  // nothing to answer with later, so keep this send's copy for the overlay.
+  rememberSentAttachments(backend, sessionId, attachments);
   try {
     await window.awefork.prompt(
       backend,

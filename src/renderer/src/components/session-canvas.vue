@@ -325,14 +325,20 @@
         </div>
         <div v-if="(store.draft?.attachments.length ?? 0) > 0" class="draft-atts">
           <span v-for="a in store.draft?.attachments ?? []" :key="a.id" class="att-chip">
-            <img
+            <button
               v-if="a.mime.startsWith('image/')"
-              :src="a.dataUrl"
-              class="att-thumb"
-              alt=""
-            />
-            <span v-else class="att-ico">📎</span>
-            <span class="att-name" :title="a.name">{{ a.name }}</span>
+              type="button"
+              class="att-open"
+              :title="t('attachments.preview')"
+              @click="openLocalAttachmentPreview(a.name, a.dataUrl)"
+            >
+              <img :src="a.dataUrl" class="att-thumb" alt="" />
+              <span class="att-name">{{ a.name }}</span>
+            </button>
+            <template v-else>
+              <span class="att-ico">📎</span>
+              <span class="att-name" :title="a.name">{{ a.name }}</span>
+            </template>
             <button
               type="button"
               class="att-x"
@@ -513,6 +519,7 @@ import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { COL_GAP, draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
 import type { ModelChoice } from "../../../shared/types";
+import { openLocalAttachmentPreview } from "../attachment-preview";
 import { type DraftAttachment, readAttachments } from "../attachments";
 import { flashNotice, isPathDrag, readPathDrop } from "../files";
 import { formatDuration, formatTokens } from "../format";

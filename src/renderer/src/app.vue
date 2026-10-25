@@ -110,6 +110,7 @@
     <HistoryPanel />
     <FileMenu />
     <SettingsPage />
+    <AttachmentPreview />
     <div
       v-if="store.actionError"
       class="toast banner-error"
@@ -159,6 +160,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
+import AttachmentPreview from "./components/attachment-preview.vue";
 import BranchContext from "./components/branch-context.vue";
 import CanvasTabs from "./components/canvas-tabs.vue";
 import CommandPalette from "./components/command-palette.vue";
