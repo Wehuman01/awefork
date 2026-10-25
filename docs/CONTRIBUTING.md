@@ -134,6 +134,10 @@ The overview uses idle as the baseline for history with no observed run. Unknown
 
 The main process owns `overview-read.json`, including result revisions, seen watermarks, and unfinished-run markers. Only an observed ending creates a result. A successful jump marks only the revision shown when the target starts loading. A failed cross-agent jump restores the original workspace and keeps the panel and unread results; a newer workspace navigation takes precedence. A failed return is shown in the panel.
 
+### Session compression
+
+Compression folds history through the backend's summarize primitive and happens at a position, not on a session: anything living after the cut — the branch's own later turns or forks growing from it — sends the summary into a fresh fork, and only the bare tip of an unbranched story compresses in place. A run in flight blocks exactly that in-place case, because a session runs one turn at a time; the fork path summarizes a new session and leaves the original alone, running or not. A parent with its own run is never claimed, cleared, or settled by the compress — the flag, its watchdog, and its overview evidence belong to that run.
+
 ### Adding an agent backend
 
 Implement `AgentAdapter` in `src/shared/`, add its ID and capability row in

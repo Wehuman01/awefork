@@ -245,3 +245,57 @@ describe("compress at a position", () => {
     await pending;
   });
 });
+
+describe("compress while the session runs", () => {
+  it("refuses an in-place compress of a session with a run in flight", async () => {
+    const h = await bootState();
+    h.emit({ type: "message.started", sessionId: ANCHOR.id, messageId: "u2" });
+    expect(h.state.store.running[ANCHOR.id]).toBe(true);
+    await h.state.compressSession(ANCHOR.id, "u2");
+    // The tip of an unbranched story compresses in place, and that is the one
+    // case a run really does block: the summarize would be a second turn on a
+    // session already running one.
+    expect(h.state.store.compressAsk).toBeNull();
+    expect(h.state.store.actionError).toBe(t("state.sessionRunningCompress"));
+    expect(h.compress).not.toHaveBeenCalled();
+  });
+
+  it("compresses a branched session in a fork while its own run is in flight", async () => {
+    const h = await bootState({ extraSessions: [CHILD] });
+    h.emit({ type: "message.started", sessionId: ANCHOR.id, messageId: "u2" });
+    expect(await confirmCompress(h, null)).toBe(true);
+    expect(h.fork).toHaveBeenCalledWith("codex", ANCHOR.id, "u2");
+    expect(h.compress).toHaveBeenCalledWith("codex", "fork-1", { ...MODEL, variant: null });
+    // The parent's run is not this call's to end: its flag — and with it the
+    // composer's waiting state — survives the compress untouched.
+    expect(h.state.store.running[ANCHOR.id]).toBe(true);
+    expect(h.state.store.actionError).toBeNull();
+  });
+
+  it("still refuses an in-place compress when a run starts inside the dialog", async () => {
+    const h = await bootState();
+    const pending = h.state.compressSession(ANCHOR.id, "u2");
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    required(h.state.store.compressAsk);
+    h.emit({ type: "message.started", sessionId: ANCHOR.id, messageId: "u2" });
+    h.state.answerCompressAsk(MODEL);
+    await pending;
+    expect(h.compress).not.toHaveBeenCalled();
+    expect(h.state.store.actionError).toBe(t("state.sessionRunningCompress"));
+    // The refused compress never claimed the run that started mid-dialog.
+    expect(h.state.store.running[ANCHOR.id]).toBe(true);
+  });
+
+  it("forks a branched session even when its run starts inside the dialog", async () => {
+    const h = await bootState({ extraSessions: [CHILD] });
+    const pending = h.state.compressSession(ANCHOR.id, null);
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    required(h.state.store.compressAsk);
+    h.emit({ type: "message.started", sessionId: ANCHOR.id, messageId: "u2" });
+    h.state.answerCompressAsk(MODEL);
+    await pending;
+    expect(h.compress).toHaveBeenCalledWith("codex", "fork-1", { ...MODEL, variant: null });
+    expect(h.state.store.running[ANCHOR.id]).toBe(true);
+    expect(h.state.store.actionError).toBeNull();
+  });
+});
