@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.7
+
+- **A session overview watches every agent's runs** — a trigger bar and a floating panel aggregate all backends' sessions into one live view: runs settle into done / failed / unknown / aborted (a silent timeout no longer fabricates a result), each session keeps its last outcome and error, and a persisted unread ledger (revision/seen watermark, capped at 300) remembers the results no window was there to see — surviving restarts, because event ids carry a per-launch prefix that cannot collide with the previous launch's ledger. Cross-window and offline results reconcile, an idle frame mints an unread result only on real evidence, subagent sessions stay hidden like they are in the sidebar, and a jump that cannot switch backends keeps the panel instead of losing it.
+- **claude code joins as a fourth backend** — the claude CLI runs in stream-json -p mode behind the same surface as the other three: transcripts under `~/.claude/projects` are walked for the session list, the active branch chain is traversed, forks cut through `--resume --fork-session`, `/compact` runs on a dedicated resume child with the CLI's verdict surfaced, image attachments and the permission bridge (allow / always / deny) work, and static model aliases (default / opus / sonnet / haiku) cover the catalog. Resuming a stored session plans explicitly (create / resume / fork) and takes the cwd from the transcript's own field, so the CLI continues the real chain instead of silently starting a new one in a second project directory. A failed run now surfaces as a session-scoped error instead of settling like a normal turn, "always allow" writes the rule set the CLI actually accepts, the model choice rides `set_model`, and rename works through `rename_session`'s custom-title row.
+- **codex aligns with opencode** — tool items (commandExecution / fileChange / mcpToolCall / …) stream as live tool chips while a turn runs, approvals and inputs render inline in the context pane, and a thread codex compacted on its own announces itself with the 🗜 toast and a reload instead of a silent refresh. codex asks wait for the user indefinitely — the 30s auto-deny was awefork's own guard, not codex's contract.
+
+### Install
+
+Installers attached: `awefork-0.4.7-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.4.7-win-x64.exe` (Windows x64). 
+
 ## v0.4.6
 
 - **A turn's tool calls fold into one grouped chip** — a settled turn no longer stacks a wall of near-identical pills: the chips collapse into a single grouped count following opencode's TUI ("shell ×8 · read · edit"), codex's command previews group on the family before " · ", a lone call keeps its full label (that command preview is the whole point of a single chip), the full list rides in the chip's title attribute, and an overlong line cuts at a group boundary so the ellipsis never lands mid tool name. Canvas cards drop their per-turn tool chips — the pane already tells that story.
