@@ -364,17 +364,40 @@ try {
   check("path breadcrumbs render for the landing directory", fbStates.crumbs >= 1, `${fbStates.crumbs} crumbs`);
   check("the preview pane waits for a file instead of squatting", fbStates.preview === false);
 
-  // 4b-ii. A real directory through the path box: folder rows carry a
-  //     disclosure caret, and clicking one unfolds its children in place —
-  //     the tree behavior the session dock has, inside the browser's own
-  //     listing. The repo checkout is a real tree wherever this runs.
+  // 4b-ii. Folder rows carry a disclosure caret, and clicking one unfolds
+  //     its children in place — the tree behavior the session dock has,
+  //     inside the browser's own listing. The demo has no filesystem (every
+  //     read answers "not found"), so a small tree is handed to the IPC
+  //     boundary the browser reads through; everything above it — the rows,
+  //     the caret, the nesting — is the real component.
+  await cdp.evaluate(`(() => {
+    const entry = (name, isDir, size = null) => ({
+      name,
+      path: "/demo/proj/" + name,
+      isDir,
+      isSymlink: false,
+      size,
+      mtime: 1,
+      hidden: false,
+    });
+    const trees = {
+      "/demo/proj": [entry("docs", true), entry("src", true), entry("README.md", false, 12)],
+      "/demo/proj/docs": [entry("guide.md", false, 4)],
+      "/demo/proj/src": [entry("main.ts", false, 9)],
+    };
+    window.awefork.listDir = async (dir) =>
+      trees[dir]
+        ? { ok: true, value: { path: dir, entries: trees[dir], capped: false } }
+        : { ok: false, error: { code: "not-found" } };
+    return true;
+  })()`);
   await retry(
     () =>
       cdp.evaluate(
-        `(() => { ${fillInput(".fb-path", root)}; document.querySelector(".fb-path-form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); return true; })()`,
+        `(() => { ${fillInput(".fb-path", "/demo/proj")}; document.querySelector(".fb-path-form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); return true; })()`,
       ),
     5000,
-    "path jump to the repo root",
+    "path jump to the demo project",
   );
   const listed = await retry(async () => {
     const rows = await cdp.evaluate(`({
@@ -384,12 +407,12 @@ try {
         (w) => parseFloat(getComputedStyle(w).paddingLeft) > 8,
       ).length,
     })`);
-    if (rows.total < 2 || rows.carets < 1 || rows.nested !== 0) {
-      throw new Error(`repo root listing incomplete: ${JSON.stringify(rows)}`);
+    if (rows.total !== 3 || rows.carets !== 2 || rows.nested !== 0) {
+      throw new Error(`demo listing incomplete: ${JSON.stringify(rows)}`);
     }
     return rows;
-  }, 10_000, "repo root listing");
-  check("a real listing renders folder carets and nothing unfolded", true, JSON.stringify(listed));
+  }, 10_000, "demo project listing");
+  check("a listing renders folder carets and nothing unfolded", true, JSON.stringify(listed));
 
   await cdp.evaluate(`document.querySelector(".fb-row-caret:not(.fb-row-caret-off)").click()`);
   const unfolded = await retry(async () => {
@@ -400,7 +423,7 @@ try {
       ).length,
       open: document.querySelectorAll('.fb-row-caret[aria-expanded="true"]').length,
     })`);
-    if (rows.total <= listed.total || rows.nested < 1 || rows.open < 1) {
+    if (rows.total !== 4 || rows.nested !== 1 || rows.open !== 1) {
       throw new Error(`folder did not unfold: ${JSON.stringify(rows)}`);
     }
     return rows;
