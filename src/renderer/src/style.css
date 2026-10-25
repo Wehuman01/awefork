@@ -7610,6 +7610,22 @@ html[data-theme="dark"] ::selection {
   color: var(--primary-deep);
 }
 
+/* Drag-to-reorder: the dragged tab dims, the landing edge shows a line. */
+.story-tab.dragging,
+.fb-tab.dragging {
+  opacity: 0.4;
+}
+
+.story-tab.drop-before,
+.fb-tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.story-tab.drop-after,
+.fb-tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--primary);
+}
+
 .story-tab-title {
   overflow: hidden;
   text-overflow: ellipsis;

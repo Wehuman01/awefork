@@ -14,9 +14,15 @@
         type="button"
         role="tab"
         class="fb-tab"
-        :class="{ on: entry.id === files.activeTabId }"
+        :class="tabClass(entry)"
         :aria-selected="entry.id === files.activeTabId"
         :title="entry.browsing ?? undefined"
+        draggable="true"
+        @dragstart="tabDrag.onDragStart(entry.id, $event)"
+        @dragover="tabDrag.onDragOver(entry.id, $event)"
+        @dragleave="tabDrag.onDragLeave(entry.id, $event)"
+        @drop="tabDrag.onDrop(entry.id, $event)"
+        @dragend="tabDrag.onDragEnd()"
         @click="activateFileTab(entry.id)"
         @auxclick="onTabAuxClick(entry.id, $event)"
       >
@@ -334,6 +340,7 @@ import {
   quickSearch,
   readPathDrop,
   refresh,
+  reorderFileTab,
   revealEntry,
   selectOrPreviewEntry,
   setFilter,
@@ -352,6 +359,7 @@ import { formatBytes, formatTimestamp } from "../format";
 import { t } from "../i18n";
 import { mainView } from "../layout";
 import { store } from "../state";
+import { createTabDrag } from "../tab-drag";
 import FilePreview from "./file-preview.vue";
 
 const pathInput = ref("");
@@ -459,6 +467,20 @@ function startSplitDrag(event: MouseEvent): void {
 /** Middle-click closes, like the canvas tabs. */
 function onTabAuxClick(tabId: string, event: MouseEvent): void {
   if (event.button === 1) void closeFileTab(tabId);
+}
+
+/** Drag-to-reorder: the strip order is the tab order, browsing stays put. */
+const tabDrag = createTabDrag(() => files.tabs.map((tab) => tab.id), reorderFileTab);
+
+/** Active / dragged / drop-marker classes for one tab. */
+function tabClass(tab: FileTab): Record<string, boolean> {
+  const marker = tabDrag.marker.value;
+  return {
+    on: tab.id === files.activeTabId,
+    dragging: tabDrag.draggingId.value === tab.id,
+    "drop-before": marker?.id === tab.id && marker.side === "before",
+    "drop-after": marker?.id === tab.id && marker.side === "after",
+  };
 }
 
 // ── path drops ────────────────────────────────────────────────────────

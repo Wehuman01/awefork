@@ -6,9 +6,15 @@
       type="button"
       role="tab"
       class="story-tab"
-      :class="{ on: tab.id === store.activeCanvasTabId }"
+      :class="tabClass(tab)"
       :aria-selected="tab.id === store.activeCanvasTabId"
       :title="titleOf(tab)"
+      draggable="true"
+      @dragstart="tabDrag.onDragStart(tab.id, $event)"
+      @dragover="tabDrag.onDragOver(tab.id, $event)"
+      @dragleave="tabDrag.onDragLeave(tab.id, $event)"
+      @drop="tabDrag.onDrop(tab.id, $event)"
+      @dragend="tabDrag.onDragEnd()"
       @click="activate(tab.id)"
       @auxclick="onAuxClick(tab.id, $event)"
     >
@@ -41,9 +47,11 @@ import {
   type CanvasTab,
   closeCanvasTab,
   createSession,
+  reorderCanvasTab,
   store,
   tabRootSession,
 } from "../state";
+import { createTabDrag } from "../tab-drag";
 
 /**
  * Browser-style story tabs over the canvas: one tab per fork-tree story. The
@@ -61,6 +69,20 @@ const visible = computed(() => {
 
 function titleOf(tab: CanvasTab): string {
   return tabRootSession(tab)?.title || t("canvas.tabBlank");
+}
+
+/** Drag-to-reorder: the strip order is the tab order, nothing else moves. */
+const tabDrag = createTabDrag(() => store.canvasTabs.map((tab) => tab.id), reorderCanvasTab);
+
+/** Active / dragged / drop-marker classes for one tab. */
+function tabClass(tab: CanvasTab): Record<string, boolean> {
+  const marker = tabDrag.marker.value;
+  return {
+    on: tab.id === store.activeCanvasTabId,
+    dragging: tabDrag.draggingId.value === tab.id,
+    "drop-before": marker?.id === tab.id && marker.side === "before",
+    "drop-after": marker?.id === tab.id && marker.side === "after",
+  };
 }
 
 async function activate(id: string): Promise<void> {

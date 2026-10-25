@@ -1130,6 +1130,35 @@ describe("tabs", () => {
     expect(active(h.mod).browsing).toBe("/a");
   });
 
+  it("reorders the strip by drag, keeping the active tab's position", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", []), "/b": listing("/b", []) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.openFileTab("/b");
+    const [first, second] = h.files.tabs;
+    // Drag the second tab in front of the first: only the order changes, the
+    // active tab keeps browsing /b.
+    h.mod.reorderFileTab(second.id, first.id);
+    expect(h.files.tabs.map((t) => t.id)).toEqual([second.id, first.id]);
+    expect(active(h.mod).browsing).toBe("/b");
+  });
+
+  it("appends a dragged tab at the end and ignores unknown ids", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", []), "/b": listing("/b", []) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.openFileTab("/b");
+    const [first, second] = h.files.tabs;
+    h.mod.reorderFileTab(first.id, null);
+    expect(h.files.tabs.map((t) => t.id)).toEqual([second.id, first.id]);
+    // An unknown id, or a tab dropped onto itself, leaves the strip alone.
+    h.mod.reorderFileTab("tab-404", second.id);
+    h.mod.reorderFileTab(second.id, second.id);
+    expect(h.files.tabs.map((t) => t.id)).toEqual([second.id, first.id]);
+  });
+
   it("closing the active tab activates its neighbour", async () => {
     const h = await bootFiles({
       listings: { "/a": listing("/a", []), "/b": listing("/b", []) },
