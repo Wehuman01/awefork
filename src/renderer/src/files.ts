@@ -234,9 +234,15 @@ export async function ensureBrowsing(root: string | null): Promise<void> {
   }
   const tab = activeTab();
   if (!tab || tab.browsing !== null) return;
-  // A dock or context-menu preview claims the parked tab before this view
-  // even mounts; landing on the project root now would list a different
-  // directory and drop the selection the jump just made.
+  // A jump-in from the canvas (a tree click, "open in new tab", a dock
+  // click) switches the middle view and claims a tab in the same gesture,
+  // so this landing resolves after that claim: `selectedPath` covers the
+  // dock's claim made before its read starts, `loading` covers the claim
+  // whose listing is already on its way. Landing on top of either would
+  // race the caller's browse and win — the newer listing retires the older
+  // one as stale — and the user would get the project root instead of the
+  // folder they asked for.
+  if (tab.loading) return;
   if (tab.selectedPath !== null) return;
   await browseTabTo(tab, root ?? files.homePath ?? "/");
 }
@@ -896,6 +902,42 @@ export async function toggleTreeNode(dir: string): Promise<void> {
 
 export function isTreeNodeExpanded(dir: string): boolean {
   return files.treeExpanded[dir] === true;
+}
+
+/** One row of the browser's list view: an entry, its depth, its open state. */
+export interface ListingRow {
+  entry: FileEntry;
+  /** Indentation level; 0 for the listed directory's own entries. */
+  depth: number;
+  /** True while this directory's children are nested underneath it. */
+  expanded: boolean;
+  /** Set when the directory is open but its children could not be read. */
+  error?: FileError;
+}
+
+/**
+ * The list view's rows: the given entries, with every open directory's own
+ * children (recursively) nested below it — the same unfolding the sidebar
+ * tree and the session dock do, driven by the same expansion state, so a
+ * folder reads as open everywhere and its children cost no second read.
+ *
+ * The name filter deliberately stops at the listed directory: it scopes to
+ * what the user is looking at, never to the subtree they unfold. Dotfiles
+ * stay out, as they do in every tree — the listing's own ◉ toggle covers
+ * the top level.
+ */
+export function nestedListingRows(entries: readonly FileEntry[]): ListingRow[] {
+  const rows: ListingRow[] = [];
+  const walk = (list: readonly FileEntry[], depth: number): void => {
+    for (const entry of list) {
+      const expanded = entry.isDir && isTreeNodeExpanded(entry.path);
+      const error = expanded ? files.treeError[entry.path] : undefined;
+      rows.push({ entry, depth, expanded, ...(error ? { error } : {}) });
+      if (expanded) walk(visibleTreeChildren(entry.path), depth + 1);
+    }
+  };
+  walk(entries, 0);
+  return rows;
 }
 
 // ── internal path drags ────────────────────────────────────────────────

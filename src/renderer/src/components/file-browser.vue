@@ -217,53 +217,70 @@
         </p>
         <template v-else-if="files.view === 'list'">
           <div class="fb-list-head">
+            <span class="fb-col-caret"></span>
             <span class="fb-col-name">{{ t("files.colName") }}</span>
             <span class="fb-col-size">{{ t("files.colSize") }}</span>
             <span class="fb-col-mtime">{{ t("files.colModified") }}</span>
           </div>
-          <button
-            v-for="entry in rows"
-            :key="entry.path"
-            type="button"
-            class="fb-row"
-            :class="{ selected: entry.path === tab.selectedPath }"
-            draggable="true"
-            @dragstart="startPathDrag($event, [entry.path])"
-            @click="selectOrPreviewEntry(entry)"
-            @dblclick="openEntry(entry)"
-            @keydown.enter.prevent="openEntry(entry)"
-            @contextmenu.prevent="openFileMenu(entry, $event.clientX, $event.clientY)"
+          <div
+            v-for="row in listRows"
+            :key="row.entry.path"
+            class="fb-row-wrap"
+            :style="{ '--fb-depth': row.depth }"
           >
-            <span class="fb-row-icon" aria-hidden="true">{{
-              entry.isDir ? "📁" : entry.isSymlink ? "🔗" : "📄"
-            }}</span>
-            <span class="fb-row-name" :title="entry.path">{{ entry.name }}</span>
-            <span class="fb-row-size">{{
-              entry.isDir ? t("files.dirSizeDash") : formatBytes(entry.size ?? 0)
-            }}</span>
-            <span class="fb-row-mtime">{{
-              entry.mtime === null ? "" : formatTimestamp(entry.mtime)
-            }}</span>
-          </button>
+            <button
+              v-if="row.entry.isDir"
+              type="button"
+              class="fb-row-caret"
+              :aria-expanded="row.expanded"
+              :title="t('files.toggleTree')"
+              @click.stop="toggleTreeNode(row.entry.path)"
+              >{{ row.expanded ? "▾" : "▸" }}</button
+            >
+            <span v-else class="fb-row-caret fb-row-caret-off" aria-hidden="true"></span>
+            <button
+              type="button"
+              class="fb-row"
+              :class="{ selected: row.entry.path === tab.selectedPath }"
+              draggable="true"
+              @dragstart="startPathDrag($event, [row.entry.path])"
+              @click="selectOrPreviewEntry(row.entry)"
+              @dblclick="openEntry(row.entry)"
+              @keydown.enter.prevent="openEntry(row.entry)"
+              @contextmenu.prevent="openFileMenu(row.entry, $event.clientX, $event.clientY)"
+            >
+              <span class="fb-row-icon" aria-hidden="true">{{
+                row.entry.isDir ? "📁" : row.entry.isSymlink ? "🔗" : "📄"
+              }}</span>
+              <span class="fb-row-name" :title="row.entry.path">{{ row.entry.name }}</span>
+              <span class="fb-row-size">{{
+                row.entry.isDir ? t("files.dirSizeDash") : formatBytes(row.entry.size ?? 0)
+              }}</span>
+              <span class="fb-row-mtime">{{
+                row.entry.mtime === null ? "" : formatTimestamp(row.entry.mtime)
+              }}</span>
+            </button>
+            <p v-if="row.error" class="fb-row-error">{{ describeFsError(row.error) }}</p>
+          </div>
         </template>
         <template v-else>
           <button
-            v-for="entry in rows"
-            :key="entry.path"
+            v-for="row in gridRows"
+            :key="row.entry.path"
             type="button"
             class="fb-tile"
-            :class="{ selected: entry.path === tab.selectedPath }"
+            :class="{ selected: row.entry.path === tab.selectedPath }"
             draggable="true"
-            @dragstart="startPathDrag($event, [entry.path])"
-            @click="selectOrPreviewEntry(entry)"
-            @dblclick="openEntry(entry)"
-            @keydown.enter.prevent="openEntry(entry)"
-            @contextmenu.prevent="openFileMenu(entry, $event.clientX, $event.clientY)"
+            @dragstart="startPathDrag($event, [row.entry.path])"
+            @click="selectOrPreviewEntry(row.entry)"
+            @dblclick="openEntry(row.entry)"
+            @keydown.enter.prevent="openEntry(row.entry)"
+            @contextmenu.prevent="openFileMenu(row.entry, $event.clientX, $event.clientY)"
           >
             <span class="fb-tile-icon" aria-hidden="true">{{
-              entry.isDir ? "📁" : entry.isSymlink ? "🔗" : "📄"
+              row.entry.isDir ? "📁" : row.entry.isSymlink ? "🔗" : "📄"
             }}</span>
-            <span class="fb-tile-name" :title="entry.path">{{ entry.name }}</span>
+            <span class="fb-tile-name" :title="row.entry.path">{{ row.entry.name }}</span>
           </button>
         </template>
         <p v-if="tab.capped" class="fb-capped">{{ t("files.capped", { n: MAX_ENTRIES }) }}</p>
@@ -284,7 +301,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { displayName, joinSegments, parentOf, pathSegments } from "../../../shared/file-paths";
-import type { FileEntry } from "../../../shared/file-types";
+import type { FileEntry, FileError } from "../../../shared/file-types";
 import { MAX_ENTRIES } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
@@ -302,6 +319,7 @@ import {
   goForward,
   goToPath,
   goUp,
+  nestedListingRows,
   openEntry,
   openFileTab,
   quickSearch,
@@ -317,6 +335,7 @@ import {
   stepReading,
   toggleHidden,
   toggleReading,
+  toggleTreeNode,
   visibleEntries,
 } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
@@ -436,10 +455,10 @@ function onTabAuxClick(tabId: string, event: MouseEvent): void {
 function stepSelection(offset: number): void {
   const rowsNow = rows.value;
   if (rowsNow.length === 0) return;
-  const current = rowsNow.findIndex((entry) => entry.path === tab.value?.selectedPath);
+  const current = rowsNow.findIndex((row) => row.entry.path === tab.value?.selectedPath);
   const next = Math.min(Math.max((current < 0 ? 0 : current) + offset, 0), rowsNow.length - 1);
   const target = rowsNow[next];
-  if (target) selectOrPreviewEntry(target);
+  if (target) selectOrPreviewEntry(target.entry);
 }
 
 const entriesEl = ref<HTMLDivElement | null>(null);
@@ -458,7 +477,7 @@ function onEntriesKeydown(event: KeyboardEvent): void {
   }
   if (event.key === "Enter") {
     const selected = tab.value?.selectedPath;
-    const entry = rows.value.find((row) => row.path === selected);
+    const entry = rows.value.find((row) => row.entry.path === selected)?.entry;
     if (entry) {
       event.preventDefault();
       void openEntry(entry);
@@ -552,11 +571,23 @@ const canGoUp = computed(
 );
 
 /** The rows the list/grid renders — filter and hidden-files applied. */
-const rows = computed(() => visibleEntries());
+const listRows = computed(() => nestedListingRows(visibleEntries()));
 
-const listError = computed(() => {
-  const error = tab.value?.error ?? null;
-  if (!error) return null;
+/**
+ * The grid stays flat: tiles have no room for nesting, so a folder there is
+ * still entered with a double-click. Both views render the same entries —
+ * only the list view unfolds them.
+ */
+const gridRows = computed(() =>
+  visibleEntries().map((entry) => ({ entry, depth: 0, expanded: false })),
+);
+
+/** Whatever the current view renders; the arrow keys walk exactly that. */
+const rows = computed(() => (files.view === "list" ? listRows.value : gridRows.value));
+
+/** One phrasing per filesystem failure, shared by the listing and a folder
+ *  that would not unfold. */
+function describeFsError(error: FileError): string {
   switch (error.code) {
     case "not-found":
       return t("files.errNotFound");
@@ -567,6 +598,12 @@ const listError = computed(() => {
     default:
       return error.message ? `${t("files.errUnknown")}：${error.message}` : t("files.errUnknown");
   }
+}
+
+const listError = computed(() => {
+  const error = tab.value?.error ?? null;
+  if (!error) return null;
+  return describeFsError(error);
 });
 
 const quickErrorText = computed(() => {

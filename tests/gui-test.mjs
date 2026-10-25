@@ -140,6 +140,16 @@ const fillTextarea = (selector, text) => `(() => {
   return true;
 })()`;
 
+/** Same v-model dance for a text input (the file panel's path box). */
+const fillInput = (selector, text) => `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)});
+  if (!el) throw new Error("missing " + ${JSON.stringify(selector)});
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  set.call(el, ${JSON.stringify(text)});
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+})()`;
+
 let failures = 0;
 function check(name, ok, detail = "") {
   if (ok) {
@@ -353,6 +363,49 @@ try {
   check("a missing listing is phrased, not spun", fbStates.error.length > 0, fbStates.error);
   check("path breadcrumbs render for the landing directory", fbStates.crumbs >= 1, `${fbStates.crumbs} crumbs`);
   check("the preview pane waits for a file instead of squatting", fbStates.preview === false);
+
+  // 4b-ii. A real directory through the path box: folder rows carry a
+  //     disclosure caret, and clicking one unfolds its children in place —
+  //     the tree behavior the session dock has, inside the browser's own
+  //     listing. The repo checkout is a real tree wherever this runs.
+  await retry(
+    () =>
+      cdp.evaluate(
+        `(() => { ${fillInput(".fb-path", root)}; document.querySelector(".fb-path-form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); return true; })()`,
+      ),
+    5000,
+    "path jump to the repo root",
+  );
+  const listed = await retry(async () => {
+    const rows = await cdp.evaluate(`({
+      total: document.querySelectorAll(".fb-row").length,
+      carets: document.querySelectorAll(".fb-row-caret:not(.fb-row-caret-off)").length,
+      nested: [...document.querySelectorAll(".fb-row-wrap")].filter(
+        (w) => parseFloat(getComputedStyle(w).paddingLeft) > 8,
+      ).length,
+    })`);
+    if (rows.total < 2 || rows.carets < 1 || rows.nested !== 0) {
+      throw new Error(`repo root listing incomplete: ${JSON.stringify(rows)}`);
+    }
+    return rows;
+  }, 10_000, "repo root listing");
+  check("a real listing renders folder carets and nothing unfolded", true, JSON.stringify(listed));
+
+  await cdp.evaluate(`document.querySelector(".fb-row-caret:not(.fb-row-caret-off)").click()`);
+  const unfolded = await retry(async () => {
+    const rows = await cdp.evaluate(`({
+      total: document.querySelectorAll(".fb-row").length,
+      nested: [...document.querySelectorAll(".fb-row-wrap")].filter(
+        (w) => parseFloat(getComputedStyle(w).paddingLeft) > 8,
+      ).length,
+      open: document.querySelectorAll('.fb-row-caret[aria-expanded="true"]').length,
+    })`);
+    if (rows.total <= listed.total || rows.nested < 1 || rows.open < 1) {
+      throw new Error(`folder did not unfold: ${JSON.stringify(rows)}`);
+    }
+    return rows;
+  }, 10_000, "folder unfolds in place");
+  check("a folder's caret unfolds its children in place", true, JSON.stringify(unfolded));
 
   await retry(() => cdp.evaluate(`(() => {
     const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));

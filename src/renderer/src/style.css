@@ -7979,6 +7979,54 @@ html[data-theme="dark"] ::selection {
   margin-bottom: 4px;
 }
 
+/* The disclosure column the header and every row share, so a row's name
+   stays put whether or not it is a folder. */
+.fb-col-caret,
+.fb-row-caret {
+  flex: 0 0 16px;
+  width: 16px;
+}
+
+/* A list row: its caret (folders only) beside the row button itself, so the
+   two never share a hit area and the button keeps its own keyboard role. */
+.fb-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: calc(var(--fb-depth, 0) * 14px);
+}
+
+.fb-row-caret {
+  display: grid;
+  place-items: center;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fb-row-caret:hover {
+  background: var(--row-hover);
+  color: var(--ink);
+}
+
+/* Files carry the column without the control, so names stay aligned. */
+.fb-row-caret-off {
+  cursor: default;
+}
+
+/* A folder that would not unfold says so, under its own row. */
+.fb-row-error {
+  padding: 2px 8px 4px 44px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
 .fb-col-size,
 .fb-row-size {
   flex: 0 0 76px;
@@ -8022,6 +8070,12 @@ html[data-theme="dark"] ::selection {
 
 .fb-row.selected {
   background: var(--row-active);
+}
+
+/* Inside its wrap the row button takes the space the caret leaves. */
+.fb-row-wrap .fb-row {
+  flex: 1;
+  min-width: 0;
 }
 
 .fb-row-icon {

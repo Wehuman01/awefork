@@ -865,6 +865,149 @@ describe("sidebar tree", () => {
   });
 });
 
+describe("first landing", () => {
+  /**
+   * A jump-in from the canvas (tree click, "open in new tab", dock click)
+   * switches the middle view and claims a tab in the same gesture. The view
+   * switch schedules ensureBrowsing as a watcher job, so the two interleave
+   * on the microtask queue exactly as they do in the app: the jump runs its
+   * synchronous part first, the watcher's landing resolves after it.
+   */
+  function coldBrowser(h: Awaited<ReturnType<typeof bootFiles>>) {
+    h.files.tabs.length = 0;
+    h.files.activeTabId = null;
+    return (root: string) => Promise.resolve().then(() => h.mod.ensureBrowsing(root));
+  }
+
+  it("a view switch never hijacks the tab an open-in-new-tab just claimed", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/proj": listing("/proj", [entry("docs", true)]),
+        "/proj/docs": listing("/proj/docs", []),
+      },
+    });
+    const firstLanding = coldBrowser(h)("/proj");
+    const opening = h.mod.openFileTabFor("/proj/docs");
+    await Promise.all([firstLanding, opening]);
+
+    // The landing stepped aside: one tab, on the folder that was asked for.
+    // Without the guard it browses the project root instead — its listing is
+    // the newer one, so the folder's own answer is retired as stale.
+    expect(h.files.tabs).toHaveLength(1);
+    expect(active(h.mod).browsing).toBe("/proj/docs");
+  });
+
+  it("a dock jump keeps the listing its preview needs", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/proj": listing("/proj", []),
+        "/proj/docs": listing("/proj/docs", [
+          { ...entry("readme.md"), path: "/proj/docs/readme.md" },
+        ]),
+      },
+    });
+    const firstLanding = coldBrowser(h)("/proj");
+    const jump = h.mod.previewEntry({ ...entry("readme.md"), path: "/proj/docs/readme.md" });
+    await Promise.all([firstLanding, jump]);
+
+    // The listing under the preview describes the previewed file's own
+    // directory; landing on the project root would drop the selection the
+    // jump just made and take the preview with it.
+    expect(active(h.mod).browsing).toBe("/proj/docs");
+    expect(active(h.mod).preview?.path).toBe("/proj/docs/readme.md");
+  });
+
+  it("lands a tab nobody claimed on the project root, once", async () => {
+    const h = await bootFiles({ listings: { "/proj": listing("/proj", []) } });
+    const firstLanding = coldBrowser(h)("/proj");
+    await firstLanding;
+    expect(active(h.mod).browsing).toBe("/proj");
+    expect(h.api.listDir).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("nested listing rows", () => {
+  /** Entries whose paths really sit under `dir` (the entry() helper roots at /root). */
+  function under(dir: string, entries: FileEntry[]): FileEntry[] {
+    return entries.map((e) => ({ ...e, path: `${dir}/${e.name}` }));
+  }
+
+  it("unfolds an expanded folder's children under it, recursively", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/proj": listing("/proj", under("/proj", [entry("docs", true), entry("README.md")])),
+        "/proj/docs": listing(
+          "/proj/docs",
+          under("/proj/docs", [entry("deep", true), entry("a.md")]),
+        ),
+        "/proj/docs/deep": listing("/proj/docs/deep", under("/proj/docs/deep", [entry("b.ts")])),
+      },
+    });
+    await h.mod.browseTo("/proj");
+    await h.mod.loadTreeChildren("/proj/docs");
+    await h.mod.loadTreeChildren("/proj/docs/deep");
+
+    // Folded: the listed directory's own entries only.
+    expect(h.mod.nestedListingRows(h.mod.visibleEntries()).map((r) => r.entry.name)).toEqual([
+      "docs",
+      "README.md",
+    ]);
+
+    await h.mod.toggleTreeNode("/proj/docs");
+    expect(h.mod.nestedListingRows(h.mod.visibleEntries())).toMatchObject([
+      { entry: { name: "docs" }, depth: 0, expanded: true },
+      { entry: { name: "deep" }, depth: 1, expanded: false },
+      { entry: { name: "a.md" }, depth: 1 },
+      { entry: { name: "README.md" }, depth: 0 },
+    ]);
+
+    // A folder opened inside an opened folder nests one level deeper.
+    await h.mod.toggleTreeNode("/proj/docs/deep");
+    expect(
+      h.mod.nestedListingRows(h.mod.visibleEntries()).map((r) => [r.entry.name, r.depth]),
+    ).toEqual([
+      ["docs", 0],
+      ["deep", 1],
+      ["b.ts", 2],
+      ["a.md", 1],
+      ["README.md", 0],
+    ]);
+  });
+
+  it("carries a folder's read failure on its row instead of unfolding into silence", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/proj": listing("/proj", under("/proj", [entry("locked", true)])),
+        "/proj/locked": { ok: false, error: { code: "permission" } },
+      },
+    });
+    await h.mod.browseTo("/proj");
+    await h.mod.toggleTreeNode("/proj/locked");
+    const rows = h.mod.nestedListingRows(h.mod.visibleEntries());
+    expect(rows).toMatchObject([{ entry: { name: "locked" }, expanded: true }]);
+    expect(rows[0]?.error).toEqual({ code: "permission" });
+  });
+
+  it("keeps the name filter on the listed directory, not on what unfolds", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/proj": listing("/proj", under("/proj", [entry("docs", true), entry("README.md")])),
+        "/proj/docs": listing("/proj/docs", under("/proj/docs", [entry("a.md"), entry("b.md")])),
+      },
+    });
+    await h.mod.browseTo("/proj");
+    await h.mod.toggleTreeNode("/proj/docs");
+    h.mod.setFilter("docs");
+    // "docs" survives the filter (it matches); its children arrive unfiltered
+    // — the box scopes to the directory being looked at, not to the subtree.
+    expect(h.mod.nestedListingRows(h.mod.visibleEntries()).map((r) => r.entry.name)).toEqual([
+      "docs",
+      "a.md",
+      "b.md",
+    ]);
+  });
+});
+
 describe("tabs", () => {
   it("keeps each tab's position, selection and preview apart", async () => {
     const h = await bootFiles({
