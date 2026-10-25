@@ -4593,7 +4593,10 @@ export async function compressSession(
     await window.awefork.compressSession(backend, targetId, plainModel(model) ?? preset);
     watchCompletion(backend, targetId, sentAt);
   } catch (error) {
-    setRunning(backend, targetId, false);
+    // Only a target this call marked running is this call's to clear. A fork
+    // that failed before the target moved leaves `targetId` on the parent,
+    // whose own streaming run must keep its flag.
+    if (targetId !== sessionId || parentOwnRun) setRunning(backend, targetId, false);
     if (parentOwnRun) settleRun(backend, sessionId, "aborted");
     state.actionError = t("state.compressFailed", {
       error: error instanceof Error ? error.message : String(error),

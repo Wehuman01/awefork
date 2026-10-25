@@ -296,4 +296,15 @@ describe("compress while the session runs", () => {
     expect(h.state.store.running[ANCHOR.id]).toBe(true);
     expect(h.state.store.actionError).toBeNull();
   });
+
+  it("keeps the parent's own run when the fork itself fails", async () => {
+    const h = await bootState({ extraSessions: [CHILD] });
+    h.fork.mockRejectedValueOnce(new Error("fork refused"));
+    h.emit({ type: "message.started", sessionId: ANCHOR.id, messageId: "u2" });
+    await confirmCompress(h, null);
+    // The compress never owned the parent's run, so a failed fork must not
+    // clear the flag — the streaming turn is still going.
+    expect(h.state.store.running[ANCHOR.id]).toBe(true);
+    expect(h.state.store.actionError).toBe(t("state.compressFailed", { error: "fork refused" }));
+  });
 });
