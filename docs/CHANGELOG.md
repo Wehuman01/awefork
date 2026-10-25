@@ -8,7 +8,7 @@
 
 ### Install
 
-Installers attached: `awefork-0.4.7-arm64.dmg` (macOS arm64, unsigned — on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`) and `awefork-0.4.7-win-x64.exe` (Windows x64). 
+Installers attached: `awefork-0.4.7-universal.dmg` (macOS universal — Intel and Apple Silicon in one package; unsigned, so on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`), `awefork-0.4.7-arm64.dmg` (macOS arm64 only, smaller download) and `awefork-0.4.7-x64-setup.exe` (Windows x64).
 
 ## v0.4.6
 
