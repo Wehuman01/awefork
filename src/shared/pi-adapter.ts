@@ -792,7 +792,7 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       };
     },
 
-    dispose(options) {
+    dispose() {
       emitEvent = null;
       // awefork's process exits on quit, which also kills the adapter's
       // event sink and reap timers. Pi has no detached server to finish the

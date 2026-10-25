@@ -618,7 +618,7 @@ export function toggleReading(): void {
  */
 export function stepReading(delta: number): void {
   const tab = activeTab();
-  if (!tab || !tab.reading) return;
+  if (!tab?.reading) return;
   const filesOnly = visibleEntries().filter((entry) => !entry.isDir);
   if (filesOnly.length === 0) return;
   const current = filesOnly.findIndex((entry) => entry.path === tab.selectedPath);

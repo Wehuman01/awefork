@@ -2088,11 +2088,6 @@ html[data-density="compact"] .sess-snips {
   display: none;
 }
 
-html[data-density="compact"] .ft-row {
-  padding-top: 2px;
-  padding-bottom: 2px;
-}
-
 .viewport.panning {
   cursor: grabbing;
 }
@@ -3924,11 +3919,6 @@ html[data-density="compact"] .ft-row {
   min-width: 0;
 }
 
-.chain-lineage .chain-preview {
-  color: var(--ask-deep);
-  font-weight: 700;
-}
-
 .chain-step {
   flex: 0 0 18px;
   width: 18px;
@@ -3973,6 +3963,11 @@ html[data-density="compact"] .ft-row {
   line-height: 1.5;
   color: var(--ink-soft);
   margin-top: 2px;
+}
+
+.chain-lineage .chain-preview {
+  color: var(--ask-deep);
+  font-weight: 700;
 }
 
 /* messages */
@@ -6628,10 +6623,10 @@ code.md-code {
   container-type: inline-size;
 }
 
-.canvas-overview > * {
-  pointer-events: auto;
-}
-
+/* Named children rather than `> *`: the higher specificity also keeps this
+   clear of the global `html[data-motion="off"] *` opt-out block above. The
+   pointer-events declarations ride their base rules below, so the
+   descending-specificity check stays quiet. */
 .overview-trigger {
   position: absolute;
   top: 12px;
@@ -6654,6 +6649,10 @@ code.md-code {
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--primary) 28%, transparent),
     var(--shadow-card);
+}
+
+.canvas-overview > .overview-trigger {
+  pointer-events: auto;
 }
 
 .overview-trigger button {
@@ -6749,6 +6748,10 @@ code.md-code {
     0 18px 60px rgba(0, 0, 0, 0.18),
     var(--shadow-card);
   overflow: hidden;
+}
+
+.canvas-overview > .overview-float {
+  pointer-events: auto;
 }
 
 .float-header {
@@ -7437,7 +7440,9 @@ html[data-theme="dark"] .mm-node.desc {
   border-color: #6f5fae;
 }
 
-html[data-theme="dark"] .mm-hint {
+/* (0,3,0) on purpose: beats `.minimap:hover .mm-hint` above without relying
+   on source order between the theme block and the light rules. */
+html[data-theme="dark"] .minimap .mm-hint {
   background: linear-gradient(to top, rgba(38, 30, 25, 0.95), rgba(38, 30, 25, 0));
 }
 
@@ -7475,7 +7480,9 @@ html[data-theme="dark"] .fchange-path {
   color: #c4bdd6;
 }
 
-html[data-theme="dark"] .fchange-open {
+/* (0,3,0) on purpose: beats `.fchange:hover .fchange-open` above without
+   relying on source order between the theme block and the light rules. */
+html[data-theme="dark"] .fchange .fchange-open {
   border-color: #4c4270;
   background: var(--card);
   color: var(--lavender-deep);
@@ -7490,7 +7497,9 @@ html[data-theme="dark"] .fchange-hunk + .fchange-hunk {
   border-top-color: #343048;
 }
 
-html[data-theme="dark"] .fc-sign {
+/* (0,3,0) on purpose: beats `.fc-line.add .fc-sign` and `.fc-line.del
+   .fc-sign` above, so the dark sign color wins on both row kinds. */
+html[data-theme="dark"] .fc-line .fc-sign {
   color: #7d7694;
 }
 
@@ -8345,8 +8354,12 @@ html[data-theme="dark"] ::selection {
   width: 100%;
 }
 
-.fp-csv th,
-.fp-csv td {
+/* (0,3,1) on purpose: the file preview's table never lives inside a
+   `.user-body`, but the descending-specificity check compares against the
+   markdown table rules above — the triple-class resolves it without
+   relying on file order. */
+.fp-csv .fp-csv-table th,
+.fp-csv .fp-csv-table td {
   border: 1px solid var(--line);
   padding: 3px 8px;
   text-align: left;
@@ -8356,7 +8369,7 @@ html[data-theme="dark"] ::selection {
   text-overflow: ellipsis;
 }
 
-.fp-csv th {
+.fp-csv .fp-csv-table th {
   background: var(--panel);
   color: var(--ink-soft);
   font-weight: 700;
@@ -8466,6 +8479,14 @@ html[data-theme="dark"] ::selection {
 
 .ft-row:hover {
   background: var(--row-hover);
+}
+
+/* Density override lives next to its base rule (the compact padding has to
+   win by specificity, not file order): (0,2,1) beats `.ft-row` and loses to
+   `.ft-row:hover` only on the property it does not set. */
+html[data-density="compact"] .ft-row {
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .ft-row.active {

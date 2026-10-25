@@ -115,7 +115,7 @@
       </div>
       <template v-else-if="preview.status === 'text'">
         <div v-if="csvTable" class="fp-csv">
-          <table>
+          <table class="fp-csv-table">
             <thead>
               <tr>
                 <th v-for="(cell, i) in csvTable.head" :key="i">{{ cell }}</th>
@@ -224,7 +224,7 @@ const imageWrapEl = ref<HTMLDivElement | null>(null);
 
 function onImageLoad(): void {
   const img = imageEl.value;
-  if (!img || !img.naturalWidth) {
+  if (!img?.naturalWidth) {
     imageSize.value = "";
     return;
   }

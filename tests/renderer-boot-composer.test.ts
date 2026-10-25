@@ -26,7 +26,7 @@ const FAV = [
  *  test sees what the app would really read next time. */
 let onDisk: PersistedComposer | null = null;
 
-async function boot(options: { composer?: PersistedComposer | null } = {}) {
+async function boot() {
   vi.resetModules();
   const saves: Array<{ backend: BackendId; value: PersistedComposer | null }> = [];
   const api: AweforkApi = {
