@@ -151,8 +151,9 @@ function modelKey(model: ModelChoice | ModelOption): string {
 const filtered = computed(() => {
   const needle = query.value.trim().toLowerCase();
   if (!needle) return props.models;
+  // providerId rides along — see model-picker's filter for why.
   return props.models.filter((m) =>
-    `${m.modelName} ${m.modelId} ${m.providerName}`.toLowerCase().includes(needle),
+    `${m.providerId} ${m.modelName} ${m.modelId} ${m.providerName}`.toLowerCase().includes(needle),
   );
 });
 

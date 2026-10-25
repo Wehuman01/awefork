@@ -238,6 +238,58 @@ describe("zcode-server", () => {
     });
   });
 
+  describe("readZcodeProviderConfig", () => {
+    const home = "/Users/tester";
+
+    it("prefers the unified registry the app-server reads", async () => {
+      mocks.existsSync.mockImplementation((path: string) =>
+        String(path).endsWith("provider_config.json"),
+      );
+      const readFileFn = vi.fn(async (path: string) => {
+        if (String(path).endsWith("provider_config.json")) return '{"config":{}}';
+        throw new Error("the legacy config must not be read");
+      });
+
+      const { readZcodeProviderConfig } = await import("../src/main/zcode-server.js");
+      const raw = await readZcodeProviderConfig(home, readFileFn as never);
+
+      expect(raw).toBe('{"config":{}}');
+      expect(readFileFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to the legacy v2 config when the registry file is absent", async () => {
+      // An install old enough to predate the unification has no
+      // provider_config.json; the v2 config is then the only source.
+      mocks.existsSync.mockReturnValue(false);
+      const readFileFn = vi.fn(async (path: string) => {
+        if (String(path).endsWith("config.json")) return '{"provider":{}}';
+        throw new Error("registry file is absent");
+      });
+
+      const { readZcodeProviderConfig } = await import("../src/main/zcode-server.js");
+      const raw = await readZcodeProviderConfig(home, readFileFn as never);
+
+      expect(raw).toBe('{"provider":{}}');
+    });
+
+    it("returns null when the registry exists but is unreadable", async () => {
+      mocks.existsSync.mockImplementation((path: string) =>
+        String(path).endsWith("provider_config.json"),
+      );
+      const readFileFn = vi.fn(async () => {
+        throw new Error("EACCES");
+      });
+
+      const { readZcodeProviderConfig } = await import("../src/main/zcode-server.js");
+      const raw = await readZcodeProviderConfig(home, readFileFn as never);
+
+      // A corrupt registry must not silently degrade to the legacy file on a
+      // modern install — its providers are ones the server refuses.
+      expect(raw).toBeNull();
+      expect(readFileFn).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("resolveZcodeCli", () => {
     it("runs the .cjs with a plain node — no second Electron Dock icon on macOS", async () => {
       const home = "/Users/tester";

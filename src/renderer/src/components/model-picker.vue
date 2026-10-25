@@ -115,8 +115,11 @@ const label = computed(() => {
 const filtered = computed(() => {
   const needle = query.value.trim().toLowerCase();
   if (!needle) return props.models;
+  // providerId rides along: the rows show providerName/modelId, but a provider
+  // is keyed by its id in zcode's own config (builtin:…, account:…), and a
+  // search for that key must not come back empty.
   return props.models.filter((m) =>
-    `${m.modelName} ${m.modelId} ${m.providerName}`.toLowerCase().includes(needle),
+    `${m.providerId} ${m.modelName} ${m.modelId} ${m.providerName}`.toLowerCase().includes(needle),
   );
 });
 

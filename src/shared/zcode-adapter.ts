@@ -41,10 +41,12 @@ export interface ZcodeAdapterOptions {
   /** Path to the lineage sidecar file (per-backend). */
   lineagePath: string;
   /**
-   * Raw provider registry the desktop client pushes (zcode v2 config.json);
-   * null when missing or unreadable. The app-server itself has no model
-   * listing — its catalog fills only when a desktop client connects — so
-   * awefork reads the same file the CLI itself configures from.
+   * Raw provider registry the desktop client pushes (zcode v2
+   * `provider_config.json` — the unified rules file; the legacy
+   * `config.json` only on installs that predate it). null when missing or
+   * unreadable. The app-server itself has no model listing outside a
+   * running session, so awefork reads the same file the CLI configures
+   * from.
    */
   readProviderConfig?(): Promise<string | null> | string | null;
   /** Fallback workspace for createSession when the caller passes none. */
@@ -124,7 +126,7 @@ function isModelOnly(message: ZcodeMessage): boolean {
   );
 }
 
-/** The slice of the provider registry listModels falls back to. */
+/** The slice of the legacy v2 provider config listModels falls back to. */
 interface ZcodeProviderModel {
   name?: string;
   reasoning?: { variants?: string[] } | null;
@@ -143,6 +145,41 @@ interface ZcodeProviderConfig {
   provider?: Record<string, ZcodeProviderEntry | null> | null;
 }
 
+/**
+ * One provider rule of the unified registry (`v2/provider_config.json`) —
+ * the file the app-server itself reads, so every model listed here is one
+ * session/setModel accepts.
+ */
+interface ZcodeRegistryRule {
+  providerId?: string;
+  providerName?: string;
+  enabled?: boolean;
+  config?: {
+    /** The models the registry actually offers for this provider. */
+    personalModelIds?: string[] | null;
+  } | null;
+}
+
+/** One per-model rule of the registry's modelConfigRules. */
+interface ZcodeRegistryModelRule {
+  providerId?: string;
+  modelId?: string;
+  config?: {
+    properties?: {
+      contextWindow?: number;
+      inputFormat?: { supportsImage?: boolean } | null;
+    } | null;
+    optionSpecs?: { reasoningLevel?: { values?: string[] | null } | null } | null;
+  } | null;
+}
+
+interface ZcodeProviderRegistry {
+  config?: {
+    providerConfigRules?: { providerRules?: ZcodeRegistryRule[] | null } | null;
+    modelConfigRules?: { providerModelRules?: ZcodeRegistryModelRule[] | null } | null;
+  } | null;
+}
+
 /** One entry of session/resume's settings.model.available catalog. */
 interface ZcodeCatalogModel {
   ref?: { providerId?: string; modelId?: string } | null;
@@ -155,6 +192,54 @@ interface ZcodeCatalogModel {
 }
 
 const SESSION_EVENT_METHOD = "session/event";
+
+/**
+ * Models from the unified provider registry (`v2/provider_config.json`) —
+ * the file the app-server itself builds its catalog from, so every entry
+ * here is one `session/setModel` accepts. A provider whose rule carries no
+ * `personalModelIds` contributes nothing: that is how an OAuth account plan
+ * looks before the desktop app has resolved it, and the standalone
+ * app-server never sees those models at all.
+ */
+function registryModels(raw: string): ModelOption[] {
+  let registry: ZcodeProviderRegistry;
+  try {
+    registry = JSON.parse(raw) as ZcodeProviderRegistry;
+  } catch {
+    return [];
+  }
+  const rules = registry.config?.providerConfigRules?.providerRules ?? [];
+  if (rules.length === 0) return [];
+  const modelRules = new Map<string, ZcodeRegistryModelRule>();
+  for (const rule of registry.config?.modelConfigRules?.providerModelRules ?? []) {
+    if (rule?.providerId && rule?.modelId) {
+      modelRules.set(`${rule.providerId}:${rule.modelId}`, rule);
+    }
+  }
+  const models: ModelOption[] = [];
+  for (const rule of rules) {
+    if (!rule || rule.enabled === false || !rule.providerId) continue;
+    for (const modelId of rule.config?.personalModelIds ?? []) {
+      if (!modelId) continue;
+      const extra = modelRules.get(`${rule.providerId}:${modelId}`)?.config;
+      models.push({
+        providerId: rule.providerId,
+        providerName: rule.providerName ?? rule.providerId,
+        modelId,
+        modelName: modelId,
+        variants:
+          extra?.optionSpecs?.reasoningLevel?.values?.filter(
+            (value): value is string => typeof value === "string" && value !== "",
+          ) ?? [],
+        attachment: extra?.properties?.inputFormat?.supportsImage ?? false,
+        ...(extra?.properties?.contextWindow
+          ? { contextWindow: extra.properties.contextWindow }
+          : {}),
+      });
+    }
+  }
+  return models;
+}
 
 /**
  * The v4 command channel. zcode's legacy session/* methods cover only the
@@ -491,7 +576,7 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
   /**
    * The live model catalog, read by resuming the most recent session — the
    * only request that serves it. Empty when no session exists yet or the
-   * server does not answer; listModels then falls back to the config file.
+   * server does not answer; listModels then falls back to the registry file.
    */
   const serverModelCatalog = async (): Promise<ModelOption[]> => {
     const client = await options.client();
@@ -637,14 +722,20 @@ export function createZcodeAdapter(options: ZcodeAdapterOptions): AgentAdapter {
 
     async listModels() {
       // The server's own catalog is authoritative: it carries the per-model
-      // reasoning levels session/setModel actually accepts (the v2 config
+      // reasoning levels session/setModel actually accepts (the registry
       // file's variant list drifts — e.g. "none"/"medium" are rejected live).
       // It is only served inside session/resume's settings, so attach the
-      // most recent session to fill it; fall back to the config file.
+      // most recent session to fill it; fall back to the registry file.
       const catalog = await serverModelCatalog().catch(() => []);
       if (catalog.length > 0) return catalog;
       const raw = options.readProviderConfig ? await options.readProviderConfig() : null;
       if (!raw) return [] as ModelOption[];
+      // The unified registry is the app-server's own source of truth, so its
+      // entries are the ones session/setModel accepts. It answers empty for
+      // a legacy v2 config (an install that predates the unification), which
+      // is then parsed as the old shape.
+      const registry = registryModels(raw);
+      if (registry.length > 0) return registry;
       let config: ZcodeProviderConfig;
       try {
         config = JSON.parse(raw) as ZcodeProviderConfig;

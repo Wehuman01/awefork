@@ -601,6 +601,65 @@ describe("zcode adapter", () => {
     });
   });
 
+  it("reads models from the unified provider registry", async () => {
+    // The shape the app-server itself builds its catalog from
+    // (v2/provider_config.json). Everything listed here is selectable —
+    // unlike the legacy config, whose providers the server rejects.
+    const { options } = fakeOptions({
+      readProviderConfig: async () =>
+        JSON.stringify({
+          config: {
+            providerConfigRules: {
+              providerRules: [
+                {
+                  providerId: "magpie",
+                  providerName: "magpie",
+                  enabled: true,
+                  config: { personalModelIds: ["zcode/GLM-5.3", "group/glm53-smart"] },
+                },
+                {
+                  // Disabled providers keep their rule but offer nothing.
+                  providerId: "zc-aweshare",
+                  enabled: false,
+                  config: { personalModelIds: ["hub/glm-5.3"] },
+                },
+                {
+                  // An OAuth account plan before the desktop app resolved it:
+                  // a rule with no models contributes none.
+                  providerId: "account:bigmodel-individual-coding-plan",
+                  config: { personalModelIds: [], modelOrder: ["GLM-5.3"] },
+                },
+              ],
+            },
+            modelConfigRules: {
+              providerModelRules: [
+                {
+                  providerId: "magpie",
+                  modelId: "zcode/GLM-5.3",
+                  config: {
+                    properties: { contextWindow: 1000000, inputFormat: { supportsImage: true } },
+                    optionSpecs: { reasoningLevel: { values: ["low", "high", "max"] } },
+                  },
+                },
+              ],
+            },
+          },
+        }),
+    });
+    const models = await createZcodeAdapter(options).listModels();
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({
+      providerId: "magpie",
+      providerName: "magpie",
+      modelId: "zcode/GLM-5.3",
+      modelName: "zcode/GLM-5.3",
+      variants: ["low", "high", "max"],
+      attachment: true,
+      contextWindow: 1000000,
+    });
+    expect(models[1]).toMatchObject({ modelId: "group/glm53-smart", variants: [] });
+  });
+
   it("createSession uses the caller directory or the injected home", async () => {
     const { client, calls } = fakeClient({
       replies: {

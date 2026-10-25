@@ -404,19 +404,33 @@ export function stopZcodeServer(): void {
 }
 
 /**
- * The provider registry the desktop client maintains (`~/.zcode/v2/config.
- * json`). This is the only model catalog zcode exposes outside a running
- * desktop session — the app-server's own catalog fills only when a desktop
- * client connects and pushes it. Missing or corrupt → null; the adapter
- * returns an empty list and every run uses the session's own default model.
+ * The provider registry the app-server itself builds its model catalog from:
+ * `~/.zcode/v2/provider_config.json`, the unified rules file. Missing or
+ * corrupt → null; the adapter then returns an empty list and every run uses
+ * the session's own default model.
+ *
+ * The legacy v2 `config.json` is read only when the registry file is absent —
+ * an install old enough to predate the unification. On current builds the
+ * app-server ignores it (verified live on 0.17.0: session/setModel rejects
+ * every provider that exists only there with "Provider Registry 中不存在
+ * Model"), so serving it as a peer source would list models the server
+ * refuses to select.
  */
 export async function readZcodeProviderConfig(
   home: string = homedir(),
   readFileFn: typeof readFile = readFile,
 ): Promise<string | null> {
-  const path = join(home, ".zcode", "v2", "config.json");
+  const registryPath = join(home, ".zcode", "v2", "provider_config.json");
+  if (existsSync(registryPath)) {
+    try {
+      return await readFileFn(registryPath, "utf8");
+    } catch {
+      return null;
+    }
+  }
+  const legacyPath = join(home, ".zcode", "v2", "config.json");
   try {
-    return await readFileFn(path, "utf8");
+    return await readFileFn(legacyPath, "utf8");
   } catch {
     return null;
   }
