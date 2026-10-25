@@ -252,9 +252,19 @@ export interface AweforkApi {
    * land the session, keeping this window's identity intact. The renderer
    * receives the landing through onAgentNavigate.
    */
-  requestAgentNavigate(backend: BackendId, sessionId: string): Promise<{ ok: boolean; error?: string }>;
+  requestAgentNavigate(
+    backend: BackendId,
+    sessionId: string,
+  ): Promise<{ ok: boolean; error?: string }>;
   /** Main → renderer: land this session (an overview jump routed to this window). */
   onAgentNavigate(handler: (request: AgentNavigateRequest) => void): () => void;
+  /**
+   * Tell main this window subscribes to onAgentNavigate for its active
+   * backend — a navigation parks until some window claims it, so a jump into
+   * a window that is still booting waits instead of vanishing. Returns false
+   * when nothing was parked (the normal case) or the parked jump went stale.
+   */
+  agentNavigateReady(backend: BackendId): Promise<boolean>;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /**

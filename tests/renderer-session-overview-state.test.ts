@@ -111,6 +111,11 @@ async function bootState(
     }),
     selectBackend: async () => ({ ok: true }),
     openAgentWindow: async () => ({ ok: true }),
+    // Tests boot one window over a scripted api; the multi-window jump reads
+    // multiWindow off settings, which stays false unless a test opts in.
+    requestAgentNavigate: async () => ({ ok: true }),
+    onAgentNavigate: () => () => {},
+    agentNavigateReady: async () => false,
     capabilities: async () => ({ deleteMessage: true, attachments: true, fileChanges: true }),
     openPath: async () => ({ ok: true }),
     openExternal: async () => {},
@@ -152,7 +157,13 @@ beforeEach(() => {
   // The overview is a labs feature — off by default. It must be on in storage
   // before the settings module boots (state reads it at import time), or
   // refreshOverviewSessions turns into a no-op and no row ever lists.
-  map.set("awefork:settings", JSON.stringify({ labs: { sessionOverview: true } }));
+  // Multi-window is on by default in the app; the navigation tests below are
+  // about the in-place switch, so the harness pins it off — the multi-window
+  // describe turns it back on for its own boots.
+  map.set(
+    "awefork:settings",
+    JSON.stringify({ labs: { sessionOverview: true }, canvas: { multiWindow: false } }),
+  );
   (globalThis as unknown as { localStorage: unknown }).localStorage = {
     getItem: (key: string) => map.get(key) ?? null,
     setItem: (key: string, value: string) => void map.set(key, value),
@@ -821,6 +832,98 @@ describe("overview navigation", () => {
     expect(h.store.overviewRead["opencode:s1"]?.revision).toBe(2);
     expect(h.store.overviewRead["opencode:s1"]?.seen).toBe(1);
     expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
+  });
+});
+
+describe("overview navigation in multi-window mode", () => {
+  /** Multi-window on; everything else default. */
+  async function bootMultiWindow() {
+    (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
+      "awefork:settings",
+      JSON.stringify({ labs: { sessionOverview: true }, canvas: { multiWindow: true } }),
+    );
+    return bootState();
+  }
+
+  function apiMock(): AweforkApi {
+    return (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+  }
+
+  it("routes a cross-agent jump to the agent's window instead of switching in place", async () => {
+    const h = await bootMultiWindow();
+    h.state.openOverviewPanel();
+    await vi.advanceTimersByTimeAsync(0);
+    await runAndSettle(h, "codex", "c1");
+    expect(rowOf(h, "codex", "c1")?.status).toBe("unread");
+
+    const requests: Array<{ backend: BackendId; sessionId: string }> = [];
+    const api = apiMock();
+    api.requestAgentNavigate = async (backend, sessionId) => {
+      requests.push({ backend, sessionId });
+      return { ok: true };
+    };
+
+    const landed = await h.state.jumpToOverviewSession("codex", "c1");
+
+    expect(landed).toBe(true);
+    // The window keeps its own agent: no in-place switch happened.
+    expect(h.store.activeBackend).toBe("opencode");
+    expect(h.store.selectedId).not.toBe("c1");
+    // The ask went to main, addressed to the codex window.
+    expect(requests).toEqual([{ backend: "codex", sessionId: "c1" }]);
+    // The panel closed and the row cleared — the result was handed off.
+    expect(h.store.overview.open).toBe(false);
+    expect(rowOf(h, "codex", "c1")?.status).toBe("read");
+  });
+
+  it("keeps the panel and reports when the target window cannot be reached", async () => {
+    const h = await bootMultiWindow();
+    h.state.openOverviewPanel();
+    await vi.advanceTimersByTimeAsync(0);
+    await runAndSettle(h, "codex", "c1");
+
+    const api = apiMock();
+    api.requestAgentNavigate = async () => ({ ok: false, error: "Multi-window is not enabled" });
+
+    const landed = await h.state.jumpToOverviewSession("codex", "c1");
+
+    expect(landed).toBe(false);
+    expect(h.store.activeBackend).toBe("opencode");
+    expect(h.store.overview.open).toBe(true);
+    expect(h.store.overview.error).toBeTruthy();
+    // A failed hand-off leaves the result unread — nothing was shown.
+    expect(rowOf(h, "codex", "c1")?.status).toBe("unread");
+  });
+
+  it("keeps the in-place switch for the window's own agent", async () => {
+    const h = await bootMultiWindow();
+    const api = apiMock();
+    const requests: Array<{ backend: BackendId; sessionId: string }> = [];
+    api.requestAgentNavigate = async (backend, sessionId) => {
+      requests.push({ backend, sessionId });
+      return { ok: true };
+    };
+    h.state.openOverviewPanel();
+    await vi.advanceTimersByTimeAsync(0);
+    await h.state.refreshSessions();
+    await h.state.selectSession("s1");
+    // A second story on the SAME backend — the jump stays in this window.
+    const sessions = api.sessions;
+    api.sessions = async (backend: BackendId) =>
+      backend === "opencode"
+        ? {
+            sessions: [OPENCODE_S1, { ...OPENCODE_S1, id: "s2", title: "另一条故事" }],
+            lineage: {},
+          }
+        : sessions(backend);
+    await h.state.refreshSessions();
+
+    const landed = await h.state.jumpToOverviewSession("opencode", "s2");
+
+    expect(landed).toBe(true);
+    expect(requests).toEqual([]);
+    expect(h.store.activeBackend).toBe("opencode");
+    expect(h.store.selectedId).toBe("s2");
   });
 });
 

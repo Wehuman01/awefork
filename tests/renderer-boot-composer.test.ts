@@ -67,6 +67,11 @@ async function boot(options: { composer?: PersistedComposer | null } = {}) {
     }),
     selectBackend: async () => ({ ok: true }),
     openAgentWindow: async () => ({ ok: true }),
+    // One-window harness: the multi-window jump never engages (multiWindow
+    // defaults off) but init() subscribes unconditionally.
+    requestAgentNavigate: async () => ({ ok: true }),
+    onAgentNavigate: () => () => {},
+    agentNavigateReady: async () => false,
     capabilities: async () => ({
       deleteMessage: true,
       attachments: true,

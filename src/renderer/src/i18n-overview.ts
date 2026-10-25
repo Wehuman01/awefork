@@ -87,6 +87,14 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Click for a summary · double-click or ↗ to jump · Esc closes",
   },
   "overview.jumpSwitchFailed": { zh: "无法切换到 {backend}", en: "Couldn't switch to {backend}" },
+  "overview.jumpWindowFailed": {
+    zh: "无法打开 {backend} 窗口：{error}",
+    en: "Couldn't open the {backend} window: {error}",
+  },
+  "overview.jumpWindowMissing": {
+    zh: "{backend} 窗口没有接手这次跳转，会话可能已关闭",
+    en: "The {backend} window didn't take over the jump — its session may be gone",
+  },
   "overview.jumpInterrupted": {
     zh: "会话跳转已中断，请重试",
     en: "Navigation interrupted. Try again.",

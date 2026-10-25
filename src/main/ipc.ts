@@ -9,6 +9,7 @@ import {
   shell,
 } from "electron";
 import { canonicalizeStoredArchive, setArchived } from "../shared/archive-store.js";
+import type { AgentNavigateRequest } from "../shared/awefork-api.js";
 import { type BackendId, isBackendId } from "../shared/backend.js";
 import {
   canonicalDirectory,
@@ -155,20 +156,42 @@ import { resolveZcodeCli } from "./zcode-server.js";
  * Sequence-stamped entry and unknown-state updates arrive on
  * "awefork:overview-read".
  * Multi-window jumps: requestAgentNavigate(backend, session) focuses (or
- * opens) the backend's own window and delivers "awefork:agent-navigate"
- * {backend, sessionId} there — the requesting window never switches in place,
- * so an agent window keeps the agent it was opened for.
+ * opens) the backend's own window and hands "awefork:agent-navigate"
+ * {backend, sessionId} to the window that owns it — the agent window main
+ * tracks, or the window that claimed the backend via agentNavigateReady. A
+ * window still booting parks the navigation until it claims; the asking
+ * window never switches in place, so an agent window keeps its agent.
  */
 export function registerIpc(
   registry: BackendRegistry,
   openAgentWindow?: (backend: BackendId) => Promise<{ ok: boolean; error?: string }>,
   overviewLedger?: OverviewLedgerStore,
   userDataDir = app.getPath("userData"),
+  agentWindows?: Map<BackendId, BrowserWindow>,
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
   // default rather than throwing so a stale renderer can't wedge the store.
   const storeBackend = (value: unknown): BackendId => (isBackendId(value) ? value : "opencode");
+  /**
+   * The live window that owns a backend's navigations: the agent window main
+   * tracks for it, or — on the main window, which can hold any backend — the
+   * window whose renderer reports that backend active. Null when no live
+   * window claims it, so a navigation parks instead of landing nowhere.
+   */
+  const agentWindowClaiming = (backend: BackendId): BrowserWindow | null => {
+    const dedicated = agentWindows?.get(backend);
+    if (dedicated && !dedicated.isDestroyed()) return dedicated;
+    const main = BrowserWindow.getAllWindows().find(
+      (window) =>
+        !window.isDestroyed() && navigateReadyBackends.get(window.webContents.id) === backend,
+    );
+    return main ?? null;
+  };
+  // Per-window claim of "my active backend has a live navigation listener",
+  // reported through awefork:agentNavigateReady from init(). Keyed by
+  // webContents id so a closed window's claim dies with its entry.
+  const navigateReadyBackends = new Map<number, BackendId>();
 
   // ── canvas session overview unread ledger (main-owned) ──────────────────
   // The overview's unread record is one file in userData, written only here.
@@ -800,8 +823,12 @@ export function registerIpc(
 
   // Multi-window overview jump: the asking window keeps its own agent; the
   // backend's window (focused or freshly opened) lands the session itself.
-  // Delivered after the focus round-trip so the window is on screen when the
-  // navigation starts; the renderer routes it through its own jump logic.
+  // A window that is still booting has not subscribed yet, so the navigation
+  // parks until that window reports its renderer ready (agentNavigateReady)
+  // — or times out, reporting the miss back to the asking window. Delivered
+  // only to the window that claimed the backend's navigation slot.
+  const pendingNavigations = new Map<BackendId, { request: AgentNavigateRequest; at: number }>();
+  const NAVIGATE_PARK_MS = 15_000;
   ipcMain.handle(
     "awefork:requestAgentNavigate",
     async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: unknown) => {
@@ -811,13 +838,31 @@ export function registerIpc(
       if (!openAgentWindow) return { ok: false, error: "Multi-window is not enabled" };
       const opened = await openAgentWindow(backend);
       if (!opened.ok) return opened;
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed())
-          window.webContents.send("awefork:agent-navigate", { backend, sessionId });
+      const request: AgentNavigateRequest = { backend, sessionId };
+      const window = agentWindowClaiming(backend);
+      if (window) {
+        window.webContents.send("awefork:agent-navigate", request);
+        return { ok: true };
       }
-      return { ok: true };
+      pendingNavigations.set(backend, { request, at: Date.now() });
+      return { ok: true, pending: true };
     },
   );
+  // Resolve a parked navigation the moment its window reports ready. Anything
+  // older than the park window is stale — drop it and report the miss, so a
+  // jump into a dead boot fails visibly instead of hanging the panel forever.
+  ipcMain.handle("awefork:agentNavigateReady", async (event: IpcMainInvokeEvent, backend) => {
+    if (!isBackendId(backend) || event.sender.isDestroyed()) return false;
+    navigateReadyBackends.set(event.sender.id, backend);
+    const pending = pendingNavigations.get(backend);
+    if (!pending) return false;
+    pendingNavigations.delete(backend);
+    if (Date.now() - pending.at > NAVIGATE_PARK_MS) return false;
+    const window = agentWindowClaiming(backend);
+    if (!window) return false;
+    window.webContents.send("awefork:agent-navigate", pending.request);
+    return true;
+  });
 
   ipcMain.handle("awefork:capabilities", (_event: IpcMainInvokeEvent, backend: BackendId) =>
     registry.capabilities(storeBackend(backend)),

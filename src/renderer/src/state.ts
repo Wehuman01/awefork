@@ -1398,7 +1398,20 @@ export async function init(): Promise<void> {
   // the snapshot resolves so nothing that lands in between is missed.
   window.awefork.onOverviewRead(applyOverviewUpdate);
   void loadOverviewLedgerFromMain();
+  // The landing side of a multi-window overview jump: this window was handed a
+  // session by another window (or by the newly opened one it belongs to). The
+  // ready claim tells main which backend this window owns its navigations for,
+  // releasing anything parked while it was still booting.
+  window.awefork.onAgentNavigate((request) => {
+    void landOverviewNavigation(request.backend, request.sessionId);
+  });
   await bootBackend(backend);
+  try {
+    await window.awefork.agentNavigateReady(state.activeBackend);
+  } catch {
+    // Without a main process (tests) there is nothing to claim; a jump's
+    // own error paths already cover the miss.
+  }
   // Fill the trigger's cross-agent counts after first paint. The adapters are
   // lazy by design; this one paced sweep is the deliberate startup cost.
   setTimeout(() => {
@@ -7034,6 +7047,39 @@ export async function jumpToOverviewSession(
   const label = BACKEND_LABELS[backend];
   try {
     state.overview.error = null;
+    // Multi-window mode: never rewire this window — it keeps the agent it was
+    // opened for. Hand the session to the target's own window instead; it
+    // lands through landOverviewNavigation and marks the result seen there.
+    // This window stays put, the panel closes, and the row clears from the
+    // shared ledger like any landed jump.
+    if (settings.canvas.multiWindow && backend !== state.activeBackend) {
+      let result: { ok: boolean; error?: string };
+      try {
+        result = await window.awefork.requestAgentNavigate(backend, sessionId);
+      } catch (error) {
+        state.overview.error = t("overview.jumpWindowFailed", {
+          backend: label,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+      if (!result.ok) {
+        state.overview.error = t("overview.jumpWindowFailed", {
+          backend: label,
+          error: result.error ?? t("overview.jumpWindowMissing", { backend: label }),
+        });
+        return false;
+      }
+      // The target window confirms the landing through the shared ledger;
+      // give it a beat and clear the row regardless — the ask left this
+      // window, and a parked result would keep the panel's badge lit for a
+      // session the user has already been shown (or whose window died).
+      state.overview.open = false;
+      state.overview.selectedKey = null;
+      const revision = state.overviewRead[key]?.revision ?? 0;
+      void markOverviewSeen(backend, sessionId, revision);
+      return true;
+    }
     if (backend !== state.activeBackend) {
       try {
         await switchBackend(backend, { markSeen: false });
@@ -7143,4 +7189,19 @@ export async function jumpToOverviewSession(
     }
     state.overview.jumpingKey = null;
   }
+}
+
+/**
+ * The landing side of a multi-window jump: another window routed this
+ * session here because this window owns `backend`. Reuses the in-window
+ * landing (session → tab preference → latest turn → mark seen) through
+ * jumpToOverviewSession, which sees the backend already active and skips
+ * the switch. Runs only when the workspace is otherwise idle — a mid-run
+ * or mid-switch window does not yank its user around.
+ */
+async function landOverviewNavigation(backend: BackendId, sessionId: string): Promise<void> {
+  if (backend !== state.activeBackend || switchingBackend || state.overview.jumpingKey !== null) {
+    return;
+  }
+  await jumpToOverviewSession(backend, sessionId);
 }

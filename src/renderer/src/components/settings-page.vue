@@ -276,6 +276,7 @@ import {
   closeOverviewPanel,
   installBackend,
   installingLabel,
+  openAgentWindow,
   pickResidentFolder,
   refreshBackendList,
   refreshOverviewSessions,
@@ -540,7 +541,13 @@ function backendSection(): SectionDef {
       title: entry.label,
       desc,
       buttonLabel: t("settings.switchBackend", { label: entry.label }),
-      apply: () => void switchBackend(entry.id as BackendId),
+      // Multi-window mode routes through the agent's own window: an in-place
+      // switch would leave an agent window wearing another agent's content
+      // while main still points its window at the old agent.
+      apply: () =>
+        void (settings.canvas.multiWindow
+          ? openAgentWindow(entry.id as BackendId)
+          : switchBackend(entry.id as BackendId)),
     };
   });
   rows.push(

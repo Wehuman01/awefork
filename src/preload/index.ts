@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AgentNavigateRequest,
   AweforkApi,
   BodySearchRequest,
   BodySearchResult,
@@ -246,6 +247,19 @@ const api: AweforkApi = {
     ipcRenderer.on("awefork:event", listener);
     return () => ipcRenderer.removeListener("awefork:event", listener);
   },
+  requestAgentNavigate: (
+    backend: BackendId,
+    sessionId: string,
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("awefork:requestAgentNavigate", backend, sessionId),
+  onAgentNavigate: (handler: (request: AgentNavigateRequest) => void): (() => void) => {
+    const listener = (_event: unknown, payload: unknown) =>
+      handler(payload as AgentNavigateRequest);
+    ipcRenderer.on("awefork:agent-navigate", listener);
+    return () => ipcRenderer.removeListener("awefork:agent-navigate", listener);
+  },
+  agentNavigateReady: (backend: BackendId): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:agentNavigateReady", backend),
   overviewLedger: (): Promise<OverviewLedgerSnapshot> =>
     ipcRenderer.invoke("awefork:overviewLedger"),
   overviewObserveSessions: (

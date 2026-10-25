@@ -16,13 +16,6 @@ const registry = createBackendRegistry(app.getPath("userData"));
 // channels and the "awefork:overview-read" broadcast are registered by
 // registerIpc whenever this store is passed in.
 const overviewLedger = new OverviewLedgerStore(join(app.getPath("userData"), "overview-read.json"));
-registerIpc(registry, openAgentWindow, overviewLedger);
-registerSaveFileIpc();
-// The updater's macOS relaunch exits via app.exit(0), which never fires
-// before-quit — hook the same teardown so no backend child survives the swap.
-// Keep-alive is forced off here on purpose: an update swap must not leave the
-// old install's servers behind to fight the new one over session files.
-setUpdaterExitHook(() => registry.dispose({ keepAlive: false }));
 
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no
@@ -37,6 +30,15 @@ let mainWindow: BrowserWindow | null = null;
  * the map's size is bounded by the agent count, never the click count.
  */
 const agentWindows = new Map<BackendId, BrowserWindow>();
+// Registered after agentWindows so multi-window navigations can find the
+// window that owns the target agent.
+registerIpc(registry, openAgentWindow, overviewLedger, undefined, agentWindows);
+registerSaveFileIpc();
+// The updater's macOS relaunch exits via app.exit(0), which never fires
+// before-quit — hook the same teardown so no backend child survives the swap.
+// Keep-alive is forced off here on purpose: an update swap must not leave the
+// old install's servers behind to fight the new one over session files.
+setUpdaterExitHook(() => registry.dispose({ keepAlive: false }));
 
 async function createWindow(agent?: BackendId): Promise<void> {
   const window = new BrowserWindow({
