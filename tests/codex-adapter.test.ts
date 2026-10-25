@@ -293,6 +293,44 @@ describe("createCodexAdapter messages()", () => {
     expect(await adapter.messages("s1")).toHaveLength(1);
   });
 
+  it("maps a compaction turn into the shared compaction marker row", async () => {
+    // codex folds the thread's history on its own: the turn that does it
+    // carries a single contextCompaction item (the rollout spells it
+    // ContextCompaction) and its summary is encrypted, so there is no
+    // readable text. Mapping it to nothing made the fold invisible on every
+    // later open — pane and canvas alike — while opencode, pi, claude and
+    // zcode all render the marker row.
+    const { client } = fakeClient({
+      "thread/read": () => ({ thread: THREAD_FIXTURE }),
+      "thread/turns/list": () =>
+        turnPageFixture([
+          TURN_FIXTURE,
+          {
+            id: "turn-compact",
+            status: "completed",
+            startedAt: 1726000200,
+            completedAt: 1726000300,
+            items: [{ type: "contextCompaction", id: "cmp-1", encrypted_content: "gAAAAABq" }],
+          },
+          SWITCHED_TURN_FIXTURE,
+        ]),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const rows = await adapter.messages("s1");
+    // The marker sits exactly where the fold happened: after the last
+    // pre-compaction turn, before the first post-compaction one.
+    expect(rows.map((r) => r.id)).toEqual(["u1", "turn-1", "cmp-1", "u2", "turn-2"]);
+    expect(rows[2]).toMatchObject({
+      role: "user",
+      text: "",
+      compaction: true,
+      providerId: "codex",
+      modelId: "gpt-5-codex",
+      variant: "high",
+    });
+  });
+
   it("never calls thread/resume: browsing must not take the thread writer", async () => {
     // Regression: codex 0.154 gives each thread one exclusive writer, and
     // thread/resume takes it. Opening a session that a live codex session

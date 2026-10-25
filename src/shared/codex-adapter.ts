@@ -449,6 +449,34 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     const variant = turnSettings?.effort ?? thread?.reasoningEffort ?? null;
     const rows: ChatMessage[] = [];
 
+    // codex's compaction turn carries one contextCompaction item (the rollout
+    // spells the same item ContextCompaction) and little else — the fold
+    // itself is the turn. It maps to the marker row every other backend
+    // emits, so the pane draws its divider and the canvas titles the turn;
+    // without it the fold is invisible on every later open, long after the
+    // thread/compacted toast has passed. codex's summary is encrypted, so
+    // the marker carries no text of its own.
+    const compaction = items.find((i) => i.type.toLowerCase() === "contextcompaction");
+    if (compaction) {
+      rows.push({
+        id: compaction.id,
+        role: "user",
+        text: "",
+        thinking: "",
+        toolNames: [],
+        modelId,
+        providerId: "codex",
+        variant,
+        attachmentNames: [],
+        createdAt: startedAt,
+        completedAt: null,
+        finish: null,
+        outputTokens: null,
+        compaction: true,
+        error: null,
+      });
+    }
+
     const userItem = items.find((i) => i.type === "userMessage");
     if (userItem) {
       rows.push({
