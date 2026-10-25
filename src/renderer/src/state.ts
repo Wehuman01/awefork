@@ -2445,13 +2445,13 @@ function settleRun(
   // overwritten by an idle that follows it).
   const key = overviewKey(backend, sessionId);
   const unknownRunId = state.overviewUnknown[key];
-  const observedRunId =
-    runId ??
-    overviewRunIds.get(streamKey(backend, sessionId)) ??
-    (reason === "settled" ? unknownRunId : undefined);
+  // Run evidence must come from this window: a run id it observed starting,
+  // or the empty marker a local prompt minted before the shared start event.
+  // A marker restored from the ledger is a claim about a past run, not
+  // evidence — an idle frame alone must not turn it into a result.
+  const observedRunId = runId ?? overviewRunIds.get(streamKey(backend, sessionId));
   const matchingUnknown =
-    unknownRunId !== undefined &&
-    (unknownRunId === "" || observedRunId === undefined || unknownRunId === observedRunId);
+    unknownRunId !== undefined && (unknownRunId === "" || unknownRunId === observedRunId);
   // An explicit idle can confirm a run that the watchdog already moved to
   // unknown. It still cannot create a result for a session with no run evidence.
   const observed = isRunning(backend, sessionId) || (reason === "settled" && matchingUnknown);
@@ -2794,6 +2794,13 @@ function handleEvent(
     }
     case "session.idle": {
       const runId = sharedRunId ?? overviewRunIds.get(streamKey(backend, event.sessionId));
+      // An explicit idle also resolves an unfinished run this window never
+      // observed — a marker restored after a restart, or a run another window
+      // watched. Drop the marker without minting a result: only the window
+      // that watched the run has the evidence to record how it ended.
+      if (!isRunning(backend, event.sessionId)) {
+        setOverviewUnknown(backend, event.sessionId, false, runId ?? undefined);
+      }
       stopWatch(backend, event.sessionId);
       // The turn finished, so any queued approval/input it blocked on is gone
       // (codex only ends a turn after its server requests resolve or time out).
@@ -6882,11 +6889,15 @@ function setOverviewUnknown(
  * that never became a run) leave the ledger alone, so the panel can never claim
  * a finished run it did not see finish.
  *
- * The mint itself goes to the main process — one writer, every window sees the
- * same revision — and the local mirror follows the returned entry. A window
- * that is offline when the run settles still records it locally through the
- * optimistic fold; the boot merge (see loadOverviewLedgerFromMain) folds those
- * revisions back into the authoritative copy instead of dropping them.
+ * The mint goes to the main process — one writer, every window sees the same
+ * revision — and the local mirror follows the returned entry. There is no
+ * optimistic fold on the way in: folding first and merging main's answer by max
+ * revision kept a phantom revision whenever main deduped the mint (another
+ * window, or this window's own earlier observation of the same result), and
+ * `seen` could then never reach it, so the row stayed 新结果 in that window until
+ * it restarted. The round-trip is local IPC; a window that is offline folds in
+ * the catch instead, and the boot merge (see loadOverviewLedgerFromMain) carries
+ * those revisions back into the authoritative copy.
  */
 function recordOverviewOutcome(
   backend: BackendId,
@@ -6908,24 +6919,31 @@ function recordOverviewOutcome(
   const settledAt = Date.now();
   const observedRunId = runId ?? overviewRunIds.get(streamKey(backend, sessionId));
   const observationId = settleId ?? observedRunId ?? crypto.randomUUID();
-  const previousLedger = state.overviewRead;
-  const nextLedger = recordOverviewSettle(previousLedger, key, {
-    settledAt,
-    failed,
-    settleId: observationId,
-  });
-  state.overviewRead = nextLedger;
-  if (nextLedger !== previousLedger) {
-    clearOverviewUnknown(backend, sessionId, observedRunId);
-  }
   return window.awefork
     .overviewRecordSettle(backend, sessionId, failed, observationId, observedRunId)
     .then((entry) => {
       applyOverviewEntry(key, entry);
+      // The ending is on record now, so this run's unfinished marker goes. A
+      // mint main deduped broadcasts nothing, so this cannot rely on the
+      // broadcast alone; a marker left by a newer run keeps its own id and is
+      // skipped by the run-id check.
+      clearOverviewUnknown(backend, sessionId, observedRunId);
       return true;
     })
     .catch(() => {
-      // The optimistic fold stays and is spooled for the next shared merge.
+      // Offline (or a main process that predates the channel): record it
+      // locally so the badge still shows, and spool it for the next boot's
+      // shared merge.
+      const previous = state.overviewRead;
+      const next = recordOverviewSettle(previous, key, {
+        settledAt,
+        failed,
+        settleId: observationId,
+      });
+      if (next !== previous) {
+        state.overviewRead = next;
+        clearOverviewUnknown(backend, sessionId, observedRunId);
+      }
       saveLegacyLocalLedger(state.overviewRead);
       return false;
     });
