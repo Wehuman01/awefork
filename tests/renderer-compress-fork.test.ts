@@ -270,6 +270,59 @@ describe("compress while the session runs", () => {
     expect(h.state.store.actionError).toBeNull();
   });
 
+  it("refuses a second compress while the first one is still in flight", async () => {
+    // Regression: the fork path does not claim the parent's running flag (a
+    // streaming parent owns it), and that flag used to be the only guard. A
+    // second click during the fork's copy then cut a second branch from the
+    // same position. The gesture needs its own guard on every path.
+    const h = await bootState({ extraSessions: [CHILD] });
+    h.fork.mockImplementationOnce(async () => {
+      // Park the fork so the second click lands while it is still copying.
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      return { ...ANCHOR, id: "fork-slow", parentSessionId: ANCHOR.id, origin: "fork" as const };
+    });
+
+    const first = h.state.compressSession(ANCHOR.id, null);
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    required(h.state.store.compressAsk);
+    h.state.answerCompressAsk(MODEL);
+    // Let the first call reach its fork await.
+    for (let i = 0; i < 50 && h.fork.mock.calls.length === 0; i += 1) await Promise.resolve();
+
+    await h.state.compressSession(ANCHOR.id, null);
+    expect(h.state.store.compressAsk).toBeNull();
+    expect(h.state.store.actionError).toBe(t("state.compressInFlight"));
+
+    await vi.advanceTimersByTimeAsync(20);
+    await first;
+    expect(h.fork).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the in-flight guard once the compress settles", async () => {
+    const h = await bootState({ extraSessions: [CHILD] });
+    await confirmCompress(h, null);
+    // A later, deliberate compress is allowed again.
+    const pending = h.state.compressSession(ANCHOR.id, null);
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    expect(h.state.store.compressAsk).not.toBeNull();
+    h.state.answerCompressAsk(null);
+    await pending;
+  });
+
+  it("releases the in-flight guard when the dialog is canceled", async () => {
+    const h = await bootState({ extraSessions: [CHILD] });
+    const pending = h.state.compressSession(ANCHOR.id, null);
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    h.state.answerCompressAsk(null);
+    await pending;
+    // Cancel must not wedge the session: the next click still opens the ask.
+    const again = h.state.compressSession(ANCHOR.id, null);
+    for (let i = 0; i < 50 && !h.state.store.compressAsk; i += 1) await Promise.resolve();
+    expect(h.state.store.compressAsk).not.toBeNull();
+    h.state.answerCompressAsk(null);
+    await again;
+  });
+
   it("still refuses an in-place compress when a run starts inside the dialog", async () => {
     const h = await bootState();
     const pending = h.state.compressSession(ANCHOR.id, "u2");

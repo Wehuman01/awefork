@@ -154,6 +154,10 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   overviewMergeLedger(ledger)                    -> merged ledger (window sync)
  * Sequence-stamped entry and unknown-state updates arrive on
  * "awefork:overview-read".
+ * Multi-window jumps: requestAgentNavigate(backend, session) focuses (or
+ * opens) the backend's own window and delivers "awefork:agent-navigate"
+ * {backend, sessionId} there — the requesting window never switches in place,
+ * so an agent window keeps the agent it was opened for.
  */
 export function registerIpc(
   registry: BackendRegistry,
@@ -791,6 +795,27 @@ export function registerIpc(
       if (!isBackendId(backend)) return { ok: false, error: `Unknown backend: ${String(backend)}` };
       if (!openAgentWindow) return { ok: false, error: "Multi-window is not enabled" };
       return openAgentWindow(backend);
+    },
+  );
+
+  // Multi-window overview jump: the asking window keeps its own agent; the
+  // backend's window (focused or freshly opened) lands the session itself.
+  // Delivered after the focus round-trip so the window is on screen when the
+  // navigation starts; the renderer routes it through its own jump logic.
+  ipcMain.handle(
+    "awefork:requestAgentNavigate",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: unknown) => {
+      if (!isBackendId(backend)) return { ok: false, error: `Unknown backend: ${String(backend)}` };
+      if (typeof sessionId !== "string" || sessionId.length === 0)
+        return { ok: false, error: "Invalid session id" };
+      if (!openAgentWindow) return { ok: false, error: "Multi-window is not enabled" };
+      const opened = await openAgentWindow(backend);
+      if (!opened.ok) return opened;
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed())
+          window.webContents.send("awefork:agent-navigate", { backend, sessionId });
+      }
+      return { ok: true };
     },
   );
 

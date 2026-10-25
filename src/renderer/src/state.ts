@@ -4459,6 +4459,15 @@ export async function exportSessionAt(
 let compressAskAnswer: ((model: ModelChoice | null) => void) | null = null;
 
 /**
+ * Sessions with a compress in flight. The parent's `running` flag used to be
+ * the only guard, but a fork compress deliberately does not claim that flag
+ * (a streaming parent owns it), so a second click during the fork's copy
+ * would cut a second branch. This set guards the gesture itself, on every
+ * path, and is cleared when the call settles either way.
+ */
+const compressing = new Set<string>();
+
+/**
  * Open the compress confirmation: a model pick (summary writer) plus what
  * compaction does. Resolves with the chosen model, null when canceled; the
  * modal's single exit is answerCompressAsk.
@@ -4522,6 +4531,13 @@ export async function compressSession(
   const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
   const tipId = turns[turns.length - 1]?.messageId ?? null;
   const viaFork = (atMessageId != null && atMessageId !== tipId) || hasForkChildren(sessionId);
+  // One compress per session at a time. The fork path does not claim the
+  // parent's running flag, so without this a second click during the fork's
+  // copy cuts a second branch from the same position.
+  if (compressing.has(sessionId)) {
+    state.actionError = t("state.compressInFlight");
+    return;
+  }
   // A run in flight only blocks the in-place compression: that one asks the
   // backend for a summarize turn on this very session, and a session runs one
   // turn at a time. The fork path summarizes a fresh session and leaves the
@@ -4544,65 +4560,71 @@ export async function compressSession(
       providerId: catalogFirst.providerId,
       modelId: catalogFirst.modelId,
     };
-  const model = await askCompressModel(sessionId, preset, viaFork);
-  if (!model) return;
-  // The dialog takes time and a run can start while it is open; only the
-  // in-place path has to re-check, the fork path still must not.
-  if (!viaFork && isSessionRunning(backend, sessionId)) {
-    state.actionError = t("state.sessionRunningCompress");
-    return;
-  }
-  state.actionError = null;
-  // Optimistic running + watchdog, the same contract as a prompt: the
-  // summarize request resolves only when the whole compaction is done, so
-  // without this the session stays actionable until the server's first stream
-  // frame lands (and forever on a build that publishes none) — leaving a
-  // window where a second compress races the first. The parent wears the flag
-  // through the fork await too, as its own double-compress guard; the fork
-  // path clears it once the target moves.
-  // A session already running its own turn is not this call's to claim: the
-  // flag, its watchdog and its overview evidence belong to that run, so the
-  // compress neither sets them, clears them, nor settles them.
-  const parentOwnRun = !isSessionRunning(backend, sessionId);
-  if (parentOwnRun) {
-    beginLocalOverviewRun(backend, sessionId);
-    setRunning(backend, sessionId, true);
-  }
-  const sentAt = Date.now();
-  let targetId = sessionId;
+  // Claim the session for the whole gesture — dialog, fork, summarize — so a
+  // second click cannot cut a second branch while the first is still copying.
+  compressing.add(sessionId);
   try {
-    if (viaFork) {
-      const forked = await window.awefork.fork(backend, sessionId, atMessageId ?? tipId);
-      await inheritTagsOnFork(backend, forked.id, tagsOf(sessionId));
-      targetId = forked.id;
-      setRunning(backend, forked.id, true);
-      try {
-        await window.awefork.renameSession(
-          backend,
-          forked.id,
-          t("state.compressForkTitle", { title: titleOf(sessionId) }),
-        );
-      } catch {
-        /* A title is optional; the compressed fork stays usable without one. */
-      }
-      await refreshSessions();
-      // No focus request: the new branch materializes right next to the cut
-      // point, in sight; re-centering would only yank the view.
-      await selectSession(forked.id);
+    const model = await askCompressModel(sessionId, preset, viaFork);
+    if (!model) return;
+    // The dialog takes time and a run can start while it is open; only the
+    // in-place path has to re-check, the fork path still must not.
+    if (!viaFork && isSessionRunning(backend, sessionId)) {
+      state.actionError = t("state.sessionRunningCompress");
+      return;
     }
-    await window.awefork.compressSession(backend, targetId, plainModel(model) ?? preset);
-    watchCompletion(backend, targetId, sentAt);
-  } catch (error) {
-    // Only a target this call marked running is this call's to clear. A fork
-    // that failed before the target moved leaves `targetId` on the parent,
-    // whose own streaming run must keep its flag.
-    if (targetId !== sessionId || parentOwnRun) setRunning(backend, targetId, false);
-    if (parentOwnRun) settleRun(backend, sessionId, "aborted");
-    state.actionError = t("state.compressFailed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    state.actionError = null;
+    // Optimistic running + watchdog, the same contract as a prompt: the
+    // summarize request resolves only when the whole compaction is done, so
+    // without this the session stays actionable until the server's first stream
+    // frame lands (and forever on a build that publishes none) — leaving a
+    // window where a second compress races the first. The parent wears the flag
+    // through the fork await too; the fork path clears it once the target moves.
+    // A session already running its own turn is not this call's to claim: the
+    // flag, its watchdog and its overview evidence belong to that run, so the
+    // compress neither sets them, clears them, nor settles them.
+    const parentOwnRun = !isSessionRunning(backend, sessionId);
+    if (parentOwnRun) {
+      beginLocalOverviewRun(backend, sessionId);
+      setRunning(backend, sessionId, true);
+    }
+    const sentAt = Date.now();
+    let targetId = sessionId;
+    try {
+      if (viaFork) {
+        const forked = await window.awefork.fork(backend, sessionId, atMessageId ?? tipId);
+        await inheritTagsOnFork(backend, forked.id, tagsOf(sessionId));
+        targetId = forked.id;
+        setRunning(backend, forked.id, true);
+        try {
+          await window.awefork.renameSession(
+            backend,
+            forked.id,
+            t("state.compressForkTitle", { title: titleOf(sessionId) }),
+          );
+        } catch {
+          /* A title is optional; the compressed fork stays usable without one. */
+        }
+        await refreshSessions();
+        // No focus request: the new branch materializes right next to the cut
+        // point, in sight; re-centering would only yank the view.
+        await selectSession(forked.id);
+      }
+      await window.awefork.compressSession(backend, targetId, plainModel(model) ?? preset);
+      watchCompletion(backend, targetId, sentAt);
+    } catch (error) {
+      // Only a target this call marked running is this call's to clear. A fork
+      // that failed before the target moved leaves `targetId` on the parent,
+      // whose own streaming run must keep its flag.
+      if (targetId !== sessionId || parentOwnRun) setRunning(backend, targetId, false);
+      if (parentOwnRun) settleRun(backend, sessionId, "aborted");
+      state.actionError = t("state.compressFailed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      if (targetId !== sessionId && parentOwnRun) setRunning(backend, sessionId, false);
+    }
   } finally {
-    if (targetId !== sessionId && parentOwnRun) setRunning(backend, sessionId, false);
+    compressing.delete(sessionId);
   }
 }
 

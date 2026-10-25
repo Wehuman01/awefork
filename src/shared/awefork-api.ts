@@ -36,6 +36,12 @@ import type {
   TrashEntry,
 } from "./types.js";
 
+/** One cross-window jump: the window that owns `backend` lands this session. */
+export interface AgentNavigateRequest {
+  backend: BackendId;
+  sessionId: string;
+}
+
 /** What awefork:check-updates resolves to. */
 export interface CheckUpdatesResult {
   currentVersion: string;
@@ -241,6 +247,14 @@ export interface AweforkApi {
    * by the agent count — a second ask for the same agent never spawns a window.
    */
   openAgentWindow(backend: BackendId): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Multi-window jump: focus (or open) the backend's own window and have it
+   * land the session, keeping this window's identity intact. The renderer
+   * receives the landing through onAgentNavigate.
+   */
+  requestAgentNavigate(backend: BackendId, sessionId: string): Promise<{ ok: boolean; error?: string }>;
+  /** Main → renderer: land this session (an overview jump routed to this window). */
+  onAgentNavigate(handler: (request: AgentNavigateRequest) => void): () => void;
   /** Feature surface of a backend; hides affordances the backend lacks. */
   capabilities(backend: BackendId): Promise<BackendCapabilities>;
   /**

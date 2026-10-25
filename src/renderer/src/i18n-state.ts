@@ -24,6 +24,10 @@ export const dict: Record<string, Entry> = {
     zh: "会话正在运行，等它结束后再压缩",
     en: "Session is running — wait for it to finish before compressing",
   },
+  "state.compressInFlight": {
+    zh: "这个会话正在压缩，等它完成再试",
+    en: "This session is already compressing — wait for it to finish",
+  },
   "state.noModelsForCompress": {
     zh: "暂时拿不到模型列表，无法压缩",
     en: "Model list unavailable right now; can't compress",
