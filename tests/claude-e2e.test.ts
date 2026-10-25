@@ -90,10 +90,17 @@ describe.skipIf(!ENABLED)("claude adapter against the real CLI", () => {
     await waitForIdle(events, forked.id);
 
     const forkRows = await adapter.messages(forked.id);
-    // The whole-history copy keeps the parent's turn…
+    // The copy keeps the parent's turn through the anchor…
     expect(forkRows.some((r) => r.text === "Reply with exactly: E2E-OK")).toBe(true);
     // …and appends the branch's own.
     expect(forkRows.some((r) => r.text.includes("FORK-OK"))).toBe(true);
+
+    // ── rename persists in the transcript ──────────────────────────────
+    await adapter.renameSession(session.id, "E2E Renamed");
+    // The CLI writes the custom-title row asynchronously; give it a moment.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const renamed = (await adapter.listSessions()).find((s) => s.id === session.id);
+    expect(renamed?.title).toBe("E2E Renamed");
 
     // ── compaction ─────────────────────────────────────────────────────
     // The CLI refuses a short session ("Not enough messages to compact."),

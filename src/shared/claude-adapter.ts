@@ -1,6 +1,6 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
 import { withInlineFiles } from "./inline-attachments.js";
-import { readDetachedExportIds, recordFork, removeFork } from "./lineage-store.js";
+import { readDetachedExportIds, readLineage, recordFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -17,11 +17,20 @@ import type {
  * Transport: each prompt spawns a `claude -p --input-format stream-json
  * --output-format stream-json --include-partial-messages` child and speaks
  * newline JSON on its stdin/stdout (bidirectional control frames answer
- * permission asks and drive interrupt). The child is pooled per session and
- * reaped after a quiet window, exactly like the pi backend's RPC children.
- * Session history is NOT read from the child — it is parsed from the
- * append-only JSONL transcripts under `$CLAUDE_CONFIG_DIR/projects/<encoded
- * cwd>/<sessionId>.jsonl`, so browsing never starts a process.
+ * permission asks, rename the session and drive interrupt). The child is
+ * pooled per session and reaped after a quiet window, exactly like the pi
+ * backend's RPC children. Session history is NOT read from the child — it is
+ * parsed from the append-only JSONL transcripts under
+ * `$CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<sessionId>.jsonl`, so browsing
+ * never starts a process.
+ *
+ * Continuation: the CLI only continues a transcript on a child that STARTS
+ * with `--resume <id>`, and it finds the file by the cwd's encoded name — so
+ * the cwd must be the transcript's own. A child named with a bare
+ * `--session-id` for a session that already has a transcript starts a NEW
+ * chain: the model sees no history, and the new rows land in a second project
+ * directory beside the real one. Every spawn for an existing session
+ * therefore resumes; `--session-id` is only for a brand-new one.
  *
  * Entry grammar (verified against 2.1.236):
  *  - user/assistant rows thread by `uuid`/`parentUuid`; `isSidechain: true`
@@ -41,6 +50,13 @@ import type {
  *  - `--permission-prompt-tool stdio` is what makes permission asks surface
  *    as `can_use_tool` frames instead of silently denying (the standalone
  *    CLI has no SDK canUseTool callback, this flag is its equivalent).
+ *  - `result` carries `is_error` and an `errors[]` list; a run that never
+ *    reached the model (no such session, bad cwd) reports only there, with
+ *    nothing written to the transcript. Treating it as a normal settle made
+ *    the failure invisible, so it is surfaced as a session-scoped error.
+ *  - `rename_session` and `set_model` are control requests the CLI answers
+ *    with `control_response`; a rename persists as a `custom-title` row, so
+ *    the title survives restarts and is read back with the transcript.
  *
  * Sessions are file-backed: awefork assigns the UUID for createSession/fork
  * (`--session-id`), and the transcript file only appears once the first
@@ -131,6 +147,14 @@ interface ParsedTranscript {
   file: string;
   rows: ClaudeRow[];
   cwd: string | null;
+  /** uuid-less rows that carry a title: claude's summary and rename_session's custom-title. */
+  meta: ClaudeMetaRow[];
+}
+
+/** One title-bearing row that is not part of the message chain. */
+interface ClaudeMetaRow {
+  kind: "summary" | "custom-title";
+  title: string;
 }
 
 /** A live control request awaiting the host's answer. */
@@ -153,12 +177,14 @@ export interface ClaudeChild {
 
 export interface ClaudeAdapterNodeSeams {
   /**
-   * Spawn one prompt child for a session: `sessionId` names the transcript,
-   * `cwd` the working directory, and `resumeParent` — set for a pending
-   * fork/export copy — makes the child materialize that copy in one step
-   * (`--resume <parent> --fork-session`). argv/env are main's business.
+   * Spawn one prompt child. `plan` decides what the argv means:
+   *  - `create`: a brand-new session named by `--session-id`;
+   *  - `resume`: continue an existing transcript (`--resume <id>`);
+   *  - `fork`: copy a parent's history through `cutUuid` into a new id.
+   * `cwd` is the directory the child runs in — for resume/fork it must be the
+   * transcript's own cwd, or the CLI cannot find the file to resume.
    */
-  spawnChild(sessionId: string, cwd: string, resumeParent?: string): Promise<ClaudeChild>;
+  spawnChild(cwd: string, plan: ClaudeSpawnPlan): Promise<ClaudeChild>;
   /**
    * Spawn a child that RESUMES an existing session (no new id) — the only
    * shape in which the CLI executes the /compact slash command. Returns the
@@ -172,6 +198,16 @@ export interface ClaudeAdapterNodeSeams {
   /** The store root's project directories, best-effort (missing = empty). */
   projectDirs(): Promise<string[]>;
 }
+
+/**
+ * How one spawn relates to the store. A new session is named; an existing one
+ * is resumed; a fork resumes a parent and materializes the copy under a new
+ * id. `cutUuid` is the last chain entry to keep (see `--resume-session-at`).
+ */
+export type ClaudeSpawnPlan =
+  | { kind: "create"; sessionId: string }
+  | { kind: "resume"; sessionId: string }
+  | { kind: "fork"; sessionId: string; resumeParent: string; cutUuid: string | null };
 
 export interface ClaudeAdapterOptions extends ClaudeAdapterNodeSeams {
   lineagePath: string;
@@ -192,25 +228,25 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
   /** In-flight permission asks awaiting respondInteraction. */
   const pendingAsks = new Map<string, PendingAsk>();
   /**
-   * Latest tool_use per session for can_use_tool correlation: the ask frame
-   * names the tool but the dialog's command line comes from the input the
-   * matching tool call carried.
-   */
-  const lastToolBySession = new Map<string, { tool: string; input: Record<string, unknown> }>();
-  /**
    * Sessions with a run in flight: set at prompt acceptance, cleared on the
    * child's `result` frame. message.started/idle bookkeeping rides it.
    */
   const running = new Set<string>();
-  /** Transcript cache: path → {mtimeMs, parsed}; invalidated on mutations. */
-  const transcriptCache = new Map<string, { parsed: ParsedTranscript }>();
   /** Cached detached-export ids so mapSession can scrub their fork links. */
   let detached: ReadonlySet<string> = new Set();
+  /** The newest live assistant uuid per session, for delta routing. */
+  const liveMessageIds = new Map<string, string>();
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
 
   /** Fork/export targets whose copy args ride the spawn: id → parent id. */
   const pendingResume = new Map<string, string>();
+  /**
+   * Fork targets whose copy is cut at a chain entry: id → the last uuid to
+   * keep. Claude's `--resume-session-at` is the cut primitive; absent means
+   * "copy the whole history".
+   */
+  const pendingForkCut = new Map<string, string>();
 
   const cancelReap = (sessionId: string): void => {
     const timer = idleTimers.get(sessionId);
@@ -247,15 +283,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
    * inserts `attachment`/`system` rows into the parent chain, so keeping only
    * user/assistant rows would break the walk at the first attachment (an
    * assistant row's parentUuid points at it). Rendering still filters.
+   * The rows that carry no uuid but do carry metadata — `summary` (claude's
+   * own title after a compaction) and `custom-title` (what rename_session
+   * wrote) — are kept in `meta` so a single read answers both history and
+   * title.
    */
   const parseTranscript = async (file: string): Promise<ParsedTranscript> => {
     let text: string;
     try {
       text = await options.readTranscript(file);
     } catch {
-      return { file, rows: [], cwd: null };
+      return { file, rows: [], cwd: null, meta: [] };
     }
     const rows: ClaudeRow[] = [];
+    const meta: ClaudeMetaRow[] = [];
     let cwd: string | null = null;
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
@@ -271,8 +312,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       if (typeof row.cwd === "string" && cwd === null) cwd = row.cwd;
       // The chain map needs every linked row; only message rows render.
       if (typeof row.uuid === "string") rows.push(row);
+      else {
+        const extras = row as unknown as {
+          type?: unknown;
+          summary?: unknown;
+          customTitle?: unknown;
+        };
+        if (extras.type === "summary" && typeof extras.summary === "string") {
+          meta.push({ kind: "summary", title: extras.summary });
+        } else if (extras.type === "custom-title" && typeof extras.customTitle === "string") {
+          meta.push({ kind: "custom-title", title: extras.customTitle });
+        }
+      }
     }
-    return { file, rows, cwd };
+    return { file, rows, cwd, meta };
   };
 
   /** True for the rows the conversation renders (attachment rows chain but don't show). */
@@ -383,6 +436,22 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       .filter((value): value is string => typeof value === "string")
       .join("\n\n")
       .trim();
+
+  /**
+   * True on a row that STARTS a new turn: a user row carrying actual user
+   * content. A pure tool_result row is also `role: "user"` but it is the
+   * second half of the previous assistant step, so it belongs to the turn in
+   * flight — the same distinction mapRows draws when it drops the pairing row.
+   */
+  const startsTurn = (row: ClaudeRow): boolean => {
+    if (row.message?.role !== "user") return false;
+    if (isBoundaryRow(row)) return false;
+    const blocks = contentBlocks(row);
+    if (blocks.some((block) => block.type === "tool_result") && blockText(blocks, "text") === "") {
+      return false;
+    }
+    return true;
+  };
 
   const filePathOfTool = (input: Record<string, unknown> | undefined | null): string | null => {
     if (!input) return null;
@@ -548,7 +617,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     const record = (await readLineageEntry(sessionId)) ?? undefined;
     const summary: SessionSummary = {
       id: sessionId,
-      title: await titleOf(sessionId, parsed),
+      title: titleOf(parsed),
       directory: parsed.cwd ?? "",
       parentSessionId: record?.parentId ?? null,
       origin: record ? "fork" : "root",
@@ -559,29 +628,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     return summary;
   };
 
-  const titleOf = async (sessionId: string, parsed: ParsedTranscript): Promise<string> => {
-    void sessionId;
-    // A summary row naming this session's leaf is claude's own title.
-    for (const line of (await options.readTranscript(parsed.file)).split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let parsedLine: unknown;
-      try {
-        parsedLine = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-      const row = rowOf(parsedLine);
-      if (row?.type !== "summary") continue;
-      const extras = row as unknown as { summary?: unknown; leafUuid?: unknown };
-      const title = typeof extras.summary === "string" ? extras.summary : null;
-      const leafUuid = typeof extras.leafUuid === "string" ? extras.leafUuid : null;
-      if (title) return title;
-    }
+  /**
+   * The session's display title. A rename the user performed wins, then
+   * claude's own post-compaction summary, then the first real user line. All
+   * of it comes from the parse already in hand — this used to re-read the
+   * whole file just to see the uuid-less title rows.
+   */
+  const titleOf = (parsed: ParsedTranscript): string => {
+    const custom = parsed.meta.find((row) => row.kind === "custom-title");
+    if (custom) return custom.title;
+    const summary = parsed.meta.find((row) => row.kind === "summary");
+    if (summary) return summary.title;
     const branch = activeBranch(parsed.rows);
     for (const row of branch) {
-      const blocks = contentBlocks(row);
-      const text = blockText(blocks, "text");
+      const text = blockText(contentBlocks(row), "text");
       if (row.message?.role === "user" && text && !text.startsWith(COMPACT_BOUNDARY_PREFIX)) {
         return text.length > 60 ? `${text.slice(0, 60)}…` : text;
       }
@@ -591,7 +651,6 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
 
   const readLineageEntry = async (sessionId: string): Promise<{ parentId: string } | null> => {
     // Cheap per-call read: the lineage file is tiny and writes are rare.
-    const { readLineage } = await import("./lineage-store.js");
     const map = await readLineage(lineagePath);
     const record = map[sessionId];
     return record ? { parentId: record.parentId } : null;
@@ -622,27 +681,62 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
 
   // ── child plumbing ────────────────────────────────────────────────────
 
-  const ensureChild = async (sessionId: string, cwd: string): Promise<ClaudeChild> => {
+  /**
+   * The cwd a child for this session must run in. A session awefork created
+   * carries it in `pending`; a stored one gets it from its own transcript,
+   * because that is what the CLI encodes into the project directory name it
+   * resolves `--resume` through.
+   */
+  const cwdFor = async (sessionId: string): Promise<string> => {
+    const claimed = pending.get(sessionId);
+    if (claimed !== undefined) return claimed;
+    const file = await findTranscriptFile(sessionId);
+    if (!file) return "";
+    const parsed = await parseTranscript(file);
+    return parsed.cwd ?? "";
+  };
+
+  /** How this spawn relates to the store: fork copy, resume, or brand new. */
+  const spawnPlanFor = async (sessionId: string): Promise<ClaudeSpawnPlan> => {
+    const resumeParent = pendingResume.get(sessionId);
+    if (resumeParent !== undefined) {
+      return {
+        kind: "fork",
+        sessionId,
+        resumeParent,
+        cutUuid: pendingForkCut.get(sessionId) ?? null,
+      };
+    }
+    // A session with a transcript must be resumed, not re-named: naming it
+    // starts a fresh chain that cannot see the history.
+    if (await findTranscriptFile(sessionId)) return { kind: "resume", sessionId };
+    return { kind: "create", sessionId };
+  };
+
+  const ensureChild = async (sessionId: string): Promise<ClaudeChild> => {
     const existing = sessions.get(sessionId);
     if (existing) return existing;
     const inFlight = spawning.get(sessionId);
     if (inFlight) return inFlight;
-    const promise = options
-      .spawnChild(sessionId, cwd, pendingResume.get(sessionId))
-      .then((child) => {
-        sessions.set(sessionId, child);
-        child.setEventHandler((frame) => handleFrame(sessionId, frame));
-        child.onExit((detail) => {
-          sessions.delete(sessionId);
-          if (running.has(sessionId)) {
-            running.delete(sessionId);
-            emit({ type: "server.error", sessionId, message: `claude exited: ${detail}` });
-            emit({ type: "session.idle", sessionId });
-          }
-        });
-        return child;
-      })
-      .finally(() => spawning.delete(sessionId));
+    const promise = (async () => {
+      const plan = await spawnPlanFor(sessionId);
+      const cwd = await cwdFor(sessionId);
+      const child = await options.spawnChild(cwd, plan);
+      // The copy has been materialized (or named): neither claim is needed.
+      pendingResume.delete(sessionId);
+      pendingForkCut.delete(sessionId);
+      sessions.set(sessionId, child);
+      child.setEventHandler((frame) => handleFrame(sessionId, frame));
+      child.onExit((detail) => {
+        sessions.delete(sessionId);
+        if (running.has(sessionId)) {
+          running.delete(sessionId);
+          emit({ type: "server.error", sessionId, message: `claude exited: ${detail}` });
+          emit({ type: "session.idle", sessionId });
+        }
+      });
+      return child;
+    })().finally(() => spawning.delete(sessionId));
     spawning.set(sessionId, promise);
     return promise;
   };
@@ -657,7 +751,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     const type = frame.type;
     if (type === "system" && frame.subtype === "init") {
       // The child confirms the session id; nothing to reconcile — awefork
-      // picked it via --session-id.
+      // picked it (--session-id) or resumed it (--resume).
       return;
     }
     if (type === "control_request") {
@@ -665,10 +759,13 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       return;
     }
     if (type === "assistant") {
+      // The uuid is the row id the transcript will carry, so live deltas and
+      // the reloaded history agree on which message a part belongs to.
       const messageId =
         typeof (frame as { uuid?: unknown }).uuid === "string"
           ? (frame as { uuid: string }).uuid
           : `live-${now()}`;
+      liveMessageIds.set(sessionId, messageId);
       emit({ type: "message.started", sessionId, messageId });
       return;
     }
@@ -684,25 +781,38 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
             : null;
       if (!text) return;
       const kind = delta.type === "thinking_delta" ? "thinking" : "text";
+      // Part ids are per message: a multi-step run restarts block indexes at
+      // 0, and a bare `block-0` would append step two's text onto step one's
+      // part.
+      const messageId = currentMessageId(sessionId);
+      const blockIndex = typeof event.index === "number" ? event.index : 0;
       emit({
         type: "message.delta",
         sessionId,
-        messageId: currentMessageId(sessionId),
-        partId: typeof event.index === "number" ? `block-${event.index}` : "block-0",
+        messageId,
+        partId: `${messageId}:${blockIndex}`,
         kind,
         delta: text,
       });
       return;
     }
     if (type === "result") {
-      // is_error runs settle the same way (the renderer shows the error row
-      // on the next reload); the run is over either way.
+      // A failed run reports ONLY here: no transcript row is written, and the
+      // CLI's stderr never reaches the renderer. Surfacing it as a
+      // session-scoped error is what makes "the model never answered" visible
+      // instead of a silently successful empty turn.
+      if (frame.is_error === true) {
+        const detail = errorDetailOf(frame);
+        running.delete(sessionId);
+        scheduleReap(sessionId);
+        emit({ type: "server.error", sessionId, message: detail });
+        emit({ type: "session.idle", sessionId });
+        return;
+      }
       settleRun(sessionId);
     }
   };
 
-  /** The most recent live assistant uuid per session, for delta routing. */
-  const liveMessageIds = new Map<string, string>();
   const currentMessageId = (sessionId: string): string => liveMessageIds.get(sessionId) ?? "live";
 
   const handleControlRequest = (sessionId: string, frame: Record<string, unknown>): void => {
@@ -712,7 +822,6 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     if (!requestId) return;
     const toolName = typeof request.tool_name === "string" ? request.tool_name : "tool";
     const input = (isBlock(request.input) ? request.input : {}) as Record<string, unknown>;
-    lastToolBySession.set(sessionId, { tool: toolName, input });
     pendingAsks.set(requestId, {
       kind: "permission",
       requestId,
@@ -739,20 +848,28 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     return tool;
   };
 
+  /**
+   * Translate one permission decision into the CLI's `can_use_tool` reply.
+   * `always` needs the full `updatedPermissions` entry: `type`, the rules
+   * array, the REQUIRED `behavior` of the rule set, and a destination. A
+   * missing `behavior` fails the CLI's schema check and the whole entry is
+   * dropped with a warning, which silently degraded "always" to a one-time
+   * allow; the rule must also name the tool that was actually asked about,
+   * not a hardcoded one.
+   */
   const permissionBodyOf = (
     response: import("./types.js").AgentInteractionResponse,
+    toolName: string,
   ): Record<string, unknown> | null => {
     if (response.decision === "allow") return { behavior: "allow" };
     if (response.decision === "always") {
-      // "Always" maps to a session-scoped allow rule for the tool. Claude's
-      // can_use_tool reply accepts updatedPermissions with addRules; a bare
-      // tool name rule covers every future call in this session.
       return {
         behavior: "allow",
         updatedPermissions: [
           {
             type: "addRules",
-            rules: [{ toolName: "Bash", ruleContent: "*" }],
+            rules: [{ toolName, ruleContent: "*" }],
+            behavior: "allow",
             destination: "session",
           },
         ],
@@ -765,6 +882,39 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
   };
 
   // ── adapter surface ───────────────────────────────────────────────────
+
+  /**
+   * Where a fork/export copy reads from. A pending session has no transcript
+   * yet, so its cwd is the awefork-side claim; a stored one reports its own.
+   */
+  const sourceOf = async (sessionId: string): Promise<{ cwd: string }> => {
+    const claimed = pending.get(sessionId);
+    if (claimed !== undefined) return { cwd: claimed };
+    const { parsed } = await requireTranscript(sessionId);
+    return { cwd: parsed.cwd ?? "" };
+  };
+
+  /**
+   * The chain entry that ENDS the turn starting at `atMessageId` — the uuid
+   * `--resume-session-at` must keep. The contract is "the new session contains
+   * that full turn", so the cut is the last row before the next turn begins
+   * (tool results and attachment rows included). Falling back to the anchor
+   * itself keeps a single-row turn whole.
+   */
+  const turnEndUuidOf = async (sessionId: string, atMessageId: string): Promise<string | null> => {
+    const { parsed } = await requireTranscript(sessionId);
+    const branch = activeBranch(parsed.rows);
+    const anchor = branch.findIndex((row) => row.uuid === atMessageId);
+    if (anchor === -1) return null;
+    let last = branch[anchor];
+    for (let i = anchor + 1; i < branch.length; i += 1) {
+      const row = branch[i];
+      if (!row) continue;
+      if (startsTurn(row)) break;
+      last = row;
+    }
+    return typeof last?.uuid === "string" ? last.uuid : null;
+  };
 
   /**
    * Run one `/compact` on a dedicated child that resumes the session. The CLI
@@ -861,6 +1011,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       }
       pending.delete(sessionId);
       pendingResume.delete(sessionId);
+      pendingForkCut.delete(sessionId);
       const parsed = await parseTranscript(file);
       const rows = mapRows(parsed.rows);
       // The child appends its final assistant row on its way out; a read
@@ -918,18 +1069,12 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     async fork(sessionId, atMessageId, forkOptions) {
       // Fork is lazy: awefork assigns the new id now and the first prompt on
       // the branch runs `--resume <parent> --fork-session --session-id <id>`,
-      // which materializes the copy in one step. Claude's copy is whole-
-      // history (no cut-point primitive): a mid-turn fork carries the turns
-      // AFTER the anchor too. The lineage record still pins the anchor so
-      // the canvas places the branch correctly; the limitation is the
-      // backend's, not the tree's.
-      void atMessageId;
-      const source = pending.has(sessionId)
-        ? { cwd: pending.get(sessionId) ?? "" }
-        : await (async () => {
-            const { parsed } = await requireTranscript(sessionId);
-            return { cwd: parsed.cwd ?? "" };
-          })();
+      // materializing the copy in one step. The cut rides along as
+      // `--resume-session-at <uuid>`, the CLI's "keep the chain up to and
+      // including this entry" primitive, so the branch carries exactly the
+      // turns through the anchor — the AgentAdapter contract, not a whole-
+      // history copy.
+      const source = await sourceOf(sessionId);
       if (forkOptions?.context === "none") {
         // Empty-context fork: a plain new session in the parent's cwd.
         const id = newId();
@@ -951,9 +1096,11 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         };
       }
       const id = newId();
-      // The copy inherits the parent's cwd; the resume args ride the pending
-      // map through the first prompt (see prompt()).
       pendingResume.set(id, sessionId);
+      // The cut is the last chain entry of the anchored turn; a null anchor
+      // means "at the latest state", i.e. no cut at all.
+      const cutUuid = atMessageId === null ? null : await turnEndUuidOf(sessionId, atMessageId);
+      if (cutUuid !== null) pendingForkCut.set(id, cutUuid);
       pending.set(id, source.cwd);
       await recordFork(lineagePath, id, {
         parentId: sessionId,
@@ -972,21 +1119,17 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     },
 
     /**
-     * The copy is whole-history (`--fork-session` has no cut), so a detached
-     * export would still be claude-side linked only by its resume args —
-     * once materialized it is a plain root session in every view. Offered:
-     * opencode parity (the renderer's "copy as native session").
+     * A detached copy is the same resume-and-fork spawn as a branch, with the
+     * lineage record marked detached so every view treats the result as a
+     * plain root session. The cut applies here too: an export "through this
+     * turn" must not carry later turns along.
      */
     async exportSession(sessionId, atMessageId) {
-      void atMessageId;
-      const source = pending.has(sessionId)
-        ? { cwd: pending.get(sessionId) ?? "" }
-        : await (async () => {
-            const { parsed } = await requireTranscript(sessionId);
-            return { cwd: parsed.cwd ?? "" };
-          })();
+      const source = await sourceOf(sessionId);
       const id = newId();
       pendingResume.set(id, sessionId);
+      const cutUuid = atMessageId === null ? null : await turnEndUuidOf(sessionId, atMessageId);
+      if (cutUuid !== null) pendingForkCut.set(id, cutUuid);
       pending.set(id, source.cwd);
       await recordFork(lineagePath, id, {
         parentId: sessionId,
@@ -1015,13 +1158,29 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       throw new Error("claude has no single-message delete primitive");
     },
 
-    async renameSession(_sessionId, _title) {
-      throw new Error("claude has no rename primitive; titles derive from the first prompt");
+    /**
+     * Rename through the CLI's control channel: a `rename_session` request
+     * makes the CLI write a `custom-title` row into the transcript (verified
+     * against 2.1.236 and 2.1.310), which `titleOf` reads back — so the title
+     * survives a restart instead of living only in awefork's state. It needs a
+     * live child, so one is spawned for the session when none is pooled.
+     */
+    async renameSession(sessionId, title) {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      if (!(await findTranscriptFile(sessionId))) {
+        throw new Error("this session has no transcript yet — send a prompt before renaming it");
+      }
+      const child = await ensureChild(sessionId);
+      child.send({
+        type: "control_request",
+        request_id: `awefork-rename-${now()}`,
+        request: { subtype: "rename_session", title: trimmed },
+      });
     },
 
     async prompt(sessionId, text, model, attachments) {
-      const cwd = pending.get(sessionId) ?? "";
-      const child = await ensureChild(sessionId, cwd);
+      const child = await ensureChild(sessionId);
       cancelReap(sessionId);
       running.add(sessionId);
       const images = (attachments ?? []).filter((a) => a.mime.startsWith("image/"));
@@ -1041,12 +1200,19 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         type: "user",
         message: { role: "user", content },
       };
-      if (model?.modelId && model.modelId !== "default") {
-        frame.model = model.modelId;
-      }
-      // The fork materialization args went out with the SPAWN (main reads
-      // forkPlanner when building argv); a same-session retry keeps them.
+      // The model choice rides the CLI's own control channel: a user frame has
+      // no `model` field (the schema accepts unknown keys and ignores them),
+      // so writing one there did nothing at all. `set_model` switches the
+      // session and is what the CLI itself uses for /model.
+      const modelId = model?.modelId && model.modelId !== "default" ? model.modelId : null;
       try {
+        if (modelId !== null) {
+          child.send({
+            type: "control_request",
+            request_id: `awefork-model-${now()}`,
+            request: { subtype: "set_model", model: modelId },
+          });
+        }
         child.send(frame);
       } catch (error) {
         running.delete(sessionId);
@@ -1075,7 +1241,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         });
         return;
       }
-      const body = permissionBodyOf(response);
+      const body = permissionBodyOf(response, ask.toolName);
       if (!body) return;
       // updatedInput is required-ish for allow: echo the asked input back so
       // the tool call runs unchanged.
@@ -1102,7 +1268,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       if (!(await findTranscriptFile(sessionId))) {
         throw new Error("this session has no turns to compact yet");
       }
-      const cwd = pending.get(sessionId) ?? "";
+      const cwd = await cwdFor(sessionId);
       running.add(sessionId);
       try {
         const outcome = await runCompactChild(sessionId, cwd);
@@ -1140,6 +1306,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
 
     dispose() {
       emitEvent = null;
+      // awefork's process exits on quit, which also kills the adapter's event
+      // sink and reap timers. Claude Code has no detached server that could
+      // finish the turn on its own, so keep-alive cannot preserve its work —
+      // same contract as the pi backend. Always tear the children down.
       for (const timer of idleTimers.values()) clearTimeout(timer);
       idleTimers.clear();
       for (const child of sessions.values()) child.kill();
@@ -1150,6 +1320,22 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
   };
   return adapter;
 }
+/**
+ * The human-readable reason a `result` frame reports failure. The CLI puts the
+ * cause in `errors[]` (and repeats the first one in `result`); a bare
+ * `is_error` with neither still needs a non-empty message, or the renderer
+ * would show an empty error row.
+ */
+function errorDetailOf(frame: Record<string, unknown>): string {
+  const errors = Array.isArray(frame.errors)
+    ? frame.errors.filter((entry): entry is string => typeof entry === "string" && entry !== "")
+    : [];
+  if (errors.length > 0) return errors.join("; ");
+  if (typeof frame.result === "string" && frame.result !== "") return frame.result;
+  const subtype = typeof frame.subtype === "string" ? frame.subtype : null;
+  return subtype === null ? "claude reported a failed run" : `claude run failed (${subtype})`;
+}
+
 /** awefork assigns session ids; claude requires UUID shape for --session-id. */
 function newId(): string {
   // crypto.randomUUID without node:crypto (renderer-safe).
@@ -1164,11 +1350,21 @@ function newId(): string {
 }
 
 /**
- * The spawn argv for one session: a pending fork/export copy materializes
- * through `--resume <parent> --fork-session`; everything else is a plain
- * named session. Exposed for main and tests.
+ * The spawn argv for one plan. A fork resumes the parent, copies under a new
+ * id, and — when a cut is given — keeps only the chain through that entry.
+ * `--session-id` alone is for a session with no transcript yet; passing it for
+ * an existing one starts a fresh chain that cannot see the history.
+ * Exposed for main and tests.
  */
-export function claudeSpawnArgsFor(sessionId: string, resumeParent?: string): string[] {
-  if (resumeParent) return ["--resume", resumeParent, "--fork-session", "--session-id", sessionId];
-  return ["--session-id", sessionId];
+export function claudeSpawnArgsFor(plan: ClaudeSpawnPlan): string[] {
+  if (plan.kind === "create") return ["--session-id", plan.sessionId];
+  if (plan.kind === "resume") return ["--resume", plan.sessionId];
+  return [
+    "--resume",
+    plan.resumeParent,
+    "--fork-session",
+    "--session-id",
+    plan.sessionId,
+    ...(plan.cutUuid === null ? [] : ["--resume-session-at", plan.cutUuid]),
+  ];
 }

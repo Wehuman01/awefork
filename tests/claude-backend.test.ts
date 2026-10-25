@@ -32,15 +32,15 @@ describe("claudecode capabilities", () => {
     });
   });
 
-  it("has no message or session delete, matching the CLI's primitives", () => {
+  it("has no session delete, matching the CLI's primitives", () => {
     // The renderer hides both affordances instead of surfacing a click error.
     expect(caps.deleteMessage).toBe(false);
     expect(caps.deleteSession).toBe(false);
   });
 
   it("offers a detached export because the fork linkage is awefork's", () => {
-    // --fork-session copies the whole history and records no parent, so the
-    // lineage sidecar owns the branch and can drop it for a plain copy.
+    // --fork-session copies the history and records no parent, so the lineage
+    // sidecar owns the branch and can drop it for a plain copy.
     expect(caps.exportBranch).toBe(true);
   });
 

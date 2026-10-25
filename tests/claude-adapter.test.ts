@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   type ClaudeAdapterNodeSeams,
   type ClaudeChild,
+  type ClaudeSpawnPlan,
   claudeSpawnArgsFor,
   createClaudeAdapter,
 } from "../src/shared/claude-adapter";
@@ -25,11 +26,12 @@ const S2 = "0f1e2d3c-0002-4000-8000-000000000002";
 const S3 = "0f1e2d3c-0003-4000-8000-000000000003";
 const S4 = "0f1e2d3c-0004-4000-8000-000000000004";
 const S5 = "0f1e2d3c-0005-4000-8000-000000000005";
+const S6 = "0f1e2d3c-0006-4000-8000-000000000006";
 
 interface FakeChild {
   child: ClaudeChild;
   sent: Array<Record<string, unknown>>;
-  spawnArgs: { sessionId: string; cwd: string; resumeParent?: string };
+  spawnArgs: { cwd: string; plan: ClaudeSpawnPlan };
   fire: (frame: Record<string, unknown>) => void;
   exit: (detail: string) => void;
   killed: boolean;
@@ -37,13 +39,13 @@ interface FakeChild {
 
 function fakeChildren() {
   const spawned: FakeChild[] = [];
-  const spawn: ClaudeAdapterNodeSeams["spawnChild"] = async (sessionId, cwd, resumeParent) => {
+  const spawn: ClaudeAdapterNodeSeams["spawnChild"] = async (cwd, plan) => {
     let eventHandler: ((frame: Record<string, unknown>) => void) | null = null;
     let exitHandler: ((detail: string) => void) | null = null;
     const sent: Array<Record<string, unknown>> = [];
     const record: FakeChild = {
       sent,
-      spawnArgs: { sessionId, cwd, ...(resumeParent ? { resumeParent } : {}) },
+      spawnArgs: { cwd, plan },
       fire: (frame) => eventHandler?.(frame),
       exit: (detail) => exitHandler?.(detail),
       killed: false,
@@ -68,7 +70,7 @@ function fakeChildren() {
   const spawnCompactChild: NonNullable<ClaudeAdapterNodeSeams["spawnCompactChild"]> = async (
     sessionId,
     cwd,
-  ) => spawn(sessionId, cwd);
+  ) => spawn(cwd, { kind: "resume", sessionId });
   return { spawnChild: spawn, spawnCompactChild, spawned };
 }
 
@@ -216,6 +218,12 @@ describe("claude listSessions", () => {
     expect(sessions[0]?.title).toBe("Compacted: discussed long prompt");
   });
 
+  it("reads back a renamed title from the transcript", async () => {
+    const { adapter } = await makeHarness([S6]);
+    const sessions = await adapter.listSessions();
+    expect(sessions[0]?.title).toBe("My Renamed Session");
+  });
+
   it("merges pending sessions ahead of their first prompt", async () => {
     const { adapter } = await makeHarness([S1]);
     const created = await adapter.createSession("/Users/a/b");
@@ -256,13 +264,26 @@ describe("claude sessions", () => {
     expect(children.spawned).toHaveLength(0);
 
     // The spawn seam learns the resume parent, so the child materializes the
-    // copy with --resume <parent> --fork-session.
+    // copy with --resume <parent> --fork-session, cut at the anchored turn.
     await adapter.prompt(forked.id, "continue", null, []);
     expect(children.spawned[0]?.spawnArgs).toEqual({
-      sessionId: forked.id,
       cwd: "/Users/a/b",
-      resumeParent: S1,
+      plan: {
+        kind: "fork",
+        sessionId: forked.id,
+        resumeParent: S1,
+        // The anchored turn runs through the tool_result row, so the cut is
+        // that row's uuid, not the anchor's.
+        cutUuid: "55555555-5555-4555-8555-555555555555",
+      },
     });
+  });
+
+  it("fork at the latest state carries no cut", async () => {
+    const { adapter, children } = await makeHarness([S1]);
+    const forked = await adapter.fork(S1, null);
+    await adapter.prompt(forked.id, "continue", null, []);
+    expect(children.spawned[0]?.spawnArgs.plan).toMatchObject({ kind: "fork", cutUuid: null });
   });
 
   it("an empty-context fork spawns a plain new session", async () => {
@@ -270,7 +291,10 @@ describe("claude sessions", () => {
     const forked = await adapter.fork(S1, null, { context: "none" });
 
     await adapter.prompt(forked.id, "fresh start", null, []);
-    expect(children.spawned[0]?.spawnArgs.resumeParent).toBeUndefined();
+    expect(children.spawned[0]?.spawnArgs.plan).toEqual({
+      kind: "create",
+      sessionId: forked.id,
+    });
   });
 
   it("exportSession copies without a canvas parent", async () => {
@@ -280,11 +304,40 @@ describe("claude sessions", () => {
     expect(exported.parentSessionId).toBeNull();
   });
 
-  it("rejects delete and rename, which the CLI has no primitive for", async () => {
+  it("resumes a stored session instead of re-naming it", async () => {
+    // The regression this pins: a bare --session-id for a session that
+    // already has a transcript starts a NEW chain, so the model sees no
+    // history and the rows land in a second project directory.
+    const { adapter, children } = await makeHarness([S1]);
+    await adapter.prompt(S1, "follow up", null, []);
+
+    expect(children.spawned[0]?.spawnArgs).toEqual({
+      cwd: "/Users/a/b",
+      plan: { kind: "resume", sessionId: S1 },
+    });
+  });
+
+  it("renames through the CLI's rename_session control request", async () => {
+    const { adapter, children } = await makeHarness([S1]);
+    await adapter.renameSession(S1, "  A better title  ");
+
+    expect(children.spawned[0]?.spawnArgs.plan).toEqual({ kind: "resume", sessionId: S1 });
+    expect(children.spawned[0]?.sent.at(-1)).toMatchObject({
+      type: "control_request",
+      request: { subtype: "rename_session", title: "A better title" },
+    });
+  });
+
+  it("refuses to rename a session with no transcript", async () => {
+    const { adapter } = await makeHarness([S1]);
+    const created = await adapter.createSession("/Users/a/b");
+    await expect(adapter.renameSession(created.id, "nope")).rejects.toThrow(/no transcript yet/);
+  });
+
+  it("still rejects the delete primitives the CLI lacks", async () => {
     const { adapter } = await makeHarness([S1]);
     await expect(adapter.deleteSession(S1)).rejects.toThrow(/no whole-session delete/);
     await expect(adapter.deleteMessage(S1, "x")).rejects.toThrow(/no single-message delete/);
-    await expect(adapter.renameSession(S1, "t")).rejects.toThrow(/no rename primitive/);
   });
 });
 
@@ -306,7 +359,7 @@ describe("claude prompt", () => {
       },
     ]);
 
-    const frame = children.spawned[0]?.sent[0];
+    const frame = children.spawned[0]?.sent.at(-1);
     expect(frame?.type).toBe("user");
     const message = frame?.message as { content: Array<Record<string, unknown>> };
     const content = message.content;
@@ -318,13 +371,20 @@ describe("claude prompt", () => {
       type: "image",
       source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
     });
-    expect(frame?.model).toBe("opus");
+    // The model choice is a control request, not a field on the user frame —
+    // the CLI's user-frame schema has no `model`.
+    expect(children.spawned[0]?.sent[0]).toMatchObject({
+      type: "control_request",
+      request: { subtype: "set_model", model: "opus" },
+    });
+    expect(frame).not.toHaveProperty("model");
   });
 
-  it("omits the model field for the agent default", async () => {
+  it("omits the model control request for the agent default", async () => {
     const { adapter, children } = await makeHarness([S1]);
     await adapter.prompt(S1, "hi", { providerId: "claude", modelId: "default" }, []);
-    expect(children.spawned[0]?.sent[0]?.model).toBeUndefined();
+    expect(children.spawned[0]?.sent).toHaveLength(1);
+    expect(children.spawned[0]?.sent[0]?.type).toBe("user");
   });
 
   it("reports the run as running until the result frame settles it", async () => {
@@ -357,8 +417,30 @@ describe("claude prompt", () => {
 
     const deltas = events.filter((e) => e.type === "message.delta");
     expect(deltas).toHaveLength(2);
-    expect(deltas[0]).toMatchObject({ kind: "text", delta: "Hel", partId: "block-0" });
-    expect(deltas[1]).toMatchObject({ kind: "thinking", delta: "hm", partId: "block-1" });
+    expect(deltas[0]).toMatchObject({ kind: "text", delta: "Hel", partId: "m1:0" });
+    expect(deltas[1]).toMatchObject({ kind: "thinking", delta: "hm", partId: "m1:1" });
+  });
+
+  it("routes each step's deltas to its own part", async () => {
+    // A multi-step run restarts the block index at 0; a part id without the
+    // message would append step two's text onto step one's part.
+    const { adapter, children, events } = await makeHarness([S1]);
+    await adapter.prompt(S1, "hi", null, []);
+    const child = children.spawned[0];
+    const delta = (messageUuid: string, text: string) => ({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+      uuid: messageUuid,
+    });
+    child?.fire({ type: "assistant", uuid: "step-1" });
+    child?.fire(delta("step-1", "first"));
+    child?.fire({ type: "assistant", uuid: "step-2" });
+    child?.fire(delta("step-2", "second"));
+
+    const parts = events.filter((e) => e.type === "message.delta").map((e) => e);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({ messageId: "step-1", partId: "step-1:0", delta: "first" });
+    expect(parts[1]).toMatchObject({ messageId: "step-2", partId: "step-2:0", delta: "second" });
   });
 
   it("surfaces a can_use_tool ask and answers it over the wire", async () => {
@@ -415,6 +497,32 @@ describe("claude prompt", () => {
       behavior: "deny",
       message: "awefork: denied by the user",
     });
+  });
+
+  it("maps 'always' to a well-formed session rule for the asked tool", async () => {
+    // The CLI validates updatedPermissions strictly: a missing `behavior`
+    // drops the whole entry, which silently degraded "always" to one allow.
+    // The rule must also name the tool that was actually asked about.
+    const { adapter, children } = await makeHarness([S1]);
+    await adapter.prompt(S1, "edit it", null, []);
+    children.spawned[0]?.fire({
+      type: "control_request",
+      request_id: "req-always",
+      request: { subtype: "can_use_tool", tool_name: "Write", input: { file_path: "/tmp/y" } },
+    });
+    await adapter.respondInteraction("req-always", { decision: "always" });
+
+    const reply = children.spawned[0]?.sent.at(-1) ?? {};
+    const body = (reply.response as { response: Record<string, unknown> }).response;
+    expect(body.behavior).toBe("allow");
+    expect(body.updatedPermissions).toEqual([
+      {
+        type: "addRules",
+        rules: [{ toolName: "Write", ruleContent: "*" }],
+        behavior: "allow",
+        destination: "session",
+      },
+    ]);
   });
 
   it("treats a second reply to the same ask as a no-op", async () => {
@@ -490,6 +598,27 @@ describe("claude compress and abort", () => {
     expect(events.some((e) => e.type === "server.error" && e.sessionId === S1)).toBe(true);
     expect(events.some((e) => e.type === "session.idle" && e.sessionId === S1)).toBe(true);
   });
+
+  it("surfaces a failed result frame instead of a silent empty turn", async () => {
+    // A run that never reached the model (no such session, bad cwd) reports
+    // ONLY here and writes nothing to the transcript.
+    const { adapter, children, events } = await makeHarness([S1]);
+    await adapter.prompt(S1, "hi", null, []);
+    children.spawned[0]?.fire({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["No conversation found with session ID: abc"],
+    });
+
+    const error = events.find((e) => e.type === "server.error");
+    expect(error).toMatchObject({
+      type: "server.error",
+      sessionId: S1,
+      message: "No conversation found with session ID: abc",
+    });
+    expect(events.some((e) => e.type === "session.idle" && e.sessionId === S1)).toBe(true);
+  });
 });
 
 describe("claude attachments and models", () => {
@@ -525,16 +654,22 @@ describe("claude attachments and models", () => {
 
 describe("claudeSpawnArgsFor", () => {
   it("names a plain session", () => {
-    expect(claudeSpawnArgsFor(S1)).toEqual(["--session-id", S1]);
+    expect(claudeSpawnArgsFor({ kind: "create", sessionId: S1 })).toEqual(["--session-id", S1]);
+  });
+
+  it("resumes an existing session", () => {
+    expect(claudeSpawnArgsFor({ kind: "resume", sessionId: S1 })).toEqual(["--resume", S1]);
   });
 
   it("resumes and forks for a pending copy", () => {
-    expect(claudeSpawnArgsFor(S2, S1)).toEqual([
-      "--resume",
-      S1,
-      "--fork-session",
-      "--session-id",
-      S2,
-    ]);
+    expect(
+      claudeSpawnArgsFor({ kind: "fork", sessionId: S2, resumeParent: S1, cutUuid: null }),
+    ).toEqual(["--resume", S1, "--fork-session", "--session-id", S2]);
+  });
+
+  it("adds the cut when the fork is anchored to a turn", () => {
+    expect(
+      claudeSpawnArgsFor({ kind: "fork", sessionId: S2, resumeParent: S1, cutUuid: "u-9" }),
+    ).toEqual(["--resume", S1, "--fork-session", "--session-id", S2, "--resume-session-at", "u-9"]);
   });
 });

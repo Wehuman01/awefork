@@ -182,13 +182,14 @@ export function backendCapabilities(
         exportBranch: false,
       };
     case "claudecode":
-      // Claude Code's CLI has no per-session/per-message delete or rename
-      // primitive and no fork cut point: a fork is a whole-history copy
-      // (`--resume --fork-session`) whose lineage awefork records itself,
-      // which also makes a detached export possible. Attachments round-trip
-      // as base64 blocks in the transcript (images only; documents inline
-      // into the prompt text). Compaction is the /compact slash command.
-      // Permission asks arrive as can_use_tool control frames.
+      // Claude Code's CLI has no per-session/per-message delete primitive, but
+      // it does rename (a `rename_session` control request persists a
+      // `custom-title` row) and it does fork at a cut point
+      // (`--resume-session-at`). The fork's lineage is awefork's own sidecar,
+      // so a detached export is possible too. Attachments round-trip as base64
+      // blocks in the transcript (images only; documents inline into the
+      // prompt text). Compaction is the /compact slash command. Permission
+      // asks arrive as can_use_tool control frames.
       return {
         deleteMessage: false,
         deleteSession: false,

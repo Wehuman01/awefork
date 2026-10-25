@@ -7,6 +7,7 @@ import { parseVersion } from "../shared/agent-descriptor.js";
 import {
   type ClaudeAdapterNodeSeams,
   type ClaudeChild,
+  type ClaudeSpawnPlan,
   claudeSpawnArgsFor,
 } from "../shared/claude-adapter.js";
 import { isCmdNotFound, missingCliMessage } from "./missing-cli.js";
@@ -86,18 +87,13 @@ async function listTranscripts(root: string): Promise<string[]> {
 }
 
 /**
- * Spawn one prompt child for a session. The argv carries the session id
- * (and, for a pending fork copy, its resume args); permission asks ride
+ * Spawn one prompt child. The argv comes from `claudeSpawnArgsFor(plan)`, so
+ * a new session is named, an existing one is resumed, and a fork copy resumes
+ * its parent (with the optional cut). Permission asks ride
  * `--permission-prompt-tool stdio` — without it the standalone CLI denies
  * every gated tool silently instead of asking.
  */
-async function spawnClaudeChild(
-  cwd: string,
-  sessionId: string,
-  resumeParent?: string,
-  /** Resume-only child (no --session-id): the shape /compact needs. */
-  compactOnly = false,
-): Promise<ClaudeChild> {
+async function spawnClaudeChild(cwd: string, plan: ClaudeSpawnPlan): Promise<ClaudeChild> {
   const argv = [
     "-p",
     "--input-format",
@@ -108,7 +104,7 @@ async function spawnClaudeChild(
     "--verbose",
     "--permission-prompt-tool",
     "stdio",
-    ...(compactOnly ? ["--resume", sessionId] : claudeSpawnArgsFor(sessionId, resumeParent)),
+    ...claudeSpawnArgsFor(plan),
   ];
   const spawnEnv = await resolveSpawnEnv(process.env, homedir(), undefined, process.platform);
   spawnEnv.CLAUDE_CONFIG_DIR = claudeConfigDir();
@@ -218,8 +214,9 @@ async function spawnClaudeChild(
 export async function claudeNodeSeams(): Promise<ClaudeAdapterNodeSeams> {
   const root = claudeProjectsRoot();
   return {
-    spawnChild: (sessionId, cwd, resumeParent) => spawnClaudeChild(cwd, sessionId, resumeParent),
-    spawnCompactChild: (sessionId, cwd) => spawnClaudeChild(cwd, sessionId, undefined, true),
+    spawnChild: (cwd, plan) => spawnClaudeChild(cwd, plan),
+    // /compact only executes on a child that STARTED with --resume.
+    spawnCompactChild: (sessionId, cwd) => spawnClaudeChild(cwd, { kind: "resume", sessionId }),
     listTranscriptFiles: () => listTranscripts(root),
     readTranscript: (path) => readFile(path, "utf8"),
     projectDirs: async () => {
