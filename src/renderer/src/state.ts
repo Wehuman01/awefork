@@ -4519,7 +4519,14 @@ export async function compressSession(
 ): Promise<void> {
   const backend = state.activeBackend;
   if (!state.capabilities.compress) return;
-  if (isSessionRunning(backend, sessionId)) {
+  const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
+  const tipId = turns[turns.length - 1]?.messageId ?? null;
+  const viaFork = (atMessageId != null && atMessageId !== tipId) || hasForkChildren(sessionId);
+  // A run in flight only blocks the in-place compression: that one asks the
+  // backend for a summarize turn on this very session, and a session runs one
+  // turn at a time. The fork path summarizes a fresh session and leaves the
+  // original untouched, so a running parent is no reason to refuse it.
+  if (!viaFork && isSessionRunning(backend, sessionId)) {
     state.actionError = t("state.sessionRunningCompress");
     return;
   }
@@ -4531,18 +4538,17 @@ export async function compressSession(
     state.actionError = t("state.noModelsForCompress");
     return;
   }
-  const turns = buildTurns(sessionId, state.messagesBySession[sessionId] ?? []);
   const preset = turns.find((turn) => turn.messageId === atMessageId)?.model ??
     turns[turns.length - 1]?.model ??
     state.lastModel ?? {
       providerId: catalogFirst.providerId,
       modelId: catalogFirst.modelId,
     };
-  const tipId = turns[turns.length - 1]?.messageId ?? null;
-  const viaFork = (atMessageId != null && atMessageId !== tipId) || hasForkChildren(sessionId);
   const model = await askCompressModel(sessionId, preset, viaFork);
   if (!model) return;
-  if (isSessionRunning(backend, sessionId)) {
+  // The dialog takes time and a run can start while it is open; only the
+  // in-place path has to re-check, the fork path still must not.
+  if (!viaFork && isSessionRunning(backend, sessionId)) {
     state.actionError = t("state.sessionRunningCompress");
     return;
   }
@@ -4554,8 +4560,14 @@ export async function compressSession(
   // window where a second compress races the first. The parent wears the flag
   // through the fork await too, as its own double-compress guard; the fork
   // path clears it once the target moves.
-  beginLocalOverviewRun(backend, sessionId);
-  setRunning(backend, sessionId, true);
+  // A session already running its own turn is not this call's to claim: the
+  // flag, its watchdog and its overview evidence belong to that run, so the
+  // compress neither sets them, clears them, nor settles them.
+  const parentOwnRun = !isSessionRunning(backend, sessionId);
+  if (parentOwnRun) {
+    beginLocalOverviewRun(backend, sessionId);
+    setRunning(backend, sessionId, true);
+  }
   const sentAt = Date.now();
   let targetId = sessionId;
   try {
@@ -4582,12 +4594,12 @@ export async function compressSession(
     watchCompletion(backend, targetId, sentAt);
   } catch (error) {
     setRunning(backend, targetId, false);
-    settleRun(backend, sessionId, "aborted");
+    if (parentOwnRun) settleRun(backend, sessionId, "aborted");
     state.actionError = t("state.compressFailed", {
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
-    if (targetId !== sessionId) setRunning(backend, sessionId, false);
+    if (targetId !== sessionId && parentOwnRun) setRunning(backend, sessionId, false);
   }
 }
 

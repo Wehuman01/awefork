@@ -136,6 +136,10 @@ The main process owns `overview-read.json`, including result revisions, seen wat
 
 Where a jump lands follows the "open sessions in new tabs" preference, the same rule a list click uses. With it on, a story that already has a tab is reached by switching to that tab — one story never owns two — a story with no tab opens a fresh one, and a blank active tab is reused rather than left beside the new one. With it off the jump switches the active tab in place. A jump to the session already on screen switches nothing and reloads nothing; the panel still closes and the latest turn is still focused.
 
+### Session compression
+
+Compression folds history through the backend's summarize primitive and happens at a position, not on a session: anything living after the cut — the branch's own later turns or forks growing from it — sends the summary into a fresh fork, and only the bare tip of an unbranched story compresses in place. A run in flight blocks exactly that in-place case, because a session runs one turn at a time; the fork path summarizes a new session and leaves the original alone, running or not. A parent with its own run is never claimed, cleared, or settled by the compress — the flag, its watchdog, and its overview evidence belong to that run.
+
 ### Adding an agent backend
 
 Implement `AgentAdapter` in `src/shared/`, add its ID and capability row in
