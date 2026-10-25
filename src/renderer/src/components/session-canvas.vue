@@ -115,6 +115,7 @@
           'parallel-summary': isParallelSummary(node),
           selected: node.id === selectedTurnId,
           running: isNodeRunning(node),
+          waiting: isNodeWaiting(node),
           recent: isNodeRecent(node),
           stub: node.kind === 'stub',
           dimmed: cmpRole(node) ? cmpRole(node) === 'dim' : isDimmed(node),
@@ -245,7 +246,12 @@
             >{{ source.label }}</button>
           </div>
           <div class="turn-foot">
-            <span v-if="isNodeRunning(node)" class="running-flag">{{ t("canvas.running") }}</span>
+            <span
+              v-if="isNodeRunning(node)"
+              class="running-flag"
+              :class="{ waiting: isNodeWaiting(node) }"
+              >{{ isNodeWaiting(node) ? t("canvas.waiting") : t("canvas.running") }}</span
+            >
             <span v-else>{{ footMeta(node) }}</span>
             <span
               class="model"
@@ -486,6 +492,7 @@
             on: activePathIds.has(n.id),
             desc: isMapSubtree(n),
             running: isNodeRunning(n),
+            waiting: isNodeWaiting(n),
             recent: isNodeRecent(n),
             hit: searchHitIds.has(n.id),
             marked: isTurnMarked(n.id),
@@ -2004,6 +2011,20 @@ function footMeta(node: TurnNode): string {
  */
 function isNodeRunning(node: TurnNode): boolean {
   return Boolean(store.running[node.sessionId]) && isSessionTip(node);
+}
+
+/**
+ * A tip whose session has a queued ask is waiting for the user, not working:
+ * the run stays open until the decision lands, so `running` alone would paint
+ * it the sky of a live run. It takes the ask's amber instead — the same color
+ * the inline ask card and the overview's 等你处理 badge use — on the card,
+ * its flag and the minimap dot.
+ */
+function isNodeWaiting(node: TurnNode): boolean {
+  return (
+    isNodeRunning(node) &&
+    (store.interactions[store.activeBackend] ?? []).some((ask) => ask.sessionId === node.sessionId)
+  );
 }
 
 /**

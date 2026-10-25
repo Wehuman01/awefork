@@ -86,6 +86,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "{n} branches forked from this empty branch — click to view the whole subtree",
   },
   "canvas.running": { zh: "○ 运行中…", en: "○ Running…" },
+  "canvas.waiting": { zh: "◐ 等你处理", en: "◐ Needs you" },
   "canvas.stubHint": {
     zh: "新分支还没有自己的回合 — 点「＋」写下第一步，或者直接在右侧回复。",
     en: "This new branch has no turns yet — click “＋” to write the first step, or just reply in the pane on the right.",
