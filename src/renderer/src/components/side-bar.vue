@@ -500,7 +500,7 @@
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        :title="t('sidebar.compressTitle')"
+        :title="menuTurn ? t('sidebar.compressTitleTurn') : t('sidebar.compressTitle')"
         @click="compressFromMenu"
         >{{ t("sidebar.compress") }}</button
       >
@@ -1465,11 +1465,17 @@ function exportFromMenu(): void {
   void exportSessionAt(active.sessionId, atMessageId);
 }
 
+/**
+ * Compress at the menu's own position: a turn-card right click bounds the
+ * summary through that turn — a mid-story cut lands the summary in a fresh
+ * fork at that node — while a sidebar row compresses the session at its tip.
+ */
 function compressFromMenu(): void {
   const active = menu.value;
   if (!active) return;
+  const atMessageId = menuTurn.value?.messageId ?? null;
   closeMenu();
-  void compressSession(active.sessionId);
+  void compressSession(active.sessionId, atMessageId);
 }
 
 /** Same soft delete as the canvas 🗑 chip; deleteSession owns the confirm. */

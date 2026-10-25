@@ -110,6 +110,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "把历史折叠成一份摘要：历史仍保留，之后的对话只携带摘要与最近几轮",
     en: "Fold history into a summary: history is kept, later turns carry only the summary plus the latest few rounds",
   },
+  "sidebar.compressTitleTurn": {
+    zh: "截至这个回合把历史折叠成摘要：这个位置之后还有内容时，摘要会落在一个新建的 fork 里，原分支不动",
+    en: "Fold history up to this turn into a summary: when anything follows this position, the summary lands in a fresh fork and the original branch stays untouched",
+  },
   "sidebar.compress": { zh: "🗜 压缩会话…", en: "🗜 Compress session…" },
   "sidebar.exportTitleTurn": {
     zh: "把这个分支截至当前回合复制成一份独立会话，可在任何 opencode 客户端继续",

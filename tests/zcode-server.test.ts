@@ -309,6 +309,35 @@ describe("zcode-server", () => {
       expect(result).toEqual({ command: "node", args: [bundledCli], env: {} });
     });
 
+    it("probes node under the spawn env, so a GUI-minimal PATH still finds it", async () => {
+      const home = "/Users/tester";
+      const bundledCli = "/Users/tester/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs";
+      mocks.existsSync.mockImplementation((path: string) => path === bundledCli);
+      // A Dock/Finder launch hands the app a bare PATH. resolveSpawnEnv is
+      // what unions the versioned install dirs back in; the probe must ask
+      // that same question or it reads "no node" and falls back to the
+      // Electron binary — the bouncing "exec" Dock tile on every launch.
+      const guiEnv = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" };
+      mocks.resolveSpawnEnv.mockResolvedValue({
+        PATH: "/Users/tester/.deskclaw/node/bin:/usr/bin:/bin",
+      });
+
+      const { resolveZcodeCli } = await import("../src/main/zcode-server.js");
+      const result = await resolveZcodeCli(
+        guiEnv,
+        home,
+        "darwin",
+        mocks.execFile as typeof execFile,
+      );
+
+      expect(result?.command).toBe("node");
+      expect(mocks.resolveSpawnEnv).toHaveBeenCalledWith(guiEnv, home, undefined, "darwin");
+      const probeOptions = mocks.execFile.mock.calls[0]?.[2];
+      expect(probeOptions?.env).toEqual({
+        PATH: "/Users/tester/.deskclaw/node/bin:/usr/bin:/bin",
+      });
+    });
+
     it("prefers env override over bundle and PATH", async () => {
       const fakeCliPath = "/tmp/fake-zcode.cjs";
       mocks.existsSync.mockImplementation((path: string) => path === fakeCliPath);

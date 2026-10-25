@@ -91,9 +91,9 @@ export async function resolveZcodeCli(
   execFn: typeof execFileAsync = execFileAsync,
 ): Promise<ZcodeCli | null> {
   const override = env.AWEFORK_ZCODE_CLI;
-  if (override && existsSync(override)) return scriptRunner(override, execFn);
+  if (override && existsSync(override)) return scriptRunner(override, execFn, env, home, plat);
   const bundled = bundleCandidates(home, plat, env).find((path) => existsSync(path));
-  if (bundled) return scriptRunner(bundled, execFn);
+  if (bundled) return scriptRunner(bundled, execFn, env, home, plat);
   // A PATH install (future CLI distribution): let the loader find it.
   try {
     await execFn("zcode", ["--version"], {
@@ -149,14 +149,27 @@ function builtinProviderEnv(scriptPath: string): Record<string, string> {
  * How to run a .cjs CLI script. A plain `node` is preferred: on macOS the
  * dev app's process.execPath is the Electron binary, and even with
  * ELECTRON_RUN_AS_NODE=1 a child of Electron.app registers with
- * LaunchServices as a second Electron application — a second Dock icon
- * bouncing beside awefork's own. A real node never touches AppKit.
- * GUI-launched PATHs may lack node, so Electron-as-node stays the fallback.
+ * LaunchServices as a second application — a second Dock tile, drawn with
+ * the generic "exec" icon, bouncing beside awefork's own. A real node never
+ * touches AppKit.
+ *
+ * The probe must run under the same env the spawn will use, or it answers a
+ * different question than the one that matters: a Dock/Finder launch hands
+ * the app a minimal PATH, so a bare `node` probe misses the versioned install
+ * dirs resolveSpawnEnv unions in, reads as "no node", and silently falls back
+ * to the Electron binary — the bouncing tile, every launch.
  */
-async function scriptRunner(scriptPath: string, execFn: typeof execFileAsync): Promise<ZcodeCli> {
+async function scriptRunner(
+  scriptPath: string,
+  execFn: typeof execFileAsync,
+  env: NodeJS.ProcessEnv,
+  home: string,
+  plat: NodeJS.Platform,
+): Promise<ZcodeCli> {
   const providerEnv = builtinProviderEnv(scriptPath);
+  const spawnEnv = await resolveSpawnEnv(env, home, undefined, plat);
   try {
-    await execFn("node", ["--version"], { timeout: 5000 });
+    await execFn("node", ["--version"], { timeout: 5000, env: spawnEnv });
     return { command: "node", args: [scriptPath], env: providerEnv };
   } catch {
     return {
