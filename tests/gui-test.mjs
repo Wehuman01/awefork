@@ -226,7 +226,8 @@ try {
 
   // 4. Canvas session overview: the trigger pill sits above the canvas, opens
   //    a non-modal floating panel, a single click expands a row's summary
-  //    without moving the canvas, and Esc collapses it again.
+  //    without moving the canvas, the row's ↗ jumps straight to the session,
+  //    and Esc collapses it again.
   const overviewTrigger = await cdp.evaluate(`Boolean(document.querySelector(".viewport .overview-trigger"))`);
   check("overview trigger renders above the canvas", overviewTrigger === true);
 
@@ -252,7 +253,7 @@ try {
     selected: document.querySelector(".turn.selected")?.dataset.nodeId ?? null,
     title: document.querySelector(".ctx-title")?.textContent ?? "",
   })`);
-  await cdp.evaluate(`document.querySelector(".overview-float .float-session-row").click()`);
+  await cdp.evaluate(`document.querySelector(".overview-float .float-session-main").click()`);
   await retry(
     () => cdp.evaluate(`Boolean(document.querySelector(".overview-float .float-summary"))`),
     5000,
@@ -277,6 +278,22 @@ try {
     "overview panel closed by Esc",
   );
   check("Esc collapses the panel", true);
+
+  // The row's ↗ is the one-click jump: it goes straight to the conversation,
+  // so the panel closes on the landing instead of opening a summary first.
+  await cdp.evaluate(`document.querySelector(".overview-trigger .trigger-name").click()`);
+  await retry(
+    () => cdp.evaluate(`Boolean(document.querySelector(".overview-float .jump-chevron"))`),
+    5000,
+    "overview panel reopened",
+  );
+  await cdp.evaluate(`document.querySelector(".overview-float .jump-chevron").click()`);
+  await retry(
+    () => cdp.evaluate(`!document.querySelector(".overview-float")`),
+    10_000,
+    "chevron jump",
+  );
+  check("row chevron jumps straight to the session", true);
   // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(

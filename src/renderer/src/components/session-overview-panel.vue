@@ -68,46 +68,57 @@
       </div>
 
       <div class="float-session-list">
-        <button
+        <div
           v-for="row in visibleRows"
           :key="rowKey(row)"
-          type="button"
           class="float-session-row"
           :class="{
             selected: store.overview.selectedKey === rowKey(row),
             current: isCurrent(row),
           }"
-          :aria-pressed="store.overview.selectedKey === rowKey(row)"
-          @click="selectOverviewRow(row.backend, row.session.id)"
-          @dblclick="jump(row)"
-          @keydown.enter.prevent="jump(row)"
         >
-          <span class="float-session-name">
-            <span class="agent-badge" :class="row.backend">{{ agentGlyph(row.backend) }}</span>
-            <span class="float-session-text">
-              <b>
-                {{ row.session.title }}
-                <i v-if="row.status === 'unread'" class="unread-dot" aria-hidden="true"></i>
-              </b>
-              <small>
-                {{ projectOf(row.session.directory) }}
-                <em aria-hidden="true">·</em>
-                {{ BACKEND_LABELS[row.backend] }}
-                <template v-if="isCurrent(row)">
-                  <em aria-hidden="true">·</em> {{ t("overview.current") }}
-                </template>
-              </small>
+          <button
+            type="button"
+            class="float-session-main"
+            :aria-pressed="store.overview.selectedKey === rowKey(row)"
+            @click="selectOverviewRow(row.backend, row.session.id)"
+            @dblclick="jump(row)"
+            @keydown.enter.prevent="jump(row)"
+          >
+            <span class="float-session-name">
+              <span class="agent-badge" :class="row.backend">{{ agentGlyph(row.backend) }}</span>
+              <span class="float-session-text">
+                <b>
+                  {{ row.session.title }}
+                  <i v-if="row.status === 'unread'" class="unread-dot" aria-hidden="true"></i>
+                </b>
+                <small>
+                  {{ projectOf(row.session.directory) }}
+                  <em aria-hidden="true">·</em>
+                  {{ BACKEND_LABELS[row.backend] }}
+                  <template v-if="isCurrent(row)">
+                    <em aria-hidden="true">·</em> {{ t("overview.current") }}
+                  </template>
+                </small>
+              </span>
             </span>
-          </span>
-          <span class="status-badge" :class="row.status">{{
-            t(`overview.status.${row.status}`)
-          }}</span>
-          <span class="float-activity">
-            {{ activityOf(row) }}
-            <small>{{ relTime(row.activityAt) }}</small>
-          </span>
-          <span class="jump-chevron" aria-hidden="true">↗</span>
-        </button>
+            <span class="status-badge" :class="row.status">{{
+              t(`overview.status.${row.status}`)
+            }}</span>
+            <span class="float-activity">
+              {{ activityOf(row) }}
+              <small>{{ relTime(row.activityAt) }}</small>
+            </span>
+          </button>
+          <!-- The row's chevron is the one-click jump: straight to the
+               conversation, no summary expansion in between. -->
+          <button
+            type="button"
+            class="jump-chevron"
+            :title="t('overview.jump')"
+            @click.stop="jump(row)"
+          >↗</button>
+        </div>
 
         <div v-if="visibleRows.length === 0" class="float-empty">
           {{ t("overview.empty") }}
