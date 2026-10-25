@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
-import type { AgentEvent, ChatMessage, SessionSummary } from "../src/shared/types";
+import type { AgentEvent, ChatMessage, SessionSummary, SubagentCall } from "../src/shared/types";
 import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -37,6 +37,20 @@ const USER_ROW: ChatMessage = {
   finish: null,
   outputTokens: null,
   error: null,
+};
+
+const CALL: SubagentCall = {
+  partId: "p-task",
+  tool: "task",
+  agent: "review",
+  title: "Inspect",
+  prompt: "Look.",
+  status: "running",
+  result: null,
+  childSessionId: "s1-sub",
+  modelId: null,
+  startedAt: 1,
+  endedAt: null,
 };
 
 function assistantRow(error: string | null): ChatMessage {
@@ -173,6 +187,7 @@ describe("renderer message updates", () => {
     { finish: "tool-calls" },
     { outputTokens: 42 },
     { contextTokens: 42 },
+    { taskCalls: [{ ...CALL, status: "completed", result: "done" }] },
     { error: "failed" },
     { compaction: true },
     { id: "replacement" },

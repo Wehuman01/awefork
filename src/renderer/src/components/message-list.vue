@@ -36,9 +36,15 @@
               :title="copiedId === message.id ? t('msg.copied') : t('msg.copyReply')"
               @click="copyMessage(message)"
             >{{ copiedId === message.id ? "✓" : "⧉" }}</button>
-            <p v-if="message.toolNames.length > 0" class="tool-row">
-              <span class="tool-chip lav" :title="message.toolNames.join(' · ')">{{
-                toolSummary(message.toolNames)
+            <TaskCallCard
+              v-for="call in message.taskCalls ?? []"
+              :key="call.partId"
+              :call="call"
+              @open="(call) => emit('openSubagent', call)"
+            />
+            <p v-if="chipNamesOf(message).length > 0" class="tool-row">
+              <span class="tool-chip lav" :title="chipNamesOf(message).join(' · ')">{{
+                toolSummary(chipNamesOf(message))
               }}</span>
             </p>
             <details v-if="message.thinking" class="thought">
@@ -64,7 +70,15 @@
       <div class="message-row">
         <span class="avatar bot">✨</span>
         <div class="message-body">
-          <p class="tool-row"><span class="tool-chip running">running…</span></p>
+          <p v-if="toolCalls.length === 0" class="tool-row">
+            <span class="tool-chip running">running…</span>
+          </p>
+          <TaskCallCard
+            v-for="row in toolCalls"
+            :key="row.call.partId"
+            :call="row.call"
+            @open="(call) => emit('openSubagent', call)"
+          />
           <template v-for="row in liveRows" :key="row.part.partId">
             <!-- A live tool part streams as a chip while the turn runs; the
                  settled row's full tool list lands via the idle reload. -->
@@ -114,13 +128,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
-import type { SessionSummary } from "../../../shared/types";
+import type { SessionSummary, SubagentCall } from "../../../shared/types";
 import { t } from "../i18n";
 import { isSamePaneStart, promptAnchorScrollTop, shouldFollowStream } from "../message-list-scroll";
-import type { LivePart, ReadonlyChatMessage } from "../state";
+import type { LivePart, LiveToolCall, ReadonlyChatMessage } from "../state";
 import { hasReadableThought, thoughtSummary } from "../thought";
 import { toolSummary } from "../tool-summary";
 import { MarkdownView } from "./markdown-view";
+import TaskCallCard from "./task-call-card.vue";
 
 const props = defineProps<{
   session: SessionSummary | null;
@@ -128,13 +143,20 @@ const props = defineProps<{
   running: boolean;
   /** The run's live parts in arrival order — each step's thinking and reply interleaved. */
   streamParts: readonly LivePart[];
+  toolCalls: readonly LiveToolCall[];
   error: string | null;
   collapsedUserMessageId?: string | null;
   collapsedUserMessageLabel?: string;
 }>();
 
 /** A failed reply row offers its own retry jump; the host opens the draft. */
-const emit = defineEmits<{ retry: [] }>();
+const emit = defineEmits<{ retry: []; openSubagent: [call: SubagentCall] }>();
+
+/** Task cards replace that tool's chip; other tools keep the grouped summary. */
+function chipNamesOf(message: ReadonlyChatMessage): readonly string[] {
+  const cardTools = new Set((message.taskCalls ?? []).map((call) => call.tool));
+  return message.toolNames.filter((name) => !cardTools.has(name));
+}
 
 /** Per-part render models: collapse-header summary plus the streaming caret flag. */
 const liveRows = computed(() => {

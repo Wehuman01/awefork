@@ -48,6 +48,7 @@ describe("bundled opencode descriptor", () => {
       doneStates: ["output-available", "error"],
     });
     expect(descriptor.compat).toEqual({ min: "1.18.0", max: "1.19.0" });
+    expect(descriptor.messages.parts.tool.task).toMatchObject({ name: "task" });
     expect(descriptor.events.partSnapshot.kinds).toEqual({ text: "text", reasoning: "thinking" });
     // v1 rows carry no fork link at all — only subagents ever set a parent,
     // which is why v1 needed no fork/subagent distinction.

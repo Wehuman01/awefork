@@ -552,6 +552,71 @@ describe("opencode adapter", () => {
     expect(messages[1]?.attachmentNames).toEqual([]);
   });
 
+  it("maps task tool parts to structured subagent cards", async () => {
+    const state = baseState();
+    state.messages.s1?.[1]?.parts.push({
+      type: "tool",
+      tool: "task",
+      id: "prt-task",
+      state: {
+        status: "completed",
+        input: { subagent_type: "review", description: "Inspect", prompt: "Look." },
+        output: '<task id="ses_child"><task_result>Done.</task_result></task>',
+        metadata: { sessionId: "ses_child", model: { modelID: "glm/review" } },
+        time: { start: 1000, end: 2000 },
+      },
+    });
+    const { adapter } = await newAdapter(state);
+    const messages = await adapter.messages("s1");
+    expect(messages[1]?.taskCalls).toEqual([
+      {
+        partId: "prt-task",
+        tool: "task",
+        agent: "review",
+        title: "Inspect",
+        prompt: "Look.",
+        status: "completed",
+        result: "Done.",
+        childSessionId: "ses_child",
+        modelId: "glm/review",
+        startedAt: 1000,
+        endedAt: 2000,
+      },
+    ]);
+  });
+
+  it("emits live task cards from tool part snapshots", async () => {
+    const state = baseState();
+    state.eventFrames = [
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "s1",
+          messageID: "m1",
+          part: {
+            id: "prt-task",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "running",
+              input: { subagent_type: "review", description: "Inspect", prompt: "Look." },
+              time: { start: 1000 },
+            },
+          },
+        },
+      },
+    ];
+    const { adapter } = await newAdapter(state);
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    unsubscribe();
+    expect(events.find((event) => event.type === "message.toolCall")).toMatchObject({
+      partId: "prt-task",
+      call: { status: "running", agent: "review", title: "Inspect" },
+    });
+  });
+
   it("messageAttachments hands a message's file parts back as sendable attachments", async () => {
     const state = baseState();
     state.messages.s1?.[0]?.parts.push(

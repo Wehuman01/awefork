@@ -21,7 +21,8 @@
 
 import { firstString, type OpenCodeDescriptor, readPath } from "./agent-descriptor.js";
 import type { ToolPartFrame } from "./file-change-recorder.js";
-import type { AgentEvent } from "./types.js";
+import { subagentCallOf } from "./subagent-task.js";
+import type { AgentEvent, SubagentCall } from "./types.js";
 
 /** One SSE frame as the shared parser normalized it. */
 export interface V2Frame {
@@ -84,6 +85,8 @@ interface ToolCall {
   messageId: string;
   tool: string;
   filePath: string | null;
+  input: unknown;
+  createdAt: number | null;
 }
 
 /**
@@ -161,6 +164,7 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
     props: Record<string, unknown>,
     stateKey: "running" | "completed" | "error",
     remembered: ToolCall | undefined,
+    frameCreated: number | null,
   ): void => {
     const fact = descriptor.fileChanges;
     const id = sessionId(props);
@@ -174,8 +178,16 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
       remembered?.filePath ??
       null;
     const message = messageId(props) ?? remembered?.messageId ?? "";
+    const rememberedInput = stateKey === "running" ? props.input : remembered?.input;
+    const createdAt = stateKey === "running" ? frameCreated : (remembered?.createdAt ?? null);
     if (stateKey === "running") {
-      toolCalls.set(`${id}\u0000${callId}`, { messageId: message, tool, filePath });
+      toolCalls.set(`${id}\u0000${callId}`, {
+        messageId: message,
+        tool,
+        filePath,
+        input: rememberedInput,
+        createdAt,
+      });
     }
     deps.recordToolFrame(id, {
       sessionId: id,
@@ -185,6 +197,58 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
       filePath,
       stateKey,
     });
+  };
+
+  /** Build a v1-shaped task part so the shared descriptor mapper can read it. */
+  const taskSnapshotOf = (
+    props: Record<string, unknown>,
+    stateKey: "running" | "completed" | "error",
+    remembered: ToolCall | undefined,
+    input: unknown,
+    createdAt: number | null,
+    frameCreated: number | null,
+    tool: string,
+  ): unknown => {
+    const content = props.content;
+    const outputs = Array.isArray(content)
+      ? content.filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" && item !== null && "text" in item,
+        )
+      : [];
+    return {
+      id: typeof props.id === "string" ? props.id : null,
+      name: tool,
+      state: {
+        status: stateKey,
+        input: stateKey === "running" ? input : remembered?.input,
+        output: outputs.map((item) => item.text).join("\n"),
+        error: readPath(props, "error"),
+        metadata: readPath(props, "metadata"),
+        time: { created: createdAt, completed: frameCreated },
+      },
+    };
+  };
+
+  const emitTask = (
+    props: Record<string, unknown>,
+    stateKey: "running" | "completed" | "error",
+    remembered: ToolCall | undefined,
+    frameCreated: number | null,
+  ): SubagentCall | null => {
+    const fact = descriptor.messages.parts.tool.task;
+    const id = sessionId(props);
+    const message = messageId(props) ?? remembered?.messageId;
+    const callId = typeof props.id === "string" ? props.id : null;
+    const tool = typeof props.name === "string" ? props.name : (remembered?.tool ?? "");
+    if (!fact || !id || !message || !callId || tool !== fact.name) return null;
+    const input = stateKey === "running" ? props.input : remembered?.input;
+    const createdAt = stateKey === "running" ? frameCreated : (remembered?.createdAt ?? null);
+    const raw = taskSnapshotOf(props, stateKey, remembered, input, createdAt, frameCreated, tool);
+    const call = subagentCallOf(raw, callId, tool, fact);
+    if (!call) return null;
+    emit({ type: "message.toolCall", sessionId: id, messageId: message, partId: callId, call });
+    return call;
   };
 
   const dropSessionTools = (session: string): void => {
@@ -321,19 +385,22 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
             typeof props.id === "string" ? props.id : null,
           );
         }
-        recordTool(props, "running", undefined);
+        emitTask(props, "running", undefined, frame.created);
+        recordTool(props, "running", undefined, frame.created);
         return;
       case "session.tool.success": {
         const callId = typeof props.id === "string" ? props.id : null;
         const key = id && callId ? `${id}\u0000${callId}` : null;
-        recordTool(props, "completed", key ? toolCalls.get(key) : undefined);
+        emitTask(props, "completed", key ? toolCalls.get(key) : undefined, frame.created);
+        recordTool(props, "completed", key ? toolCalls.get(key) : undefined, frame.created);
         if (key) toolCalls.delete(key);
         return;
       }
       case "session.tool.failed": {
         const callId = typeof props.id === "string" ? props.id : null;
         const key = id && callId ? `${id}\u0000${callId}` : null;
-        recordTool(props, "error", key ? toolCalls.get(key) : undefined);
+        emitTask(props, "error", key ? toolCalls.get(key) : undefined, frame.created);
+        recordTool(props, "error", key ? toolCalls.get(key) : undefined, frame.created);
         if (key) toolCalls.delete(key);
         return;
       }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Subagent task cards surface delegated runs** — opencode v1/v2 Task-tool calls now render as live cards with agent, title, elapsed time, dispatch prompt, result/error, and model. Completed cards can open a read-only child-session drawer without changing the selected branch; ordinary tool calls keep the grouped summary chip, and a task-only assistant row no longer disappears when it has no reply text.
+
 ## v0.4.6
 
 - **A turn's tool calls fold into one grouped chip** — a settled turn no longer stacks a wall of near-identical pills: the chips collapse into a single grouped count following opencode's TUI ("shell ×8 · read · edit"), codex's command previews group on the family before " · ", a lone call keeps its full label (that command preview is the whole point of a single chip), the full list rides in the chip's title attribute, and an overlong line cuts at a group boundary so the ellipsis never lands mid tool name. Canvas cards drop their per-turn tool chips — the pane already tells that story.

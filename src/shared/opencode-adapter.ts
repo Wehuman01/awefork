@@ -24,6 +24,7 @@ import {
 } from "./opencode-client.js";
 import { createV2EventTranslator } from "./opencode-v2-events.js";
 import { createSseParser, type ServerEvent } from "./sse.js";
+import { subagentCallOf, taskCallsOf } from "./subagent-task.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -247,6 +248,33 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         }
       : undefined;
 
+  /** Task cards ride v1 tool snapshots even when file-change recording is off. */
+  const onTaskToolPart =
+    descriptor.protocol === "v1" && descriptor.messages.parts.tool.task
+      ? (
+          sessionId: string,
+          messageId: string,
+          part: unknown,
+          partId: string,
+          emit: (event: AgentEvent) => void,
+        ): void => {
+          const toolPart = descriptor.messages.parts.tool;
+          const fact = toolPart.task;
+          if (!fact) return;
+          const tool = firstString(part, [toolPart.nameField]) ?? toolPart.fallbackName;
+          const call = subagentCallOf(part, partId, tool, fact);
+          if (call) {
+            emit({
+              type: "message.toolCall",
+              sessionId,
+              messageId,
+              partId,
+              call,
+            });
+          }
+        }
+      : undefined;
+
   /**
    * A session row carries two different parent relationships, and only one of
    * them hides the session: `parentSessionId` is the agent that spawned it as
@@ -341,6 +369,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
         // same user-row shape v1 produces.
         const compaction = isCompactionRow(row, messageParts);
         const contextTokens = contextTokensOf(m, descriptor.messages.usage);
+        const taskCalls = taskCallsOf(messageParts, parts.tool);
         return {
           id: firstString(m, fields.id) ?? "",
           role: compaction
@@ -358,6 +387,7 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
                 .map((p) => firstString(p, [parts.tool.nameField]) ?? parts.tool.fallbackName),
             ),
           ],
+          ...(taskCalls.length > 0 ? { taskCalls } : {}),
           modelId: firstString(m, fields.modelId),
           providerId: firstString(m, fields.providerId),
           variant: firstString(m, fields.variant),
@@ -772,7 +802,15 @@ export function createOpencodeAdapter(options: OpenCodeAdapterOptions): AgentAda
           translateV2(event);
           return;
         }
-        emitToAgentEvent(event, emit, partKinds, descriptor, onToolPart, permissionObserver);
+        emitToAgentEvent(
+          event,
+          emit,
+          partKinds,
+          descriptor,
+          onToolPart,
+          onTaskToolPart,
+          permissionObserver,
+        );
       };
 
       /**
@@ -1028,6 +1066,13 @@ function emitToAgentEvent(
   partKinds: Map<string, "text" | "thinking">,
   descriptor: OpenCodeDescriptor,
   onToolPart?: (sessionId: string, messageId: string, part: unknown) => void,
+  onTaskToolPart?: (
+    sessionId: string,
+    messageId: string,
+    part: unknown,
+    partId: string,
+    emit: (event: AgentEvent) => void,
+  ) => void,
   permissionObserver?: PermissionAskObserver,
 ): void {
   const props = event.properties;
@@ -1117,10 +1162,13 @@ function emitToAgentEvent(
     if (partId && kind) partKinds.set(partId, kind);
     // Tool parts carry no text stream, but they are where file changes live:
     // hand the raw part to the recorder before anything else falls through.
-    if (onToolPart && partId && !kind) {
+    if (partId && !kind) {
       const id = sessionId();
       const messageId = firstString(props, events.messageIdPaths);
-      if (id && messageId) onToolPart(id, messageId, part);
+      if (id && messageId) {
+        onToolPart?.(id, messageId, part);
+        onTaskToolPart?.(id, messageId, part, partId, emit);
+      }
     }
     // The permission tracker also watches tool parts — a later ask frame
     // names no command, so this is where the correlation comes from.

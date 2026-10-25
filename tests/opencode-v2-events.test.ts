@@ -199,6 +199,45 @@ describe("v2 text and reasoning streams", () => {
   });
 });
 
+describe("v2 task lifecycle", () => {
+  it("emits a task card on called and replaces it on success", () => {
+    const { translate, events } = setup();
+    translate(
+      frame(
+        "session.tool.called",
+        {
+          sessionID: SESSION,
+          assistantMessageID: MESSAGE,
+          id: "call_task",
+          name: "task",
+          input: { agent: "review", description: "Inspect", prompt: "Look." },
+        },
+        1000,
+      ),
+    );
+    translate(
+      frame(
+        "session.tool.success",
+        {
+          sessionID: SESSION,
+          assistantMessageID: MESSAGE,
+          id: "call_task",
+          content: [{ type: "text", text: "Done." }],
+          metadata: { sessionId: "ses_child" },
+        },
+        2000,
+      ),
+    );
+    const cards = events.filter((event) => event.type === "message.toolCall");
+    expect(cards[0]).toMatchObject({
+      call: { status: "running", agent: "review", title: "Inspect", startedAt: 1000 },
+    });
+    expect(cards[1]).toMatchObject({
+      call: { status: "completed", result: "Done.", childSessionId: "ses_child", endedAt: 2000 },
+    });
+  });
+});
+
 describe("v2 tool lifecycle feeds the file-change recorder", () => {
   it("records running at tool.called with the parsed input's path", () => {
     const { translate, toolFrames } = setup();

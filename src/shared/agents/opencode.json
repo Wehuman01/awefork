@@ -1,8 +1,17 @@
 {
   "kind": "opencode",
-  "compat": { "min": "1.18.0", "max": "1.19.0" },
-  "capabilities": { "deleteMessage": true, "attachments": true, "compress": true },
-  "fork": { "cut": "next-user-exclusive" },
+  "compat": {
+    "min": "1.18.0",
+    "max": "1.19.0"
+  },
+  "capabilities": {
+    "deleteMessage": true,
+    "attachments": true,
+    "compress": true
+  },
+  "fork": {
+    "cut": "next-user-exclusive"
+  },
   "fileChanges": {
     "tools": ["edit", "write"],
     "stateKeyPath": "state.key",
@@ -54,10 +63,37 @@
       "cacheWrite": ["info.tokens.cache.write"]
     },
     "parts": {
-      "text": { "type": "text", "field": "text", "join": "\n" },
-      "thinking": { "type": "reasoning", "field": "text", "join": "\n\n" },
-      "compaction": { "type": "compaction" },
-      "tool": { "type": "tool", "nameField": "tool", "fallbackName": "tool" },
+      "text": {
+        "type": "text",
+        "field": "text",
+        "join": "\n"
+      },
+      "thinking": {
+        "type": "reasoning",
+        "field": "text",
+        "join": "\n\n"
+      },
+      "compaction": {
+        "type": "compaction"
+      },
+      "tool": {
+        "type": "tool",
+        "nameField": "tool",
+        "fallbackName": "tool",
+        "task": {
+          "name": "task",
+          "agentPath": "state.input.subagent_type",
+          "titlePath": "state.input.description",
+          "promptPath": "state.input.prompt",
+          "statusPath": "state.status",
+          "resultPath": "state.output",
+          "errorPath": "state.error",
+          "childSessionIdPaths": ["state.metadata.sessionId"],
+          "modelIdPaths": ["state.metadata.model.modelID"],
+          "startedAtPath": "state.time.start",
+          "endedAtPath": "state.time.end"
+        }
+      },
       "file": {
         "type": "file",
         "nameField": "filename",
@@ -71,7 +107,10 @@
     "refresh": ["session.updated", "session.created", "session.deleted"],
     "ignore": ["message.updated", "permission.replied"],
     "idle": ["session.idle"],
-    "error": { "name": "session.error", "detailPaths": ["error.message", "error.data.message"] },
+    "error": {
+      "name": "session.error",
+      "detailPaths": ["error.message", "error.data.message"]
+    },
     "status": {
       "name": "session.status",
       "valuePath": "status.type",
@@ -82,7 +121,10 @@
       "name": "message.part.updated",
       "partField": "part",
       "deltaField": "delta",
-      "kinds": { "text": "text", "reasoning": "thinking" }
+      "kinds": {
+        "text": "text",
+        "reasoning": "thinking"
+      }
     },
     "partDelta": {
       "name": "message.part.delta",

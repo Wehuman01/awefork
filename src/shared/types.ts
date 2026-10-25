@@ -30,6 +30,30 @@ export interface SessionSummary {
   runtimeStatus?: "running" | "idle" | "unknown";
 }
 
+export interface SubagentCall {
+  /** Tool part/call id; unique within the message. */
+  partId: string;
+  /** Tool name the backend reports for the delegation (e.g. "task"). */
+  tool: string;
+  /** Subagent type the parent dispatched. */
+  agent: string | null;
+  /** Short human description of the delegation. */
+  title: string | null;
+  /** Full dispatched prompt. */
+  prompt: string | null;
+  /** Lifecycle as the backend reports it. */
+  status: "pending" | "running" | "completed" | "error";
+  /** Result body, or the error text. */
+  result: string | null;
+  /** Child session id, when the backend names the drill-in target. */
+  childSessionId: string | null;
+  /** Model that served the subagent. */
+  modelId: string | null;
+  /** Delegation times in ms; null while unreported. */
+  startedAt: number | null;
+  endedAt: number | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -39,6 +63,8 @@ export interface ChatMessage {
   thinking: string;
   /** Distinct tool names invoked in this message, in first-seen order. */
   toolNames: readonly string[];
+  /** Structured Task-tool delegations, in call order. */
+  taskCalls?: readonly SubagentCall[];
   /** Model that produced this message (e.g. "glm/glm-5.3-flash"); user messages carry the model the run was configured with, null when the backend reports none. */
   modelId: string | null;
   /** Provider that served the model (e.g. "oc-awerouter"); null alongside modelId. */
@@ -324,6 +350,14 @@ export type AgentEvent =
       endedAt: number | null;
     }
   | { type: "session.idle"; sessionId: string }
+  | {
+      /** A whole Task-tool delegation snapshot; later frames replace by partId. */
+      type: "message.toolCall";
+      sessionId: string;
+      messageId: string;
+      partId: string;
+      call: SubagentCall;
+    }
   /**
    * A manually-triggered session compaction finished: the backend folded the
    * session's history into a summary (a compaction marker row + summary

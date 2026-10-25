@@ -265,8 +265,10 @@
         :collapsed-user-message-label="pt('summaryInput')"
         :running="isRunning"
         :stream-parts="store.streamParts"
+        :tool-calls="store.liveToolCalls"
         :error="null"
         @retry="retry"
+        @open-subagent="openSubagentSession"
       >
         <template v-if="isEmptyContext(store.selectedId)" #context>
           <!-- An empty-context branch carries none of these ancestors, so the
@@ -373,6 +375,7 @@ import {
   inlineHostVisible,
   isEmptyContext,
   isTurnMarked,
+  openSubagentSession,
   paneComposerModel,
   paneContextUsage,
   paneMessages,

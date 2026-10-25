@@ -180,6 +180,22 @@ export interface AgentToolPart {
   readonly type: string;
   readonly nameField: string;
   readonly fallbackName: string;
+  /** Present = tool parts of this name map to structured subagent cards. */
+  readonly task?: AgentTaskToolFact;
+}
+
+export interface AgentTaskToolFact {
+  readonly name: string;
+  readonly agentPath: string;
+  readonly titlePath: string;
+  readonly promptPath: string;
+  readonly statusPath: string;
+  readonly resultPath: string;
+  readonly errorPath: string;
+  readonly childSessionIdPaths: readonly string[];
+  readonly modelIdPaths: readonly string[];
+  readonly startedAtPath: string;
+  readonly endedAtPath: string;
 }
 
 export interface AgentFilePart {
@@ -481,6 +497,40 @@ function singlePathAt(value: unknown, where: string): string {
     }
   }
   return path;
+}
+
+function parseTaskFact(value: unknown, where: string): AgentTaskToolFact {
+  const record = objectAt(value, where);
+  onlyKeys(
+    record,
+    [
+      "name",
+      "agentPath",
+      "titlePath",
+      "promptPath",
+      "statusPath",
+      "resultPath",
+      "errorPath",
+      "childSessionIdPaths",
+      "modelIdPaths",
+      "startedAtPath",
+      "endedAtPath",
+    ],
+    where,
+  );
+  return {
+    name: stringAt(record.name, `${where}.name`),
+    agentPath: singlePathAt(record.agentPath, `${where}.agentPath`),
+    titlePath: singlePathAt(record.titlePath, `${where}.titlePath`),
+    promptPath: singlePathAt(record.promptPath, `${where}.promptPath`),
+    statusPath: singlePathAt(record.statusPath, `${where}.statusPath`),
+    resultPath: singlePathAt(record.resultPath, `${where}.resultPath`),
+    errorPath: singlePathAt(record.errorPath, `${where}.errorPath`),
+    childSessionIdPaths: dotPathsAt(record.childSessionIdPaths, `${where}.childSessionIdPaths`),
+    modelIdPaths: dotPathsAt(record.modelIdPaths, `${where}.modelIdPaths`),
+    startedAtPath: singlePathAt(record.startedAtPath, `${where}.startedAtPath`),
+    endedAtPath: singlePathAt(record.endedAtPath, `${where}.endedAtPath`),
+  };
 }
 
 function section(value: unknown, key: string, where: string): Record<string, unknown> {
@@ -786,7 +836,7 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
   const parts = objectAt(messages.parts, "messages.parts");
   onlyKeys(parts, ["text", "thinking", "tool", "file", "compaction"], "messages.parts");
   const tool = section(parts, "tool", "messages.parts");
-  onlyKeys(tool, ["type", "nameField", "fallbackName"], "messages.parts.tool");
+  onlyKeys(tool, ["type", "nameField", "fallbackName", "task"], "messages.parts.tool");
   const file = section(parts, "file", "messages.parts");
   onlyKeys(
     file,
@@ -1013,6 +1063,9 @@ export function parseOpenCodeDescriptor(value: unknown): OpenCodeDescriptor {
           type: stringAt(tool.type, "messages.parts.tool.type"),
           nameField: stringAt(tool.nameField, "messages.parts.tool.nameField"),
           fallbackName: stringAt(tool.fallbackName, "messages.parts.tool.fallbackName"),
+          ...(tool.task !== undefined
+            ? { task: parseTaskFact(tool.task, "messages.parts.tool.task") }
+            : {}),
         },
         file: {
           type: stringAt(file.type, "messages.parts.file.type"),

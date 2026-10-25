@@ -1,5 +1,5 @@
 import type { BackendId } from "../../shared/backend";
-import type { ChatMessage } from "../../shared/types";
+import type { ChatMessage, SubagentCall } from "../../shared/types";
 
 interface SessionLoad {
   generation: number;
@@ -139,8 +139,36 @@ export function sameMessages(
       a.compaction === b.compaction &&
       a.toolNames.length === b.toolNames.length &&
       a.toolNames.every((name, j) => name === b.toolNames[j]) &&
+      sameTaskCalls(a.taskCalls, b.taskCalls) &&
       a.attachmentNames.length === b.attachmentNames.length &&
       a.attachmentNames.every((name, j) => name === b.attachmentNames[j])
     );
   });
+}
+
+function sameTaskCalls(
+  before: readonly SubagentCall[] | undefined,
+  after: readonly SubagentCall[] | undefined,
+): boolean {
+  if (!before || !after) return (before?.length ?? 0) === (after?.length ?? 0);
+  return (
+    before.length === after.length &&
+    before.every((a, i) => {
+      const b = after[i];
+      return (
+        b !== undefined &&
+        a.partId === b.partId &&
+        a.tool === b.tool &&
+        a.agent === b.agent &&
+        a.title === b.title &&
+        a.prompt === b.prompt &&
+        a.status === b.status &&
+        a.result === b.result &&
+        a.childSessionId === b.childSessionId &&
+        a.modelId === b.modelId &&
+        a.startedAt === b.startedAt &&
+        a.endedAt === b.endedAt
+      );
+    })
+  );
 }

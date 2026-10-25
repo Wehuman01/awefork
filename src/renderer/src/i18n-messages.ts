@@ -21,6 +21,28 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "msg.retryButton": { zh: "↻ 换模型重跑", en: "↻ Rerun with another model" },
   "msg.openPathFailed": { zh: "路径打不开", en: "Could not open the path" },
 
+  "task.open": { zh: "打开子会话 ↗", en: "Open subagent ↗" },
+  "task.collapse": { zh: "收起详情", en: "Collapse details" },
+  "task.expand": { zh: "展开派发指令与结果", en: "Expand the prompt and result" },
+  "task.openTitle": {
+    zh: "查看这个子代理的会话（只读）",
+    en: "Open this subagent session (read-only)",
+  },
+  "task.runningFor": { zh: "已运行", en: "Running for" },
+  "task.prompt": { zh: "派发指令", en: "Dispatch prompt" },
+  "task.error": { zh: "失败原因", en: "Failure reason" },
+  "task.result": { zh: "执行结果", en: "Result" },
+  "task.failed": { zh: "失败", en: "failed" },
+  "task.fallbackTitle": { zh: "子任务", en: "Subtask" },
+  "task.drawerLabel": { zh: "子会话（只读）", en: "Subagent session (read-only)" },
+  "task.drawerClose": { zh: "返回父会话（Esc）", en: "Back to parent (Esc)" },
+  "task.drawerMeta": { zh: "子会话 · 只读", en: "Subagent session · read-only" },
+  "task.drawerParent": {
+    zh: "由「{title}」的 task 工具派生",
+    en: "derived by the task tool from “{title}”",
+  },
+  "task.drawerLoading": { zh: "载入子会话…", en: "Loading subagent session…" },
+
   // ── code-block.vue ─────────────────────────────────────────────────────
   "code.copied": { zh: "✓ 已复制", en: "✓ Copied" },
   "code.copy": { zh: "⧉ 复制", en: "⧉ Copy" },

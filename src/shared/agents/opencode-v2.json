@@ -105,7 +105,20 @@
       "tool": {
         "type": "tool",
         "nameField": "name",
-        "fallbackName": "tool"
+        "fallbackName": "tool",
+        "task": {
+          "name": "task",
+          "agentPath": "state.input.agent",
+          "titlePath": "state.input.description",
+          "promptPath": "state.input.prompt",
+          "statusPath": "state.status",
+          "resultPath": "state.output",
+          "errorPath": "state.error",
+          "childSessionIdPaths": ["state.metadata.sessionId"],
+          "modelIdPaths": ["state.metadata.model.id"],
+          "startedAtPath": "state.time.created",
+          "endedAtPath": "state.time.completed"
+        }
       },
       "file": {
         "type": "file",

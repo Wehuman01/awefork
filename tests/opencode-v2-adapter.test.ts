@@ -398,6 +398,18 @@ describe("v2 message mapping", () => {
                 name: "edit",
                 state: { status: "completed", input: { path: "/tmp/project/a.md" } },
               },
+              {
+                type: "tool",
+                id: "call_task",
+                name: "task",
+                state: {
+                  status: "completed",
+                  input: { agent: "review", description: "Inspect", prompt: "Look." },
+                  output: '<task id="ses_child"><task_result>Done.</task_result></task>',
+                  metadata: { sessionId: "ses_child", model: { id: "glm/review" } },
+                  time: { created: 10, completed: 21 },
+                },
+              },
               { type: "text", text: "done" },
             ],
             finish: "tool-calls",
@@ -433,7 +445,22 @@ describe("v2 message mapping", () => {
         role: "assistant",
         text: "done",
         thinking: "let me look",
-        toolNames: ["edit"],
+        toolNames: ["edit", "task"],
+        taskCalls: [
+          {
+            partId: "call_task",
+            tool: "task",
+            agent: "review",
+            title: "Inspect",
+            prompt: "Look.",
+            status: "completed",
+            result: "Done.",
+            childSessionId: "ses_child",
+            modelId: "glm/review",
+            startedAt: 10,
+            endedAt: 21,
+          },
+        ],
         modelId: "glm/glm-5.3",
         providerId: "oc-awerouter",
         variant: "low",
@@ -788,6 +815,60 @@ describe("v2 event stream", () => {
       },
       { type: "session.idle", sessionId: "ses_1" },
     ]);
+  });
+
+  it("streams task cards through the v2 tool lifecycle", async () => {
+    const fake = await startFakeV2();
+    const dir = await mkdtemp(join(tmpdir(), "awefork-v2-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const adapter = await adapterFor(fake, join(dir, "lineage.json"));
+    const events: AgentEvent[] = [];
+    const unsubscribe = await adapter.subscribe((event) => events.push(event));
+    try {
+      for (let i = 0; i < 40 && !fake.calls.some((c) => c.path === "/api/event"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      fake.pushFrame({
+        id: "evt_1",
+        created: 1000,
+        type: "session.tool.called",
+        data: {
+          sessionID: "ses_1",
+          assistantMessageID: "msg_a1",
+          id: "call_task",
+          name: "task",
+          input: { agent: "review", description: "Inspect", prompt: "Look." },
+        },
+      });
+      fake.pushFrame({
+        id: "evt_2",
+        created: 2000,
+        type: "session.tool.success",
+        data: {
+          sessionID: "ses_1",
+          assistantMessageID: "msg_a1",
+          id: "call_task",
+          content: [{ type: "text", text: "Done." }],
+          metadata: { sessionId: "ses_child" },
+        },
+      });
+      for (
+        let i = 0;
+        i < 40 && events.filter((e) => e.type === "message.toolCall").length < 2;
+        i += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    } finally {
+      unsubscribe();
+    }
+    const cards = events.filter((event) => event.type === "message.toolCall");
+    expect(cards[0]).toMatchObject({
+      call: { status: "running", agent: "review", title: "Inspect" },
+    });
+    expect(cards[1]).toMatchObject({
+      call: { status: "completed", result: "Done.", childSessionId: "ses_child" },
+    });
   });
 
   it("records file changes from the tool lifecycle, keyed by call id", async () => {
