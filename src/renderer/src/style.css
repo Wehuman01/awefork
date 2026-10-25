@@ -2374,6 +2374,12 @@ html[data-density="compact"] .ft-row {
   border-color: var(--sky);
 }
 
+/* a queued ask outranks the live-run sky: the tip waits for the user's
+   decision, which reads amber like the ask card it opens */
+.turn.waiting {
+  border-color: var(--ask);
+}
+
 /* search hits: butter ring on every matching card while a query is live */
 .turn.hit {
   border-color: var(--butter);
@@ -2628,6 +2634,10 @@ html[data-density="compact"] .ft-row {
 
 .running-flag {
   color: var(--sky-deep);
+}
+
+.running-flag.waiting {
+  color: var(--ask-deep);
 }
 
 .add-chip {
@@ -3126,6 +3136,13 @@ html[data-density="compact"] .ft-row {
 .mm-node.running {
   background: var(--sky);
   border-color: var(--sky-deep);
+}
+
+/* a queued ask outranks the run's sky — the decision is what needs the user,
+   in the ask's amber */
+.mm-node.waiting {
+  background: var(--ask);
+  border-color: var(--ask-deep);
 }
 
 .mm-view {
