@@ -17,7 +17,7 @@ import {
 } from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
-import { addDir, canonicalizeStoredDirs, removeDir } from "../shared/dirs-store.js";
+import { canonicalizeStoredDirs } from "../shared/dirs-store.js";
 import {
   clearSessionChanges,
   type FileChangeEntry,
@@ -122,11 +122,12 @@ import { resolveZcodeCli } from "./zcode-server.js";
  * Overlay-store channels (per-backend files, no adapter spawn):
  *   pins / togglePin / marks / toggleMark / tags / setSessionTags / setTagColor /
  *   deleteTag / addTagsToSessions / setForkTagPref / trash / trashAdd / trashRemove /
- *   archive / archiveAdd / archiveRemove / dirs / dirsAdd / dirsRemove /
+ *   archive / archiveAdd / archiveRemove / dirs /
  *   composer / saveComposer — same
  *   shapes as before, backend-routed (composer holds the unsent draft + pane
  *   model picks; tags returns { sessions, colors, forkPref? }; dirs is the
- *   hand-added sidebar directories).
+ *   legacy hand-added sidebar directories, read once for the resident-folder
+ *   adoption and written by nothing).
  * Backend switcher:
  *   backends      -> { selected, backends: BackendInfo[] } (probe, no spawn)
  *   selectBackend -> { ok, error? }                persists; probe failure bounces back
@@ -705,34 +706,12 @@ export function registerIpc(
     },
   );
 
-  // Directories the user registered by hand (the ＋ New directory entry): they
-  // render as a sidebar group even before the first conversation exists there.
-  // Stored and served canonicalized, so a hand-added spelling matches the
-  // session rows' directories however the shell reported them.
+  // Directories registered by hand before the resident folder existed: the
+  // sidecar is read once so an upgrade can adopt the first entry, and served
+  // canonicalized so a legacy spelling matches the session rows' directories.
+  // Nothing writes it anymore — the resident folder lives in the settings blob.
   ipcMain.handle("awefork:dirs", async (_event: IpcMainInvokeEvent, backend: BackendId) =>
     loadCanonicalDirs(backend),
-  );
-
-  ipcMain.handle(
-    "awefork:dirsAdd",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) => {
-      await loadCanonicalDirs(backend);
-      return addDir(
-        registry.storePaths(storeBackend(backend)).dirs,
-        await canonicalDirectory(directory),
-      );
-    },
-  );
-
-  ipcMain.handle(
-    "awefork:dirsRemove",
-    async (_event: IpcMainInvokeEvent, backend: BackendId, directory: string) => {
-      await loadCanonicalDirs(backend);
-      return removeDir(
-        registry.storePaths(storeBackend(backend)).dirs,
-        await canonicalDirectory(directory),
-      );
-    },
   );
 
   // The unsent draft's crash-recovery sidecar, one file per backend — the
@@ -861,19 +840,24 @@ export function registerIpc(
     return error ? { ok: false, error } : { ok: true };
   });
 
-  // Native folder picker behind the ＋ New directory entry — anchored to the
-  // requesting window so the dialog stays with the app. Null on cancel, first
-  // pick otherwise.
+  // Native folder picker behind the ＋ resident-folder entry and the file
+  // browser's jump — anchored to the requesting window so the dialog stays
+  // with the app. Null on cancel, first pick otherwise. The answer comes back
+  // canonicalized: every other path the app groups by (session directories,
+  // archive keys) is canonical too, so a /var vs /private/var spelling cannot
+  // split one folder into two rows.
   ipcMain.handle("awefork:pickDirectory", async (event: IpcMainInvokeEvent) => {
     const options: Electron.OpenDialogOptions = {
-      title: "Choose a project directory to add",
+      title: "Choose a folder",
       properties: ["openDirectory", "createDirectory"],
     };
     const window = BrowserWindow.fromWebContents(event.sender);
     const result = window
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options);
-    return result.canceled ? null : (result.filePaths[0] ?? null);
+    if (result.canceled) return null;
+    const picked = result.filePaths[0] ?? null;
+    return picked === null ? null : await canonicalDirectory(picked);
   });
 
   // ── file browser (backend-free, read-only) ────────────────────────────

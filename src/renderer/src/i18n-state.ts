@@ -138,8 +138,6 @@ export const dict: Record<string, Entry> = {
     en: 'Restored directory "{path}"',
   },
   "state.createSessionLabel": { zh: "新建会话「{title}」", en: 'Created session "{title}"' },
-  "state.addDirectoryLabel": { zh: "添加目录「{path}」", en: 'Added directory "{path}"' },
-  "state.removeDirectoryLabel": { zh: "移除目录「{path}」", en: 'Removed directory "{path}"' },
   "state.renameLabel": { zh: "重命名「{from}」→「{to}」", en: 'Renamed "{from}" → "{to}"' },
 
   // ── prompts / abort / export ───────────────────────────────────────────

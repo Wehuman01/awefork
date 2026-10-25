@@ -155,10 +155,6 @@ const api: AweforkApi = {
   archiveRemove: (backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState> =>
     ipcRenderer.invoke("awefork:archiveRemove", backend, kind, key),
   dirs: (backend: BackendId): Promise<string[]> => ipcRenderer.invoke("awefork:dirs", backend),
-  dirsAdd: (backend: BackendId, directory: string): Promise<string[]> =>
-    ipcRenderer.invoke("awefork:dirsAdd", backend, directory),
-  dirsRemove: (backend: BackendId, directory: string): Promise<string[]> =>
-    ipcRenderer.invoke("awefork:dirsRemove", backend, directory),
   composer: (backend: BackendId): Promise<PersistedComposer | null> =>
     ipcRenderer.invoke("awefork:composer", backend),
   saveComposer: (backend: BackendId, value: PersistedComposer | null): Promise<void> =>

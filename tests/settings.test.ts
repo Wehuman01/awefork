@@ -160,6 +160,43 @@ describe("normalizeSettings", () => {
     const many = Array.from({ length: 40 }, (_, i) => `dir-${i}`);
     expect(normalizeSettings({ files: { ignore: many } }).files.ignore).toHaveLength(32);
   });
+
+  it("keeps a resident folder path and treats anything else as unset", () => {
+    expect(
+      normalizeSettings({ files: { residentFolder: "  /work/app  " } }).files.residentFolder,
+    ).toBe("/work/app");
+    expect(normalizeSettings({ files: { residentFolder: "   " } }).files.residentFolder).toBe("");
+    expect(normalizeSettings({ files: { residentFolder: 7 } }).files.residentFolder).toBe("");
+    expect(normalizeSettings({}).files.residentFolder).toBe("");
+  });
+});
+
+describe("sanitizeResidentFolder", () => {
+  it("cleans a settings-page write the same way the load path does", async () => {
+    const module = await boot();
+    expect(module.sanitizeResidentFolder("  /work/app  ")).toBe("/work/app");
+    expect(module.sanitizeResidentFolder(" ")).toBe("");
+  });
+});
+
+describe("residentFolderUnset", () => {
+  it("reports unset for a missing, partial or corrupt blob", async () => {
+    const module = await boot();
+    expect(module.residentFolderUnset()).toBe(true);
+    storage.setItem("awefork:settings", JSON.stringify({ files: { showHidden: true } }));
+    expect(module.residentFolderUnset()).toBe(true);
+    storage.setItem("awefork:settings", "{not json");
+    expect(module.residentFolderUnset()).toBe(false);
+  });
+
+  it("reports set once the key exists — even as an empty string", async () => {
+    const module = await boot();
+    storage.setItem("awefork:settings", JSON.stringify({ files: { residentFolder: "/work/app" } }));
+    expect(module.residentFolderUnset()).toBe(false);
+    // A cleared folder must never be re-adopted from the legacy sidecar.
+    storage.setItem("awefork:settings", JSON.stringify({ files: { residentFolder: "" } }));
+    expect(module.residentFolderUnset()).toBe(false);
+  });
 });
 
 describe("sanitizeIgnorePatterns", () => {

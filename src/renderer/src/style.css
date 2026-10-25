@@ -1066,6 +1066,14 @@ mark.hl {
   text-overflow: ellipsis;
 }
 
+/* The standing folder's mark: why an empty group sits in the list at all. */
+.resident-pin {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
 .proj .chev {
   color: var(--primary);
   font-size: 8px;
@@ -9078,6 +9086,29 @@ html[data-theme="dark"] .fp-image {
   border-radius: 999px;
   padding: 3px 10px;
   max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The resident-folder row: the path reads like the info chip, the two
+   actions sit beside it. */
+.settings-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-folder-path {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

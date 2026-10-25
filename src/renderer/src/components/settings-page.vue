@@ -177,6 +177,25 @@
                     <template v-else-if="row.kind === 'info'">
                       <span class="settings-info">{{ row.info }}</span>
                     </template>
+                    <template v-else-if="row.kind === 'folder'">
+                      <div class="settings-folder">
+                        <span v-if="row.value" class="settings-folder-path" :title="row.value">{{
+                          shortPath(row.value)
+                        }}</span>
+                        <span v-else class="settings-info">{{ t("settings.residentUnset") }}</span>
+                        <button type="button" class="settings-btn" @click="row.choose()">
+                          {{ t("settings.residentChoose") }}
+                        </button>
+                        <button
+                          v-if="row.value"
+                          type="button"
+                          class="settings-btn"
+                          @click="row.clear()"
+                        >
+                          {{ t("settings.residentClear") }}
+                        </button>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -233,6 +252,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { BackendId } from "../../../shared/backend";
 import type { ModelChoice, ParallelSummaryLength } from "../../../shared/types";
+import { shortPath } from "../format";
 import { locale, setLocale, t } from "../i18n";
 import { resetLayout, settingsOpen, toggleSettings } from "../layout";
 import { modWith } from "../platform-key";
@@ -252,9 +272,11 @@ import {
   archivedDirectoryViews,
   archivedSessionViews,
   checkForUpdates,
+  clearResidentFolder,
   closeOverviewPanel,
   installBackend,
   installingLabel,
+  pickResidentFolder,
   refreshBackendList,
   refreshOverviewSessions,
   store,
@@ -312,12 +334,28 @@ interface ButtonRow extends RowBase {
   apply: () => void;
 }
 
+interface FolderRow extends RowBase {
+  kind: "folder";
+  /** The chosen path, or "" while none is set. */
+  value: string;
+  choose: () => void;
+  clear: () => void;
+}
+
 interface InfoRow extends RowBase {
   kind: "info";
   info: string;
 }
 
-type Row = ToggleRow | SegmentRow | ThemeRow | SelectRow | TextRow | ButtonRow | InfoRow;
+type Row =
+  | ToggleRow
+  | SegmentRow
+  | ThemeRow
+  | SelectRow
+  | TextRow
+  | ButtonRow
+  | FolderRow
+  | InfoRow;
 
 interface SectionDef {
   id: string;
@@ -423,6 +461,17 @@ function button(
 
 function info(key: string, title: string, desc: string, text: string): InfoRow {
   return { kind: "info", key, title, desc, info: text };
+}
+
+function folder(
+  key: string,
+  title: string,
+  desc: string,
+  value: string,
+  choose: () => void,
+  clear: () => void,
+): FolderRow {
+  return { kind: "folder", key, title, desc, value, choose, clear };
 }
 
 function text(
@@ -754,8 +803,20 @@ function filesSection(): SectionDef {
         },
         "node_modules, dist",
       ),
+      folder(
+        "files.residentFolder",
+        t("settings.residentFolder"),
+        t("settings.residentFolderDesc"),
+        settings.files.residentFolder,
+        () => {
+          void pickResidentFolder();
+        },
+        () => {
+          void clearResidentFolder();
+        },
+      ),
     ],
-    keywords: "files preview hidden grid ignore 文件 预览 隐藏 网格 忽略",
+    keywords: "files preview hidden grid ignore resident folder 文件 预览 隐藏 网格 忽略 常驻",
   };
 }
 
@@ -867,7 +928,7 @@ function storageSection(): SectionDef {
         "storage.overlay",
         t("settings.overlay"),
         t("settings.overlayDesc"),
-        "lineage · pins · marks · tags · trash · archive · composer · dirs",
+        "lineage · pins · marks · tags · trash · archive · composer",
       ),
       info(
         "storage.archive",

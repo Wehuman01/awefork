@@ -223,8 +223,8 @@
         <button
           type="button"
           class="head-icon"
-          :title="t('sidebar.addDirTitle')"
-          @click="emitAddDir"
+          :title="t('sidebar.setResidentTitle')"
+          @click="emitChooseResident"
         >＋</button>
       </span>
     </div>
@@ -248,6 +248,7 @@
             :title="group.directory"
             @click="selectDirectory(group.directory)"
           >
+            <span v-if="isResident(group.directory)" class="resident-pin" :title="t('sidebar.residentPin')">📌</span>
             <span>📁</span>
             <span class="proj-name">{{ shortPath(group.directory) }}</span>
             <span v-if="countSessions(group) > 0" class="proj-count">{{ countSessions(group) }}</span>
@@ -538,24 +539,33 @@
         {{ t("sidebar.dirNewChat") }}
       </button>
       <button
-        v-if="dirSessionCount(dirMenu.directory) > 0"
+        v-if="isResident(dirMenu.directory)"
         type="button"
         role="menuitem"
         class="ctx-menu-item"
-        @click="beginDirArchive"
+        @click="beginDirClearResident"
       >
-        {{ t("sidebar.dirArchive") }}
+        {{ t("sidebar.dirClearResident") }}
       </button>
-      <button
-        v-else
-        type="button"
-        role="menuitem"
-        class="ctx-menu-item"
-        :title="t('sidebar.dirRemoveTitle')"
-        @click="beginDirRemove"
-      >
-        {{ t("sidebar.dirRemove") }}
-      </button>
+      <template v-else>
+        <button
+          type="button"
+          role="menuitem"
+          class="ctx-menu-item"
+          @click="beginDirSetResident"
+        >
+          {{ t("sidebar.dirSetResident") }}
+        </button>
+        <button
+          v-if="dirSessionCount(dirMenu.directory) > 0"
+          type="button"
+          role="menuitem"
+          class="ctx-menu-item"
+          @click="beginDirArchive"
+        >
+          {{ t("sidebar.dirArchive") }}
+        </button>
+      </template>
     </div>
 
     <div
@@ -824,7 +834,6 @@ import { listSep, t } from "../i18n";
 import { fileBrowserEnabled, panels, persistLayout, setSidebarView, sidebarView } from "../layout";
 import { settings } from "../settings";
 import {
-  addDirectory,
   allTags,
   applyTagsToSubtree,
   archiveDirectory,
@@ -833,6 +842,8 @@ import {
   archiveSession,
   beginComparePick,
   cancelComparePick,
+  chooseResidentFolder,
+  clearResidentFolder,
   compressSession,
   createSession,
   deleteSession,
@@ -844,6 +855,7 @@ import {
   forkTagPrefOf,
   hueOf,
   isEmptyContext,
+  isResidentFolder,
   isTurnMarked,
   jumpToMessage,
   openCanvasTab,
@@ -851,12 +863,12 @@ import {
   openSessionTerminal,
   recentAlphaFor,
   refreshSessions,
-  removeDirectory,
   renameSession,
   restoreDirectory,
   restoreSession,
   sessionGroups,
   setForkTagPref,
+  setResidentFolder,
   setSessionTags,
   setTagColor,
   store,
@@ -1719,19 +1731,28 @@ function beginDirCreate(): void {
 }
 
 /** Sessions under a path across every view filter — decides which dir-menu
- * items apply: archiving needs rows to hide, removal empties the group. */
+ * items apply: archiving needs rows to hide, a standing folder is cleared. */
 function dirSessionCount(directory: string): number {
   const group = sessionGroups.value.find((g) => g.directory === directory);
   return group ? flattenSessionTree(group.roots, () => false).length : 0;
 }
 
-/** Only offered on empty groups: forgetting the registration hides the row,
- * and no session data moves — the disk directory is untouched. */
-function beginDirRemove(): void {
+const isResident = isResidentFolder;
+
+/** Stand this directory up as the resident folder — the pin, no navigation. */
+function beginDirSetResident(): void {
   const active = dirMenu.value;
   if (!active) return;
   closeMenu();
-  void removeDirectory(active.directory);
+  setResidentFolder(active.directory);
+}
+
+/** Drop the standing folder; the row leaves the sidebar. */
+function beginDirClearResident(): void {
+  const active = dirMenu.value;
+  if (!active) return;
+  closeMenu();
+  void clearResidentFolder();
 }
 
 /** Whole-directory archive is just as reversible from the archive section. */
@@ -1977,7 +1998,7 @@ async function emitRefresh(): Promise<void> {
 function emitCreateIn(directory: string): void {
   void createSession(directory);
 }
-function emitAddDir(): void {
-  void addDirectory();
+function emitChooseResident(): void {
+  void chooseResidentFolder();
 }
 </script>

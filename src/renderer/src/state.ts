@@ -18,6 +18,7 @@ import {
   type TurnNode,
 } from "../../shared/canvas-graph";
 import { selectCanvasSessions, storyRootOf } from "../../shared/canvas-scope";
+import { samePath } from "../../shared/file-paths";
 import type { OverviewReadUpdate } from "../../shared/overview-ledger-types";
 import {
   buildSessionTree,
@@ -82,7 +83,12 @@ import {
   projectOverviewStatus,
   recordOverviewSettle,
 } from "./session-overview";
-import { MAX_PARALLEL_TARGETS, settings } from "./settings";
+import {
+  MAX_PARALLEL_TARGETS,
+  residentFolderUnset,
+  sanitizeResidentFolder,
+  settings,
+} from "./settings";
 
 /** One canvas tab: a story (fork tree) parked next to the active one. */
 export interface CanvasTab {
@@ -277,12 +283,6 @@ interface AppState {
    * Pure awefork overlay: the data keeps living in the agent backend.
    */
   archive: ArchiveState;
-  /**
-   * Directories the user added by hand (dirs.json sidecar): they keep a
-   * sidebar group even with zero conversations, so a new conversation has somewhere to
-   * land. Per-backend like every overlay store.
-   */
-  knownDirs: string[];
   selectedDirectory: string | null;
   selectedId: string | null;
   /**
@@ -491,7 +491,6 @@ const state = reactive<AppState>({
   forkTagPrefs: {},
   tagDeletedToast: null,
   archive: { sessions: [], directories: [] },
-  knownDirs: [],
   selectedDirectory: null,
   selectedId: null,
   selectedTurnId: null,
@@ -574,16 +573,28 @@ export function isEmptyContext(sessionId: string | null): boolean {
   return state.lineage[sessionId]?.context === "none";
 }
 
+/**
+ * The one folder that always shows as a sidebar group, conversations or not.
+ * App-level (settings blob), so a backend switch cannot make it disappear.
+ */
+export const residentFolder = computed(() => settings.files.residentFolder);
+
+/** Whether a directory is the resident folder (same folder, any spelling). */
+export function isResidentFolder(directory: string): boolean {
+  return residentFolder.value !== "" && samePath(residentFolder.value, directory);
+}
+
 export const sessionGroups = computed<SessionGroup[]>(() => {
   const groups = buildSessionTree(visibleSessions.value, state.lineage);
-  // Registered-but-empty directories keep their group so the sidebar offers
-  // new conversation somewhere to land. Archived paths hide entirely — registration
-  // included — until restored from the archive section.
-  const present = new Set(groups.map((group) => group.directory));
-  const archived = new Set(state.archive.directories.map((entry) => entry.path));
-  const extras = state.knownDirs
-    .filter((directory) => !present.has(directory) && !archived.has(directory))
-    .map((directory): SessionGroup => ({ directory, roots: [] }));
+  // The resident folder keeps its group so the sidebar always offers a home
+  // to create a conversation in. A folder that already has conversations is
+  // one group, not two: the resident row folds into the project's. Archived
+  // paths hide their sessions but never the standing folder itself.
+  const resident = residentFolder.value;
+  const extras =
+    resident !== "" && !groups.some((group) => samePath(group.directory, resident))
+      ? [{ directory: resident, roots: [] }]
+      : [];
   return [...groups, ...extras];
 });
 
@@ -1267,9 +1278,16 @@ async function bootBackend(
     state.archive = { sessions: [], directories: [] };
   }
   try {
-    state.knownDirs = await window.awefork.dirs(backend);
+    // Pre-resident-folder installs registered directories per backend; the
+    // first one becomes the resident folder so the upgrade keeps the group
+    // the user already had. Adoption only runs while the preference has never
+    // been written, so clearing it later is never undone by a later boot.
+    if (residentFolderUnset()) {
+      const legacy = await window.awefork.dirs(backend);
+      if (legacy.length > 0) settings.files.residentFolder = legacy[0] ?? "";
+    }
   } catch {
-    state.knownDirs = [];
+    // A missing or unreadable sidecar simply leaves no resident folder.
   }
   // Restore the remembered project BEFORE the session load: its auto-select
   // fills selectedDirectory only when null, and without this it picks the
@@ -1618,13 +1636,13 @@ export async function switchDirectory(directory: string): Promise<void> {
  * a directory as soon as one becomes visible again (e.g. after a restore).
  */
 async function leaveEmptiedDirectory(): Promise<void> {
-  // A registered directory keeps its (now empty) group — stay put so the
-  // next new conversation lands right back in it. An archived path hides entirely,
-  // registration included, so that case still moves away.
+  // The resident folder keeps its (now empty) group — stay put so the next
+  // new conversation lands right back in it. An archived path hides entirely,
+  // resident standing or not, so that case still moves away.
   const current = state.selectedDirectory;
   if (
     current !== null &&
-    state.knownDirs.includes(current) &&
+    isResidentFolder(current) &&
     !state.archive.directories.some((entry) => entry.path === current)
   ) {
     return;
@@ -2944,15 +2962,6 @@ function applyArchive(backend: BackendId, archive: ArchiveState): void {
   }
 }
 
-function applyKnownDirs(backend: BackendId, dirs: string[]): void {
-  if (backend === state.activeBackend) {
-    state.knownDirs = dirs;
-    return;
-  }
-  const snap = workspaceCache.get(backend);
-  if (snap) snap.knownDirs = dirs;
-}
-
 function applyTrash(backend: BackendId, ids: string[]): void {
   if (backend === state.activeBackend) {
     state.trash = ids;
@@ -4023,90 +4032,64 @@ export async function createSession(directory?: string): Promise<void> {
   state.composerFocusRequest = Date.now();
 }
 
-// ── directories (＋ new directory / forget) ───────────────────────────
+// ── the resident folder (＋ / settings / context menu) ─────────────────
 
-/** Pure dirs write (throws on failure); undo/redo re-use it. */
-async function dirsAddOrThrow(backend: BackendId, directory: string): Promise<boolean> {
-  const dirs = await window.awefork.dirsAdd(backend, directory);
-  applyKnownDirs(backend, dirs);
-  return true;
+/** The native folder picker, with its failure phrased for the action banner. */
+async function pickFolderPath(): Promise<string | null> {
+  try {
+    return await window.awefork.pickDirectory();
+  } catch (error) {
+    state.actionError = error instanceof Error ? error.message : String(error);
+    return null;
+  }
 }
 
-/** Pure dirs removal (throws on failure); undo/redo re-use it. */
-async function dirsRemoveOrThrow(backend: BackendId, directory: string): Promise<boolean> {
-  const dirs = await window.awefork.dirsRemove(backend, directory);
-  applyKnownDirs(backend, dirs);
-  return true;
+/** Stand a folder up as the resident one (no navigation, no picker). */
+export function setResidentFolder(directory: string): void {
+  const trimmed = sanitizeResidentFolder(directory);
+  if (trimmed === "") return;
+  settings.files.residentFolder = trimmed;
 }
 
-/** Remove a directory registration and bail out of the project if it was open.
- *  Active-backend only; the redo path is idempotent. */
-async function dirsRemoveFlow(backend: BackendId, directory: string): Promise<boolean> {
-  await dirsRemoveOrThrow(backend, directory);
+/**
+ * ＋ next to the 文件 heading: the picker stands the chosen folder up as THE
+ * resident folder — one, replacing any previous one — and opens it as the
+ * current project, ready for the next new conversation. Canceling the picker
+ * changes nothing.
+ */
+export async function chooseResidentFolder(): Promise<void> {
+  state.actionError = null;
+  const picked = await pickFolderPath();
+  if (!picked) return;
+  setResidentFolder(picked);
+  // Setting the home folder means wanting to work there; only the ＋ path
+  // navigates, so the settings row and the context menu never move the user.
+  if (!samePath(state.selectedDirectory ?? "", picked)) await switchDirectory(picked);
+}
+
+/** The settings row's picker: same standing-up, without the navigation. */
+export async function pickResidentFolder(): Promise<void> {
+  state.actionError = null;
+  const picked = await pickFolderPath();
+  if (!picked) return;
+  setResidentFolder(picked);
+}
+
+/**
+ * Drop the resident folder. The row leaves the sidebar; when the folder was
+ * the open project and holds no visible session, the view moves on exactly
+ * like a deleted last session would.
+ */
+export async function clearResidentFolder(): Promise<void> {
+  const current = state.selectedDirectory;
+  const wasResident = current !== null && isResidentFolder(current);
+  settings.files.residentFolder = "";
   if (
-    backend === state.activeBackend &&
-    state.selectedDirectory === directory &&
-    !visibleSessions.value.some((session) => session.directory === directory)
+    wasResident &&
+    !visibleSessions.value.some((session) => samePath(session.directory, current ?? ""))
   ) {
     await leaveEmptiedDirectory();
   }
-  return true;
-}
-
-/**
- * ＋ new directory: the system folder picker registers the path as a sidebar group —
- * zero conversations and all — then opens it as the current project, ready
- * for the next new conversation. Canceling the picker changes nothing.
- */
-export async function addDirectory(): Promise<void> {
-  state.actionError = null;
-  let picked: string | null;
-  try {
-    picked = await window.awefork.pickDirectory();
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
-  if (!picked) return;
-  try {
-    await dirsAddOrThrow(state.activeBackend, picked);
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
-  track({
-    backend: state.activeBackend,
-    kind: "addDirectory",
-    label: t("state.addDirectoryLabel", { path: shortPath(picked) }),
-    undo: () => dirsRemoveFlow(state.activeBackend, picked),
-    redo: () => dirsAddOrThrow(state.activeBackend, picked),
-  });
-  // Only the initial add opens the project; undoing/redoing the registration
-  // never yanks the current directory around.
-  if (state.selectedDirectory !== picked) await switchDirectory(picked);
-}
-
-/**
- * Forget a hand-added directory. The sidebar only offers this once the group
- * is empty, so nothing visible is lost — and no session data moves: the
- * registration is the whole payload.
- */
-export async function removeDirectory(directory: string): Promise<void> {
-  const backend = state.activeBackend;
-  state.actionError = null;
-  try {
-    await dirsRemoveOrThrow(backend, directory);
-  } catch (error) {
-    state.actionError = error instanceof Error ? error.message : String(error);
-    return;
-  }
-  track({
-    backend,
-    kind: "removeDirectory",
-    label: t("state.removeDirectoryLabel", { path: shortPath(directory) }),
-    undo: () => dirsAddOrThrow(backend, directory),
-    redo: () => dirsRemoveFlow(backend, directory),
-  });
 }
 
 /** Pure rename write + local title update; throws on failure. */
@@ -6026,7 +6009,6 @@ interface WorkspaceSnapshot {
   forkTagPrefs: Record<string, boolean>;
   trash: string[];
   archive: ArchiveState;
-  knownDirs: string[];
   selectedDirectory: string | null;
   selectedId: string | null;
   selectedTurnId: string | null;
@@ -6074,7 +6056,6 @@ function parkWorkspace(backend: BackendId): void {
       sessions: [...state.archive.sessions],
       directories: [...state.archive.directories],
     },
-    knownDirs: [...state.knownDirs],
     selectedDirectory: state.selectedDirectory,
     selectedId: state.selectedId,
     selectedTurnId: state.selectedTurnId,
@@ -6114,7 +6095,6 @@ function restoreWorkspace(snapshot: WorkspaceSnapshot): void {
   state.forkTagPrefs = snapshot.forkTagPrefs;
   state.trash = snapshot.trash;
   state.archive = snapshot.archive;
-  state.knownDirs = snapshot.knownDirs;
   state.selectedDirectory = snapshot.selectedDirectory;
   state.selectedId = snapshot.selectedId;
   state.selectedTurnId = snapshot.selectedTurnId;
@@ -6201,7 +6181,6 @@ function resetWorkspace(): void {
   state.trash = [];
   state.deletedToast = null;
   state.archive = { sessions: [], directories: [] };
-  state.knownDirs = [];
   state.selectedDirectory = null;
   state.selectedId = null;
   state.selectedTurnId = null;

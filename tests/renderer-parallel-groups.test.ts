@@ -151,8 +151,6 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
     pins: async () => [],
     togglePin: async () => [],
     dirs: async () => [],
-    dirsAdd: async (_backend: BackendId, directory: string) => [directory],
-    dirsRemove: async () => [],
     pickDirectory: async () => null,
     trash: async () => [],
     trashAdd: async () => [],

@@ -88,8 +88,6 @@ async function bootState(
     pins: async () => [],
     togglePin: async () => [],
     dirs: async () => [],
-    dirsAdd: async (_backend, directory) => [directory],
-    dirsRemove: async () => [],
     pickDirectory: async () => null,
     trash: async () => [],
     trashAdd: async () => [],

@@ -474,10 +474,11 @@ export function installMockAdapter(): void {
   let marks: string[] = [];
   let trash: TrashEntry[] = [];
   let archive: ArchiveState = { sessions: [], directories: [] };
-  // Hand-added directories keep their group here too; the browser tab can't
-  // open a native picker, so the + New directory entry hands out invented
-  // paths instead.
-  let knownDirs: string[] = [];
+  // The legacy hand-added directories, read once so the resident-folder
+  // adoption has something to adopt in the browser demo. Seeded with one
+  // invented path: the demo can't open a native picker, so ＋ stands up
+  // `/demo/picked-N` instead.
+  const knownDirs: string[] = ["/demo/resident-project"];
   let pickedCount = 0;
   // Session tags, seeded from the defs and mutated through setSessionTags —
   // the demo's stand-in for the real tags.json sidecar.
@@ -887,14 +888,6 @@ export function installMockAdapter(): void {
       return marks;
     },
     dirs: async () => knownDirs,
-    dirsAdd: async (_backend, directory) => {
-      knownDirs = knownDirs.includes(directory) ? knownDirs : [...knownDirs, directory];
-      return knownDirs;
-    },
-    dirsRemove: async (_backend, directory) => {
-      knownDirs = knownDirs.filter((dir) => dir !== directory);
-      return knownDirs;
-    },
     pickDirectory: async () => {
       pickedCount += 1;
       return `/demo/picked-${pickedCount}`;

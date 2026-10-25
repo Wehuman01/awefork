@@ -135,8 +135,6 @@ async function bootState(options: { extraSessions?: SessionSummary[]; tags?: str
     pins: async () => [],
     togglePin: async () => [],
     dirs: async () => [],
-    dirsAdd: async (_backend: BackendId, directory: string) => [directory],
-    dirsRemove: async () => [],
     pickDirectory: async () => null,
     trash: async () => [],
     trashAdd: async () => [],

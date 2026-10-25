@@ -216,13 +216,10 @@ export interface AweforkApi {
   archive(backend: BackendId): Promise<ArchiveState>;
   archiveAdd(backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState>;
   archiveRemove(backend: BackendId, kind: ArchiveKind, key: string): Promise<ArchiveState>;
-  /** Directories the user added by hand (dirs.json sidecar): they keep a
-   *  sidebar group even with zero conversations. */
+  /** Directories registered by hand before the resident folder existed
+   *  (dirs.json sidecar). Read once at boot so an upgrade can adopt the
+   *  first entry; nothing writes it anymore. */
   dirs(backend: BackendId): Promise<string[]>;
-  /** Register a directory (dedupes); returns the whole list. */
-  dirsAdd(backend: BackendId, directory: string): Promise<string[]>;
-  /** Forget a registration — no session data moves; returns the whole list. */
-  dirsRemove(backend: BackendId, directory: string): Promise<string[]>;
   /** The backend's unsent draft + pane model picks (composer.json sidecar). */
   composer(backend: BackendId): Promise<PersistedComposer | null>;
   saveComposer(backend: BackendId, value: PersistedComposer | null): Promise<void>;

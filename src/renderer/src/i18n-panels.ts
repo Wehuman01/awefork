@@ -55,9 +55,9 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "sidebar.collapseProjects": { zh: "收起项目列表", en: "Collapse project list" },
   "sidebar.expandProjects": { zh: "展开项目列表", en: "Expand project list" },
   "sidebar.projects": { zh: "项目", en: "Projects" },
-  "sidebar.addDirTitle": {
-    zh: "选择一个项目目录加进侧栏，可在其中新建对话",
-    en: "Pick a project directory to add to the sidebar; new chats can start in it",
+  "sidebar.setResidentTitle": {
+    zh: "选择常驻文件夹：它一直显示在侧栏里，可在其中新建对话",
+    en: "Pick the resident folder: it stays in the sidebar, and new chats can start in it",
   },
   "sidebar.collapseDir": { zh: "收起这个目录", en: "Collapse this directory" },
   "sidebar.expandDir": { zh: "展开这个目录", en: "Expand this directory" },
@@ -123,12 +123,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "sidebar.archiveSession": { zh: "📦 归档会话", en: "📦 Archive session" },
   "sidebar.deleteSession": { zh: "🗑 删除会话…", en: "🗑 Delete session…" },
   "sidebar.dirNewChat": { zh: "＋ 在此目录新建对话", en: "＋ New chat in this directory" },
+  "sidebar.dirSetResident": { zh: "📌 设为常驻文件夹", en: "📌 Make this the resident folder" },
+  "sidebar.dirClearResident": { zh: "📌 取消常驻文件夹", en: "📌 Stop being the resident folder" },
   "sidebar.dirArchive": { zh: "📦 归档这个目录…", en: "📦 Archive this directory…" },
-  "sidebar.dirRemove": { zh: "✕ 移除这个目录", en: "✕ Remove this directory" },
-  "sidebar.dirRemoveTitle": {
-    zh: "只从侧栏移除这个空目录，不动磁盘",
-    en: "Drop this empty directory from the sidebar only; disk untouched",
-  },
+  "sidebar.residentPin": { zh: "常驻文件夹", en: "Resident folder" },
   "sidebar.tagOnSessions": {
     zh: "「{tag}」挂在 {n} 个会话上",
     en: "\u201c{tag}\u201d is on {n} sessions",

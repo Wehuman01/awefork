@@ -4,10 +4,11 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { enqueueWrite } from "./write-queue.js";
 
 /**
- * Known-directories store: paths the user added to the sidebar by hand, so a
- * project with zero conversations still shows a group to create one in.
- * A plain JSON sidecar like pins — losing it only loses the curation, never
- * session data.
+ * Known-directories store (legacy, read-only): paths the user once added to
+ * the sidebar by hand, so a project with zero conversations still showed a
+ * group. The resident folder replaced that mechanism — one folder, set in
+ * the settings blob — so this file is only read to adopt the first legacy
+ * entry on upgrade. A plain JSON sidecar like pins; losing it costs nothing.
  */
 
 export async function readDirs(filePath: string): Promise<string[]> {
@@ -32,29 +33,11 @@ export async function writeDirs(filePath: string, dirs: string[]): Promise<void>
   await writeFileAtomic(filePath, `${JSON.stringify(dirs, null, 2)}\n`);
 }
 
-/** Register a directory (no-op when already known); serialized like pins. */
-export function addDir(filePath: string, directory: string): Promise<string[]> {
-  return enqueueWrite(filePath, async () => {
-    const dirs = await readDirs(filePath);
-    const next = dirs.includes(directory) ? dirs : [...dirs, directory];
-    await writeDirs(filePath, next);
-    return next;
-  });
-}
-
-/** Forget a registration; serialized so concurrent edits cannot interleave. */
-export function removeDir(filePath: string, directory: string): Promise<string[]> {
-  return enqueueWrite(filePath, async () => {
-    const next = (await readDirs(filePath)).filter((dir) => dir !== directory);
-    await writeDirs(filePath, next);
-    return next;
-  });
-}
-
 /**
- * Spelling migration as one queued read-modify-write, same discipline as
- * addDir/removeDir: a rewrite that read outside the queue and wrote the whole
- * list back could blind-overwrite a registration that landed in between.
+ * Spelling migration as one queued read-modify-write: a rewrite that read
+ * outside the queue and wrote the whole list back could blind-overwrite a
+ * registration that landed in between. The write half only serves this
+ * migration now — nothing registers directories anymore.
  */
 export function canonicalizeStoredDirs(
   filePath: string,

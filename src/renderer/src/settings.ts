@@ -92,6 +92,13 @@ export interface Settings {
     ignore: string[];
     /** Double-click opens the system app or the in-app preview. */
     openOnDouble: FileOpenTarget;
+    /**
+     * The one folder that always shows as a sidebar group, conversations or
+     * not — the user's standing "home" project. Empty = none set. Kept here
+     * rather than per backend: the folder is a fact about this machine, not
+     * about an agent, so a backend switch must not make it disappear.
+     */
+    residentFolder: string;
   };
   search: {
     scopes: { title: boolean; tag: boolean; body: boolean };
@@ -151,6 +158,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // A double-click stays inside the app: the in-app preview. The system
     // app is one right-click away (and the setting still switches it back).
     openOnDouble: "preview",
+    // No standing folder until the user picks one.
+    residentFolder: "",
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },
@@ -217,6 +226,19 @@ function pickIgnorePatterns(value: unknown, fallback: readonly string[]): string
  */
 export function sanitizeIgnorePatterns(value: readonly string[]): string[] {
   return pickIgnorePatterns(value, DEFAULT_SETTINGS.files.ignore);
+}
+
+/**
+ * A stored folder path, or "" when unset. Trimmed because a picker can hand
+ * back a padded string, and a blank or non-string entry reads as "none".
+ */
+function pickPath(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** The settings page's resident-folder row writes through the same rule. */
+export function sanitizeResidentFolder(value: string): string {
+  return pickPath(value);
 }
 
 /** A stored model pick, or null when the entry is unusable. */
@@ -292,6 +314,7 @@ export function normalizeSettings(raw: unknown): Settings {
         ["system", "preview"] as const,
         d.files.openOnDouble,
       ),
+      residentFolder: pickPath(files.residentFolder),
     },
     search: {
       scopes: {
@@ -370,6 +393,27 @@ function readSettings(storage: Storage | undefined): { value: Settings; migrated
 
 function storageOrUndefined(): Storage | undefined {
   return typeof localStorage === "undefined" ? undefined : localStorage;
+}
+
+/**
+ * True while the stored blob has never carried a resident-folder key — the
+ * mark of a file written before the preference existed (or a fresh install).
+ * The legacy per-backend directory registrations are adopted into it on that
+ * signal alone: once the key exists, even as "", the user has answered and a
+ * later boot must not silently re-adopt what they cleared.
+ */
+export function residentFolderUnset(): boolean {
+  const storage = storageOrUndefined();
+  if (!storage) return false;
+  let parsed: unknown;
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    return false;
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.files)) return true;
+  return !("residentFolder" in parsed.files);
 }
 
 const initial = readSettings(storageOrUndefined());

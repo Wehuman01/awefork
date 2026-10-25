@@ -283,6 +283,14 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "文件浏览器和侧栏文件树里隐藏这些名称；支持 * 通配符，用逗号分隔。",
     en: "Hidden from the file browser and the sidebar tree. Supports * wildcards; separate with commas.",
   },
+  "settings.residentFolder": { zh: "常驻文件夹", en: "Resident folder" },
+  "settings.residentFolderDesc": {
+    zh: "一直显示在侧栏「文件」里的文件夹，没有会话也显示；和某个会话项目是同一个文件夹时只显示一行。只能设置一个。",
+    en: "The one folder that always shows in the sidebar's file list, conversations or not; when it is also a session's project folder the two share one row. Only one at a time.",
+  },
+  "settings.residentChoose": { zh: "选择…", en: "Choose…" },
+  "settings.residentClear": { zh: "清除", en: "Clear" },
+  "settings.residentUnset": { zh: "未设置", en: "Not set" },
 
   // ── search ───────────────────────────────────────────────────────────
   "settings.searchScopes": { zh: "默认搜索范围", en: "Default search scope" },

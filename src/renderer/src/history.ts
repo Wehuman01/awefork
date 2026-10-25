@@ -25,8 +25,6 @@ export type HistoryKind =
   | "archiveDirectory"
   | "restoreSession"
   | "restoreDirectory"
-  | "addDirectory"
-  | "removeDirectory"
   | "createSession"
   | "renameSession"
   | "exportSession"

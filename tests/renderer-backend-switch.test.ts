@@ -86,8 +86,6 @@ async function bootState(
     pins: async () => [],
     togglePin: async () => [],
     dirs: async () => [],
-    dirsAdd: async (_backend, directory) => [directory],
-    dirsRemove: async () => [],
     pickDirectory: async () => null,
     tags: vi.fn(
       async (backend: BackendId): Promise<TagStore> =>

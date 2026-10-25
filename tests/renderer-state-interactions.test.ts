@@ -89,8 +89,6 @@ async function bootState(
     pins: async () => [],
     togglePin: async () => [],
     dirs: async () => [],
-    dirsAdd: async (_backend, directory) => [directory],
-    dirsRemove: async () => [],
     pickDirectory: async () => null,
     tags: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),
     setSessionTags: vi.fn(async () => options.tags ?? { sessions: {}, colors: {} }),

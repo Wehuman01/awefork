@@ -83,7 +83,7 @@ import {
 } from "../files";
 import { t } from "../i18n";
 import { openFilesView } from "../layout";
-import { store } from "../state";
+import { residentFolder, store } from "../state";
 import FileTreeNode from "./file-tree-node.vue";
 
 void initFiles();
@@ -104,13 +104,12 @@ const places = computed(() => {
   ];
 });
 
-/** The selected project plus every hand-added sidebar directory. */
+/** The selected project plus the standing resident folder. */
 const projectRoots = computed(() => {
   const roots: string[] = [];
   if (store.selectedDirectory) roots.push(store.selectedDirectory);
-  for (const dir of store.knownDirs) {
-    if (!roots.includes(dir)) roots.push(dir);
-  }
+  const resident = residentFolder.value;
+  if (resident !== "" && !roots.some((dir) => samePath(dir, resident))) roots.push(resident);
   return roots;
 });
 
