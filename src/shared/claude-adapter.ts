@@ -1,4 +1,5 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
+import { displayName } from "./file-paths.js";
 import { withInlineFiles } from "./inline-attachments.js";
 import { readDetachedExportIds, readLineage, recordFork } from "./lineage-store.js";
 import type {
@@ -675,7 +676,11 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     const summaries: SessionSummary[] = [];
     const seen = new Set<string>();
     for (const file of files) {
-      const base = file.split("/").pop() ?? "";
+      // Either separator: the real walk builds these with node's join, so a
+      // Windows store hands back "C:\…\<uuid>.jsonl" — splitting on "/" alone
+      // would take the whole path for the file name and mint sessions whose
+      // id is a path, which no resume or rename could address.
+      const base = displayName(file);
       if (!base.endsWith(".jsonl")) continue;
       const id = base.slice(0, -".jsonl".length);
       if (seen.has(id)) continue;

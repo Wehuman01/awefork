@@ -85,15 +85,24 @@ async function waitForSpawn(children: ReturnType<typeof fakeChildren>): Promise<
 
 const dirs: string[] = [];
 
-async function makeHarness(ids: string[]) {
+async function makeHarness(ids: string[], options: { windowsPaths?: boolean } = {}) {
   const children = fakeChildren();
+  // The store walk hands back real filesystem paths, built with node's join —
+  // on Windows that is "C:\…\<uuid>.jsonl". The windowsPaths option scripts
+  // that shape; the read seam maps any path back to its fixture by file name
+  // (splitting on both separators), which is the harness's job, not the
+  // adapter's.
+  const pathFor = (id: string) =>
+    options.windowsPaths
+      ? `C:\\Users\\peng\\.claude\\projects\\-Users-a-b\\${id}.jsonl`
+      : join(FIXTURE_DIR, `${id}.jsonl`);
   const seams: ClaudeAdapterNodeSeams = {
     spawnChild: children.spawnChild,
     spawnCompactChild: children.spawnCompactChild,
     async listTranscriptFiles() {
-      return ids.map((id) => join(FIXTURE_DIR, `${id}.jsonl`));
+      return ids.map(pathFor);
     },
-    readTranscript: (path) => readFile(path, "utf8"),
+    readTranscript: (path) => readFile(join(FIXTURE_DIR, path.split(/[\\/]/).pop() ?? ""), "utf8"),
     async projectDirs() {
       return [FIXTURE_DIR];
     },
@@ -210,6 +219,20 @@ describe("claude listSessions", () => {
     expect(s1?.origin).toBe("root");
     expect(s1?.createdAt).toBe(Date.parse("2026-07-01T12:00:00.000Z"));
     expect(s1?.updatedAt).toBe(Date.parse("2026-07-01T12:01:04.000Z"));
+  });
+
+  it("reads the session id off the file name when the store spells windows paths", async () => {
+    // The walk builds paths with node's join, so a Windows store hands back
+    // "C:\…\<uuid>.jsonl". Taking the file name by splitting on "/" alone
+    // minted sessions whose id was the whole path — no resume, rename or
+    // selection could address them. The id must be the transcript's uuid.
+    const { adapter } = await makeHarness([S1, S4], { windowsPaths: true });
+    const sessions = await adapter.listSessions();
+
+    expect(sessions).toHaveLength(2);
+    const s1 = sessions.find((s) => s.id === S1);
+    expect(s1?.title).toBe("List the files");
+    expect(s1?.directory).toBe("/Users/a/b");
   });
 
   it("prefers claude's own summary title when the transcript has one", async () => {

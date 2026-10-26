@@ -670,17 +670,21 @@ describe("capabilities and store paths", () => {
   it("keeps opencode on legacy bare files that exist, and suffixes codex always", async () => {
     await writeFile(join(userDataDir, "pins.json"), "{}\n", "utf8");
 
-    // Store paths are contractually "<userDataDir>/<name>" with a literal
-    // slash — shared code joins by hand, so they never carry win32 separators.
+    // The store path follows the userData dir's own separator style — a
+    // Windows temp dir spells it "\" throughout, and mixing in "/" would
+    // name a file an older awefork never wrote (resolveStorePath's contract,
+    // pinned in backend.test.ts). So the expectation joins the same way
+    // instead of hardcoding a slash.
+    const at = (name: string) => join(userDataDir, name);
     const opencode = registry.storePaths("opencode");
     const codex = registry.storePaths("codex");
-    expect(opencode.pins).toBe(`${userDataDir}/pins.json`);
-    expect(opencode.lineage).toBe(`${userDataDir}/lineage-opencode.json`);
-    expect(codex.pins).toBe(`${userDataDir}/pins-codex.json`);
-    expect(codex.lineage).toBe(`${userDataDir}/lineage-codex.json`);
-    expect(codex.archive).toBe(`${userDataDir}/archive-codex.json`);
-    expect(codex.composer).toBe(`${userDataDir}/composer-codex.json`);
-    expect(opencode.composer).toBe(`${userDataDir}/composer-opencode.json`);
+    expect(opencode.pins).toBe(at("pins.json"));
+    expect(opencode.lineage).toBe(at("lineage-opencode.json"));
+    expect(codex.pins).toBe(at("pins-codex.json"));
+    expect(codex.lineage).toBe(at("lineage-codex.json"));
+    expect(codex.archive).toBe(at("archive-codex.json"));
+    expect(codex.composer).toBe(at("composer-codex.json"));
+    expect(opencode.composer).toBe(at("composer-opencode.json"));
   });
 });
 

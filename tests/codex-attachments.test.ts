@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { stageCodexImages } from "../src/main/codex-attachments";
 import type { PromptAttachment } from "../src/shared/types";
@@ -31,20 +31,23 @@ describe("stageCodexImages", () => {
 
     expect(staged.paths).toHaveLength(2);
     const [first, second] = staged.paths;
-    expect(first?.endsWith("/one.png")).toBe(true);
-    expect(second?.endsWith("/two.png")).toBe(true);
+    // The staged names are basenames on either platform — the join is node's,
+    // so a Windows temp dir spells them with "\".
+    expect(basename(first as string)).toBe("one.png");
+    expect(basename(second as string)).toBe("two.png");
+    expect(dirname(first as string)).toBe(dirname(second as string));
     expect(await readFile(first as string, "utf8")).toBe("png-bytes");
     expect(await readFile(second as string, "utf8")).toBe("jpg-bytes");
   });
 
   it("keeps the attachment's filename — history reads it back off the path", async () => {
     const staged = trackStaging([image("Screenshot 2026-10-24 at 10.41.02.png")]);
-    expect(staged.paths[0]?.endsWith("/Screenshot 2026-10-24 at 10.41.02.png")).toBe(true);
+    expect(basename(staged.paths[0] as string)).toBe("Screenshot 2026-10-24 at 10.41.02.png");
   });
 
   it("dedupes colliding names within one batch", () => {
     const staged = trackStaging([image("photo.png"), image("photo.png"), image("photo.png")]);
-    expect(staged.paths.map((p) => p.split("/").pop())).toEqual([
+    expect(staged.paths.map((p) => basename(p))).toEqual([
       "photo.png",
       "photo-2.png",
       "photo-3.png",
@@ -53,7 +56,7 @@ describe("stageCodexImages", () => {
 
   it("flattens path traversal in the filename down to its basename", () => {
     const staged = trackStaging([image("../../etc/passwd")]);
-    expect(staged.paths[0]?.split("/").pop()).toBe("passwd.png");
+    expect(basename(staged.paths[0] as string)).toBe("passwd.png");
     expect(staged.paths[0]?.includes("..")).toBe(false);
   });
 
@@ -63,7 +66,7 @@ describe("stageCodexImages", () => {
       image("vector", "image/svg+xml"),
       image("mystery", "image/unknown"),
     ]);
-    expect(staged.paths.map((p) => p.split("/").pop())).toEqual([
+    expect(staged.paths.map((p) => basename(p))).toEqual([
       "photo.jpg",
       "vector.svg",
       "mystery.unknown",
