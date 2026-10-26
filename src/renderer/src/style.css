@@ -8477,11 +8477,15 @@ html[data-theme="dark"] ::selection {
 }
 
 .fp-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
+  background: var(--card);
   font-size: 12px;
   font-weight: 700;
   color: var(--ink-soft);
