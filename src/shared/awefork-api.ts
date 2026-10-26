@@ -251,12 +251,15 @@ export interface AweforkApi {
   /**
    * Multi-window jump: focus (or open) the backend's own window and have it
    * land the session, keeping this window's identity intact. The renderer
-   * receives the landing through onAgentNavigate.
+   * receives the landing through onAgentNavigate. `pending` reports that no
+   * live window had claimed the backend yet, so main parked the navigation
+   * until one boots — the landing still arrives through onAgentNavigate, or
+   * is dropped when its window never claims it.
    */
   requestAgentNavigate(
     backend: BackendId,
     sessionId: string,
-  ): Promise<{ ok: boolean; error?: string }>;
+  ): Promise<{ ok: boolean; error?: string; pending?: boolean }>;
   /** Main → renderer: land this session (an overview jump routed to this window). */
   onAgentNavigate(handler: (request: AgentNavigateRequest) => void): () => void;
   /**

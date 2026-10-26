@@ -251,7 +251,7 @@ const api: AweforkApi = {
   requestAgentNavigate: (
     backend: BackendId,
     sessionId: string,
-  ): Promise<{ ok: boolean; error?: string }> =>
+  ): Promise<{ ok: boolean; error?: string; pending?: boolean }> =>
     ipcRenderer.invoke("awefork:requestAgentNavigate", backend, sessionId),
   onAgentNavigate: (handler: (request: AgentNavigateRequest) => void): (() => void) => {
     const listener = (_event: unknown, payload: unknown) =>
