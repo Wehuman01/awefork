@@ -2046,6 +2046,10 @@ mark.hl {
   background-size: 24px 24px;
   cursor: grab;
   min-width: 0;
+  /* Query container for the canvas's own width: the top-strip overlays
+     (trigger pill, story search and friends) reflow against the canvas,
+     never the window, so the shell columns cannot skew the breakpoints. */
+  container-type: inline-size;
 }
 
 /* Settings → appearance → canvas dot grid. One attribute on <html> rather
@@ -5554,7 +5558,12 @@ code.md-code {
   align-items: flex-start;
   gap: 8px;
   z-index: 5;
-  max-width: 380px;
+  /* The stack shares the canvas's top strip with the overview trigger: an
+     open surface caps its width so it fits beside the pill once the pill
+     dodges to the corner, and the floor keeps the box usable when the
+     canvas is too narrow for both — there the whole stack drops below the
+     pill's row instead (see the overview section below). */
+  max-width: min(380px, max(200px, calc(100% - 440px)));
 }
 
 .panel-pill {
@@ -6784,6 +6793,37 @@ code.md-code {
 
 .canvas-overview > .overview-trigger {
   pointer-events: auto;
+}
+
+/* The trigger pill and the left-stack surfaces (story search, branch
+   digest, key-turn marks) share the canvas's top strip. Wide canvas: the
+   pill stays centered until a surface opens, then dodges to the right
+   corner — centered, it used to sit on top of the story search box (the
+   stack paints below .canvas-overview, so the pill always won that
+   overlap) and swallow the box's hit count and close button. Narrow
+   canvas: a centered pill only has half the canvas before it wraps to two
+   rows, so it anchors right from the start and the stack drops below its
+   row — the way story tabs wrap into rows rather than hide. */
+@container (min-width: 761px) {
+  .viewport:has(.canvas-panels .story-search) .overview-trigger,
+  .viewport:has(.canvas-panels .digest-panel) .overview-trigger,
+  .viewport:has(.canvas-panels .marks-panel) .overview-trigger {
+    left: auto;
+    right: 12px;
+    transform: none;
+  }
+}
+
+@container (max-width: 760px) {
+  .overview-trigger {
+    left: auto;
+    right: 12px;
+    transform: none;
+  }
+
+  .canvas-panels {
+    top: 56px;
+  }
 }
 
 .overview-trigger button {

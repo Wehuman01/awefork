@@ -735,9 +735,33 @@ async function placeInitial(): Promise<void> {
   const host = viewportRect();
   const { width } = panelSize();
   const hostWidth = host?.width ?? window.innerWidth;
+  const hostHeight = host?.height ?? window.innerHeight;
   position.x = Math.max(8, Math.round((hostWidth - width) / 2));
-  position.y = 56;
-  clampPosition();
+  // Start below whatever already owns the canvas's top strip — the trigger
+  // pill (two rows tall once a narrow canvas wraps it), the pick-mode
+  // banner, and the story search's input box — instead of at a guessed
+  // offset that parked the panel on top of them. The search *results* and
+  // the digest/marks lists are read-only surfaces a floating panel may
+  // cover, the way it covers canvas cards; the input is the one control
+  // that has to stay reachable.
+  const top = host?.top ?? 0;
+  let below = 56;
+  const occupants = [".overview-trigger", ".pick-banner", ".ss-box"];
+  for (const selector of occupants) {
+    const occupant = document.querySelector(selector);
+    if (!occupant) continue;
+    const bottom = occupant.getBoundingClientRect().bottom - top;
+    if (bottom + 8 > below) below = Math.round(bottom + 8);
+  }
+  // The floor keeps max-height (a function of y) a valid, positive value
+  // even on a canvas shorter than the top strip.
+  position.y = Math.min(below, Math.max(56, hostHeight - 20));
+  // Clamp x only. The panel's own max-height shrinks with y, so its bottom
+  // edge is inside the canvas by construction; clamping y against the
+  // panel's natural height here would double-count that cap and pull a
+  // too-tall panel back up over the strip it was just placed below.
+  const maxX = Math.max(8, hostWidth - width - 8);
+  position.x = Math.min(position.x, maxX);
   placed.value = true;
 }
 
