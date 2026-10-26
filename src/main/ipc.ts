@@ -416,6 +416,18 @@ export function registerIpc(
     nativeTheme.themeSource = value === "dark" ? "dark" : "light";
   });
 
+  // The overview's badge counts, reported by whichever window last projected
+  // them. The Dock badge is the one signal that reaches the user while the
+  // window is buried behind an editor or on another Space — the counts already
+  // exist in the renderer, so this only mirrors the sum onto the icon. Only a
+  // window that is not focused reports: a badge you can see the reason for is
+  // noise, and the focused window is the one the user is reading.
+  ipcMain.handle("awefork:overviewBadge", (_event: IpcMainInvokeEvent, value: unknown) => {
+    const count = Math.max(0, Math.trunc(Number(value) || 0));
+    if (process.platform === "darwin") app.dock?.setBadge(count > 0 ? String(count) : "");
+    return true;
+  });
+
   ipcMain.handle("awefork:ready", async (_event: IpcMainInvokeEvent, backend: BackendId) => {
     try {
       await withAdapter(storeBackend(backend));

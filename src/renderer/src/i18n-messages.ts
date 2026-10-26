@@ -19,6 +19,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
     en: "Rerun this turn (original prompt pre-filled; you can switch model/effort first)",
   },
   "msg.retryButton": { zh: "↻ 换模型重跑", en: "↻ Rerun with another model" },
+  "msg.jumpToBottom": { zh: "回到最新", en: "Jump to the newest" },
   "msg.openPathFailed": { zh: "路径打不开", en: "Could not open the path" },
 
   // ── code-block.vue ─────────────────────────────────────────────────────

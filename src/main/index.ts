@@ -1,13 +1,18 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, nativeImage } from "electron";
+import { app, BrowserWindow, dialog, nativeImage, screen } from "electron";
 import type { BackendId } from "../shared/backend.js";
 import { OverviewLedgerStore } from "../shared/overview-ledger.js";
 import { RoundsStore } from "../shared/rounds-store.js";
 import { createBackendRegistry } from "./backend-registry.js";
 import { registerIpc } from "./ipc.js";
 import { registerSaveFileIpc } from "./save-file.js";
-import { readBackendSelection } from "./settings-store.js";
+import {
+  readBackendSelection,
+  readWindowBounds,
+  type WindowBounds,
+  writeWindowBounds,
+} from "./settings-store.js";
 import { setUpdaterExitHook } from "./update-install.js";
 
 const registry = createBackendRegistry(app.getPath("userData"));
@@ -46,10 +51,40 @@ registerSaveFileIpc();
 // old install's servers behind to fight the new one over session files.
 setUpdaterExitHook(() => registry.dispose({ keepAlive: false }));
 
+/**
+ * Whether a saved placement still lands on a real display. A laptop that
+ * undocks, or a monitor that is unplugged, leaves bounds that would open the
+ * window off-screen where the user cannot reach it — the default box is the
+ * better answer then.
+ */
+function isOnScreen(bounds: WindowBounds): boolean {
+  const displays = screen.getAllDisplays();
+  // Any overlap with any display counts; requiring full containment would
+  // reject a window the user deliberately hung over an edge.
+  return displays.some((display) => {
+    const area = display.workArea;
+    return (
+      bounds.x < area.x + area.width &&
+      bounds.x + bounds.width > area.x &&
+      bounds.y < area.y + area.height &&
+      bounds.y + bounds.height > area.y
+    );
+  });
+}
+
 async function createWindow(agent?: BackendId): Promise<void> {
+  // Reopen where this kind of window was left. The saved placement is applied
+  // before first paint so the window never flashes at the default size first;
+  // a placement that is off-screen (a monitor that is gone) is dropped and the
+  // default box is used instead.
+  const settingsPath = join(app.getPath("userData"), "settings.json");
+  const kind = agent ?? "main";
+  const saved = await readWindowBounds(settingsPath, kind).catch(() => null);
+  const placement = saved && isOnScreen(saved) ? saved : null;
   const window = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    width: placement?.width ?? 1280,
+    height: placement?.height ?? 840,
+    ...(placement ? { x: placement.x, y: placement.y } : {}),
     minWidth: 900,
     minHeight: 560,
     title: agent ? `awefork — ${agent}` : "awefork",
@@ -78,6 +113,42 @@ async function createWindow(agent?: BackendId): Promise<void> {
       mainWindow = null;
     });
   }
+
+  // Remember the placement for the next launch. Debounced: dragging a window
+  // emits a resize/move per frame, and each save is a read-modify-write of the
+  // whole settings file. `getNormalBounds` reports the restored box even while
+  // maximized, so un-maximizing after a restart lands on a real size.
+  let boundsTimer: ReturnType<typeof setTimeout> | null = null;
+  const rememberBounds = (): void => {
+    if (window.isDestroyed()) return;
+    if (boundsTimer) clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => {
+      if (window.isDestroyed()) return;
+      const box = window.getNormalBounds();
+      void writeWindowBounds(settingsPath, kind, {
+        ...box,
+        maximized: window.isMaximized(),
+      }).catch(() => {
+        // A failed write only costs the next launch its placement.
+      });
+    }, 400);
+  };
+  window.on("resized", rememberBounds);
+  window.on("moved", rememberBounds);
+  window.on("maximize", rememberBounds);
+  window.on("unmaximize", rememberBounds);
+  // A close is the last chance to record a move that is still inside the
+  // debounce window.
+  window.on("close", () => {
+    if (boundsTimer) clearTimeout(boundsTimer);
+    if (window.isDestroyed()) return;
+    const box = window.getNormalBounds();
+    void writeWindowBounds(settingsPath, kind, {
+      ...box,
+      maximized: window.isMaximized(),
+    }).catch(() => {});
+  });
+  if (placement?.maximized) window.maximize();
 
   // The renderer is not a web browser: a compromised or confused page must
   // not be able to navigate the window to an arbitrary origin or pop one

@@ -316,6 +316,10 @@ describe("renderer message updates", () => {
     h.setRows([USER_ROW, assistantRow(null), { ...USER_ROW, id: "m3", text: "继续" }]);
     await vi.advanceTimersByTimeAsync(1500);
     expect(h.store.messagesBySession.s1?.some((m) => m.id.startsWith("local_"))).toBe(false);
+    // Let the first run end, so the second send is a plain send rather than a
+    // queued one — the row-matching behaviour is what this test is about.
+    h.send({ type: "session.idle", sessionId: "s1" });
+    await vi.advanceTimersByTimeAsync(1500);
 
     // Same text again; the store has not projected this one yet.
     await h.state.sendPromptTo("s1", "继续");
@@ -371,7 +375,9 @@ describe("renderer message updates", () => {
     );
     h.send({ type: "message.started", sessionId: "s1", messageId: "m2" });
     await vi.advanceTimersByTimeAsync(1500);
-    const sending = h.state.sendPromptTo("s1", "next prompt");
+    // A run is in flight, so a new prompt replaces it explicitly rather than
+    // queueing behind it — this is the send-while-running path.
+    const sending = h.state.interruptAndSend("next prompt");
     finishPoll([USER_ROW, { ...assistantRow(null), completedAt: Date.now(), finish: "stop" }]);
     await vi.advanceTimersByTimeAsync(0);
     expect(h.store.running.s1).toBe(true);

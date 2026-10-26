@@ -429,6 +429,12 @@ export interface AweforkApi {
    */
   overviewRunning(): Promise<OverviewRunningEntry[]>;
   /**
+   * Mirror the overview's "needs you" total onto the app icon (macOS Dock
+   * badge). The renderer owns the projection; this only surfaces it where the
+   * user looks when the window is buried. 0 clears the badge.
+   */
+  overviewBadge(count: number): Promise<boolean>;
+  /**
    * Multi-model rounds sidecar (main-owned, one file every window shares).
    * The renderer's round groups are window-local memory, so without this a
    * restart forgets which branches form a round: its sessions degrade into

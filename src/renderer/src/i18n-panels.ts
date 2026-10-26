@@ -209,6 +209,29 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "input.remove": { zh: "移除", en: "Remove" },
   "input.placeholder": { zh: "继续这条分支…", en: "Continue this branch…" },
   "input.placeholderRunning": { zh: "Agent is running…", en: "Agent is running…" },
+  "input.placeholderRunningQueue": {
+    zh: "Agent 正在跑，输入下一句排队等它结束…",
+    en: "Agent is running — type the next prompt to queue it",
+  },
+  "input.placeholderQueued": {
+    zh: "已排队 {n} 条，可以继续输入…",
+    en: "{n} queued — keep typing",
+  },
+  "input.queue": { zh: "排队", en: "Queue" },
+  "input.queueMore": { zh: "再排队 ({n})", en: "Queue ({n})" },
+  "input.queueTitle": {
+    zh: "等这一轮跑完后自动发送",
+    en: "Send this automatically when the current turn ends",
+  },
+  "input.interrupt": { zh: "打断并发送", en: "Interrupt & send" },
+  "input.interruptTitle": {
+    zh: "立刻停掉当前这一轮，改为发送这句",
+    en: "Stop the current turn now and send this instead",
+  },
+  "input.queueNoParallel": {
+    zh: "运行中无法发起多模型发送，请先等它结束",
+    en: "A multi-model send needs the session to be idle",
+  },
   "input.previewEmpty": {
     zh: "输入内容后，这里显示发送后的 Markdown 效果",
     en: "Type something — the sent Markdown renders here",

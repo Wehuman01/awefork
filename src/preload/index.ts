@@ -314,6 +314,8 @@ const api: AweforkApi = {
   },
   overviewRunning: (): Promise<OverviewRunningEntry[]> =>
     ipcRenderer.invoke("awefork:overviewRunning"),
+  overviewBadge: (count: number): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:overviewBadge", count),
   roundsList: (): Promise<RoundRecord[]> => ipcRenderer.invoke("awefork:roundsList"),
   roundsSave: (record: RoundRecord): Promise<boolean> =>
     ipcRenderer.invoke("awefork:roundsSave", record),

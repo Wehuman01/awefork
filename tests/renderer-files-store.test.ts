@@ -906,6 +906,36 @@ describe("sidebar tree", () => {
     expect(h.files.treeError["/locked"]?.code).toBe("permission");
   });
 
+  it("keeps each sidebar section's unfolding its own", async () => {
+    const h = await bootFiles({
+      listings: { "/proj": listing("/proj", [entry("docs", true)]) },
+    });
+    // The same folder as a common place and as a project root: expanding
+    // one must not expand the other, and folding one must not fold it.
+    await h.mod.toggleTreeNode("/proj", "places");
+    expect(h.mod.isTreeNodeExpanded("/proj", "places")).toBe(true);
+    expect(h.mod.isTreeNodeExpanded("/proj", "projects")).toBe(false);
+    await h.mod.toggleTreeNode("/proj", "projects");
+    expect(h.mod.isTreeNodeExpanded("/proj", "places")).toBe(true);
+    expect(h.mod.isTreeNodeExpanded("/proj", "projects")).toBe(true);
+    await h.mod.toggleTreeNode("/proj", "projects");
+    expect(h.mod.isTreeNodeExpanded("/proj", "places")).toBe(true);
+    expect(h.mod.isTreeNodeExpanded("/proj", "projects")).toBe(false);
+  });
+
+  it("shares the unscoped state between the dock and the browser listing", async () => {
+    const h = await bootFiles({
+      listings: { "/proj/docs": listing("/proj/docs", [entry("deep", true)]) },
+    });
+    // The dock and the listing's nested rows read one path-keyed state by
+    // design, so a folder reads as open in both for one children read.
+    await h.mod.toggleTreeNode("/proj/docs");
+    expect(h.mod.isTreeNodeExpanded("/proj/docs")).toBe(true);
+    // …and that state is not the sidebar sections'.
+    expect(h.mod.isTreeNodeExpanded("/proj/docs", "places")).toBe(false);
+    expect(h.mod.isTreeNodeExpanded("/proj/docs", "projects")).toBe(false);
+  });
+
   it("drops a stale tree response when a newer load for the same node won", async () => {
     const gates: Array<() => void> = [];
     const answers: Array<FileEntry[]> = [[entry("stale.md")], [entry("fresh.md")]];

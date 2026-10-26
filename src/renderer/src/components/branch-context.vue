@@ -328,6 +328,7 @@
         v-if="selectedSession"
         ref="chatInputEl"
         :running="isRunning"
+        :queued-count="queuedCount"
         :parallel-sending="parallelSending || (showParallelResults && parallelRoundBusy)"
         :backend="store.activeBackend"
         :model="paneModel"
@@ -339,6 +340,7 @@
         :can-compress="store.capabilities.compress"
         :send-parallel="settings.labs.parallelModels ? sendParallel : undefined"
         @send="send"
+        @interrupt="interrupt"
         @abort="abort"
         @set-model="onSetModel"
         @toggle-favorite="toggleFavoriteModel"
@@ -375,6 +377,7 @@ import {
   exitCompare,
   exportBranchMarkdown,
   inlineHostVisible,
+  interruptPanePrompt,
   isEmptyContext,
   isTurnMarked,
   paneComposerModel,
@@ -383,6 +386,7 @@ import {
   paneTurn,
   parallelGroupForSession,
   parallelRoundOwner,
+  queuedPromptCount,
   retryParallelTarget,
   retryTurn,
   selectedSession,
@@ -798,6 +802,12 @@ const isRunning = computed(() => {
   return id != null && Boolean(store.running[id]);
 });
 
+/** Prompts already waiting behind this session's run (0 hides the count). */
+const queuedCount = computed(() => {
+  const id = store.selectedId;
+  return id == null ? 0 : queuedPromptCount(store.activeBackend, id);
+});
+
 const turnMeta = computed(() => {
   const current = pane.value;
   if (!current) return null;
@@ -809,6 +819,11 @@ const turnMeta = computed(() => {
 
 function send(text: string, attachments: PromptAttachment[]): void {
   void sendPanePrompt(text, attachments);
+}
+
+/** Stop the running turn and send this prompt instead of queueing behind it. */
+function interrupt(text: string, attachments: PromptAttachment[]): void {
+  void interruptPanePrompt(text, attachments);
 }
 
 async function sendParallel(

@@ -215,8 +215,8 @@ function isActive(dir: string): boolean {
   return browsingDir.value !== null && samePath(browsingDir.value, dir);
 }
 
-function expanded(dir: string): boolean {
-  return isTreeNodeExpanded(dir);
+function expanded(dir: string, scope: TreeScope): boolean {
+  return isTreeNodeExpanded(dir, scope);
 }
 
 function childrenOf(dir: string): FileEntry[] {
@@ -268,15 +268,16 @@ function placeIcon(path: string): string {
 /**
  * A root row's click. With the middle browser on it jumps the browser to
  * the directory (the tree as a jump-in surface); with the browser folded
- * away the tree is the navigation, so the click expands in place.
+ * away the tree is the navigation, so the click expands in place — within
+ * the section that was clicked, never its neighbour.
  */
-function onRootClick(dir: string): void {
+function onRootClick(dir: string, scope: TreeScope): void {
   if (middleBrowserEnabled.value) {
     openFilesView();
     void browseTo(dir);
     return;
   }
-  void toggleTreeNode(dir);
+  void toggleTreeNode(dir, scope);
 }
 
 async function pickFolder(): Promise<void> {

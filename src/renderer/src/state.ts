@@ -381,6 +381,15 @@ interface AppState {
    */
   stashedDrafts: Record<string, DraftState>;
   /**
+   * Prompts waiting for the session's current run to end, keyed by
+   * streamKey(backend, sessionId). A send while a run is in flight is queued
+   * instead of refused, so the composer never has to be locked while the
+   * agent works. Renderer-owned on purpose: the backend only ever sees one
+   * prompt start at a time, exactly like a user clicking send twice — no
+   * adapter has to grow a queue primitive it does not have.
+   */
+  queuedPrompts: Record<string, QueuedPrompt[]>;
+  /**
    * Open branch comparison (⇄): the two session ids shown side by
    * side in the right pane. null = normal pane. Any fresh selection tears it
    * down — compare is a lens, not a selection.
@@ -562,6 +571,7 @@ const state = reactive<AppState>({
   draft: null,
   draftSending: false,
   stashedDrafts: {},
+  queuedPrompts: {},
   compare: null,
   comparePickFrom: null,
   forkTagAsk: null,
@@ -1481,6 +1491,12 @@ export async function init(): Promise<void> {
   // their starts, this window did not exist to see them. Seed before the
   // first paint so the trigger counts what is actually running everywhere.
   void seedOverviewRunning();
+  // Focusing the window retires the Dock badge: the user is looking at the
+  // app, so the icon no longer has anything to tell them. Guarded like the
+  // rest of the DOM touchpoints — tests boot state without a real window.
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("focus", () => reportOverviewBadge(0));
+  }
   // Fill the trigger's cross-agent counts after first paint. The adapters are
   // lazy by design; this one paced sweep is the deliberate startup cost.
   setTimeout(() => {
@@ -2628,6 +2644,14 @@ function settleRun(
   if (backend === state.activeBackend && state.selectedId === sessionId) {
     state.streamParts = [];
   }
+  // A queued prompt starts now that the run before it has ended. Only a real
+  // ending drains the queue: "unknown" (silent timeout, lost connection) and
+  // "aborted" (a prompt the backend refused) leave the queue alone, so a
+  // prompt is never fired into a backend whose state we cannot vouch for —
+  // the next genuine idle or the user's own send picks it up instead.
+  if (reason === "settled" || reason === "failed") {
+    drainQueuedPrompt(backend, sessionId);
+  }
 }
 
 /**
@@ -3677,6 +3701,9 @@ async function softDeleteSession(backend: BackendId, sessionId: string): Promise
     dropDraftsOfSession(sessionId);
     clearCompareOf(sessionId);
   }
+  // A trashed session's queue has nowhere to drain to, whichever window
+  // deleted it (the parked-workspace path shares this function).
+  clearQueuedPrompts(backend, sessionId);
   const session = findSessionAnywhere(backend, sessionId);
   try {
     const ids = (
@@ -4042,6 +4069,8 @@ async function hardDeleteSession(backend: BackendId, sessionId: string): Promise
   messageLoads.invalidate(backend, sessionId);
   applyPins(backend, pins);
   forgetOverviewSession(backend, sessionId);
+  // A deleted session's queue has nowhere to drain to.
+  clearQueuedPrompts(backend, sessionId);
   if (active) {
     stopWatch(backend, sessionId);
     streamBuffers.delete(streamKey(backend, sessionId));
@@ -5289,6 +5318,8 @@ function appendLocalMessage(
 export interface PromptSendResult {
   sessionId: string;
   error: string | null;
+  /** True when the prompt went into the session's queue instead of out now. */
+  queued?: boolean;
 }
 
 /**
@@ -5304,7 +5335,70 @@ export async function sendPromptTo(
   return sendPromptToBackend(state.activeBackend, sessionId, text, model, attachments);
 }
 
-async function sendPromptToBackend(
+/**
+ * One prompt waiting for its turn. Everything the send needs is captured at
+ * enqueue time — the text, the model and the attachments the user chose then,
+ * not whatever the composer holds when the queue drains.
+ */
+interface QueuedPrompt {
+  text: string;
+  model: ModelChoice | null;
+  attachments: PromptAttachment[];
+}
+
+/** How many prompts one session may queue before the send is refused. */
+const MAX_QUEUED_PROMPTS = 5;
+
+/** The prompts waiting for a session, in send order. */
+export function queuedPromptsFor(backend: BackendId, sessionId: string): readonly QueuedPrompt[] {
+  return state.queuedPrompts[streamKey(backend, sessionId)] ?? [];
+}
+
+/** How many prompts the pane's session has waiting (0 hides the badge). */
+export function queuedPromptCount(backend: BackendId, sessionId: string): number {
+  return queuedPromptsFor(backend, sessionId).length;
+}
+
+/**
+ * Take the next queued prompt for a session and send it, if any. Called after
+ * a run settles: the queue drains one prompt at a time, each one starting only
+ * once the previous run's idle has landed, so the backend never sees two
+ * concurrent turns for one session.
+ */
+function drainQueuedPrompt(backend: BackendId, sessionId: string): void {
+  const key = streamKey(backend, sessionId);
+  const queue = state.queuedPrompts[key];
+  const next = queue?.[0];
+  if (!next) return;
+  const rest = queue.slice(1);
+  if (rest.length === 0) {
+    const { [key]: _drained, ...kept } = state.queuedPrompts;
+    void _drained;
+    state.queuedPrompts = kept;
+  } else {
+    state.queuedPrompts = { ...state.queuedPrompts, [key]: rest };
+  }
+  // sendNow, not sendPromptToBackend: this prompt was already admitted to the
+  // queue, and re-entering the queue check would loop forever.
+  void sendNow(backend, sessionId, next.text, next.model, next.attachments);
+}
+
+/** Drop a session's whole queue (delete, abort-and-clear, backend reset). */
+function clearQueuedPrompts(backend: BackendId, sessionId: string): void {
+  const key = streamKey(backend, sessionId);
+  if (!(key in state.queuedPrompts)) return;
+  const { [key]: _gone, ...kept } = state.queuedPrompts;
+  void _gone;
+  state.queuedPrompts = kept;
+}
+
+/**
+ * The actual send: claims the run locally, surfaces the prompt and hands it to
+ * the backend. Split out of sendPromptToBackend so the queue drain can call it
+ * without re-entering the "is a run in flight?" check that put the prompt in
+ * the queue in the first place.
+ */
+async function sendNow(
   backend: BackendId,
   sessionId: string,
   text: string,
@@ -5341,6 +5435,31 @@ async function sendPromptToBackend(
     settleRun(backend, sessionId, "aborted");
     return { sessionId, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function sendPromptToBackend(
+  backend: BackendId,
+  sessionId: string,
+  text: string,
+  model: ModelChoice | null,
+  attachments: PromptAttachment[],
+): Promise<PromptSendResult> {
+  if (!text.trim()) return { sessionId, error: null };
+  // A run already in flight owns this session: queue instead of refusing, so
+  // the composer stays usable for the whole turn. The queue drains on idle.
+  if (isRunningObserved(backend, sessionId)) {
+    const key = streamKey(backend, sessionId);
+    const queue = state.queuedPrompts[key] ?? [];
+    if (queue.length >= MAX_QUEUED_PROMPTS) {
+      return { sessionId, error: t("state.queueFull", { n: MAX_QUEUED_PROMPTS }) };
+    }
+    state.queuedPrompts = {
+      ...state.queuedPrompts,
+      [key]: [...queue, { text, model, attachments }],
+    };
+    return { sessionId, error: null, queued: true };
+  }
+  return sendNow(backend, sessionId, text, model, attachments);
 }
 
 /** Send one shared compare draft to the requested current comparison sides. */
@@ -5935,6 +6054,17 @@ export async function sendPanePrompt(
   state.actionError = result.error;
 }
 
+/** The pane's "stop this turn and send instead" — see interruptAndSend. */
+export async function interruptPanePrompt(
+  text: string,
+  attachments: PromptAttachment[] = [],
+): Promise<void> {
+  if (!state.selectedId || !text.trim()) return;
+  const model = paneComposerModel.value;
+  state.selectedTurnId = null;
+  await interruptAndSend(text, model, attachments);
+}
+
 export async function sendPrompt(
   text: string,
   model: ModelChoice | null = null,
@@ -6018,9 +6148,75 @@ export async function abortRun(): Promise<void> {
   state.actionError = await abortRunFor(sessionId);
 }
 
+/**
+ * Interrupt the current run and send this prompt now. The explicit "replace
+ * what it is doing" gesture: unlike a plain send (which queues behind the
+ * running turn) this drops the queue's place and starts immediately.
+ *
+ * The abort settles the run locally before the prompt goes out, so the new
+ * send owns the session and the old run's idle frame cannot settle it as
+ * failed. A backend that refuses the abort leaves the prompt unsent and the
+ * run alone — the error says so and nothing is lost.
+ */
+export async function interruptAndSend(
+  text: string,
+  model: ModelChoice | null = null,
+  attachments: PromptAttachment[] = [],
+): Promise<void> {
+  const sessionId = state.selectedId;
+  if (!sessionId || !text.trim()) return;
+  state.actionError = null;
+  if (isRunningObserved(state.activeBackend, sessionId)) {
+    const failure = await abortRunFor(sessionId);
+    if (failure) {
+      state.actionError = failure;
+      return;
+    }
+    // The run is gone server-side; settle it locally as aborted so the
+    // outgoing turn's idle cannot mint a result for a run the user replaced.
+    settleRun(state.activeBackend, sessionId, "aborted");
+  }
+  const result = await sendPromptToBackend(
+    state.activeBackend,
+    sessionId,
+    text,
+    model,
+    attachments,
+  );
+  state.actionError = result.error;
+}
+
 export function dismissActionError(): void {
   state.actionError = null;
 }
+
+/**
+ * How long an error banner stays before fading on its own. Errors used to
+ * require a click to dismiss, which left a stale "cannot delete, session is
+ * running" sitting on screen long after the situation resolved — and the next
+ * error replaced it anyway, so the click bought nothing. Long enough to read,
+ * short enough not to become furniture.
+ */
+const ACTION_ERROR_MS = 9_000;
+
+/** The pending fade's timer and the error it belongs to. */
+let actionErrorTimer: ReturnType<typeof setTimeout> | null = null;
+let actionErrorStamp = 0;
+
+/** Restart the fade whenever a new error is set (a repeat of the same text counts). */
+watch(
+  () => state.actionError,
+  (message) => {
+    if (message === null) return;
+    const stamp = Date.now();
+    actionErrorStamp = stamp;
+    if (actionErrorTimer) clearTimeout(actionErrorTimer);
+    actionErrorTimer = setTimeout(() => {
+      // A newer error owns the banner now; the older timer must not clear it.
+      if (actionErrorStamp === stamp) state.actionError = null;
+    }, ACTION_ERROR_MS);
+  },
+);
 
 /** Surface a failure toast from outside this module (e.g. markdown-view). */
 export function reportActionError(message: string): void {
@@ -6711,6 +6907,36 @@ export const overviewRows = computed<OverviewRow[]>(() => {
 
 /** Trigger and tab counts over every row; zero states still open the panel. */
 export const overviewStats = computed(() => overviewCounts(overviewRows.value));
+
+/**
+ * Mirror the counts the user cannot see onto the app icon. Only a window that
+ * is not focused reports: the badge exists to reach someone looking elsewhere,
+ * and a focused window already shows the same numbers in its trigger pill.
+ * Unread plus waiting is the "something needs you" total — running is not a
+ * call to action, it is work already in progress.
+ */
+let lastReportedBadge = -1;
+watch(
+  () => overviewStats.value.unread + overviewStats.value.waiting,
+  (total) => {
+    // Blurred windows report; a focused one clears its own claim so the badge
+    // never outlives the window that is now on screen.
+    const focused = typeof document !== "undefined" && document.hasFocus();
+    reportOverviewBadge(focused ? 0 : total);
+  },
+);
+
+/** Push the badge count to main, skipping repeats. */
+function reportOverviewBadge(count: number): void {
+  if (count === lastReportedBadge) return;
+  lastReportedBadge = count;
+  // A window whose api predates the channel (an older preload, a test double)
+  // simply has no badge to set; that must never surface as an unhandled error.
+  if (typeof window.awefork?.overviewBadge !== "function") return;
+  void window.awefork.overviewBadge(count).catch(() => {
+    // A failed write only costs the badge.
+  });
+}
 
 /** Agents with at least one listed session, in backend-list order. */
 export const overviewAgents = computed<BackendId[]>(() => {

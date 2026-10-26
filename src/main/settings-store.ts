@@ -105,3 +105,67 @@ export async function readOnboardingDone(filePath: string): Promise<boolean> {
 export async function writeOnboardingDone(filePath: string): Promise<void> {
   await patchSettings(filePath, { onboardingDone: true });
 }
+
+/**
+ * The last window placement, so a restart reopens where the user left it
+ * instead of snapping back to the default 1280×840 centered box. Kept per
+ * window kind ("main" or an agent id): the agent window is a different
+ * workspace and should not inherit the main window's size.
+ */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+}
+
+function asBounds(value: unknown): WindowBounds | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const x = raw.x;
+  const y = raw.y;
+  const width = raw.width;
+  const height = raw.height;
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    width < 400 ||
+    height < 300
+  ) {
+    return null;
+  }
+  return { x, y, width, height, maximized: raw.maximized === true };
+}
+
+/** The saved placement for one window kind ("main" / an agent id), if any. */
+export async function readWindowBounds(
+  filePath: string,
+  kind: string,
+): Promise<WindowBounds | null> {
+  const all = (await readSettings(filePath)).windowBounds;
+  if (!all || typeof all !== "object") return null;
+  return asBounds((all as Record<string, unknown>)[kind]);
+}
+
+/**
+ * Remember one window kind's placement. A maximized window saves the restored
+ * (pre-maximize) bounds so un-maximizing after a restart still has a sane
+ * size, and the flag tells the next launch to maximize again.
+ */
+export async function writeWindowBounds(
+  filePath: string,
+  kind: string,
+  bounds: WindowBounds,
+): Promise<void> {
+  const existing = (await readSettings(filePath)).windowBounds;
+  const all =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  await patchSettings(filePath, { windowBounds: { ...all, [kind]: bounds } });
+}

@@ -159,7 +159,6 @@
       ref="textareaEl"
       v-model="text"
       :placeholder="inputPlaceholder"
-      :disabled="busy"
       rows="2"
       @keydown.enter.exact="onEnterKey"
       @keydown.tab.prevent="onTabKey"
@@ -190,7 +189,28 @@
         :disabled="!text.trim() || busy || (parallelMode && parallelModels.length < 2)"
         :title="parallelMode && parallelModels.length < 2 ? t('input.parallelNeedTwo') : undefined"
         >{{ parallelMode ? t("input.parallelSend", { n: parallelModels.length }) : t("input.send") }}</button>
-      <button v-else type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
+      <!--
+        While a run is in flight the composer stays usable: a plain send joins
+        the queue behind it, and ⇢ replaces what the agent is doing right now.
+        Two explicit actions, so "add to this turn's work" and "stop and do
+        this instead" never have to be inferred from one button.
+      -->
+      <template v-else>
+        <button
+          type="submit"
+          class="send queue"
+          :disabled="!text.trim() || (parallelMode && parallelModels.length < 2)"
+          :title="t('input.queueTitle')"
+          >{{ queuedCount > 0 ? t("input.queueMore", { n: queuedCount }) : t("input.queue") }}</button>
+        <button
+          type="button"
+          class="interrupt"
+          :disabled="!text.trim() || (parallelMode && parallelModels.length < 2)"
+          :title="t('input.interruptTitle')"
+          @click="interrupt"
+        >{{ t("input.interrupt") }}</button>
+        <button type="button" class="abort" @click="$emit('abort')">{{ t("input.stop") }}</button>
+      </template>
     </div>
     <!-- Why the send button is inert, said where the user is looking: the
          button's title alone is easy to miss behind a disabled control. -->
@@ -234,6 +254,8 @@ import VariantPicker from "./variant-picker.vue";
 const props = withDefaults(
   defineProps<{
     running: boolean;
+    /** Prompts already waiting behind the running turn (drives the button's count). */
+    queuedCount?: number;
     parallelSending?: boolean;
     sendParallel?: (
       text: string,
@@ -265,10 +287,13 @@ const props = withDefaults(
     context: null,
     canCompress: false,
     parallelSending: false,
+    queuedCount: 0,
   },
 );
 const emit = defineEmits<{
   send: [text: string, attachments: PromptAttachment[]];
+  /** Replace the running turn with this prompt instead of queueing behind it. */
+  interrupt: [text: string, attachments: PromptAttachment[]];
   abort: [];
   "set-model": [model: ModelChoice | null];
   "toggle-favorite": [model: ModelChoice];
@@ -426,7 +451,11 @@ const summaryLengthLabel = computed(() => {
 });
 
 const inputPlaceholder = computed(() => {
-  if (props.running) return t("input.placeholderRunning");
+  if (props.running) {
+    return props.queuedCount > 0
+      ? t("input.placeholderQueued", { n: props.queuedCount })
+      : t("input.placeholderRunningQueue");
+  }
   if (parallelMode.value) {
     return t("input.parallelPlaceholder", { n: parallelModels.value.length });
   }
@@ -703,7 +732,14 @@ function onEnterKey(event: KeyboardEvent): void {
 
 async function submit(): Promise<void> {
   const value = text.value.trim();
-  if (!value || busy.value) return;
+  // A run in flight no longer blocks the composer: the prompt queues behind it
+  // (state.sendPromptToBackend decides), so `busy` only gates parallel sends,
+  // which need the whole session to themselves.
+  if (!value || (busy.value && !props.running)) return;
+  if (props.running && parallelMode.value) {
+    flashNotice(t("input.queueNoParallel"));
+    return;
+  }
   if (
     parallelMode.value &&
     !canAttach.value &&
@@ -740,6 +776,24 @@ async function submit(): Promise<void> {
   } else {
     emit("send", value, promptAttachments);
   }
+  text.value = "";
+  attachments.value = [];
+  previewing.value = false;
+}
+
+/**
+ * Replace the running turn with this prompt. Same guards as a send, then the
+ * host aborts the run and starts this one immediately — the queue is bypassed
+ * on purpose, because the user is saying "this instead", not "this after".
+ */
+function interrupt(): void {
+  const value = text.value.trim();
+  if (!value) return;
+  if (parallelMode.value) {
+    flashNotice(t("input.queueNoParallel"));
+    return;
+  }
+  emit("interrupt", value, toPromptAttachments(attachments.value));
   text.value = "";
   attachments.value = [];
   previewing.value = false;

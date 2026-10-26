@@ -118,6 +118,10 @@ export const dict: Record<string, Entry> = {
     zh: "会话正在运行，先停止再删除。",
     en: "Session is running — stop it before deleting.",
   },
+  "state.queueFull": {
+    zh: "这个会话已排了 {n} 条，等它跑完一些再排。",
+    en: "This session already has {n} prompts queued — let some drain first.",
+  },
   "state.redoSessionGone": {
     zh: "会话已不存在，无法重做删除。",
     en: "Session no longer exists; cannot redo the delete.",

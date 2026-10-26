@@ -1186,6 +1186,8 @@ export function installMockAdapter(): void {
     overviewPublishListing: async () => true,
     onOverviewListing: () => () => {},
     overviewRunning: async () => [],
+    // The demo has no Dock icon to badge; the call is a no-op that succeeds.
+    overviewBadge: async () => true,
     requestAgentNavigate: async () => ({ ok: true }),
     onAgentNavigate: (handler) => {
       navigateHandlers.add(handler);
