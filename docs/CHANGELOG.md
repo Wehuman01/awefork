@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **多模型轮次跨重启存活 / Multi-model rounds survive a restart** — a round's canvas decorations (the ⇄ Round N badge on each source fork, the ✦ 汇总 vN badge on the summary card, the lavender source→summary links) and the pane's round reading view (✦ 汇总 / 对话 tabs, the results panel) were window-local memory: after a restart every round degraded into plain fork cards, and the summary branch — which is deliberately forked with empty context, because its prompt already carries the question and every answer — read as a hand-made ✂ empty-context fork with "the parent's turns did not come along". The round's durable half (anchor, prompt, per-model targets with their baselines, summary versions, settings) now lives in a main-owned sidecar (`rounds.json`), written when a round's forks land and again as each summary settles; every window restores it at boot. A record written mid-run restores as "unknown", never as finished — only endings the app actually observed read as endings — and a restored round is never busy, so it can't block a send. Rounds created before this change stay as they are: nothing reconstructs them.
+
 ## v0.5.0
 
 - **Compression works from any turn, on a fork, while the session runs** — a turn card's context menu can compress through that turn: with later content a fresh fork is cut carrying exactly the history up to it (the near-limit case no longer waits for the run streaming right now, because the fork path never touches the original — only in-place compression still needs an idle session, checked again after the confirm dialog). A compress already in flight is refused with a localized error instead of double-firing (tracked across dialog, fork and request), a failed fork no longer clears the parent's own running flag (the composer stayed sendable mid-run and the overview lost its evidence), and a parent with its own run is never claimed, cleared, or settled by a compress it did not start.

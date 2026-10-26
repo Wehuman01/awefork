@@ -20,6 +20,7 @@ import type {
   OverviewReadLedger,
   OverviewReadUpdate,
 } from "./overview-ledger-types.js";
+import type { RoundRecord } from "./rounds-types.js";
 import type {
   AgentInteractionResponse,
   ArchiveKind,
@@ -401,4 +402,14 @@ export interface AweforkApi {
   overviewMergeLedger(incoming: OverviewReadLedger): Promise<OverviewReadLedger>;
   /** Every applied entry, from any window; subscribe after the snapshot. */
   onOverviewRead(handler: (update: OverviewReadUpdate) => void): () => void;
+  /**
+   * Multi-model rounds sidecar (main-owned, one file every window shares).
+   * The renderer's round groups are window-local memory, so without this a
+   * restart forgets which branches form a round: its sessions degrade into
+   * plain fork cards, and a round's summary branch even reads as a hand-made
+   * ✂ empty-context fork. `roundsList` restores them at boot; `roundsSave`
+   * upserts one round (false when the record fails validation).
+   */
+  roundsList(): Promise<RoundRecord[]>;
+  roundsSave(record: RoundRecord): Promise<boolean>;
 }

@@ -31,6 +31,7 @@ import type {
   OverviewReadLedger,
   OverviewReadUpdate,
 } from "../shared/overview-ledger-types.js";
+import type { RoundRecord } from "../shared/rounds-types.js";
 
 import type {
   AgentInteractionResponse,
@@ -309,6 +310,9 @@ const api: AweforkApi = {
     ipcRenderer.on("awefork:agent-navigate", listener);
     return () => ipcRenderer.removeListener("awefork:agent-navigate", listener);
   },
+  roundsList: (): Promise<RoundRecord[]> => ipcRenderer.invoke("awefork:roundsList"),
+  roundsSave: (record: RoundRecord): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:roundsSave", record),
 };
 
 contextBridge.exposeInMainWorld("awefork", api);

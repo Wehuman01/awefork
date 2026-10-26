@@ -71,6 +71,7 @@ import {
   parallelReply,
 } from "./parallel-groups";
 import { insertPathText } from "./path-insert";
+import { groupFromRoundRecord, roundRecordFromGroup } from "./rounds";
 import {
   compareOverviewRows,
   lastModelOfMessages,
@@ -151,6 +152,27 @@ export function parallelRoundOwner(group: ParallelGroup, sessionId: string | nul
     group.summarySessionId === sessionId ||
     group.summaryVersions.some((version) => version.sessionId === sessionId)
   );
+}
+
+/**
+ * Mirror one round into the main-owned sidecar so a restart still knows which
+ * branches form a round: the canvas keeps its ⇄ / ✦ badges and source→summary
+ * links, and the pane keeps the round reading view instead of reading the
+ * summary branch as a hand-made ✂ empty-context fork.
+ *
+ * Fire-and-forget by design — a failed write costs the round its decorations
+ * after the next restart, nothing more. Called at the three points where a
+ * round's durable state changes: once its forks exist, when a summary
+ * version lands, and when the round finishes (targets collected, summary
+ * settled). Live fields travel as last known; the restore sanitizes them.
+ */
+function persistRound(group: ParallelGroup): void {
+  void Promise.resolve()
+    .then(() => window.awefork.roundsSave(roundRecordFromGroup(group)))
+    .catch(() => {
+      // No main process (demo mode, a test boot) or an unwritable sidecar:
+      // rounds stay window-local, exactly as before persistence existed.
+    });
 }
 
 interface DraftState {
@@ -1429,6 +1451,11 @@ export async function init(): Promise<void> {
   // the snapshot resolves so nothing that lands in between is missed.
   window.awefork.onOverviewRead(applyOverviewUpdate);
   void loadOverviewLedgerFromMain();
+  // Multi-model rounds are window-local memory; the main-owned sidecar is
+  // what makes them survive a restart. Restored before the first session
+  // load resolves, so a round's canvas badges and reading view are in place
+  // by the time its sessions render.
+  void loadRoundsFromMain();
   // The landing side of a multi-window overview jump: this window was handed a
   // session by another window (or by the newly opened one it belongs to). The
   // ready claim tells main which backend this window owns its navigations for,
@@ -5474,6 +5501,10 @@ async function startParallelRound(
   state.actionError = null;
   // Resolve the send after the forks have accepted the prompt; completion remains observable in the group.
   await Promise.all(group.targets.map((target) => startParallelTarget(group, target)));
+  // The forks exist now (session ids + baselines known): persist the round's
+  // skeleton before anything else, so a crash mid-run still leaves a
+  // restorable group instead of orphan branches.
+  persistRound(group);
   if (
     backend === state.activeBackend &&
     state.sessions.some((session) => session.id === anchorSessionId)
@@ -5664,6 +5695,9 @@ async function finishParallelRound(group: ParallelGroup): Promise<void> {
   ) {
     await summarizeParallelGroup(group.id);
   }
+  // The round reached a resting state (every target collected, the summary
+  // settled or deliberately skipped): this is the record a restart reads.
+  persistRound(group);
 }
 
 /**
@@ -5842,6 +5876,10 @@ async function createParallelSummary(
     group.summaryText = previousText;
     group.summarySourceIds = previousSourceIds;
   }
+  // The summary's outcome (and this version's session) is on record now —
+  // including the failure paths above, so a restored round never claims a
+  // summary that did not land.
+  persistRound(group);
 }
 
 export async function sendPanePrompt(
@@ -6460,6 +6498,27 @@ function mergeOverviewLedgerLocal(
   incoming: OverviewReadLedger,
 ): OverviewReadLedger {
   return mergeOverviewLedger(base, incoming);
+}
+
+/**
+ * Restore the rounds the sidecar knows about into this window's group list.
+ * Every window boots with an empty `parallelGroups`, so without this the
+ * canvas badges, source→summary links and the round reading view only exist
+ * in the window — and app lifetime — that ran the round. Restored groups are
+ * inert: no watcher, no collector, nothing busy (see groupFromRoundRecord),
+ * so a restored round reads as history and never blocks a send.
+ */
+async function loadRoundsFromMain(): Promise<void> {
+  try {
+    const records = await window.awefork.roundsList();
+    for (const record of records) {
+      if (parallelGroups.some((group) => group.id === record.id)) continue;
+      parallelGroups.push(groupFromRoundRecord(record));
+    }
+  } catch {
+    // No main process (demo mode, a test boot) or an unreadable sidecar:
+    // rounds stay window-local, exactly as before persistence existed.
+  }
 }
 
 const LEGACY_LEDGER_KEY = "awefork:overview-read";
