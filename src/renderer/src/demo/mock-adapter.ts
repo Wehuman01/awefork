@@ -22,6 +22,7 @@ import {
   overviewKey,
   recordOverviewSettle,
 } from "../../../shared/overview-ledger-types.js";
+import type { RoundRecord } from "../../../shared/rounds-types.js";
 import type {
   AgentEvent,
   AgentInteractionRequest,
@@ -509,6 +510,10 @@ export function installMockAdapter(): void {
   // Demo-only stand-in for the main-owned overview ledger: an in-memory map
   // with the same per-entry merge rule as OverviewLedgerStore.merge.
   const demoLedger: OverviewReadLedger = {};
+  // Same idea for the multi-model rounds sidecar: an in-memory list, so a
+  // round survives demo navigation but not a reload — the sidecar file is
+  // what a real install adds.
+  const demoRounds: RoundRecord[] = [];
   const demoUnknown = new Map<string, string>();
   const demoObservedAt: Record<string, number> = {};
   const demoScannedAt: Record<string, number> = {};
@@ -1173,6 +1178,13 @@ export function installMockAdapter(): void {
     onOverviewRead: (handler) => {
       ledgerHandlers.add(handler);
       return () => ledgerHandlers.delete(handler);
+    },
+    roundsList: async () => demoRounds.map((record) => structuredClone(record)),
+    roundsSave: async (record) => {
+      const index = demoRounds.findIndex((item) => item.id === record.id);
+      if (index >= 0) demoRounds[index] = structuredClone(record);
+      else demoRounds.push(structuredClone(record));
+      return true;
     },
   };
 

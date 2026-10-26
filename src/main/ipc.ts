@@ -48,6 +48,8 @@ import {
   overviewKey,
 } from "../shared/overview-ledger-types.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
+import type { RoundsStore } from "../shared/rounds-store.js";
+import { normalizeRoundRecord } from "../shared/rounds-types.js";
 import {
   addTagsToSessions,
   deleteTag,
@@ -155,6 +157,9 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   overviewMergeLedger(ledger)                    -> merged ledger (window sync)
  * Sequence-stamped entry and unknown-state updates arrive on
  * "awefork:overview-read".
+ * Multi-model rounds sidecar (main-owned, when a store is passed in):
+ *   roundsList()                -> RoundRecord[]     every persisted round
+ *   roundsSave(record)          -> boolean           upsert one round (id-keyed)
  * Multi-window jumps: requestAgentNavigate(backend, session) focuses (or
  * opens) the backend's own window and hands "awefork:agent-navigate"
  * {backend, sessionId} to the window that owns it — the agent window main
@@ -168,6 +173,7 @@ export function registerIpc(
   overviewLedger?: OverviewLedgerStore,
   userDataDir = app.getPath("userData"),
   agentWindows?: Map<BackendId, BrowserWindow>,
+  roundsStore?: RoundsStore,
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
@@ -326,6 +332,23 @@ export function registerIpc(
         return merged;
       },
     );
+  }
+
+  // ── multi-model rounds sidecar (main-owned) ──────────────────────────────
+  // The renderer's round groups are window-local memory; this file is what
+  // makes them survive a restart. One writer (here), read whole at every
+  // window's boot, upserted per round — no broadcast, because a round only
+  // changes in the window whose user acted, and the next boot converges.
+  if (roundsStore) {
+    ipcMain.handle("awefork:roundsList", async () => roundsStore.list());
+    ipcMain.handle("awefork:roundsSave", async (_event: IpcMainInvokeEvent, value: unknown) => {
+      // The file is untrusted input on the way back: validate before writing
+      // so a renderer bug (or a stale build) cannot persist a malformed round.
+      const record = normalizeRoundRecord(value);
+      if (!record) return false;
+      await roundsStore.save(record);
+      return true;
+    });
   }
 
   ipcMain.handle("awefork:setTheme", (_event: IpcMainInvokeEvent, value: unknown) => {
