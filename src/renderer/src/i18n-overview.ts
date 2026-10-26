@@ -58,6 +58,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
   // ── list ────────────────────────────────────────────────────────────────
   "overview.empty": { zh: "没有符合条件的会话", en: "No sessions match" },
   "overview.clearFilters": { zh: "清除筛选", en: "Clear filters" },
+  "overview.selectRow": { zh: "选择这条会话", en: "Select this session" },
+  "overview.selectAllVisible": { zh: "全选当前列表", en: "Select all listed" },
+  "overview.markAllSeen": { zh: "全部标记已查看", en: "Mark all as seen" },
+  "overview.selectedCount": { zh: "已选 {n} 项", en: "{n} selected" },
+  "overview.clearSelection": { zh: "取消选择", en: "Clear selection" },
   "overview.remoteFailed": {
     zh: "{agents} 的会话列表暂时读不到",
     en: "Couldn't list sessions for {agents}",
@@ -86,8 +91,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
 
   // ── footer + errors ─────────────────────────────────────────────────────
   "overview.footer": {
-    zh: "单击看摘要 · 双击或点 ↗ 跳转 · Esc 收起",
-    en: "Click for a summary · double-click or ↗ to jump · Esc closes",
+    zh: "单击看摘要 · ⌘点击多选 · 双击或 ↗ 跳转 · Esc 收起",
+    en: "Click for a summary · ⌘-click to multi-select · double-click or ↗ to jump · Esc closes",
   },
   "overview.jumpSwitchFailed": { zh: "无法切换到 {backend}", en: "Couldn't switch to {backend}" },
   "overview.jumpWindowFailed": {

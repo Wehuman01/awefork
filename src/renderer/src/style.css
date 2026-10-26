@@ -7032,7 +7032,7 @@ code.md-code {
 .float-column-labels,
 .float-session-row {
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) 74px 132px 22px;
+  grid-template-columns: 18px minmax(190px, 1fr) 74px 132px 22px;
   gap: 9px;
   align-items: center;
 }
@@ -7065,7 +7065,7 @@ code.md-code {
 /* The row's own button owns the three data columns; the chevron beside it
    carries the one-click jump, so the two never share a hit area. */
 .float-session-main {
-  grid-column: 1 / 4;
+  grid-column: 2 / 5;
   display: grid;
   grid-template-columns: minmax(190px, 1fr) 74px 132px;
   gap: 9px;
@@ -7074,12 +7074,56 @@ code.md-code {
   text-align: left;
 }
 
+/* The multi-select checkbox: a button that reads as a checkbox. The check
+   glyph only paints when selected, so an unchecked row stays quiet. */
+.row-check,
+.labels-check {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: transparent;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.row-check:hover,
+.labels-check:hover {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.row-check.checked,
+.labels-check.checked {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.labels-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+
 .float-session-row:hover {
   background: var(--bg);
   border-color: var(--line);
 }
 
 .float-session-row.selected {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+/* A checked row reads like a selected one; the checkbox itself is what tells
+   "summary open" from "in the multi-selection". */
+.float-session-row.checked {
   background: var(--primary-soft);
   border-color: var(--primary-border);
 }
@@ -7502,6 +7546,72 @@ code.md-code {
   color: var(--ink-faint);
 }
 
+.footer-hint {
+  min-width: 0;
+}
+
+/* The bulk action sits at the footer's right edge even when it is the only
+   child (nothing is selected). */
+.mark-all-seen {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--primary-border);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--primary-deep);
+  white-space: nowrap;
+}
+
+.mark-all-seen:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.float-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.float-bulk > b {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.float-bulk > button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--primary-deep);
+  white-space: nowrap;
+}
+
+.float-bulk > button:hover:not(:disabled) {
+  background: var(--primary-soft);
+}
+
+.float-bulk > button.bulk-mark {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.float-bulk > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.float-bulk small {
+  font-weight: 700;
+  opacity: 0.75;
+}
+
 .overview-float-enter-active,
 .overview-float-leave-active {
   transition:
@@ -7518,11 +7628,11 @@ code.md-code {
 @container (max-width: 560px) {
   .float-column-labels,
   .float-session-row {
-    grid-template-columns: minmax(140px, 1fr) 70px 22px;
+    grid-template-columns: 18px minmax(140px, 1fr) 70px 22px;
   }
 
   .float-session-main {
-    grid-column: 1 / 3;
+    grid-column: 2 / 4;
     grid-template-columns: minmax(140px, 1fr) 70px;
   }
 

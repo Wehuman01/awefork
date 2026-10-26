@@ -107,9 +107,10 @@ export function overviewModelLabel(model: OverviewModel | null): string | null {
 
 /**
  * The model of the most recent turn: the last row that reports one, whichever
- * role it is. A user row carries the model its run was configured with, so a
- * session mid-first-turn still names its model; an assistant row carries the
- * model that produced it. Sessions with no model-bearing row report none.
+ * role it is. In practice the backend reports it on assistant rows (opencode's
+ * user rows carry no model), so a session whose first run has not answered yet
+ * shows no chip rather than guessing — the same "no evidence, no claim" rule
+ * the status projection keeps. Sessions with no model-bearing row report none.
  */
 export function lastModelOfMessages(
   messages: readonly {
@@ -273,6 +274,56 @@ export function matchesOverviewFilter(row: OverviewRow, filter: OverviewFilter):
 /** True when the row belongs to the selected agent (or every agent). */
 export function matchesOverviewAgent(row: OverviewRow, agent: "all" | BackendId): boolean {
   return agent === "all" || row.backend === agent;
+}
+
+/**
+ * The rows a bulk "mark as seen" covers: a result nobody has looked at yet, or
+ * a failure that is still lit. Waiting, running, unknown and idle rows are
+ * excluded — nothing has been recorded for them to see, and marking them would
+ * claim a result that does not exist.
+ */
+export function isOverviewMarkable(row: OverviewRow): boolean {
+  return row.status === "unread" || row.status === "failed";
+}
+
+/** The markable rows among a list, in list order. */
+export function overviewMarkableRows(rows: readonly OverviewRow[]): OverviewRow[] {
+  return rows.filter(isOverviewMarkable);
+}
+
+/**
+ * Toggle one key in the panel's multi-selection. A pure fold over the key set,
+ * so the row checkbox, ⌘-click and the header checkbox all share one rule.
+ */
+export function toggleOverviewSelection(selected: ReadonlySet<string>, key: string): Set<string> {
+  const next = new Set(selected);
+  if (!next.delete(key)) next.add(key);
+  return next;
+}
+
+/**
+ * Shift-click range: every key between the anchor and the target in list order,
+ * added to the selection. An anchor that is no longer listed degrades to a
+ * plain toggle rather than selecting nothing — the gesture still lands on the
+ * row the user aimed at.
+ */
+export function extendOverviewSelection(
+  selected: ReadonlySet<string>,
+  keys: readonly string[],
+  anchorKey: string,
+  targetKey: string,
+): Set<string> {
+  const from = keys.indexOf(anchorKey);
+  const to = keys.indexOf(targetKey);
+  if (from < 0 || to < 0) return toggleOverviewSelection(selected, targetKey);
+  const next = new Set(selected);
+  const low = Math.min(from, to);
+  const high = Math.max(from, to);
+  for (let index = low; index <= high; index += 1) {
+    const key = keys[index];
+    if (key !== undefined) next.add(key);
+  }
+  return next;
 }
 
 /** Per-status counts for the panel's tabs and the trigger's stats. */

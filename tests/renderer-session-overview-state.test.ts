@@ -521,6 +521,63 @@ describe("overview rows over the store", () => {
   });
 });
 
+describe("overview bulk mark-seen", () => {
+  it("retires every listed row's result in one call", async () => {
+    const h = await bootState();
+    // The panel's first refresh is what lists the other agent's sessions.
+    h.state.openOverviewPanel();
+    await vi.advanceTimersByTimeAsync(0);
+    h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.send("opencode", { type: "session.idle", sessionId: "s1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    h.send("codex", { type: "message.started", sessionId: "c1", messageId: "m2" });
+    h.send("codex", { type: "session.idle", sessionId: "c1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("unread");
+    expect(rowOf(h, "codex", "c1")?.status).toBe("unread");
+
+    const markSeen = vi.fn(h.api.overviewMarkSeen);
+    h.api.overviewMarkSeen = markSeen;
+    await h.state.markOverviewRowsSeen([
+      { backend: "opencode", sessionId: "s1" },
+      { backend: "codex", sessionId: "c1" },
+    ]);
+
+    expect(
+      markSeen.mock.calls.map(([backend, sessionId]) => `${backend}:${sessionId}`).sort(),
+    ).toEqual(["codex:c1", "opencode:s1"]);
+    expect(h.store.overviewRead["opencode:s1"]?.seen).toBe(1);
+    expect(h.store.overviewRead["codex:c1"]?.seen).toBe(1);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("read");
+    expect(rowOf(h, "codex", "c1")?.status).toBe("read");
+  });
+
+  it("keeps marking the rest when one row's ledger write fails", async () => {
+    const h = await bootState();
+    await h.api.overviewRecordSettle("opencode", "s1", false);
+    await h.api.overviewRecordSettle("codex", "c1", false);
+    const api = (globalThis as unknown as { window: { awefork: AweforkApi } }).window.awefork;
+    const original = api.overviewMarkSeen;
+    api.overviewMarkSeen = async (backend, sessionId, upTo) => {
+      if (backend === "codex") throw new Error("main gone");
+      return original(backend, sessionId, upTo);
+    };
+
+    await h.state.markOverviewRowsSeen([
+      { backend: "opencode", sessionId: "s1" },
+      { backend: "codex", sessionId: "c1" },
+    ]);
+
+    // The reachable row is retired for real…
+    expect(h.store.overviewRead["opencode:s1"]?.seen).toBe(1);
+    expect(rowOf(h, "opencode", "s1")?.status).toBe("read");
+    // …and the unreachable one keeps the legacy local fallback a later boot
+    // merges back, exactly like a single-row mark over a dead main process.
+    const fallback = JSON.parse(localStorage.getItem("awefork:overview-read") ?? "{}");
+    expect(fallback["codex:c1"]?.seen).toBe(1);
+  });
+});
+
 describe("overview navigation", () => {
   it("jumps across agents, closes the panel and marks the result seen", async () => {
     const h = await bootState();

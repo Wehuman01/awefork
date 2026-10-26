@@ -6948,6 +6948,19 @@ export async function markOverviewSeen(
   }
 }
 
+/**
+ * Advance the seen watermark for many sessions at once — the overview panel's
+ * bulk "mark as seen". Every row runs the same single-row write the summary's
+ * button performs: the optimistic paints chain in call order, the IPC writes
+ * are independent, and one row's failure (kept as a legacy local fallback
+ * inside markOverviewSeen) never blocks the others.
+ */
+export async function markOverviewRowsSeen(
+  rows: readonly { backend: BackendId; sessionId: string }[],
+): Promise<void> {
+  await Promise.all(rows.map((row) => markOverviewSeen(row.backend, row.sessionId)));
+}
+
 function applyOverviewUpdate(update: OverviewReadUpdate): void {
   if (!overviewSnapshotReady) {
     pendingOverviewUpdates.push(update);

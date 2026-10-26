@@ -62,6 +62,17 @@
       </div>
 
       <div class="float-column-labels">
+        <!-- Header checkbox: one click takes every listed row into the
+             multi-selection, so a bulk mark can start from "everything" and
+             subtract the few the user still wants to open. -->
+        <button
+          type="button"
+          class="labels-check"
+          :class="{ checked: allVisibleChecked }"
+          :aria-pressed="allVisibleChecked"
+          :title="t('overview.selectAllVisible')"
+          @click="toggleSelectAllVisible"
+        >✓</button>
         <span>{{ t("overview.colSession") }}</span>
         <span>{{ t("overview.colStatus") }}</span>
         <span>{{ t("overview.colActivity") }}</span>
@@ -75,13 +86,25 @@
           :class="{
             selected: store.overview.selectedKey === rowKey(row),
             current: isCurrent(row),
+            checked: isChecked(row),
           }"
         >
+          <!-- Multi-select checkbox. A sibling of the row's main button, never
+               inside it: the row stays one hit area for the summary, and the
+               checkbox is its own control for keyboard and screen readers. -->
+          <button
+            type="button"
+            class="row-check"
+            :class="{ checked: isChecked(row) }"
+            :aria-pressed="isChecked(row)"
+            :title="t('overview.selectRow')"
+            @click.stop="toggleCheck(row, $event)"
+          >✓</button>
           <button
             type="button"
             class="float-session-main"
             :aria-pressed="store.overview.selectedKey === rowKey(row)"
-            @click="selectOverviewRow(row.backend, row.session.id)"
+            @click="onRowClick(row, $event)"
             @dblclick="jump(row)"
             @keydown.enter.prevent="jump(row)"
           >
@@ -237,7 +260,27 @@
       </div>
 
       <footer class="float-footer">
-        <span>{{ t("overview.footer") }}</span>
+        <span v-if="checkedRows.length === 0" class="footer-hint">{{ t("overview.footer") }}</span>
+        <!-- A selection replaces the hint: the count, the bulk mark (scoped to
+             the rows that actually carry an unseen result) and the way out. -->
+        <span v-else class="float-bulk">
+          <b>{{ t("overview.selectedCount", { n: checkedRows.length }) }}</b>
+          <button
+            type="button"
+            class="bulk-mark"
+            :disabled="checkedMarkable.length === 0"
+            @click="markCheckedSeen"
+          >{{ t("overview.markSeen") }}<small v-if="checkedMarkable.length > 0"> · {{ checkedMarkable.length }}</small></button>
+          <button type="button" class="bulk-clear" @click="clearChecked">{{ t("overview.clearSelection") }}</button>
+        </span>
+        <!-- No selection: one click retires everything the current filters
+             list as a new result or a lit failure. -->
+        <button
+          v-if="checkedRows.length === 0 && markableVisible.length > 0"
+          type="button"
+          class="mark-all-seen"
+          @click="markVisibleSeen"
+        >{{ t("overview.markAllSeen") }} · {{ markableVisible.length }}</button>
       </footer>
     </section>
   </Transition>
@@ -250,6 +293,8 @@ import type { AgentInteractionRequest, ChatMessage } from "../../../shared/types
 import { relTime } from "../format";
 import { t } from "../i18n";
 import {
+  extendOverviewSelection,
+  isOverviewMarkable,
   matchesOverviewAgent,
   matchesOverviewFilter,
   matchesOverviewQuery,
@@ -257,15 +302,18 @@ import {
   type OverviewRow,
   type OverviewSummary,
   overviewKey,
+  overviewMarkableRows,
   overviewModelLabel,
   projectOf,
   summarizeMessages,
+  toggleOverviewSelection,
 } from "../session-overview";
 import {
   clearOverviewSelection,
   closeOverviewPanel,
   ensureOverviewModels,
   jumpToOverviewSession,
+  markOverviewRowsSeen,
   markOverviewSeen,
   overviewAgents,
   overviewPendingAsk,
@@ -292,6 +340,14 @@ const placed = ref(false);
 const query = ref("");
 const agent = ref<"all" | BackendId>("all");
 const searchInput = ref<HTMLInputElement | null>(null);
+
+/**
+ * The multi-selection: `${backend}:${sessionId}` keys the user checked, plus
+ * the last key a check gesture touched (shift-click ranges from there). Both
+ * are panel-local UI state — the ledger, not this set, decides what is unread.
+ */
+const checked = ref<Set<string>>(new Set());
+const anchorKey = ref<string | null>(null);
 
 let drag: { startX: number; startY: number; originX: number; originY: number } | null = null;
 
@@ -352,6 +408,89 @@ const selectedRow = computed<OverviewRow | null>(() => {
 
 function rowKey(row: OverviewRow): string {
   return overviewKey(row.backend, row.session.id);
+}
+
+// ── multi-select + bulk mark-seen ───────────────────────────────────────
+
+/** The listed rows that carry an unseen result or a lit failure. */
+const markableVisible = computed(() => overviewMarkableRows(visibleRows.value));
+
+/**
+ * The checked rows that still exist, from the full row set rather than the
+ * filtered view: a check is a decision about a session, so hiding it behind a
+ * search must not silently drop it from a bulk action.
+ */
+const checkedRows = computed(() =>
+  overviewRows.value.filter((row) => checked.value.has(rowKey(row))),
+);
+
+/** Of those, the ones a bulk mark can actually retire. */
+const checkedMarkable = computed(() => checkedRows.value.filter(isOverviewMarkable));
+
+const allVisibleChecked = computed(
+  () => visibleRows.value.length > 0 && visibleRows.value.every((row) => isChecked(row)),
+);
+
+function isChecked(row: OverviewRow): boolean {
+  return checked.value.has(rowKey(row));
+}
+
+function toggleCheck(row: OverviewRow, event: MouseEvent): void {
+  const key = rowKey(row);
+  if (event.shiftKey && anchorKey.value !== null) {
+    checked.value = extendOverviewSelection(
+      checked.value,
+      visibleRows.value.map(rowKey),
+      anchorKey.value,
+      key,
+    );
+  } else {
+    checked.value = toggleOverviewSelection(checked.value, key);
+  }
+  anchorKey.value = key;
+}
+
+/** Plain click expands the summary; ⌘-click (ctrl off macOS) or shift-click selects instead. */
+function onRowClick(row: OverviewRow, event: MouseEvent): void {
+  if (event.metaKey || event.ctrlKey || event.shiftKey) {
+    toggleCheck(row, event);
+    return;
+  }
+  selectOverviewRow(row.backend, row.session.id);
+}
+
+function toggleSelectAllVisible(): void {
+  if (allVisibleChecked.value) {
+    const visible = new Set(visibleRows.value.map(rowKey));
+    checked.value = new Set([...checked.value].filter((key) => !visible.has(key)));
+    anchorKey.value = null;
+    return;
+  }
+  const next = new Set(checked.value);
+  for (const key of visibleRows.value.map(rowKey)) next.add(key);
+  checked.value = next;
+}
+
+function markCheckedSeen(): void {
+  markRowsSeen(checkedMarkable.value);
+  clearChecked();
+}
+
+function markVisibleSeen(): void {
+  markRowsSeen(markableVisible.value);
+}
+
+/** Rows → the ledger write's minimal shape; one call per row, fired together. */
+function markRowsSeen(rows: readonly OverviewRow[]): void {
+  if (rows.length === 0) return;
+  void markOverviewRowsSeen(
+    rows.map((row) => ({ backend: row.backend, sessionId: row.session.id })),
+  );
+}
+
+function clearChecked(): void {
+  checked.value = new Set();
+  anchorKey.value = null;
 }
 
 /** The session the canvas is showing right now — labelled, never re-ordered. */
@@ -673,6 +812,7 @@ watch(
   (open) => {
     if (!open) {
       query.value = "";
+      clearChecked();
       return;
     }
     // First open centers under the trigger; later opens keep the position the

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   compareOverviewRows,
+  extendOverviewSelection,
   lastModelOfMessages,
   markOverviewSeen,
   matchesOverviewAgent,
@@ -16,6 +17,7 @@ import {
   type OverviewRow,
   overviewCounts,
   overviewKey,
+  overviewMarkableRows,
   overviewModelLabel,
   overviewModelsToFetch,
   projectOf,
@@ -23,6 +25,7 @@ import {
   pruneOverviewLedger,
   recordOverviewSettle,
   summarizeMessages,
+  toggleOverviewSelection,
 } from "../src/renderer/src/session-overview";
 import type { BackendId } from "../src/shared/backend";
 import { OverviewLedgerStore, readOverviewLedger } from "../src/shared/overview-ledger";
@@ -207,7 +210,7 @@ describe("overview model projection", () => {
     expect(overviewModelLabel({ modelId: null, variant: "high" })).toBeNull();
   });
 
-  it("reads the newest model-bearing row, user or assistant", () => {
+  it("reads the newest model-bearing row, and claims none without evidence", () => {
     const rowOf = (role: "user" | "assistant", modelId: string | null) => ({
       role,
       modelId,
@@ -217,11 +220,9 @@ describe("overview model projection", () => {
       modelId: "b/two",
       variant: null,
     });
-    // A session whose first turn is still running: only the user row carries it.
-    expect(lastModelOfMessages([rowOf("user", "a/one")])).toEqual({
-      modelId: "a/one",
-      variant: null,
-    });
+    // opencode's user rows carry no model, so a session whose first run has not
+    // answered yet has nothing to show — no chip, never a guess.
+    expect(lastModelOfMessages([rowOf("user", null)])).toBeNull();
     // A model-less tail (an ask, a tool row) falls back to the last real one.
     expect(lastModelOfMessages([rowOf("assistant", "a/one"), rowOf("assistant", null)])).toEqual({
       modelId: "a/one",
@@ -661,5 +662,61 @@ describe("summary extraction", () => {
 
   it("stays empty for an empty session", () => {
     expect(summarizeMessages([])).toEqual({ prompt: "", reply: "" });
+  });
+});
+
+describe("overview bulk mark-seen and multi-select", () => {
+  const rows = [
+    row("opencode", "a", "unread"),
+    row("codex", "b", "failed"),
+    row("opencode", "c", "running"),
+    row("pi", "d", "waiting"),
+    row("zcode", "e", "unknown"),
+    row("opencode", "f", "read"),
+    row("opencode", "g", "idle"),
+  ];
+  const keyA = overviewKey("opencode", "a");
+  const keyB = overviewKey("codex", "b");
+  const keyC = overviewKey("opencode", "c");
+  const keyD = overviewKey("pi", "d");
+  const keyG = overviewKey("opencode", "g");
+
+  it("marks only rows that carry an unseen result or a lit failure", () => {
+    // A running, waiting, unknown, read or idle row has no recorded result to
+    // see; marking it would claim one that does not exist.
+    expect(overviewMarkableRows(rows).map((r) => overviewKey(r.backend, r.session.id))).toEqual([
+      keyA,
+      keyB,
+    ]);
+  });
+
+  it("toggles one key in and out of the selection", () => {
+    const once = toggleOverviewSelection(new Set(), keyA);
+    expect([...once]).toEqual([keyA]);
+    expect([...toggleOverviewSelection(once, keyA)]).toEqual([]);
+    // Toggling a second key keeps the first.
+    expect([...toggleOverviewSelection(once, keyB)].sort()).toEqual([keyA, keyB].sort());
+  });
+
+  it("adds the whole range on a shift-click, in list order", () => {
+    const keys = rows.map((r) => overviewKey(r.backend, r.session.id));
+    const selected = extendOverviewSelection(new Set(), keys, keyA, keyD);
+    expect([...selected]).toEqual([keyA, keyB, keyC, keyD]);
+    // Ranging backwards covers the same span.
+    const back = extendOverviewSelection(new Set(), keys, keyD, keyA);
+    expect([...back]).toEqual([keyA, keyB, keyC, keyD]);
+  });
+
+  it("degrades a shift-click to a toggle when the anchor left the list", () => {
+    const keys = rows.map((r) => overviewKey(r.backend, r.session.id));
+    const selected = extendOverviewSelection(new Set(), keys, "codex:vanished", keyA);
+    expect([...selected]).toEqual([keyA]);
+  });
+
+  it("keeps earlier checks when a shift-click extends the selection", () => {
+    const keys = rows.map((r) => overviewKey(r.backend, r.session.id));
+    const start = toggleOverviewSelection(new Set(), keyG);
+    const selected = extendOverviewSelection(start, keys, keyA, keyB);
+    expect([...selected].sort()).toEqual([keyA, keyB, keyG].sort());
   });
 });

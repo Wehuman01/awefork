@@ -257,6 +257,29 @@ try {
   check("panel lists sessions with no backdrop", modal.rows > 0 && !modal.backdrop, JSON.stringify(modal));
   check("panel floats inside the canvas viewport", modal.insideCanvas === true);
 
+  // Each row names the model its last turn ran on, read from messages for the
+  // backends whose listing cannot report one. The chip is text in the meta
+  // line, so it must show up without expanding anything.
+  await retry(
+    () =>
+      cdp.evaluate(
+        `document.querySelectorAll(".overview-float .float-session-model").length > 0`,
+      ),
+    10000,
+    "overview model chips",
+  );
+  const chips = await cdp.evaluate(`(() => {
+    const labels = [...document.querySelectorAll(".overview-float .float-session-model")]
+      .map((node) => node.textContent.trim())
+      .filter(Boolean);
+    return { count: labels.length, first: labels[0] ?? "" };
+  })()`);
+  check(
+    "rows name the model their last turn ran on",
+    chips.count > 0 && chips.first.length > 0,
+    JSON.stringify(chips),
+  );
+
   // A single click is a summary, never a navigation: the canvas selection and
   // the sidebar's active row must both stay put.
   const before = await cdp.evaluate(`({
@@ -304,6 +327,83 @@ try {
     "chevron jump",
   );
   check("row chevron jumps straight to the session", true);
+
+  // 4c. Multi-select and bulk mark-seen: a fresh run leaves a new result, the
+  //     row checkboxes take rows into a selection (without opening a
+  //     summary), the header checkbox takes the whole list, and one bulk mark
+  //     retires every selected new result — none of them opened.
+  await retry(() => cdp.evaluate(fillTextarea(".chat-input textarea", "gui-smoke 批量标记")), 5000, "composer fill");
+  await cdp.evaluate(`document.querySelector(".chat-input .send").click()`);
+  await retry(async () => {
+    const idle = await cdp.evaluate(`Boolean(document.querySelector(".chat-input .send"))`);
+    if (!idle) throw new Error("run still going");
+  }, 30_000, "bulk-mark run settled");
+  check("second mock run settles with a new result", true);
+
+  await cdp.evaluate(`document.querySelector(".overview-trigger .trigger-name").click()`);
+  await retry(
+    () => cdp.evaluate(`Boolean(document.querySelector(".overview-float .row-check"))`),
+    5000,
+    "overview panel reopened for multi-select",
+  );
+  const boxes = await cdp.evaluate(`({
+    rows: document.querySelectorAll(".overview-float .float-session-row").length,
+    checks: document.querySelectorAll(".overview-float .row-check").length,
+  })`);
+  check(
+    "every row carries a multi-select checkbox",
+    boxes.rows > 0 && boxes.checks === boxes.rows,
+    JSON.stringify(boxes),
+  );
+
+  await cdp.evaluate(`document.querySelector(".overview-float .row-check").click()`);
+  const selectedOne = await cdp.evaluate(`({
+    checked: document.querySelectorAll(".overview-float .float-session-row.checked").length,
+    bulk: Boolean(document.querySelector(".overview-float .float-bulk")),
+    summary: Boolean(document.querySelector(".overview-float .float-summary")),
+  })`);
+  check(
+    "row checkbox selects without opening a summary",
+    selectedOne.checked === 1 && selectedOne.bulk && !selectedOne.summary,
+    JSON.stringify(selectedOne),
+  );
+
+  await cdp.evaluate(`document.querySelector(".overview-float .labels-check").click()`);
+  const selectedAll = await cdp.evaluate(`({
+    checked: document.querySelectorAll(".overview-float .float-session-row.checked").length,
+    rows: document.querySelectorAll(".overview-float .float-session-row").length,
+  })`);
+  check(
+    "header checkbox takes the whole list into the selection",
+    selectedAll.rows > 1 && selectedAll.checked === selectedAll.rows,
+    JSON.stringify(selectedAll),
+  );
+
+  const markable = await cdp.evaluate(
+    `Number(document.querySelector(".overview-float .bulk-mark")?.textContent.match(/·\\s*(\\d+)/)?.[1] ?? 0)`,
+  );
+  await cdp.evaluate(`document.querySelector(".overview-float .bulk-mark").click()`);
+  await retry(async () => {
+    const after = await cdp.evaluate(`({
+      bulk: Boolean(document.querySelector(".overview-float .float-bulk")),
+      unread: document.querySelectorAll(".overview-float .status-badge.unread").length,
+      failed: document.querySelectorAll(".overview-float .status-badge.failed").length,
+    })`);
+    if (after.bulk || after.unread > 0 || after.failed > 0) {
+      throw new Error(`new results survived the bulk mark: ${JSON.stringify(after)}`);
+    }
+  }, 10_000, "bulk mark-seen");
+  check(
+    "one bulk mark retires every selected new result",
+    markable >= 1,
+    `markable=${markable}`,
+  );
+
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(() => cdp.evaluate(`!document.querySelector(".overview-float")`), 5000, "panel closed after bulk mark");
+  check("panel collapses after the bulk mark", true);
+
   // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(
