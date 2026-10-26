@@ -266,4 +266,28 @@ describe("canvas tabs", () => {
     state.setActiveCanvasTabView({ scale: 0.8, tx: 120, ty: -40 });
     expect(state.store.canvasTabViews[id]).toEqual({ scale: 0.8, tx: 120, ty: -40 });
   });
+
+  it("reorders the strip by drag, keeping the active tab's selection", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a");
+    const [first, second] = state.store.canvasTabs;
+    // Drag the second tab in front of the first: the strip order changes, the
+    // canvas does not — the active tab keeps showing story-a.
+    state.reorderCanvasTab(second.id, first.id);
+    expect(state.store.canvasTabs.map((t) => t.id)).toEqual([second.id, first.id]);
+    expect(state.store.activeCanvasTabId).toBe(second.id);
+    expect(state.store.selectedId).toBe("story-a");
+  });
+
+  it("appends a dragged tab at the end and ignores unknown ids", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a");
+    const [first, second] = state.store.canvasTabs;
+    state.reorderCanvasTab(first.id, null);
+    expect(state.store.canvasTabs.map((t) => t.id)).toEqual([second.id, first.id]);
+    // An unknown id, or a tab dropped onto itself, leaves the strip alone.
+    state.reorderCanvasTab("tab-404", first.id);
+    state.reorderCanvasTab(second.id, second.id);
+    expect(state.store.canvasTabs.map((t) => t.id)).toEqual([second.id, first.id]);
+  });
 });

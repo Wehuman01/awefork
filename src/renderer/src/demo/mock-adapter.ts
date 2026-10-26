@@ -13,7 +13,7 @@
  * production builds (import.meta.env.DEV is false).
  */
 
-import type { BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
+import type { AgentNavigateRequest, BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
 import {
   mergeOverviewLedger,
@@ -512,6 +512,9 @@ export function installMockAdapter(): void {
   const demoUnknown = new Map<string, string>();
   const demoObservedAt: Record<string, number> = {};
   const demoScannedAt: Record<string, number> = {};
+  // Demo agent-navigate subscribers: the demo has no second window to focus,
+  // so the request resolves ok and no frame is broadcast.
+  const navigateHandlers = new Set<(request: AgentNavigateRequest) => void>();
   const ledgerHandlers = new Set<
     (update: {
       sequence: number;
@@ -1173,6 +1176,11 @@ export function installMockAdapter(): void {
     onOverviewRead: (handler) => {
       ledgerHandlers.add(handler);
       return () => ledgerHandlers.delete(handler);
+    },
+    requestAgentNavigate: async () => ({ ok: true }),
+    onAgentNavigate: (handler) => {
+      navigateHandlers.add(handler);
+      return () => navigateHandlers.delete(handler);
     },
   };
 

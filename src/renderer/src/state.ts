@@ -1911,6 +1911,23 @@ export async function closeCanvasTab(tabId: string): Promise<void> {
   if (next) await activateCanvasTab(next.id);
 }
 
+/**
+ * Drag-reorder the strip: move `tabId` in front of `beforeTabId` (null appends
+ * at the end). The active tab keeps its selection and camera — only the strip
+ * order changes, so a reorder never disturbs what the canvas shows.
+ */
+export function reorderCanvasTab(tabId: string, beforeTabId: string | null): void {
+  const from = state.canvasTabs.findIndex((t) => t.id === tabId);
+  if (from < 0 || tabId === beforeTabId) return;
+  const [moved] = state.canvasTabs.splice(from, 1);
+  if (!moved) return;
+  const at =
+    beforeTabId === null
+      ? state.canvasTabs.length
+      : state.canvasTabs.findIndex((t) => t.id === beforeTabId);
+  state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at, 0, moved);
+}
+
 /** Live camera write from the canvas: park the view on the active tab. */
 export function setActiveCanvasTabView(view: CanvasTabView): void {
   const id = state.activeCanvasTabId;

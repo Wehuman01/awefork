@@ -412,6 +412,20 @@ export async function closeFileTab(tabId: string): Promise<void> {
   }
 }
 
+/**
+ * Drag-reorder the strip: move a tab in front of another (null appends at the
+ * end). The active tab keeps its browsing position — only the order changes.
+ */
+export function reorderFileTab(tabId: string, beforeTabId: string | null): void {
+  const from = files.tabs.findIndex((tab) => tab.id === tabId);
+  if (from < 0 || tabId === beforeTabId) return;
+  const [moved] = files.tabs.splice(from, 1);
+  if (!moved) return;
+  const at =
+    beforeTabId === null ? files.tabs.length : files.tabs.findIndex((t) => t.id === beforeTabId);
+  files.tabs.splice(at < 0 ? files.tabs.length : at, 0, moved);
+}
+
 /** Tab title: the directory name, or its parent's when two share a name. */
 export function fileTabLabel(tab: FileTab): string {
   const dir = tab.browsing;
