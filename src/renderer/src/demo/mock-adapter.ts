@@ -1047,8 +1047,6 @@ export function installMockAdapter(): void {
     openAgentWindow: async () => ({ ok: true }),
     // Single-window demo: navigations land in the demo tab itself, nothing
     // to route across windows — the request is a focused no-op.
-    requestAgentNavigate: async () => ({ ok: true }),
-    onAgentNavigate: () => () => {},
     agentNavigateReady: async () => false,
     capabilities: async () => ({
       deleteMessage: true,

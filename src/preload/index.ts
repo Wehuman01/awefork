@@ -299,17 +299,6 @@ const api: AweforkApi = {
     ipcRenderer.on("awefork:overview-read", listener);
     return () => ipcRenderer.removeListener("awefork:overview-read", listener);
   },
-  requestAgentNavigate: (
-    backend: BackendId,
-    sessionId: string,
-  ): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke("awefork:requestAgentNavigate", backend, sessionId),
-  onAgentNavigate: (handler: (request: AgentNavigateRequest) => void): (() => void) => {
-    const listener = (_event: unknown, payload: unknown) =>
-      handler(payload as AgentNavigateRequest);
-    ipcRenderer.on("awefork:agent-navigate", listener);
-    return () => ipcRenderer.removeListener("awefork:agent-navigate", listener);
-  },
   roundsList: (): Promise<RoundRecord[]> => ipcRenderer.invoke("awefork:roundsList"),
   roundsSave: (record: RoundRecord): Promise<boolean> =>
     ipcRenderer.invoke("awefork:roundsSave", record),
