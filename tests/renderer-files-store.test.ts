@@ -416,14 +416,13 @@ describe("preview", () => {
 
   it("keeps reading mode across file switches and drops it with the preview", async () => {
     const h = await bootFiles();
-    // The default double-click hands the file to the OS; reading mode is
-    // about the in-app preview, so the setting is switched for this case.
-    const { settings } = await import("../src/renderer/src/settings");
-    settings.files.openOnDouble = "preview";
     await h.mod.browseTo("/root");
-    // A double-click reads; a later click in the same tab must not unread.
+    // A double-click only quick-previews; reading mode is entered from the
+    // preview itself (⤢), so that is how this reader starts.
     await h.mod.openEntry(entry("a.md"));
+    h.mod.enterReading();
     expect(active(h.mod).reading).toBe(true);
+    // A later click in the same tab must not unread.
     await h.mod.selectOrPreviewEntry(entry("b.md"));
     expect(active(h.mod).reading).toBe(true);
     // Another tab starts unread.
@@ -437,7 +436,24 @@ describe("preview", () => {
     // Entering needs something to read.
     h.mod.enterReading();
     expect(active(h.mod).reading).toBe(false);
+  });
+
+  it("a double-click quick-previews a file and keeps the listing beside it", async () => {
+    const h = await bootFiles();
+    await h.mod.browseTo("/root");
+    await h.mod.openEntry(entry("a.md"));
+    // The preview lands; reading mode (the folded-away listing) is not
+    // entered by a double-click — only the ⤢ toggle does that.
+    await vi.waitFor(() => expect(active(h.mod).preview?.path).toBe("/root/a.md"));
+    expect(active(h.mod).reading).toBe(false);
+    // The setting still hands the file to the OS when asked to.
+    const { settings } = await import("../src/renderer/src/settings");
     settings.files.openOnDouble = "system";
+    h.mod.clearPreview();
+    await h.mod.openEntry(entry("b.md"));
+    expect(h.api.openPath).toHaveBeenCalledWith("/root/b.md");
+    expect(active(h.mod).preview).toBeNull();
+    settings.files.openOnDouble = "preview";
   });
 
   it("retires an in-flight preview when the listing changes directory", async () => {
@@ -499,10 +515,9 @@ describe("preview", () => {
     const h = await bootFiles({
       listings: { "/a": listing("/a", [entry("gone.md")]) },
     });
-    const { settings } = await import("../src/renderer/src/settings");
-    settings.files.openOnDouble = "preview";
     await h.mod.browseTo("/a");
     await h.mod.openEntry(entry("gone.md"));
+    h.mod.enterReading();
     expect(active(h.mod).reading).toBe(true);
     h.api.listDir.mockResolvedValueOnce({ ok: false, error: { code: "permission" } });
     await h.mod.refresh();
@@ -511,7 +526,6 @@ describe("preview", () => {
     expect(active(h.mod).preview).toBeNull();
     // The folded-away listing must come back with the preview it was reading.
     expect(active(h.mod).reading).toBe(false);
-    settings.files.openOnDouble = "system";
   });
 
   it("drops reading mode when a navigation loses the previewed file", async () => {
@@ -521,17 +535,15 @@ describe("preview", () => {
         "/a/b": listing("/a/b", []),
       },
     });
-    const { settings } = await import("../src/renderer/src/settings");
-    settings.files.openOnDouble = "preview";
     await h.mod.browseTo("/a");
     await h.mod.openEntry(entry("readme.md"));
+    h.mod.enterReading();
     expect(active(h.mod).reading).toBe(true);
     // The new directory does not list the file, so the preview goes — and
     // the reader with it, or the middle column would hold neither.
     await h.mod.browseTo("/a/b");
     expect(active(h.mod).preview).toBeNull();
     expect(active(h.mod).reading).toBe(false);
-    settings.files.openOnDouble = "system";
   });
 
   it("a dock jump lands the listing on the file's own directory", async () => {
@@ -560,10 +572,10 @@ describe("preview", () => {
         "/a": listing("/a", [entry("one.md"), entry("sub", true), entry("two.md")]),
       },
     });
-    const { settings } = await import("../src/renderer/src/settings");
-    settings.files.openOnDouble = "preview";
     await h.mod.browseTo("/a");
     await h.mod.openEntry(entry("one.md"));
+    // Reading is entered from the preview (⤢), not by the double-click.
+    h.mod.enterReading();
     expect(active(h.mod).reading).toBe(true);
     // Directories are skipped and the reader keeps reading.
     h.mod.stepReading(1);
@@ -576,6 +588,7 @@ describe("preview", () => {
     h.mod.stepReading(-1);
     expect(active(h.mod).selectedPath).toBe("/root/one.md");
     // A step reads the neighbour even when a plain click would only select.
+    const { settings } = await import("../src/renderer/src/settings");
     settings.files.openOnDouble = "system";
     h.mod.stepReading(1);
     await vi.waitFor(() => expect(active(h.mod).preview?.path).toBe("/root/two.md"));

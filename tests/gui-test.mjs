@@ -530,6 +530,77 @@ try {
   }, 10_000, "folder unfolds in place");
   check("a folder's caret unfolds its children in place", true, JSON.stringify(unfolded));
 
+  // 4b-iii. The preview toolbar is pinned to the top of its pane: a long
+  //     file scrolls under it and the name, badges and buttons stay
+  //     reachable instead of scrolling away. The demo has no filesystem, so
+  //     the reads are handed to the IPC boundary the preview reads through;
+  //     everything above it — the pane, the sticky head, the scrolled
+  //     body — is the real component.
+  await cdp.evaluate(`(() => {
+    window.awefork.readImagePreview = async () => ({ ok: false, error: { code: "not-image" } });
+    window.awefork.readTextPreview = async (path) => ({
+      ok: true,
+      value: {
+        path,
+        text: Array.from({ length: 200 }, (_, i) => "line " + (i + 1)).join("\\n\\n"),
+        truncated: false,
+        bytes: 1400,
+      },
+    });
+    return true;
+  })()`);
+  await retry(() => cdp.evaluate(`(() => {
+    const row = [...document.querySelectorAll(".fb-row-name")].find((n) => n.textContent === "README.md");
+    if (!row) throw new Error("README.md row missing");
+    row.click();
+    return Boolean(document.querySelector(".fb-preview .fp-head"));
+  })()`), 5000, "preview opens for a text file");
+  const pinned = await retry(async () => {
+    const state = await cdp.evaluate(`(() => {
+      const pane = document.querySelector(".fb-preview");
+      const head = document.querySelector(".fb-preview .fp-head");
+      if (!pane || !head) throw new Error("preview pane missing");
+      if (pane.scrollHeight <= pane.clientHeight) throw new Error("preview pane not scrollable");
+      pane.scrollTop = 400;
+      const pr = pane.getBoundingClientRect();
+      const hr = head.getBoundingClientRect();
+      return {
+        scrollTop: pane.scrollTop,
+        position: getComputedStyle(head).position,
+        headOffset: Math.round(hr.top - pr.top),
+      };
+    })()`);
+    if (state.scrollTop < 100) throw new Error(`pane did not scroll: ${JSON.stringify(state)}`);
+    if (state.position !== "sticky" || Math.abs(state.headOffset) > 1) {
+      throw new Error(`toolbar not pinned: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "toolbar pinned while scrolling");
+  check("the preview toolbar stays pinned while the file scrolls", true, JSON.stringify(pinned));
+
+  // 4b-iv. A double-click quick-previews the file inside the app — the
+  //     same side pane a click opens, listing still beside it. It must
+  //     not fold the listing away into reading mode; that stays the ⤢
+  //     toggle's gesture.
+  await retry(() => cdp.evaluate(`(() => {
+    const row = [...document.querySelectorAll(".fb-row-name")].find((n) => n.textContent === "README.md");
+    if (!row) throw new Error("README.md row missing");
+    row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    return true;
+  })()`), 5000, "double-click dispatched");
+  const quick = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      preview: Boolean(document.querySelector(".fb-preview .fp-head")),
+      listingVisible: document.querySelector(".fb-entries")?.offsetParent !== null,
+      reading: Boolean(document.querySelector(".fb-body-reading")),
+    })`);
+    if (!state.preview || !state.listingVisible || state.reading) {
+      throw new Error(`double-click did not stay a quick preview: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "double-click stays a quick preview");
+  check("a double-click quick-previews without folding the listing away", true, JSON.stringify(quick));
+
   await retry(() => cdp.evaluate(`(() => {
     const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));
     if (!tab) throw new Error("sidebar files tab missing");

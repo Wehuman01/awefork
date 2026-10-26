@@ -703,7 +703,10 @@ export function visibleEntries(): FileEntry[] {
 /**
  * Open an entry: a directory is entered (symlinks included — readdir
  * follows them, and the displayed path stays the one that was clicked),
- * a file is previewed without being executed.
+ * a file is quick-previewed in the app without being executed. Reading
+ * mode — the listing folded away, the preview owning the middle column —
+ * stays a deliberate gesture (⤢ in the preview toolbar), so neither a
+ * double-click nor Enter on a row enters it.
  */
 export async function openEntry(entry: FileEntry): Promise<void> {
   const tab = activeTab();
@@ -715,7 +718,6 @@ export async function openEntry(entry: FileEntry): Promise<void> {
     if (tab.error?.code === "not-a-directory") {
       tab.error = null;
       await previewOnTab(tab, entry);
-      if (tab.preview?.status !== "error") tab.reading = true;
     }
     return;
   }
@@ -729,11 +731,7 @@ export async function openEntry(entry: FileEntry): Promise<void> {
       return;
     }
   }
-  // A double-click is a request to read, not just to peek: the listing
-  // folds away and the preview owns the middle column. An error pane is
-  // not something to read — it keeps the listing up instead.
   await previewOnTab(tab, entry);
-  if (tab.preview?.status !== "error") tab.reading = true;
 }
 
 /**
