@@ -1309,26 +1309,88 @@ describe("sidebar tree navigation", () => {
     await h.mod.browseTo("/a");
     await h.mod.loadTreeChildren("/a");
     // A loaded match answers for itself — no project search runs.
-    await h.mod.setTreeFilter("/a", "readme");
+    h.mod.setTreeFilter("/a", "readme");
     expect(h.mod.files.treeFilter).toBe("readme");
     expect(h.mod.treeChildrenFor("/a").map((e) => e.name)).toEqual(["readme.md"]);
     expect(h.mod.files.recursiveResults).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
     expect(h.api.searchFiles).not.toHaveBeenCalled();
     // No loaded match: the same box switches to its recursive second state.
-    await h.mod.setTreeFilter("/a", "zzz");
+    h.mod.setTreeFilter("/a", "zzz");
+    // The narrowing is instant; the search waits for the typing to settle.
+    expect(h.mod.files.treeFilter).toBe("zzz");
+    expect(h.api.searchFiles).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
     expect(h.api.searchFiles).toHaveBeenCalledWith("/a", "zzz", expect.anything());
     expect(h.mod.files.recursiveResults.map((e) => e.name)).toEqual(["hit.md"]);
   });
 
+  it("coalesces fast typing into one project search", async () => {
+    const h = await bootFiles();
+    h.mod.setTreeFilter("/a", "z");
+    h.mod.setTreeFilter("/a", "zz");
+    h.mod.setTreeFilter("/a", "zzz");
+    await vi.advanceTimersByTimeAsync(200);
+    // One walk for the settled query, not one per keystroke.
+    expect(h.api.searchFiles).toHaveBeenCalledTimes(1);
+    expect(h.api.searchFiles).toHaveBeenCalledWith("/a", "zzz", expect.anything());
+  });
+
+  it("cancels a pending search when the filter is cleared", async () => {
+    const h = await bootFiles();
+    h.mod.setTreeFilter("/a", "zzz");
+    h.mod.clearTreeFilter();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(h.api.searchFiles).not.toHaveBeenCalled();
+    expect(h.mod.files.treeFilter).toBe("");
+    expect(h.mod.files.recursiveSettled).toBe(false);
+  });
+
+  it("searches the project when the only loaded matches are hidden or ignored", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", [entry(".env"), entry("dist", true), entry("readme.md")]) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.loadTreeChildren("/a");
+    // ".env" is hidden and "dist" is on the ignore list: neither is a row any
+    // surface shows, so the loaded tree does not answer for them — the box
+    // falls through to the project search instead of silently blanking.
+    h.mod.setTreeFilter("/a", "dist");
+    expect(h.mod.treeChildrenFor("/a")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(h.api.searchFiles).toHaveBeenCalledWith("/a", "dist", expect.anything());
+    // The mock's single hit is a plain name, so the ignore filter keeps it.
+    expect(h.mod.files.recursiveResults.map((e) => e.name)).toEqual(["hit.md"]);
+  });
+
+  it("keeps the no-match answer on screen when the search finds nothing", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", [entry("readme.md")]) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.loadTreeChildren("/a");
+    h.api.searchFiles.mockResolvedValueOnce({ ok: true, value: [] });
+    h.mod.setTreeFilter("/a", "zzz");
+    await vi.advanceTimersByTimeAsync(200);
+    // An empty result is still an answer: the second state stays up with its
+    // "no match" row rather than leaving a silently blank tree.
+    expect(h.mod.files.recursiveSettled).toBe(true);
+    expect(h.mod.files.recursiveResults).toEqual([]);
+    expect(h.mod.files.recursiveLoading).toBe(false);
+    expect(h.mod.files.recursiveError).toBeNull();
+  });
+
   it("clears the filter and its second state together", async () => {
     const h = await bootFiles();
-    await h.mod.setTreeFilter("/a", "zzz");
+    h.mod.setTreeFilter("/a", "zzz");
+    await vi.advanceTimersByTimeAsync(200);
     expect(h.mod.files.recursiveResults.length).toBeGreaterThan(0);
     h.mod.clearTreeFilter();
     expect(h.mod.files.treeFilter).toBe("");
     expect(h.mod.files.recursiveResults).toEqual([]);
     expect(h.mod.files.recursiveLoading).toBe(false);
     expect(h.mod.files.recursiveError).toBeNull();
+    expect(h.mod.files.recursiveSettled).toBe(false);
   });
 
   it("previews a tree file in the browser's tab while the middle browser is on", async () => {

@@ -170,7 +170,7 @@ void initFiles();
 /** The filter box writes straight through to the store; Esc clears both. */
 const filterInput = computed({
   get: () => files.treeFilter,
-  set: (value: string) => void setTreeFilter(searchRoot.value, value),
+  set: (value: string) => setTreeFilter(searchRoot.value, value),
 });
 
 function clearFilter(): void {
@@ -182,8 +182,13 @@ const searchRoot = computed(() => store.selectedDirectory ?? files.homePath ?? n
 
 const recursiveActive = computed(() => {
   if (files.treeFilter.trim() === "") return false;
+  // A settled search that found nothing still owns the section — "no match"
+  // is an answer, and a silently blank tree is not.
   return (
-    files.recursiveLoading || files.recursiveResults.length > 0 || files.recursiveError !== null
+    files.recursiveLoading ||
+    files.recursiveSettled ||
+    files.recursiveResults.length > 0 ||
+    files.recursiveError !== null
   );
 });
 

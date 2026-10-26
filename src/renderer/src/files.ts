@@ -142,6 +142,13 @@ export const files = reactive({
   recursiveLoading: false,
   recursiveError: null as FileError | null,
   /**
+   * A project-wide search has settled for the current filter. Keeps the
+   * second state on screen when it found nothing: an empty result with no
+   * error is still an answer ("no match"), and hiding the section would
+   * leave the filtered tree silently blank.
+   */
+  recursiveSettled: false,
+  /**
    * The standalone preview: the no-browser mode's only preview, shown in
    * the middle column. A browser tab's preview lives on the tab; this one
    * exists so the sidebar can preview with no browser mounted.
@@ -1059,11 +1066,17 @@ export function isTreeNodeExpanded(dir: string): boolean {
   return files.treeExpanded[dir] === true;
 }
 
-/** True while any loaded tree node's name matches the filter. */
+/**
+ * True while any VISIBLE loaded tree node's name matches the filter. Hidden
+ * and ignored names are not rows any surface shows, so a match among them
+ * does not answer for the loaded tree — the box falls through to the
+ * project-wide search, which then reports the honest "no match" instead of
+ * silently showing nothing.
+ */
 function treeHasMatch(needle: string): boolean {
   const lower = needle.toLowerCase();
-  return Object.values(files.treeChildren).some((children) =>
-    children.some((entry) => entry.name.toLowerCase().includes(lower)),
+  return Object.keys(files.treeChildren).some((dir) =>
+    visibleTreeChildren(dir).some((entry) => entry.name.toLowerCase().includes(lower)),
   );
 }
 
@@ -1071,35 +1084,66 @@ function treeHasMatch(needle: string): boolean {
 let recursiveSeq = 0;
 
 /**
- * The sidebar tree's filter box. It narrows the loaded tree live; when the
- * loaded tree has no match at all, the same box switches to its second
- * state — a project-wide name search whose rows preview on click. `root`
- * is the project that search runs against (the caller's selected project,
- * or the home directory).
+ * How long the box waits after the last keystroke before the project-wide
+ * search runs. Narrowing the loaded tree stays instant; only the recursive
+ * second state is paced, so a fast typist costs one directory walk instead
+ * of one per character.
  */
-export async function setTreeFilter(root: string | null, query: string): Promise<void> {
+const TREE_SEARCH_DEBOUNCE_MS = 180;
+
+/** The pending second-state search, while the user is still typing. */
+let recursiveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Drop any in-flight or pending search: its result is no longer wanted. */
+function cancelTreeSearch(): void {
+  if (recursiveTimer !== null) {
+    clearTimeout(recursiveTimer);
+    recursiveTimer = null;
+  }
+  recursiveSeq += 1;
+}
+
+function resetTreeSearchState(): void {
+  files.recursiveResults = [];
+  files.recursiveLoading = false;
+  files.recursiveSettled = false;
+}
+
+/**
+ * The sidebar tree's filter box. It narrows the loaded tree live; when the
+ * loaded tree has no visible match at all, the same box switches to its
+ * second state — a project-wide name search whose rows preview on click.
+ * `root` is the project that search runs against (the caller's selected
+ * project, or the home directory). The narrowing is immediate; the search
+ * is debounced, so only a settled query costs a walk.
+ */
+export function setTreeFilter(root: string | null, query: string): void {
   files.treeFilter = query;
   files.recursiveError = null;
+  cancelTreeSearch();
   const needle = query.trim();
-  const seq = ++recursiveSeq;
-  if (needle === "") {
-    files.recursiveResults = [];
-    files.recursiveLoading = false;
-    return;
-  }
-  // The loaded tree answers for itself while it has any match; the
+  // The loaded tree answers for itself while it has any visible match; the
   // project-wide search is the second state, not a parallel one.
-  if (treeHasMatch(needle) || root === null || root === "") {
-    files.recursiveResults = [];
-    files.recursiveLoading = false;
+  if (needle === "" || treeHasMatch(needle) || root === null || root === "") {
+    resetTreeSearchState();
     return;
   }
+  recursiveTimer = setTimeout(() => {
+    recursiveTimer = null;
+    void runTreeSearch(root, needle);
+  }, TREE_SEARCH_DEBOUNCE_MS);
+}
+
+/** The debounced second state: one project-wide name search, latest wins. */
+async function runTreeSearch(root: string, needle: string): Promise<void> {
+  const seq = ++recursiveSeq;
   files.recursiveLoading = true;
   const result = await window.awefork
     .searchFiles(root, needle, { includeHidden: files.showHidden })
     .catch(() => null);
   if (seq !== recursiveSeq) return;
   files.recursiveLoading = false;
+  files.recursiveSettled = true;
   if (!result?.ok) {
     files.recursiveResults = [];
     files.recursiveError = result && !result.ok ? result.error : { code: "unknown" };
@@ -1112,10 +1156,9 @@ export async function setTreeFilter(root: string | null, query: string): Promise
 
 /** Drop the filter and its second state together. */
 export function clearTreeFilter(): void {
-  recursiveSeq += 1;
+  cancelTreeSearch();
   files.treeFilter = "";
-  files.recursiveResults = [];
-  files.recursiveLoading = false;
+  resetTreeSearchState();
   files.recursiveError = null;
 }
 
