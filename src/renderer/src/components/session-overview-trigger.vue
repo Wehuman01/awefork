@@ -18,6 +18,7 @@
       {{ t("overview.label") }}
     </button>
     <button
+      v-if="settings.labs.overview.showRunning"
       type="button"
       class="trigger-stat running"
       :aria-expanded="store.overview.open"
@@ -30,6 +31,7 @@
       <b>{{ stats.running }}</b>
     </button>
     <button
+      v-if="settings.labs.overview.showWaiting"
       type="button"
       class="trigger-stat waiting"
       :aria-expanded="store.overview.open"
@@ -42,6 +44,7 @@
       <b>{{ stats.waiting }}</b>
     </button>
     <button
+      v-if="settings.labs.overview.showUnread"
       type="button"
       class="trigger-stat unread"
       :aria-expanded="store.overview.open"
@@ -66,6 +69,7 @@
 
 <script setup lang="ts">
 import { t } from "../i18n";
+import { settings } from "../settings";
 import { overviewStats, showOverviewStatus, store, toggleOverview } from "../state";
 
 /**

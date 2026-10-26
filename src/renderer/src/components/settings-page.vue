@@ -94,7 +94,7 @@
                 >{{ t("settings.resetSection") }}</button>
               </header>
               <div class="settings-card">
-                <div v-for="row in section.rows" :key="row.key" class="settings-row">
+                <div v-for="row in section.rows" :key="row.key" class="settings-row" :class="{ indent: row.indent }">
                   <div class="settings-row-text">
                     <p class="settings-row-title">
                       {{ row.title }}
@@ -294,6 +294,8 @@ interface RowBase {
   title: string;
   desc: string;
   proposed?: boolean;
+  /** A dependent row of the labs feature switch above it (see labsSection). */
+  indent?: boolean;
 }
 
 interface ToggleRow extends RowBase {
@@ -370,6 +372,11 @@ interface SectionDef {
   rows: Row[];
   /** Extra lowercase text the search box should match. */
   keywords: string;
+  /**
+   * Keys "reset section" restores, when they are more than this section's own
+   * id (labs also owns the file browser's preferences).
+   */
+  resetKeys?: (keyof Settings)[];
 }
 
 const panelEl = ref<HTMLElement | null>(null);
@@ -484,6 +491,11 @@ function text(
   placeholder?: string,
 ): TextRow {
   return { kind: "text", key, title, desc, value, apply, placeholder };
+}
+
+/** Mark a row as belonging to the labs feature switch directly above it. */
+function nested<T extends Row>(row: T): T {
+  return { ...row, indent: true };
 }
 
 // ── section builders ────────────────────────────────────────────────
@@ -662,7 +674,9 @@ function canvasSection(): SectionDef {
         settings.canvas.defaultView,
         [
           { value: "canvas", label: t("files.tabCanvas") },
-          { value: "files", label: t("files.tabFiles") },
+          // The files view exists only while the file-browser experiment is
+          // on; offering it otherwise would be a choice that does nothing.
+          ...(settings.labs.fileBrowser ? [{ value: "files", label: t("files.tabFiles") }] : []),
         ],
         (next) => {
           settings.canvas.defaultView = next as Settings["canvas"]["defaultView"];
@@ -722,118 +736,253 @@ function canvasSection(): SectionDef {
   };
 }
 
-function filesSection(): SectionDef {
+/**
+ * Labs: one block per experiment — the master switch, then the feature's own
+ * preferences indented beneath it. A switch that is off contributes no
+ * dependent rows at all, so the section shrinks to switches instead of
+ * describing a surface that is not there.
+ */
+function labsSection(): SectionDef {
+  const rows: Row[] = [
+    toggle(
+      "labs.fileBrowser",
+      t("settings.labsFileBrowser"),
+      t("settings.labsFileBrowserDesc"),
+      settings.labs.fileBrowser,
+      (next) => {
+        settings.labs.fileBrowser = next;
+      },
+    ),
+  ];
+  // The file browser's preferences used to be their own "files" section; they
+  // belong to the switch that owns them, and are gone while it is off.
+  if (settings.labs.fileBrowser) {
+    rows.push(
+      nested(
+        toggle(
+          "files.showHidden",
+          t("settings.showHidden"),
+          t("settings.showHiddenDesc"),
+          settings.files.showHidden,
+          (next) => {
+            settings.files.showHidden = next;
+          },
+        ),
+      ),
+      nested(
+        segment(
+          "files.view",
+          t("settings.fileView"),
+          t("settings.fileViewDesc"),
+          settings.files.view,
+          [
+            { value: "list", label: t("settings.viewList") },
+            { value: "grid", label: t("settings.viewGrid") },
+          ],
+          (next) => {
+            settings.files.view = next as Settings["files"]["view"];
+          },
+        ),
+      ),
+      nested(
+        select(
+          "files.previewCap",
+          t("settings.previewCap"),
+          t("settings.previewCapDesc"),
+          String(settings.files.previewCapKb),
+          [
+            { value: "128", label: "128 KB" },
+            { value: "256", label: "256 KB" },
+            { value: "512", label: "512 KB" },
+          ],
+          (next) => {
+            settings.files.previewCapKb = Number(next);
+          },
+        ),
+      ),
+      nested(
+        select(
+          "files.imageCap",
+          t("settings.imageCap"),
+          t("settings.imageCapDesc"),
+          String(settings.files.imageCapMb),
+          [
+            { value: "2", label: "2 MB" },
+            { value: "4", label: "4 MB" },
+            { value: "8", label: "8 MB" },
+          ],
+          (next) => {
+            settings.files.imageCapMb = Number(next);
+          },
+        ),
+      ),
+      nested(
+        segment(
+          "files.openOnDouble",
+          t("settings.openOnDouble"),
+          t("settings.openOnDoubleDesc"),
+          settings.files.openOnDouble,
+          [
+            { value: "system", label: t("settings.openSystem") },
+            { value: "preview", label: t("settings.openPreview") },
+          ],
+          (next) => {
+            settings.files.openOnDouble = next as FileOpenTarget;
+          },
+          true,
+        ),
+      ),
+      nested(
+        toggle(
+          "files.middleBrowser",
+          t("settings.middleBrowser"),
+          t("settings.middleBrowserDesc"),
+          settings.files.middleBrowser,
+          (next) => {
+            settings.files.middleBrowser = next;
+          },
+        ),
+      ),
+      nested(
+        text(
+          "files.ignore",
+          t("settings.filesIgnore"),
+          t("settings.filesIgnoreDesc"),
+          settings.files.ignore.join(", "),
+          (next) => {
+            const list = next
+              .split(",")
+              .map((name) => name.trim())
+              .filter((name) => name !== "");
+            settings.files.ignore = sanitizeIgnorePatterns(list);
+          },
+          "node_modules, dist",
+        ),
+      ),
+      nested(
+        folder(
+          "files.residentFolder",
+          t("settings.residentFolder"),
+          t("settings.residentFolderDesc"),
+          settings.files.residentFolder,
+          () => {
+            void pickResidentFolder();
+          },
+          () => {
+            void clearResidentFolder();
+          },
+        ),
+      ),
+    );
+  }
+  rows.push(
+    toggle(
+      "labs.parallelModels",
+      t("settings.labsParallelModels"),
+      t("settings.labsParallelModelsDesc"),
+      settings.labs.parallelModels,
+      (next) => {
+        settings.labs.parallelModels = next;
+      },
+    ),
+  );
+  // The multi-model defaults only matter once the feature is on; hiding them
+  // keeps the section about switches, not about a disabled feature's knobs.
+  if (settings.labs.parallelModels) {
+    rows.push(
+      nested(
+        button(
+          "labs.parallelDefaults",
+          t("settings.parallelDefaults"),
+          t("settings.parallelDefaultsDesc"),
+          settings.labs.parallel.targets.length > 0
+            ? t("settings.parallelDefaultsCount", { n: settings.labs.parallel.targets.length })
+            : t("settings.parallelDefaultsEmpty"),
+          () => {
+            parallelDefaultsOpen.value = true;
+          },
+        ),
+      ),
+      nested(
+        toggle(
+          "labs.parallelAutoOpen",
+          t("settings.parallelAutoOpen"),
+          t("settings.parallelAutoOpenDesc"),
+          settings.labs.parallel.autoOpenReading,
+          (next) => {
+            settings.labs.parallel.autoOpenReading = next;
+          },
+        ),
+      ),
+    );
+  }
+  rows.push(
+    toggle(
+      "labs.sessionOverview",
+      t("settings.labsSessionOverview"),
+      t("settings.labsSessionOverviewDesc"),
+      settings.labs.sessionOverview,
+      (next) => {
+        settings.labs.sessionOverview = next;
+        if (next) void refreshOverviewSessions();
+        // The pill and panel unmount with the switch; a panel left "open"
+        // in the store would pop back up when the switch returns on.
+        if (!next) closeOverviewPanel();
+      },
+    ),
+  );
+  if (settings.labs.sessionOverview) {
+    rows.push(
+      nested(
+        toggle(
+          "labs.overviewShowRunning",
+          t("settings.overviewShowRunning"),
+          t("settings.overviewShowRunningDesc"),
+          settings.labs.overview.showRunning,
+          (next) => {
+            settings.labs.overview.showRunning = next;
+          },
+        ),
+      ),
+      nested(
+        toggle(
+          "labs.overviewShowWaiting",
+          t("settings.overviewShowWaiting"),
+          t("settings.overviewShowWaitingDesc"),
+          settings.labs.overview.showWaiting,
+          (next) => {
+            settings.labs.overview.showWaiting = next;
+          },
+        ),
+      ),
+      nested(
+        toggle(
+          "labs.overviewShowUnread",
+          t("settings.overviewShowUnread"),
+          t("settings.overviewShowUnreadDesc"),
+          settings.labs.overview.showUnread,
+          (next) => {
+            settings.labs.overview.showUnread = next;
+          },
+        ),
+      ),
+    );
+  }
+  rows.push(info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""));
   return {
-    id: "files",
-    icon: "▤",
-    group: t("settings.groupWorkbench"),
-    title: t("settings.files"),
-    desc: t("settings.filesDesc"),
+    id: "labs",
+    icon: "⚗",
+    group: t("settings.groupLabs"),
+    title: t("settings.labs"),
+    desc: t("settings.labsDesc"),
     ...LOCAL_STORE(),
     resettable: true,
-    rows: [
-      toggle(
-        "files.showHidden",
-        t("settings.showHidden"),
-        t("settings.showHiddenDesc"),
-        settings.files.showHidden,
-        (next) => {
-          settings.files.showHidden = next;
-        },
-      ),
-      segment(
-        "files.view",
-        t("settings.fileView"),
-        t("settings.fileViewDesc"),
-        settings.files.view,
-        [
-          { value: "list", label: t("settings.viewList") },
-          { value: "grid", label: t("settings.viewGrid") },
-        ],
-        (next) => {
-          settings.files.view = next as Settings["files"]["view"];
-        },
-      ),
-      select(
-        "files.previewCap",
-        t("settings.previewCap"),
-        t("settings.previewCapDesc"),
-        String(settings.files.previewCapKb),
-        [
-          { value: "128", label: "128 KB" },
-          { value: "256", label: "256 KB" },
-          { value: "512", label: "512 KB" },
-        ],
-        (next) => {
-          settings.files.previewCapKb = Number(next);
-        },
-      ),
-      select(
-        "files.imageCap",
-        t("settings.imageCap"),
-        t("settings.imageCapDesc"),
-        String(settings.files.imageCapMb),
-        [
-          { value: "2", label: "2 MB" },
-          { value: "4", label: "4 MB" },
-          { value: "8", label: "8 MB" },
-        ],
-        (next) => {
-          settings.files.imageCapMb = Number(next);
-        },
-      ),
-      segment(
-        "files.openOnDouble",
-        t("settings.openOnDouble"),
-        t("settings.openOnDoubleDesc"),
-        settings.files.openOnDouble,
-        [
-          { value: "system", label: t("settings.openSystem") },
-          { value: "preview", label: t("settings.openPreview") },
-        ],
-        (next) => {
-          settings.files.openOnDouble = next as FileOpenTarget;
-        },
-        true,
-      ),
-      toggle(
-        "files.middleBrowser",
-        t("settings.middleBrowser"),
-        t("settings.middleBrowserDesc"),
-        settings.files.middleBrowser,
-        (next) => {
-          settings.files.middleBrowser = next;
-        },
-      ),
-      text(
-        "files.ignore",
-        t("settings.filesIgnore"),
-        t("settings.filesIgnoreDesc"),
-        settings.files.ignore.join(", "),
-        (next) => {
-          const list = next
-            .split(",")
-            .map((name) => name.trim())
-            .filter((name) => name !== "");
-          settings.files.ignore = sanitizeIgnorePatterns(list);
-        },
-        "node_modules, dist",
-      ),
-      folder(
-        "files.residentFolder",
-        t("settings.residentFolder"),
-        t("settings.residentFolderDesc"),
-        settings.files.residentFolder,
-        () => {
-          void pickResidentFolder();
-        },
-        () => {
-          void clearResidentFolder();
-        },
-      ),
-    ],
+    // The file browser's preferences live under this section's switch, so a
+    // reset here restores the experiment's defaults, not just the switches.
+    resetKeys: ["labs", "files"],
+    rows,
     keywords:
-      "files preview hidden grid ignore resident folder middle browser 文件 预览 隐藏 网格 忽略 常驻 中栏",
+      "labs experiment 实验室 实验 experimental beta parallel 并行 多模型 overview 总览 面板 files preview hidden grid ignore resident folder middle browser 文件 预览 隐藏 网格 忽略 常驻 中栏 auto-open reading 阅读视图 running waiting unread 运行 等待 未读",
   };
 }
 
@@ -1140,72 +1289,6 @@ function languageSection(): SectionDef {
   };
 }
 
-function labsSection(): SectionDef {
-  const rows: Row[] = [
-    toggle(
-      "labs.fileBrowser",
-      t("settings.labsFileBrowser"),
-      t("settings.labsFileBrowserDesc"),
-      settings.labs.fileBrowser,
-      (next) => {
-        settings.labs.fileBrowser = next;
-      },
-    ),
-    toggle(
-      "labs.parallelModels",
-      t("settings.labsParallelModels"),
-      t("settings.labsParallelModelsDesc"),
-      settings.labs.parallelModels,
-      (next) => {
-        settings.labs.parallelModels = next;
-      },
-    ),
-    toggle(
-      "labs.sessionOverview",
-      t("settings.labsSessionOverview"),
-      t("settings.labsSessionOverviewDesc"),
-      settings.labs.sessionOverview,
-      (next) => {
-        settings.labs.sessionOverview = next;
-        if (next) void refreshOverviewSessions();
-        // The pill and panel unmount with the switch; a panel left "open"
-        // in the store would pop back up when the switch returns on.
-        if (!next) closeOverviewPanel();
-      },
-    ),
-  ];
-  // The multi-model defaults only matter once the feature is on; hiding them
-  // keeps the section about switches, not about a disabled feature's knobs.
-  if (settings.labs.parallelModels) {
-    rows.push(
-      button(
-        "labs.parallelDefaults",
-        t("settings.parallelDefaults"),
-        t("settings.parallelDefaultsDesc"),
-        settings.labs.parallel.targets.length > 0
-          ? t("settings.parallelDefaultsCount", { n: settings.labs.parallel.targets.length })
-          : t("settings.parallelDefaultsEmpty"),
-        () => {
-          parallelDefaultsOpen.value = true;
-        },
-      ),
-    );
-  }
-  rows.push(info("labs.note", t("settings.labsNote"), t("settings.labsNoteDesc"), ""));
-  return {
-    id: "labs",
-    icon: "⚗",
-    group: t("settings.groupLabs"),
-    title: t("settings.labs"),
-    desc: t("settings.labsDesc"),
-    ...LOCAL_STORE(),
-    resettable: true,
-    rows,
-    keywords:
-      "labs experiment 实验室 实验 experimental beta parallel 并行 多模型 overview 总览 面板",
-  };
-}
-
 // ── assembled view ──────────────────────────────────────────────────
 
 const sections = computed<SectionDef[]>(() => {
@@ -1227,7 +1310,6 @@ const sections = computed<SectionDef[]>(() => {
     backendSection(),
     modelsSection(),
     canvasSection(),
-    filesSection(),
     searchSection(),
     shortcutsSection(),
     storageSection(),
@@ -1328,9 +1410,14 @@ function onScroll(): void {
 }
 
 function resetSection(id: string): void {
-  const key = id as keyof Settings;
-  if (!(key in settings)) return;
-  resetSettingsSection(key);
+  // A section can own more keys than its id (labs also owns the file
+  // browser's preferences); reset each one it lists.
+  const keys = sections.value.find((section) => section.id === id)?.resetKeys ?? [
+    id as keyof Settings,
+  ];
+  for (const key of keys) {
+    if (key in settings) resetSettingsSection(key);
+  }
 }
 
 function resetAll(): void {

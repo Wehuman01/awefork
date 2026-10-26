@@ -405,6 +405,26 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "settings.parallelDefaultsCount": { zh: "{n} 个模型", en: "{n} models" },
   "settings.parallelDefaultsEmpty": { zh: "未设置", en: "Not set" },
+  "settings.parallelAutoOpen": { zh: "完成后打开阅读视图", en: "Open reading view when finished" },
+  "settings.parallelAutoOpenDesc": {
+    zh: "一轮的全部回答和汇总就绪后，自动跳到该轮的阅读视图，不用再找卡片上的 ⇄ 徽标。",
+    en: "When a round's answers and summary are all in, jump straight to its reading view instead of hunting for the ⇄ badge on a card.",
+  },
+  "settings.overviewShowRunning": { zh: "胶囊显示「运行中」计数", en: "Pill shows “running”" },
+  "settings.overviewShowRunningDesc": {
+    zh: "关闭后触发条不再占这个位置；面板里照样列得出。",
+    en: "Turning it off frees the space on the pill; the panel still lists everything.",
+  },
+  "settings.overviewShowWaiting": { zh: "胶囊显示「待我处理」计数", en: "Pill shows “waiting”" },
+  "settings.overviewShowWaitingDesc": {
+    zh: "等权限、等回答的会话计数。关闭后触发条不再占这个位置。",
+    en: "The count of sessions awaiting a permission or an answer. Turning it off frees the space on the pill.",
+  },
+  "settings.overviewShowUnread": { zh: "胶囊显示「未读」计数", en: "Pill shows “unread”" },
+  "settings.overviewShowUnreadDesc": {
+    zh: "有新结果却没看过的会话计数。关闭后触发条不再占这个位置。",
+    en: "The count of sessions with results you have not read. Turning it off frees the space on the pill.",
+  },
   "settings.labsNote": { zh: "关于实验室", en: "About Labs" },
   "settings.labsNoteDesc": {
     zh: "功能稳定后会从实验室毕业，进入正式分区；关闭开关不会丢失相关偏好。",

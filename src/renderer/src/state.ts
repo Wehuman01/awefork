@@ -5698,6 +5698,24 @@ async function finishParallelRound(group: ParallelGroup): Promise<void> {
   // The round reached a resting state (every target collected, the summary
   // settled or deliberately skipped): this is the record a restart reads.
   persistRound(group);
+  // A round that answered nothing has no reading view to open; yanking the
+  // selection back to the anchor would interrupt the user for nothing.
+  if (settings.labs.parallel.autoOpenReading && (sources.length > 0 || group.summarySessionId)) {
+    openParallelRoundView(group);
+  }
+}
+
+/**
+ * Land the round's reading view: the newest summary version when one exists,
+ * the summary session next, the anchor last. The canvas badge opens the same
+ * landing; this is the settings-driven version for a round the user is not
+ * watching.
+ */
+function openParallelRoundView(group: ParallelGroup): void {
+  const landing =
+    group.summaryVersions.at(-1)?.sessionId ?? group.summarySessionId ?? group.anchorSessionId;
+  if (!landing || landing === state.selectedId) return;
+  void selectSession(landing);
 }
 
 /**

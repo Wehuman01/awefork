@@ -198,6 +198,7 @@ async function bootState(options: { inheritedRows?: ChatMessage[]; tags?: string
   await state.selectSession(ANCHOR.id);
   return {
     state,
+    store: state.store,
     saveComposer,
     fork,
     prompt,
@@ -434,6 +435,34 @@ describe("parallel reading groups", () => {
       expect(h.state.parallelRoundOwner(group, branch)).toBe(false);
     }
     expect(h.state.parallelRoundOwner(group, null)).toBe(false);
+  });
+
+  it("leaves the selection alone when the round finishes and auto-open is off", async () => {
+    const h = await bootState();
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.labs.parallel.autoOpenReading = false;
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, "fork-2", "回答乙");
+    await settle(h, required(group.summarySessionId), "结论：先读汇总，再看分歧。");
+    expect(group.summaryStatus).toBe("done");
+    expect(h.store.selectedId).toBe(ANCHOR.id);
+  });
+
+  it("opens the round's reading view when it finishes and auto-open is on", async () => {
+    const h = await bootState();
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.labs.parallel.autoOpenReading = true;
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    await settle(h, "fork-1", "回答甲");
+    // One target still running: the round is not finished, so no jump yet.
+    expect(h.store.selectedId).toBe(ANCHOR.id);
+    await settle(h, "fork-2", "回答乙");
+    await settle(h, required(group.summarySessionId), "结论：先读汇总，再看分歧。");
+    expect(group.summaryStatus).toBe("done");
+    expect(h.store.selectedId).toBe(group.summarySessionId);
   });
 
   it("can summarize available answers early, then refresh when the remaining model finishes", async () => {

@@ -9463,6 +9463,24 @@ html[data-theme="dark"] .fp-image {
   background: var(--row-hover);
 }
 
+/* A labs feature's dependent rows sit indented under their master switch,
+   tied to it by a guide line down the left that runs through the group. */
+.settings-row.indent {
+  position: relative;
+  padding-left: 27px;
+}
+
+.settings-row.indent::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ink-faint);
+  opacity: 0.5;
+}
+
 .settings-row-text {
   flex: 1;
   min-width: 0;

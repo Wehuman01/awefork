@@ -146,6 +146,17 @@ export interface Settings {
       targets: ModelChoice[];
       summaryModel: ModelChoice | null;
       summaryLength: ParallelSummaryLength;
+      /** Jump to the round's reading view when the round finishes. */
+      autoOpenReading: boolean;
+    };
+    /**
+     * Which of the overview pill's three counts are shown. A stat turned off
+     * frees its space; the panel still lists everything regardless.
+     */
+    overview: {
+      showRunning: boolean;
+      showWaiting: boolean;
+      showUnread: boolean;
     };
   };
 }
@@ -185,7 +196,13 @@ export const DEFAULT_SETTINGS: Settings = {
     fileBrowser: false,
     parallelModels: false,
     sessionOverview: false,
-    parallel: { targets: [], summaryModel: null, summaryLength: "brief" },
+    parallel: {
+      targets: [],
+      summaryModel: null,
+      summaryLength: "brief",
+      autoOpenReading: false,
+    },
+    overview: { showRunning: true, showWaiting: true, showUnread: true },
   },
 };
 
@@ -311,6 +328,7 @@ export function normalizeSettings(raw: unknown): Settings {
   const updates = isRecord(root.updates) ? root.updates : {};
   const labs = isRecord(root.labs) ? root.labs : {};
   const parallel = isRecord(labs.parallel) ? labs.parallel : {};
+  const overview = isRecord(labs.overview) ? labs.overview : {};
   const d = DEFAULT_SETTINGS;
   return {
     appearance: {
@@ -387,6 +405,12 @@ export function normalizeSettings(raw: unknown): Settings {
           ["brief", "standard", "none"] as const,
           d.labs.parallel.summaryLength,
         ),
+        autoOpenReading: pickBool(parallel.autoOpenReading, d.labs.parallel.autoOpenReading),
+      },
+      overview: {
+        showRunning: pickBool(overview.showRunning, d.labs.overview.showRunning),
+        showWaiting: pickBool(overview.showWaiting, d.labs.overview.showWaiting),
+        showUnread: pickBool(overview.showUnread, d.labs.overview.showUnread),
       },
     },
   };

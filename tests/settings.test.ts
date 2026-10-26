@@ -138,6 +138,34 @@ describe("normalizeSettings", () => {
     ).toHaveLength(4);
   });
 
+  it("keeps the multi-model auto-open switch and repairs the rest", () => {
+    expect(normalizeSettings({}).labs.parallel.autoOpenReading).toBe(false);
+    expect(
+      normalizeSettings({ labs: { parallel: { autoOpenReading: true } } }).labs.parallel
+        .autoOpenReading,
+    ).toBe(true);
+    expect(
+      normalizeSettings({ labs: { parallel: { autoOpenReading: "yes" } } }).labs.parallel
+        .autoOpenReading,
+    ).toBe(false);
+  });
+
+  it("shows every overview trigger stat until one is turned off", () => {
+    expect(normalizeSettings({}).labs.overview).toEqual({
+      showRunning: true,
+      showWaiting: true,
+      showUnread: true,
+    });
+    const result = normalizeSettings({
+      labs: { overview: { showRunning: false, showUnread: "no" } },
+    });
+    expect(result.labs.overview).toEqual({
+      showRunning: false,
+      showWaiting: true,
+      showUnread: true,
+    });
+  });
+
   it("trims, de-duplicates and caps the ignore list", () => {
     const result = normalizeSettings({
       files: { ignore: [" node_modules ", "node_modules", "", "dist", 42, "out", "build", "x"] },
