@@ -21,6 +21,11 @@ import { selectCanvasSessions, storyRootOf } from "../../shared/canvas-scope";
 import { samePath } from "../../shared/file-paths";
 import type { OverviewReadUpdate } from "../../shared/overview-ledger-types";
 import {
+  type OverviewListing,
+  type OverviewRunningEntry,
+  overviewListingIsNewer,
+} from "../../shared/overview-listing";
+import {
   buildSessionTree,
   descendantSessionIds,
   enrichSessions,
@@ -218,18 +223,11 @@ function localCapabilities(backend: BackendId): BackendCapabilities {
  * Session metadata for a backend this window has not switched to. The overview
  * lists every connected agent, but a parked workspace snapshot only exists for
  * backends the user already visited — so unvisited ones are listed on demand
- * (and refreshed while the panel is open).
+ * (and refreshed while the panel is open). The entries themselves are the
+ * main-owned cross-window cache: whatever any window fetched, every window
+ * renders (see overview-listing.ts).
  */
-interface OverviewRemoteEntry {
-  sessions: SessionSummary[];
-  /** The backend's own delete grace window (overlay sidecar). */
-  trash: string[];
-  /** The backend's own archive (overlay sidecar). */
-  archive: ArchiveState;
-  fetchedAt: number;
-  /** Why the last list attempt failed; null after a success. */
-  error: string | null;
-}
+type OverviewRemoteEntry = OverviewListing;
 
 /** The overview panel's own UI state; never touches the canvas selection. */
 interface OverviewUiState {
@@ -1434,8 +1432,11 @@ export async function init(): Promise<void> {
     }
   }
   // The page's <title> overrides the BrowserWindow title on load, so the
-  // agent window names its agent here rather than only at creation.
-  if (agentFromHash(currentHash())) document.title = `awefork — ${backend}`;
+  // agent window names its agent here rather than only at creation. Guarded
+  // like currentHash: tests boot state in plain node, without a DOM.
+  if (agentFromHash(currentHash()) && typeof document !== "undefined") {
+    document.title = `awefork — ${backend}`;
+  }
   try {
     state.capabilities = await window.awefork.capabilities(backend);
   } catch {
@@ -1450,7 +1451,13 @@ export async function init(): Promise<void> {
   // the mirror in step from the broadcast. Order matters — subscribe before
   // the snapshot resolves so nothing that lands in between is missed.
   window.awefork.onOverviewRead(applyOverviewUpdate);
+  // The cross-window session listings: adopt what other windows already
+  // fetched, and keep adopting whatever they fetch next.
+  window.awefork.onOverviewListing(({ backend, listing }) =>
+    adoptOverviewListing(backend, listing),
+  );
   void loadOverviewLedgerFromMain();
+  void loadOverviewListingsFromMain();
   // Multi-model rounds are window-local memory; the main-owned sidecar is
   // what makes them survive a restart. Restored before the first session
   // load resolves, so a round's canvas badges and reading view are in place
@@ -1470,6 +1477,10 @@ export async function init(): Promise<void> {
     // Without a main process (tests) there is nothing to claim; a jump's
     // own error paths already cover the miss.
   }
+  // Runs already in flight when this window opened: main's registry watched
+  // their starts, this window did not exist to see them. Seed before the
+  // first paint so the trigger counts what is actually running everywhere.
+  void seedOverviewRunning();
   // Fill the trigger's cross-agent counts after first paint. The adapters are
   // lazy by design; this one paced sweep is the deliberate startup cost.
   setTimeout(() => {
@@ -1633,6 +1644,16 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
         overviewPool(sessions, state.trash, state.archive),
         scanAt,
       );
+      // This window holds the freshest view of the active backend, so share
+      // it: the windows not showing this agent render this listing instead of
+      // waiting for their own sweeps to catch up.
+      publishOverviewListing(backend, {
+        sessions,
+        trash: state.trash,
+        archive: state.archive,
+        fetchedAt: Date.now(),
+        error: null,
+      });
     }
     // The fetch is the connection test; success revives a UI that an earlier
     // failure (or a cold-start timeout) had flagged as offline.
@@ -6722,6 +6743,71 @@ function dropOverviewRemote(backend: BackendId): void {
   state.overviewRemote = kept;
 }
 
+/**
+ * Fold one cross-window listing into this window's view. Newer-wins: the
+ * freshest fetch — whichever window paid for it — is what every window
+ * renders, so two windows cannot project different session sets for the same
+ * agent. A failed sweep keeps its local entry (its fetchedAt is the last
+ * success, so a stale failure never outranks a fresh listing either).
+ */
+function adoptOverviewListing(backend: BackendId, listing: OverviewListing): void {
+  if (!settings.labs.sessionOverview) return;
+  if (!overviewListingIsNewer(state.overviewRemote[backend], listing)) return;
+  state.overviewRemote = { ...state.overviewRemote, [backend]: listing };
+}
+
+/** Store what this window fetched where every window can read it. */
+function publishOverviewListing(backend: BackendId, listing: OverviewListing): void {
+  if (!settings.labs.sessionOverview) return;
+  void window.awefork.overviewPublishListing(backend, listing).catch(() => {
+    // A failed publish only costs the other windows their shortcut; their own
+    // sweeps still list the backend.
+  });
+}
+
+/**
+ * Take the shared cache at boot: a window that opens while another already
+ * listed the other agents starts with those rows instead of an empty panel
+ * until its own sweep lands.
+ */
+async function loadOverviewListingsFromMain(): Promise<void> {
+  try {
+    const listings = await window.awefork.overviewListings();
+    for (const [backend, listing] of Object.entries(listings ?? {})) {
+      if (listing && isBackendId(backend)) adoptOverviewListing(backend, listing);
+    }
+  } catch {
+    // A main without the cache (or an older build): the sweeps refill it.
+  }
+}
+
+/**
+ * Seed the runs already in flight when this window opened. Main's registry
+ * watched their start frames; this window did not exist to see them, and
+ * neither opencode nor codex reports a runtime status in its listing — so
+ * without the seed an in-flight run reads as idle here. Mirrors
+ * message.started minus the run id (the registry's set carries none): the
+ * empty unknown marker, the running flag and the poll watchdog this window
+ * needs for a run it did not observe starting.
+ */
+async function seedOverviewRunning(): Promise<void> {
+  let running: OverviewRunningEntry[];
+  try {
+    running = await window.awefork.overviewRunning();
+  } catch {
+    // No main process (tests): observed events remain the only evidence.
+    return;
+  }
+  for (const entry of running) {
+    if (!entry || !isBackendId(entry.backend) || typeof entry.sessionId !== "string") continue;
+    if (isRunningObserved(entry.backend, entry.sessionId)) continue;
+    const key = streamKey(entry.backend, entry.sessionId);
+    setOverviewUnknown(entry.backend, entry.sessionId, true);
+    setRunning(entry.backend, entry.sessionId, true);
+    if (!completionWatches.has(key)) watchCompletion(entry.backend, entry.sessionId, Date.now());
+  }
+}
+
 let overviewSweepPending = false;
 let overviewSweepPromise: Promise<void> | null = null;
 
@@ -6950,17 +7036,23 @@ export async function refreshOverviewSessions(force = false): Promise<void> {
             ),
             now,
           );
-          state.overviewRemote = {
-            ...state.overviewRemote,
-            [info.id]: {
-              sessions,
-              trash: trash.map((entry) => entry.id),
-              archive,
-              fetchedAt: Date.now(),
-              error: null,
-            },
+          const listing: OverviewListing = {
+            sessions,
+            trash: trash.map((entry) => entry.id),
+            archive,
+            fetchedAt: Date.now(),
+            error: null,
           };
+          state.overviewRemote = { ...state.overviewRemote, [info.id]: listing };
+          publishOverviewListing(info.id, listing);
         } catch (error) {
+          if (previous && previous.error === null) return;
+          // A standing listing stays the view: a failed sweep failed to
+          // REFRESH it, it did not invalidate it. Recording the error would
+          // drop rows the listing still answers for — including one another
+          // window just published — and fall back to a snapshot frozen at the
+          // last switch. Only a backend with no successful listing left
+          // carries the error, so the UI can disclose the fallback it shows.
           const message = error instanceof Error ? error.message : String(error);
           // A parked snapshot outranks this failed sweep; retain the error so
           // the UI can disclose that the fallback may be stale.

@@ -1180,6 +1180,12 @@ export function installMockAdapter(): void {
       ledgerHandlers.add(handler);
       return () => ledgerHandlers.delete(handler);
     },
+    // The demo runs one window without a main process: the cross-window
+    // listing cache and the registry's running set have nothing to share.
+    overviewListings: async () => ({}),
+    overviewPublishListing: async () => true,
+    onOverviewListing: () => () => {},
+    overviewRunning: async () => [],
     requestAgentNavigate: async () => ({ ok: true }),
     onAgentNavigate: (handler) => {
       navigateHandlers.add(handler);

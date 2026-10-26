@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { AgentEvent, ChatMessage, SessionSummary } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Run-settle tint harness: the state module is a singleton, so every test
@@ -128,6 +128,7 @@ async function bootState(
       return () => {};
     },
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

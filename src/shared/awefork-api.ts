@@ -20,6 +20,7 @@ import type {
   OverviewReadLedger,
   OverviewReadUpdate,
 } from "./overview-ledger-types.js";
+import type { OverviewListing, OverviewRunningEntry } from "./overview-listing.js";
 import type { RoundRecord } from "./rounds-types.js";
 import type {
   AgentInteractionResponse,
@@ -405,6 +406,28 @@ export interface AweforkApi {
   overviewMergeLedger(incoming: OverviewReadLedger): Promise<OverviewReadLedger>;
   /** Every applied entry, from any window; subscribe after the snapshot. */
   onOverviewRead(handler: (update: OverviewReadUpdate) => void): () => void;
+  /**
+   * Canvas session overview, cross-window listings: the session lists of the
+   * agents a window is NOT showing. Without a shared cache every window
+   * refreshes its own copy on its own schedule, so two windows project
+   * different session sets — and different running/unread counts — for the
+   * same backend. `overviewPublishListing` stores what one window fetched and
+   * broadcasts it; `overviewListings` hands a fresh window what is already
+   * there; `onOverviewListing` keeps the rest in step. Newer-wins on
+   * `fetchedAt`, so the freshest fetch — whichever window paid for it — is
+   * what all of them render.
+   */
+  overviewListings(): Promise<Partial<Record<BackendId, OverviewListing>>>;
+  overviewPublishListing(backend: BackendId, listing: OverviewListing): Promise<boolean>;
+  onOverviewListing(
+    handler: (payload: { backend: BackendId; listing: OverviewListing }) => void,
+  ): () => void;
+  /**
+   * The runs main's registry watched start and has not seen end. A window
+   * that opened mid-run never observed the start frame, so it seeds its run
+   * state from this set at boot instead of showing an in-flight run as idle.
+   */
+  overviewRunning(): Promise<OverviewRunningEntry[]>;
   /**
    * Multi-model rounds sidecar (main-owned, one file every window shares).
    * The renderer's round groups are window-local memory, so without this a

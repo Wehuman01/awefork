@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
+import type { OverviewListing, OverviewRunningEntry } from "../src/shared/overview-listing";
 import type {
   AgentEvent,
   ChatMessage,
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * The session overview over the real store: which status a row projects after
@@ -55,16 +56,18 @@ function assistantRow(error: string | null = null): ChatMessage {
   return { ...USER_ROW, id: "m2", role: "assistant", text: "修好了", error };
 }
 
-async function bootState(
-  options: {
-    runError?: string | null;
-    beforeInit?: (api: AweforkApi) => void | Promise<void>;
-  } = {},
-) {
-  vi.resetModules();
-  const rows = [USER_ROW, assistantRow(options.runError ?? null)];
+/**
+ * One window's scripted api. Multi-window tests boot several windows against
+ * ONE shared main mock, so the api can be built once and passed in.
+ */
+function createTestApi(options: { runError?: string | null } = {}): {
+  api: AweforkApi;
+  send: (backend: BackendId, event: AgentEvent) => void;
+  failMessages: (value: boolean) => void;
+} {
   let onEnvelope: ((envelope: BackendEventEnvelope) => void) | null = null;
   let failMessages = false;
+  const rows = [USER_ROW, assistantRow(options.runError ?? null)];
   const api: AweforkApi = {
     ready: async () => ({ ok: true }),
     sessions: async (backend: BackendId) => ({
@@ -133,8 +136,34 @@ async function bootState(
       onEnvelope = handler;
       return () => {};
     },
+    // The cross-window overview cache: one window's fetch is every window's
+    // listing. A single-window test sees an empty cache and no running set.
+    ...createOverviewCacheMock(),
     ...createOverviewLedgerMock(),
   };
+  return {
+    api,
+    send: (backend: BackendId, event: AgentEvent) => onEnvelope?.({ backend, event }),
+    failMessages: (value: boolean) => {
+      failMessages = value;
+    },
+  };
+}
+
+async function bootState(
+  options: {
+    runError?: string | null;
+    beforeInit?: (api: AweforkApi) => void | Promise<void>;
+    /** A pre-built api to boot against — multi-window tests share one "main". */
+    api?: AweforkApi;
+    /** Envelope delivery for a shared api; multi-window tests pass their mock's send. */
+    send?: (backend: BackendId, event: AgentEvent) => void;
+  } = {},
+) {
+  vi.resetModules();
+  const scripted = options.api ? null : createTestApi(options);
+  const api = options.api ?? scripted?.api;
+  if (!api) throw new Error("missing api");
   await options.beforeInit?.(api);
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");
@@ -143,10 +172,15 @@ async function bootState(
     api,
     state,
     store: state.store,
-    send: (backend: BackendId, event: AgentEvent) => onEnvelope?.({ backend, event }),
-    failMessages: (value: boolean) => {
-      failMessages = value;
-    },
+    // A shared api fans envelopes out to every subscribed window through its
+    // own send; a private one has the single handler this boot captured.
+    send:
+      scripted?.send ??
+      options.send ??
+      (() => {
+        throw new Error("multi-window boots deliver events through the shared main mock");
+      }),
+    failMessages: scripted?.failMessages ?? (() => {}),
   };
 }
 
@@ -175,6 +209,7 @@ afterEach(() => {
   vi.useRealTimers();
   delete (globalThis as unknown as { window?: unknown }).window;
   delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+  delete (globalThis as unknown as { location?: unknown }).location;
 });
 
 function rowOf(h: Awaited<ReturnType<typeof bootState>>, backend: BackendId, id: string) {
@@ -981,6 +1016,160 @@ describe("overview navigation in multi-window mode", () => {
     expect(requests).toEqual([]);
     expect(h.store.activeBackend).toBe("opencode");
     expect(h.store.selectedId).toBe("s2");
+  });
+});
+
+describe("overview listings across windows", () => {
+  /**
+   * Several windows over ONE main-process mock. The listing cache, the
+   * broadcast fan-out and the running set are main-owned state, so every
+   * window booted against this mock must project the same overview.
+   */
+  function createMainMock() {
+    const envelopeHandlers = new Set<(envelope: BackendEventEnvelope) => void>();
+    const listingHandlers = new Set<
+      (payload: { backend: BackendId; listing: OverviewListing }) => void
+    >();
+    const listings = new Map<BackendId, OverviewListing>();
+    let running: OverviewRunningEntry[] = [];
+    const scripted = createTestApi();
+    const api: AweforkApi = {
+      ...scripted.api,
+      onEvent: (handler) => {
+        envelopeHandlers.add(handler);
+        return () => {
+          envelopeHandlers.delete(handler);
+        };
+      },
+      onOverviewListing: (handler) => {
+        listingHandlers.add(handler);
+        return () => {
+          listingHandlers.delete(handler);
+        };
+      },
+      overviewListings: async () => Object.fromEntries(listings),
+      overviewPublishListing: async (backend, listing) => {
+        listings.set(backend, listing);
+        for (const handler of listingHandlers) handler({ backend, listing });
+        return true;
+      },
+      overviewRunning: async () => running,
+    };
+    return {
+      api,
+      /** Deliver one backend event to every booted window, as main does. */
+      send: (backend: BackendId, event: AgentEvent) => {
+        for (const handler of envelopeHandlers) handler({ backend, event });
+      },
+      setRunning: (entries: OverviewRunningEntry[]) => {
+        running = entries;
+      },
+      published: () => Object.fromEntries(listings),
+    };
+  }
+
+  /** Boot one more window against the shared mock; `agent` opens an agent window. */
+  async function bootWindow(main: ReturnType<typeof createMainMock>, agent?: BackendId) {
+    (globalThis as unknown as { location?: { hash: string } }).location = {
+      hash: agent ? `#agent=${agent}` : "",
+    };
+    return bootState({ api: main.api, send: main.send });
+  }
+
+  it("counts the same runs in every window once one window lists them", async () => {
+    const main = createMainMock();
+    const baseSessions = main.api.sessions;
+    let codexSessions: SessionSummary[] = [CODEX_C1];
+    main.api.sessions = async (backend: BackendId) =>
+      backend === "codex" ? { sessions: codexSessions, lineage: {} } : baseSessions(backend);
+
+    const ocWindow = await bootWindow(main);
+    await vi.advanceTimersByTimeAsync(3_000); // the boot sweep lists codex
+    const codexWindow = await bootWindow(main, "codex");
+
+    // A second codex story starts a run: only the codex window lists it live.
+    codexSessions = [CODEX_C1, { ...CODEX_C1, id: "c2", title: "新开的故事" }];
+    await codexWindow.state.refreshSessions();
+    main.send("codex", { type: "message.started", sessionId: "c2", messageId: "m9" });
+
+    expect(rowOf(codexWindow, "codex", "c2")?.status).toBe("running");
+    // The other window renders the same row from the shared listing.
+    expect(rowOf(ocWindow, "codex", "c2")?.status).toBe("running");
+    expect(ocWindow.state.overviewStats.value).toEqual(codexWindow.state.overviewStats.value);
+  });
+
+  it("starts a new window with the listings other windows already fetched", async () => {
+    const main = createMainMock();
+    await bootWindow(main);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(Object.keys(main.published())).toContain("codex");
+
+    const listed: BackendId[] = [];
+    const baseSessions = main.api.sessions;
+    main.api.sessions = async (backend: BackendId) => {
+      listed.push(backend);
+      return baseSessions(backend);
+    };
+
+    const third = await bootWindow(main, "codex");
+    // Before this window's own boot sweep fires, the shared cache already
+    // holds the other agents' listings.
+    expect(third.state.overviewRows.value.some((row) => row.backend === "opencode")).toBe(true);
+    expect(listed).not.toContain("opencode");
+  });
+
+  it("adopts a listing another window refreshed, without fetching it again", async () => {
+    const main = createMainMock();
+    const ocWindow = await bootWindow(main);
+    await vi.advanceTimersByTimeAsync(3_000);
+    const codexWindow = await bootWindow(main, "codex");
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const baseSessions = main.api.sessions;
+    main.api.sessions = async (backend: BackendId) =>
+      backend === "codex"
+        ? { sessions: [CODEX_C1, { ...CODEX_C1, id: "c3" }], lineage: {} }
+        : baseSessions(backend);
+    // The codex window lists its own backend; the oc window must follow.
+    await codexWindow.state.refreshSessions();
+
+    expect(rowOf(ocWindow, "codex", "c3")).toBeDefined();
+  });
+
+  it("keeps a fresh cross-window listing when this window's sweep fails", async () => {
+    const main = createMainMock();
+    const ocWindow = await bootWindow(main);
+    await vi.advanceTimersByTimeAsync(3_000);
+    const codexWindow = await bootWindow(main, "codex");
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const baseSessions = main.api.sessions;
+    main.api.sessions = async (backend: BackendId) =>
+      backend === "codex"
+        ? { sessions: [CODEX_C1, { ...CODEX_C1, id: "c3" }], lineage: {} }
+        : baseSessions(backend);
+    await codexWindow.state.refreshSessions();
+    expect(rowOf(ocWindow, "codex", "c3")).toBeDefined();
+
+    // The oc window's own codex sweep now fails. The adopted listing stands:
+    // a failed refresh does not invalidate a listing that still answers.
+    main.api.sessions = async (backend: BackendId) => {
+      if (backend === "codex") throw new Error("codex server down");
+      return baseSessions(backend);
+    };
+    await ocWindow.state.refreshOverviewSessions(true);
+
+    expect(rowOf(ocWindow, "codex", "c3")).toBeDefined();
+    expect(ocWindow.state.overviewRemoteError("codex")).toBeNull();
+  });
+
+  it("marks a run that started before this window opened as running", async () => {
+    const main = createMainMock();
+    main.setRunning([{ backend: "codex", sessionId: "c1" }]);
+    const h = await bootWindow(main);
+    await vi.advanceTimersByTimeAsync(3_000); // the sweep lists codex; the seed resolved
+
+    expect(rowOf(h, "codex", "c1")?.status).toBe("running");
   });
 });
 

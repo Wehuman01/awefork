@@ -157,3 +157,21 @@ export function createOverviewLedgerMock(): Pick<
     },
   };
 }
+
+/**
+ * Stand-in for the main-owned cross-window overview cache, for single-window
+ * tests: an empty listing cache, a publish that stores nothing, no
+ * broadcast, and no runs in flight. The multi-window describe in
+ * renderer-session-overview-state.test.ts builds a real shared cache.
+ */
+export function createOverviewCacheMock(): Pick<
+  AweforkApi,
+  "overviewListings" | "overviewPublishListing" | "onOverviewListing" | "overviewRunning"
+> {
+  return {
+    overviewListings: async () => ({}),
+    overviewPublishListing: async () => true,
+    onOverviewListing: () => () => {},
+    overviewRunning: async () => [],
+  };
+}

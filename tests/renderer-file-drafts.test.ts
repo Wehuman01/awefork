@@ -8,7 +8,7 @@ import type {
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Draft identity × multi-draft preservation: opening a draft for another
@@ -162,6 +162,7 @@ async function bootState(options: { composer?: PersistedComposer | null } = {}) 
     pathForFile: () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

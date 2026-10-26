@@ -7,7 +7,7 @@ import type {
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Composer-persistence × backend-switch regression harness: the state module
@@ -182,6 +182,7 @@ async function bootState(
     fileChangeDiff: async () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

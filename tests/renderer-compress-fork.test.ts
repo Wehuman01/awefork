@@ -9,7 +9,7 @@ import type {
   SessionSummary,
   TagStore,
 } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 const ANCHOR: SessionSummary = {
   id: "anchor",
@@ -171,6 +171,7 @@ async function bootState(options: { extraSessions?: SessionSummary[]; tags?: str
       return () => {};
     },
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   } as unknown as AweforkApi;
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

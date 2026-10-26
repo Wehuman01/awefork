@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendId } from "../src/shared/backend";
 import type { ChatMessage, SessionSummary } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * Compare-lens fold isolation harness: the state module is a singleton, so
@@ -134,6 +134,7 @@ async function bootState() {
     fileChangeDiff: async () => null,
     onEvent: () => () => {},
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   } as unknown as AweforkApi;
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

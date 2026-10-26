@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { ChatMessage, PersistedComposer, SessionSummary } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /** The session lives in /demo/shop-api but the app opens on a DIFFERENT dir
  *  first — the classic cold start where refreshSessions auto-selects the
@@ -88,6 +88,7 @@ async function boot() {
     fileChangeDiff: async () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

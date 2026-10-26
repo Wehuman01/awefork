@@ -31,6 +31,7 @@ import type {
   OverviewReadLedger,
   OverviewReadUpdate,
 } from "../shared/overview-ledger-types.js";
+import type { OverviewListing, OverviewRunningEntry } from "../shared/overview-listing.js";
 import type { RoundRecord } from "../shared/rounds-types.js";
 
 import type {
@@ -299,6 +300,20 @@ const api: AweforkApi = {
     ipcRenderer.on("awefork:overview-read", listener);
     return () => ipcRenderer.removeListener("awefork:overview-read", listener);
   },
+  overviewListings: (): Promise<Partial<Record<BackendId, OverviewListing>>> =>
+    ipcRenderer.invoke("awefork:overviewListings"),
+  overviewPublishListing: (backend: BackendId, listing: OverviewListing): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:overviewPublishListing", backend, listing),
+  onOverviewListing: (
+    handler: (payload: { backend: BackendId; listing: OverviewListing }) => void,
+  ): (() => void) => {
+    const listener = (_event: unknown, payload: unknown) =>
+      handler(payload as { backend: BackendId; listing: OverviewListing });
+    ipcRenderer.on("awefork:overview-listing", listener);
+    return () => ipcRenderer.removeListener("awefork:overview-listing", listener);
+  },
+  overviewRunning: (): Promise<OverviewRunningEntry[]> =>
+    ipcRenderer.invoke("awefork:overviewRunning"),
   roundsList: (): Promise<RoundRecord[]> => ipcRenderer.invoke("awefork:roundsList"),
   roundsSave: (record: RoundRecord): Promise<boolean> =>
     ipcRenderer.invoke("awefork:roundsSave", record),

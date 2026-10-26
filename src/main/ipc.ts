@@ -47,6 +47,7 @@ import {
   type OverviewReadLedger,
   overviewKey,
 } from "../shared/overview-ledger-types.js";
+import type { OverviewListing, OverviewRunningEntry } from "../shared/overview-listing.js";
 import { prunePin, readPins, togglePin } from "../shared/pins-store.js";
 import type { RoundsStore } from "../shared/rounds-store.js";
 import { normalizeRoundRecord } from "../shared/rounds-types.js";
@@ -93,6 +94,30 @@ import { readOnboardingDone, writeOnboardingDone } from "./settings-store.js";
 import { checkForUpdates, openRelease, skipUpdate } from "./update-check.js";
 import { downloadAndInstallUpdate } from "./update-install.js";
 import { resolveZcodeCli } from "./zcode-server.js";
+
+/**
+ * Validate one published overview listing. The cache is renderer-supplied
+ * input on the way back in: cap the arrays, keep the fields the rows read,
+ * and drop anything malformed rather than trusting it.
+ */
+function normalizeOverviewListing(value: unknown): OverviewListing | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.sessions)) return null;
+  const archive = raw.archive;
+  return {
+    sessions: raw.sessions.slice(0, 10_000) as OverviewListing["sessions"],
+    trash: Array.isArray(raw.trash)
+      ? raw.trash.filter((id): id is string => typeof id === "string")
+      : [],
+    archive:
+      archive && typeof archive === "object"
+        ? (archive as OverviewListing["archive"])
+        : { sessions: [], directories: [] },
+    fetchedAt: Number.isFinite(raw.fetchedAt) ? Number(raw.fetchedAt) : Date.now(),
+    error: typeof raw.error === "string" ? raw.error.slice(0, 500) : null,
+  };
+}
 
 /**
  * IPC surface (all invoke-channels, prefixed awefork:). Every method that
@@ -156,7 +181,13 @@ import { resolveZcodeCli } from "./zcode-server.js";
  *   overviewForget(backend, session)               -> boolean (hard delete)
  *   overviewMergeLedger(ledger)                    -> merged ledger (window sync)
  * Sequence-stamped entry and unknown-state updates arrive on
- * "awefork:overview-read".
+ * "awefork:overview-read". The cross-window session listings (so every
+ * window's overview counts the same sessions) ride their own cache:
+ *   overviewListings      -> cached listings          for a new window
+ *   overviewPublishListing(backend, listing)         -> boolean (broadcast)
+ *   overviewRunning       -> runs in flight           for a window booted mid-run
+ * Published listings arrive on "awefork:overview-listing" as
+ * {backend, listing}.
  * Multi-model rounds sidecar (main-owned, when a store is passed in):
  *   roundsList()                -> RoundRecord[]     every persisted round
  *   roundsSave(record)          -> boolean           upsert one round (id-keyed)
@@ -333,6 +364,35 @@ export function registerIpc(
       },
     );
   }
+
+  // ── canvas session overview cross-window listings (main-owned cache) ─────
+  // One listing per backend, written by whichever window fetched it and read
+  // by all of them. This is what keeps two windows from projecting different
+  // session sets for the same agent: each window refreshes its own copy of
+  // the agents it is not showing, so without a shared cache the counts drift
+  // apart by up to a sweep per window. Newer-wins on fetchedAt.
+  const overviewListings = new Map<BackendId, OverviewListing>();
+  ipcMain.handle("awefork:overviewListings", async () => Object.fromEntries(overviewListings));
+  ipcMain.handle(
+    "awefork:overviewPublishListing",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, value: unknown) => {
+      const listing = normalizeOverviewListing(value);
+      if (!listing) return false;
+      const id = storeBackend(backend);
+      overviewListings.set(id, listing);
+      const payload = { backend: id, listing };
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send("awefork:overview-listing", payload);
+      }
+      return true;
+    },
+  );
+  // The registry's in-flight runs: one app-global set every window seeds
+  // from, so a window opened mid-run sees the same "running" as the windows
+  // that watched the start frame.
+  ipcMain.handle("awefork:overviewRunning", async (): Promise<OverviewRunningEntry[]> => {
+    return registry.runningSessions().map(({ backend, sessionId }) => ({ backend, sessionId }));
+  });
 
   // ── multi-model rounds sidecar (main-owned) ──────────────────────────────
   // The renderer's round groups are window-local memory; this file is what

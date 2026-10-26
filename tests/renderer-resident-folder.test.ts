@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { SessionSummary } from "../src/shared/types";
-import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
+import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
  * The resident folder: one standing folder in the sidebar's file list, kept
@@ -141,6 +141,7 @@ async function bootState(
     openRelease: async () => ({ ok: true }),
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
+    ...createOverviewCacheMock(),
   } as unknown as AweforkApi;
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
 
