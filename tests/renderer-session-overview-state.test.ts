@@ -1123,3 +1123,59 @@ describe("workspace work left pending by a return", () => {
     },
   );
 });
+
+describe("overview model enrichment", () => {
+  /**
+   * opencode and zcode keep a session's model on its messages, so the panel
+   * reads it for the rows whose listing reports none. The reads are paced
+   * (one pass, bounded concurrency) and cached per session version.
+   */
+  it("fills the model chip from a messages read, once per session version", async () => {
+    const h = await bootState();
+    const messages = vi.fn(async () => [
+      { ...USER_ROW, id: "m2", role: "assistant" as const, modelId: "glm-5.3", variant: "high" },
+    ]);
+    h.api.messages = messages;
+    const rows = h.state.overviewRows.value;
+    // The fixture listing reports no model, so the row starts bare.
+    expect(rows.map((row) => row.model)).toEqual([null]);
+
+    await h.state.ensureOverviewModels(rows);
+    expect(rowOf(h, "opencode", "s1")?.model).toEqual({ modelId: "glm-5.3", variant: "high" });
+    expect(messages).toHaveBeenCalledTimes(1);
+
+    // A quiet session is never fetched twice: the cache is keyed by the
+    // session version the read saw.
+    await h.state.ensureOverviewModels(h.state.overviewRows.value);
+    expect(messages).toHaveBeenCalledTimes(1);
+
+    // A new turn bumps the version, so that row is read again.
+    const newer = h.state.overviewRows.value.map((row) => ({
+      ...row,
+      session: { ...row.session, updatedAt: row.session.updatedAt + 1 },
+    }));
+    await h.state.ensureOverviewModels(newer);
+    expect(messages).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a failed read uncached so a later pass retries it", async () => {
+    const h = await bootState();
+    const messages = vi.fn(async () => {
+      throw new Error("backend gone");
+    });
+    h.api.messages = messages;
+    const rows = h.state.overviewRows.value;
+    await h.state.ensureOverviewModels(rows);
+    expect(rowOf(h, "opencode", "s1")?.model).toBeNull();
+    expect(messages).toHaveBeenCalledTimes(1);
+
+    // The backend comes back: the uncached row is read again rather than
+    // staying bare for the rest of the window's life.
+    messages.mockImplementation(async () => [
+      { ...USER_ROW, id: "m2", role: "assistant" as const, modelId: "glm-5.3", variant: null },
+    ]);
+    await h.state.ensureOverviewModels(rows);
+    expect(rowOf(h, "opencode", "s1")?.model).toEqual({ modelId: "glm-5.3", variant: null });
+    expect(messages).toHaveBeenCalledTimes(2);
+  });
+});

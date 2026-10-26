@@ -6740,6 +6740,10 @@ async function reconcileOverviewSessions(
 ): Promise<void> {
   if (!settings.labs.sessionOverview || !overviewSnapshotReady || sessions.length === 0) return;
   const updates: Array<{ id: string; updatedAt: number }> = [];
+  // The models this sweep's reads saw, applied once after the loop: the
+  // overview rows project off that cache, so a write per session would
+  // re-project every row once per swept session.
+  const found = new Map<string, { at: number; model: OverviewModel | null }>();
   const priorScanAt = state.overviewScannedAt[backend] ?? 0;
   for (const session of sessions) {
     if (!Number.isFinite(session.updatedAt) || session.updatedAt <= 0) continue;
@@ -6767,7 +6771,7 @@ async function reconcileOverviewSessions(
         );
       // The read is already paid for: cache the model this session last ran on
       // so the overview's row shows it without a second fetch.
-      cacheOverviewModel(backend, session.id, session.updatedAt, lastModelOfMessages(messages));
+      found.set(key, { at: session.updatedAt, model: lastModelOfMessages(messages) });
       const completedAt = latestReply?.completedAt ?? latestReply?.createdAt ?? 0;
       const previousResultAt = state.overviewRead[key]?.settledAt ?? 0;
       const resultBaseline = previous ?? session.createdAt;
@@ -6785,6 +6789,7 @@ async function reconcileOverviewSessions(
     }
     updates.push({ id: session.id, updatedAt: session.updatedAt });
   }
+  applyOverviewModelCache(found);
   if (updates.length === 0) return;
   try {
     const persistedScanAt = await window.awefork.overviewObserveSessions(backend, updates, scanAt);
@@ -6802,21 +6807,41 @@ async function reconcileOverviewSessions(
 }
 
 /**
- * Record the model one session last ran on, as of the given session version.
- * `model` null means the read found no model-bearing row; it is still cached,
- * so a quiet session is not re-read on every pass.
+ * How many sessions' models the enrichment cache remembers. One small entry
+ * per session the panel ever enriched, in-memory only — the same bounded
+ * shape the ledger and rounds stores keep, so a long-lived window cannot
+ * grow it without end. A refreshed session re-inserts at the newest end.
  */
-function cacheOverviewModel(
-  backend: BackendId,
-  sessionId: string,
-  updatedAt: number,
-  model: OverviewModel | null,
+const MAX_OVERVIEW_MODELS = 2_000;
+
+/**
+ * Record the models one enrichment pass read, as of the session versions
+ * that read saw. Applied once per pass, not per row: `overviewRows` reads
+ * this map, so a write per row would re-project every row once per
+ * enriched row. `model` null means the read found no model-bearing row;
+ * it is still cached, so a quiet session is not re-read on every pass.
+ */
+function applyOverviewModelCache(
+  found: ReadonlyMap<string, { at: number; model: OverviewModel | null }>,
 ): void {
-  state.overviewModels[overviewKey(backend, sessionId)] = {
-    at: updatedAt,
-    modelId: model?.modelId ?? null,
-    variant: model?.variant ?? null,
-  };
+  if (found.size === 0) return;
+  const next = new Map(Object.entries(state.overviewModels));
+  for (const [key, value] of found) {
+    // Delete first so a refreshed session lands at the newest end of the
+    // insertion order the cap prunes from.
+    next.delete(key);
+    next.set(key, {
+      at: value.at,
+      modelId: value.model?.modelId ?? null,
+      variant: value.model?.variant ?? null,
+    });
+  }
+  while (next.size > MAX_OVERVIEW_MODELS) {
+    const oldest = next.keys().next();
+    if (oldest.done) break;
+    next.delete(oldest.value);
+  }
+  state.overviewModels = Object.fromEntries(next);
 }
 
 /** One enrichment pass in flight; the panel's watch re-arms it after each. */
@@ -6843,18 +6868,19 @@ export async function ensureOverviewModels(rows: readonly OverviewRow[]): Promis
   if (pending.length === 0) return;
   const queue = [...pending];
   const pass = (async () => {
+    // Collected first, written once: overviewRows projects off this cache,
+    // so a write per row would re-project the whole list per enriched row.
+    const found = new Map<string, { at: number; model: OverviewModel | null }>();
     const workers = Array.from(
       { length: Math.min(OVERVIEW_MODEL_CONCURRENCY, queue.length) },
       async () => {
         for (let row = queue.shift(); row !== undefined; row = queue.shift()) {
           try {
             const messages = await window.awefork.messages(row.backend, row.session.id);
-            cacheOverviewModel(
-              row.backend,
-              row.session.id,
-              row.session.updatedAt,
-              lastModelOfMessages(messages),
-            );
+            found.set(overviewKey(row.backend, row.session.id), {
+              at: row.session.updatedAt,
+              model: lastModelOfMessages(messages),
+            });
           } catch {
             // Leave the row uncached: the chip stays absent and a later pass retries.
           }
@@ -6862,6 +6888,7 @@ export async function ensureOverviewModels(rows: readonly OverviewRow[]): Promis
       },
     );
     await Promise.allSettled(workers);
+    applyOverviewModelCache(found);
   })();
   overviewModelPass = pass;
   try {
@@ -7277,7 +7304,7 @@ export async function jumpToOverviewSession(
     // This window stays put, the panel closes, and the row clears from the
     // shared ledger like any landed jump.
     if (settings.canvas.multiWindow && backend !== state.activeBackend) {
-      let result: { ok: boolean; error?: string };
+      let result: { ok: boolean; error?: string; pending?: boolean };
       try {
         result = await window.awefork.requestAgentNavigate(backend, sessionId);
       } catch (error) {
