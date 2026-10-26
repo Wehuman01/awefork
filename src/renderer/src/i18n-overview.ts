@@ -20,7 +20,7 @@ export const dict: Record<string, { zh: string; en: string }> = {
   "overview.scope": { zh: "全部 Agent · 全部项目", en: "All agents · all projects" },
   "overview.close": { zh: "关闭会话总览", en: "Close the session overview" },
   "overview.searchLabel": { zh: "搜索会话", en: "Search sessions" },
-  "overview.searchPlaceholder": { zh: "搜索会话或项目…", en: "Search sessions or projects…" },
+  "overview.searchPlaceholder": { zh: "搜索会话、项目或模型…", en: "Search sessions, projects or models…" },
   "overview.filterStatus": { zh: "筛选会话状态", en: "Filter by session status" },
   "overview.filterAgent": { zh: "筛选 Agent", en: "Filter by agent" },
   "overview.allAgents": { zh: "全部 Agent", en: "All agents" },

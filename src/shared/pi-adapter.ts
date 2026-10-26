@@ -401,9 +401,18 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
     let title = "(untitled session)";
     const createdAt = parsed.header?.timestamp ? Date.parse(parsed.header.timestamp) : 0;
     let updatedAt = createdAt;
+    // Model changes ride the branch as their own entries, so the newest
+    // model-bearing entry — a message or a model_change — is what this session
+    // last ran on. The index already holds the parse, so this costs no read.
+    let modelId: string | null = null;
     for (const entry of parsed.entries) {
       const ts = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
       if (!Number.isNaN(ts) && ts > updatedAt) updatedAt = ts;
+      if (entry.type === "model_change" && entry.modelId) {
+        modelId = entry.modelId;
+      } else if (entry.type === "message" && entry.message?.model) {
+        modelId = entry.message.model;
+      }
       if (entry.type === "session_info" && typeof entry.name === "string" && entry.name.trim()) {
         title = entry.name.trim();
       }
@@ -425,6 +434,8 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       origin: "root",
       createdAt: date,
       updatedAt: updatedAt || date,
+      modelId,
+      variant: null,
     };
   };
 

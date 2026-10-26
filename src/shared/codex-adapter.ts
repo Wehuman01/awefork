@@ -291,6 +291,10 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     origin: thread.forkedFromId ? "fork" : thread.parentThreadId ? "subagent" : "root",
     createdAt: secToMs(thread.createdAt) ?? Date.now(),
     updatedAt: secToMs(thread.updatedAt) ?? Date.now(),
+    // thread/list carries the thread's current model settings, so the overview
+    // can name a model without reading a single turn.
+    modelId: thread.model ?? null,
+    variant: thread.reasoningEffort ?? null,
   });
 
   /**

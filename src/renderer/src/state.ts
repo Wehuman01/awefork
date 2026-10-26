@@ -73,14 +73,19 @@ import {
 import { insertPathText } from "./path-insert";
 import {
   compareOverviewRows,
+  lastModelOfMessages,
   markOverviewSeen as markSeenInLedger,
   mergeOverviewLedger,
+  OVERVIEW_MODEL_BATCH,
+  OVERVIEW_MODEL_CONCURRENCY,
   type OverviewFilter,
+  type OverviewModel,
   type OverviewReadEntry,
   type OverviewReadLedger,
   type OverviewRow,
   overviewCounts,
   overviewKey,
+  overviewModelsToFetch,
   projectOverviewStatus,
   recordOverviewSettle,
 } from "./session-overview";
@@ -130,6 +135,21 @@ export function parallelGroupForSession(
           group.summaryVersions.some((version) => version.sessionId === sessionId) ||
           group.targets.some((target) => target.sessionId === sessionId)),
     ) ?? null
+  );
+}
+
+/**
+ * The round reading view belongs to the session that sent the round and to
+ * the summary it produced. A per-model answer branch is one model's own
+ * conversation — showing the round's tabs there repeated the same round on
+ * every branch, so those sessions read as plain conversations.
+ */
+export function parallelRoundOwner(group: ParallelGroup, sessionId: string | null): boolean {
+  if (!sessionId) return false;
+  return (
+    group.anchorSessionId === sessionId ||
+    group.summarySessionId === sessionId ||
+    group.summaryVersions.some((version) => version.sessionId === sessionId)
   );
 }
 
@@ -546,6 +566,10 @@ const state = reactive<AppState>({
   overviewScannedAt: {},
   overviewRemote: {},
   overviewUnknown: {},
+  // Models the panel read from messages for rows whose listing reports none
+  // (opencode, zcode), keyed by backend+session. `at` is the session's
+  // updatedAt the read saw, so a new turn re-reads and a quiet session does not.
+  overviewModels: {},
 });
 
 export const store = readonly(state);
@@ -6506,6 +6530,11 @@ export const overviewRows = computed<OverviewRow[]>(() => {
       (request) => request.sessionId === session.id,
     );
     const result = state.overviewRead[key] ?? null;
+    // A listing that reports a model (codex, claude, pi) answers directly; the
+    // others fall back to what a messages read cached for this session version.
+    const cached = state.overviewModels[key];
+    const modelId = session.modelId ?? cached?.modelId ?? null;
+    const variant = session.variant ?? cached?.variant ?? null;
     rows.push({
       backend,
       session,
@@ -6519,6 +6548,7 @@ export const overviewRows = computed<OverviewRow[]>(() => {
         unknown: state.overviewUnknown[key] !== undefined || session.runtimeStatus === "unknown",
       }),
       activityAt: Math.max(session.updatedAt, result?.settledAt ?? 0),
+      model: modelId !== null || variant !== null ? { modelId, variant } : null,
     });
   };
 
@@ -6631,6 +6661,9 @@ async function reconcileOverviewSessions(
             message.finish !== "tool-calls" &&
             (message.completedAt !== null || message.error !== null),
         );
+      // The read is already paid for: cache the model this session last ran on
+      // so the overview's row shows it without a second fetch.
+      cacheOverviewModel(backend, session.id, session.updatedAt, lastModelOfMessages(messages));
       const completedAt = latestReply?.completedAt ?? latestReply?.createdAt ?? 0;
       const previousResultAt = state.overviewRead[key]?.settledAt ?? 0;
       const resultBaseline = previous ?? session.createdAt;
@@ -6661,6 +6694,68 @@ async function reconcileOverviewSessions(
     );
   } catch {
     // Keep the local baseline unchanged so a later refresh can retry the save.
+  }
+}
+
+/**
+ * Record the model one session last ran on, as of the given session version.
+ * `model` null means the read found no model-bearing row; it is still cached,
+ * so a quiet session is not re-read on every pass.
+ */
+function cacheOverviewModel(
+  backend: BackendId,
+  sessionId: string,
+  updatedAt: number,
+  model: OverviewModel | null,
+): void {
+  state.overviewModels[overviewKey(backend, sessionId)] = {
+    at: updatedAt,
+    modelId: model?.modelId ?? null,
+    variant: model?.variant ?? null,
+  };
+}
+
+/** One enrichment pass in flight; the panel's watch re-arms it after each. */
+let overviewModelPass: Promise<void> | null = null;
+
+/**
+ * Fill the model chip for the rows the panel is showing.
+ *
+ * codex, claude and pi report a model in their session listing, so their rows
+ * cost nothing. opencode and zcode keep it on messages, so this reads at most
+ * OVERVIEW_MODEL_BATCH of the given rows — the top of the list, which is what
+ * the user is looking at — never the whole store. A read that fails leaves the
+ * row uncached, so the next pass retries it; the same contract the result
+ * reconcile sweep keeps.
+ */
+export async function ensureOverviewModels(rows: readonly OverviewRow[]): Promise<void> {
+  if (!settings.labs.sessionOverview) return;
+  if (overviewModelPass) return overviewModelPass;
+  const pending = overviewModelsToFetch(
+    rows,
+    (row) => state.overviewModels[overviewKey(row.backend, row.session.id)]?.at ?? null,
+    OVERVIEW_MODEL_BATCH,
+  );
+  if (pending.length === 0) return;
+  const queue = [...pending];
+  const pass = (async () => {
+    const workers = Array.from({ length: Math.min(OVERVIEW_MODEL_CONCURRENCY, queue.length) }, async () => {
+      for (let row = queue.shift(); row !== undefined; row = queue.shift()) {
+        try {
+          const messages = await window.awefork.messages(row.backend, row.session.id);
+          cacheOverviewModel(row.backend, row.session.id, row.session.updatedAt, lastModelOfMessages(messages));
+        } catch {
+          // Leave the row uncached: the chip stays absent and a later pass retries.
+        }
+      }
+    });
+    await Promise.allSettled(workers);
+  })();
+  overviewModelPass = pass;
+  try {
+    await pass;
+  } finally {
+    overviewModelPass = null;
   }
 }
 

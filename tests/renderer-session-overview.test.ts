@@ -5,15 +5,19 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   compareOverviewRows,
+  lastModelOfMessages,
   markOverviewSeen,
   matchesOverviewAgent,
   matchesOverviewFilter,
   matchesOverviewQuery,
   mergeOverviewLedger,
+  OVERVIEW_MODEL_BATCH,
   type OverviewReadLedger,
   type OverviewRow,
   overviewCounts,
   overviewKey,
+  overviewModelLabel,
+  overviewModelsToFetch,
   projectOf,
   projectOverviewStatus,
   pruneOverviewLedger,
@@ -50,7 +54,7 @@ function row(
   status: OverviewRow["status"],
   activityAt = 0,
 ): OverviewRow {
-  return { backend, session: session(id), status, pending: 0, activityAt };
+  return { backend, session: session(id), status, pending: 0, activityAt, model: null };
 }
 
 describe("overview status projection", () => {
@@ -191,6 +195,70 @@ describe("overview ordering", () => {
   });
 });
 
+describe("overview model projection", () => {
+  it("labels a model with its effort variant, and nothing when there is no model", () => {
+    expect(overviewModelLabel({ modelId: "glm/glm-5.3-flash", variant: null })).toBe(
+      "glm/glm-5.3-flash",
+    );
+    expect(overviewModelLabel({ modelId: "glm/glm-5.3-flash", variant: "high" })).toBe(
+      "glm/glm-5.3-flash · high",
+    );
+    expect(overviewModelLabel(null)).toBeNull();
+    expect(overviewModelLabel({ modelId: null, variant: "high" })).toBeNull();
+  });
+
+  it("reads the newest model-bearing row, user or assistant", () => {
+    const rowOf = (role: "user" | "assistant", modelId: string | null) => ({
+      role,
+      modelId,
+      variant: null,
+    });
+    expect(lastModelOfMessages([rowOf("user", "a/one"), rowOf("assistant", "b/two")])).toEqual({
+      modelId: "b/two",
+      variant: null,
+    });
+    // A session whose first turn is still running: only the user row carries it.
+    expect(lastModelOfMessages([rowOf("user", "a/one")])).toEqual({
+      modelId: "a/one",
+      variant: null,
+    });
+    // A model-less tail (an ask, a tool row) falls back to the last real one.
+    expect(
+      lastModelOfMessages([rowOf("assistant", "a/one"), rowOf("assistant", null)]),
+    ).toEqual({ modelId: "a/one", variant: null });
+    expect(lastModelOfMessages([])).toBeNull();
+    expect(lastModelOfMessages([rowOf("assistant", null)])).toBeNull();
+  });
+
+  it("only fetches rows a listing cannot answer, and only once per session version", () => {
+    const reported = {
+      ...row("codex", "reported", "idle"),
+      session: session("reported", { modelId: "gpt-5.6-sol" }),
+    };
+    const unanswered = row("opencode", "unanswered", "idle");
+    const cached = row("opencode", "cached", "idle");
+    const stale = row("opencode", "stale", "idle");
+    const rows = [reported, unanswered, cached, stale];
+    const cache = new Map<string, number>([
+      ["opencode/cached", cached.session.updatedAt],
+      // A cache entry from before this session's newest turn is stale.
+      ["opencode/stale", stale.session.updatedAt - 1],
+    ]);
+
+    const pending = overviewModelsToFetch(rows, (item) => cache.get(overviewKey(item.backend, item.session.id)) ?? null, 10);
+    expect(pending.map((item) => item.session.id)).toEqual(["unanswered", "stale"]);
+  });
+
+  it("caps one pass at the batch size, in list order", () => {
+    const rows = Array.from({ length: OVERVIEW_MODEL_BATCH + 5 }, (_, index) =>
+      row("opencode", `s${index}`, "idle"),
+    );
+    const pending = overviewModelsToFetch(rows, () => null, OVERVIEW_MODEL_BATCH);
+    expect(pending).toHaveLength(OVERVIEW_MODEL_BATCH);
+    expect(pending[0]?.session.id).toBe("s0");
+  });
+});
+
 describe("overview filtering", () => {
   const target: OverviewRow = {
     backend: "codex",
@@ -201,6 +269,7 @@ describe("overview filtering", () => {
     status: "unread",
     pending: 0,
     activityAt: 0,
+    model: null,
   };
 
   it("matches title, project path and agent name", () => {
@@ -209,6 +278,18 @@ describe("overview filtering", () => {
     expect(matchesOverviewQuery(target, "codex")).toBe(true);
     expect(matchesOverviewQuery(target, "opencode")).toBe(false);
     expect(matchesOverviewQuery(target, "   ")).toBe(true);
+  });
+
+  it("matches the model a row shows, so runs can be found by model", () => {
+    const withModel: OverviewRow = {
+      ...target,
+      model: { modelId: "glm/glm-5.3-flash", variant: "high" },
+    };
+    expect(matchesOverviewQuery(withModel, "glm-5.3")).toBe(true);
+    expect(matchesOverviewQuery(withModel, "GLM")).toBe(true);
+    expect(matchesOverviewQuery(withModel, "gpt-5")).toBe(false);
+    // A row with no known model answers only its own facts.
+    expect(matchesOverviewQuery(target, "glm-5.3")).toBe(false);
   });
 
   it("filters by tab and by agent", () => {

@@ -415,6 +415,27 @@ describe("parallel reading groups", () => {
     expect(group.summaryText).not.toContain("独立回答");
   });
 
+  it("keeps the round's reading view on the anchor and the summary, not on the answer branches", async () => {
+    const h = await bootState();
+    await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);
+    const group = required(h.state.parallelGroups[0]);
+    const branches = group.targets.map((target) => target.sessionId);
+    // With no summary yet the round belongs to the session that sent it, so
+    // the tabs it opens are the round's — a per-model branch is that model's
+    // own conversation and must not repeat them.
+    expect(h.state.parallelRoundOwner(group, group.anchorSessionId)).toBe(true);
+    for (const branch of branches) {
+      expect(h.state.parallelRoundOwner(group, branch)).toBe(false);
+    }
+    await settle(h, "fork-1", "回答甲");
+    await settle(h, "fork-2", "回答乙");
+    expect(h.state.parallelRoundOwner(group, required(group.summarySessionId))).toBe(true);
+    for (const branch of branches) {
+      expect(h.state.parallelRoundOwner(group, branch)).toBe(false);
+    }
+    expect(h.state.parallelRoundOwner(group, null)).toBe(false);
+  });
+
   it("can summarize available answers early, then refresh when the remaining model finishes", async () => {
     const h = await bootState();
     await h.state.sendParallelPrompt(MODELS.slice(0, 2), QUESTION, [], SETTINGS);

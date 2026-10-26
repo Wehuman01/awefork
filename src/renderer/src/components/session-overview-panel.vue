@@ -96,6 +96,12 @@
                   {{ projectOf(row.session.directory) }}
                   <em aria-hidden="true">·</em>
                   {{ BACKEND_LABELS[row.backend] }}
+                  <template v-if="modelLabel(row)">
+                    <em aria-hidden="true">·</em>
+                    <span class="float-session-model" :title="modelTitle(row)">{{
+                      modelLabel(row)
+                    }}</span>
+                  </template>
                   <template v-if="isCurrent(row)">
                     <em aria-hidden="true">·</em> {{ t("overview.current") }}
                   </template>
@@ -251,12 +257,14 @@ import {
   type OverviewRow,
   type OverviewSummary,
   overviewKey,
+  overviewModelLabel,
   projectOf,
   summarizeMessages,
 } from "../session-overview";
 import {
   clearOverviewSelection,
   closeOverviewPanel,
+  ensureOverviewModels,
   jumpToOverviewSession,
   markOverviewSeen,
   overviewAgents,
@@ -374,6 +382,20 @@ function activityOf(row: OverviewRow): string {
 /** True when the last observed run for this session ended in an error. */
 function lastRunFailed(row: OverviewRow): boolean {
   return store.overviewRead[overviewKey(row.backend, row.session.id)]?.failed === true;
+}
+
+/**
+ * The row's model chip: the last turn's model plus its effort variant. Rows
+ * whose backend reports no model simply omit the chip — no placeholder, since
+ * "the listing cannot say" is not the same fact as "no model".
+ */
+function modelLabel(row: OverviewRow): string | null {
+  return overviewModelLabel(row.model);
+}
+
+/** The full model id, since the chip is ellipsized by the meta line. */
+function modelTitle(row: OverviewRow): string | undefined {
+  return row.model?.modelId ?? undefined;
 }
 
 function clearFilters(): void {
@@ -690,6 +712,21 @@ watch(
     if (!open) return;
     sweepTimer = setInterval(() => void refreshOverviewSessions(), 20_000);
   },
+);
+
+/**
+ * Fill in the model chips the listings cannot answer, for the rows this panel
+ * is showing. Runs when the visible set changes (open, tab switch, search, a
+ * refresh landing) and at most reads OVERVIEW_MODEL_BATCH of them per pass.
+ * `ensureOverviewModels` is a no-op once every visible row is answered, so a
+ * plain re-render costs nothing.
+ */
+watch(
+  () => (store.overview.open ? visibleRows.value : []),
+  (rows) => {
+    if (rows.length > 0) void ensureOverviewModels(rows);
+  },
+  { immediate: true, flush: "post" },
 );
 
 onMounted(() => {

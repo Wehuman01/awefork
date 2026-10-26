@@ -623,9 +623,22 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       origin: record ? "fork" : "root",
       createdAt,
       updatedAt,
+      // The parse is already in hand, so the last turn's model is free: the
+      // overview names a model without a second read of the transcript.
+      modelId: lastModelIdOf(branch),
+      variant: null,
       ...overrides,
     };
     return summary;
+  };
+
+  /** The model the branch's newest turn ran on, walking back from its tip. */
+  const lastModelIdOf = (branch: readonly ClaudeRow[]): string | null => {
+    for (let index = branch.length - 1; index >= 0; index -= 1) {
+      const model = branch[index]?.message?.model;
+      if (typeof model === "string" && model) return model;
+    }
+    return null;
   };
 
   /**

@@ -28,6 +28,14 @@ export interface SessionSummary {
   updatedAt: number;
   /** Live state only when the backend's session listing reports it explicitly. */
   runtimeStatus?: "running" | "idle" | "unknown";
+  /**
+   * Model the session's last turn ran on (e.g. "glm/glm-5.3-flash"), when the
+   * backend's listing reports one. Absent (not null) means the listing cannot
+   * say — the overview then reads it from the session's messages on demand.
+   */
+  modelId?: string | null;
+  /** Reasoning-effort variant that turn used (e.g. "high"); absent alongside modelId. */
+  variant?: string | null;
 }
 
 export interface ChatMessage {

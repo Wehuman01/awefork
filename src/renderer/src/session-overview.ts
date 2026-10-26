@@ -86,6 +86,73 @@ export interface OverviewRow {
   pending: number;
   /** Epoch ms of the most relevant observed activity, used for sorting. */
   activityAt: number;
+  /**
+   * The model the row shows: the session's last turn's model when known, null
+   * when neither the backend's listing nor a messages read reported one.
+   */
+  model: OverviewModel | null;
+}
+
+/** The model a row names: what the last turn ran on, plus its effort variant. */
+export interface OverviewModel {
+  modelId: string | null;
+  variant: string | null;
+}
+
+/** The row's model label ("glm-5.3-flash · high"); null when nothing is known. */
+export function overviewModelLabel(model: OverviewModel | null): string | null {
+  if (model === null || model.modelId === null) return null;
+  return model.variant === null ? model.modelId : `${model.modelId} · ${model.variant}`;
+}
+
+/**
+ * The model of the most recent turn: the last row that reports one, whichever
+ * role it is. A user row carries the model its run was configured with, so a
+ * session mid-first-turn still names its model; an assistant row carries the
+ * model that produced it. Sessions with no model-bearing row report none.
+ */
+export function lastModelOfMessages(
+  messages: readonly { role: "user" | "assistant"; modelId: string | null; variant: string | null }[],
+): OverviewModel | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.modelId) return { modelId: message.modelId, variant: message.variant ?? null };
+  }
+  return null;
+}
+
+/**
+ * How many rows one enrichment pass may read messages for. The panel renders
+ * every filtered row, so "the rows on screen" is a batch, not a viewport: this
+ * caps the reads at what the top of the list actually shows. Rows past the cap
+ * keep showing a model only when their backend's listing already reported one.
+ */
+export const OVERVIEW_MODEL_BATCH = 40;
+
+/** Reads one enrichment pass may have in flight; local servers, but not 40 at once. */
+export const OVERVIEW_MODEL_CONCURRENCY = 6;
+
+/**
+ * The rows whose model still needs a messages read, in list order, capped at
+ * `limit`. A row is skipped when its backend's listing already reported a
+ * model, or when a cached read covers this exact session version (`cachedAt`
+ * is the `updatedAt` that read saw). Failed reads stay uncached, so the next
+ * pass retries them — the same contract the result reconcile sweep keeps.
+ */
+export function overviewModelsToFetch(
+  rows: readonly OverviewRow[],
+  cachedAt: (row: OverviewRow) => number | null,
+  limit: number,
+): OverviewRow[] {
+  const pending: OverviewRow[] = [];
+  for (const row of rows) {
+    if (pending.length >= limit) break;
+    if (row.session.modelId) continue;
+    const at = cachedAt(row);
+    if (at !== null && at >= row.session.updatedAt) continue;
+    pending.push(row);
+  }
+  return pending;
 }
 
 /** The two text blocks the summary shows for one session. */
@@ -174,8 +241,9 @@ export function projectOf(directory: string): string {
 }
 
 /**
- * First-version search: title, project path and agent name. Body search stays
- * in the sidebar's enhanced search — the overview must not scan every session.
+ * First-version search: title, project path, agent name and model. Body search
+ * stays in the sidebar's enhanced search — the overview must not scan every
+ * session.
  */
 export function matchesOverviewQuery(row: OverviewRow, query: string): boolean {
   const needle = query.trim().toLowerCase();
@@ -186,6 +254,7 @@ export function matchesOverviewQuery(row: OverviewRow, query: string): boolean {
     projectOf(row.session.directory),
     BACKEND_LABELS[row.backend],
     row.backend,
+    row.model?.modelId ?? "",
   ]
     .join("\n")
     .toLowerCase();

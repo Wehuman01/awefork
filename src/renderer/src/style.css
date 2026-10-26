@@ -7126,6 +7126,17 @@ code.md-code {
   opacity: 0.6;
 }
 
+/* The model chip: quieter than the project and agent it follows, because it
+   answers "what ran this" and never needs to compete for the row's attention. */
+.float-session-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  opacity: 0.9;
+}
+
 .agent-badge {
   display: inline-grid;
   place-items: center;

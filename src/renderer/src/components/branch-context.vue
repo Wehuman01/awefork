@@ -161,7 +161,7 @@
       <div class="ctx-head">
         <span class="ctx-icon">💬</span>
         <div class="ctx-headings">
-          <div class="ctx-title">{{ currentParallelGroup && showParallelResults ? pt("title") : t("branch.contextTitle") }}</div>
+          <div class="ctx-title">{{ parallelRoundGroup && showParallelResults ? pt("title") : t("branch.contextTitle") }}</div>
           <div class="ctx-sub" :title="selectedSession?.title ?? ''">
             <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || t("branch.pickNode") }}
           </div>
@@ -235,20 +235,20 @@
       <!-- The marker's meaning in words, on its own row: the head is already
            tight with the nav buttons, and squeezing this in turned the title
            into a vertical strip on a narrow pane. -->
-      <div v-if="isEmptyContext(store.selectedId) && !(currentParallelGroup && showParallelResults)" class="ctx-cut-note">
+      <div v-if="isEmptyContext(store.selectedId) && !(parallelRoundGroup && showParallelResults)" class="ctx-cut-note">
         <span class="ctx-cut-glyph">✂</span>
         <span>{{ t("cut.paneNote") }}</span>
       </div>
 
       <div v-if="store.messagesError" class="banner banner-error">{{ store.messagesError }}</div>
 
-      <div v-if="currentParallelGroup" class="parallel-reading-tabs">
+      <div v-if="parallelRoundGroup" class="parallel-reading-tabs">
         <button type="button" :class="{ on: showParallelResults }" :aria-pressed="showParallelResults" @click="showParallelResults = true">✦ {{ pt("summaryTab") }}</button>
         <button type="button" :class="{ on: !showParallelResults }" :aria-pressed="!showParallelResults" @click="showParallelResults = false">{{ pt("conversationTab") }}</button>
       </div>
       <ParallelResults
-        v-if="currentParallelGroup && showParallelResults"
-        :group="currentParallelGroup"
+        v-if="parallelRoundGroup && showParallelResults"
+        :group="parallelRoundGroup"
         :summary-model-label="parallelSummaryModelLabel"
         :viewing-session-id="store.selectedId"
         @open="openParallelSource"
@@ -355,7 +355,11 @@ import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
-import { type ParallelSummarySettings, parallelGroupBusy } from "../parallel-groups";
+import {
+  type ParallelGroup,
+  type ParallelSummarySettings,
+  parallelGroupBusy,
+} from "../parallel-groups";
 import { pt } from "../parallel-i18n";
 import { settings } from "../settings";
 import {
@@ -378,6 +382,7 @@ import {
   paneMessages,
   paneTurn,
   parallelGroupForSession,
+  parallelRoundOwner,
   retryParallelTarget,
   retryTurn,
   selectedSession,
@@ -429,6 +434,15 @@ const parallelSending = ref(false);
 const currentParallelGroup = computed(() =>
   parallelGroupForSession(store.activeBackend, store.selectedId),
 );
+/**
+ * The round's reading view is the anchor's and the summary's. A per-model
+ * answer branch is that model's own conversation, so it reads as one — the
+ * round's tabs there only repeated the same round on every branch.
+ */
+const parallelRoundGroup = computed<ParallelGroup | null>(() => {
+  const group = currentParallelGroup.value;
+  return group && parallelRoundOwner(group, store.selectedId) ? group : null;
+});
 const showParallelResults = ref(true);
 const parallelSummaryInputId = computed(() => {
   const group = currentParallelGroup.value;
@@ -455,16 +469,10 @@ watch(
   () => [store.selectedId, currentParallelGroup.value?.id] as const,
   () => {
     const group = currentParallelGroup.value;
-    const selected = store.selectedId;
     // A summary session of ANY version opens the reading view, not just the
     // newest one: the canvas draws every version as its own summary card, so
     // landing on an older card must show what that card promised.
-    showParallelResults.value = Boolean(
-      group &&
-        (selected === group.anchorSessionId ||
-          selected === group.summarySessionId ||
-          group.summaryVersions.some((version) => version.sessionId === selected)),
-    );
+    showParallelResults.value = group ? parallelRoundOwner(group, store.selectedId) : false;
   },
   { immediate: true },
 );
