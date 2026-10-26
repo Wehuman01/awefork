@@ -61,18 +61,18 @@
           <button
             type="button"
             class="ft-caret"
-            :aria-expanded="expanded(place)"
+            :aria-expanded="expanded(place, 'places')"
             :title="t('files.toggleTree')"
-            @click.stop="toggleTreeNode(place)"
-            >{{ expanded(place) ? "▾" : "▸" }}</button
+            @click.stop="toggleTreeNode(place, 'places')"
+            >{{ expanded(place, "places") ? "▾" : "▸" }}</button
           >
           <span
             class="ft-row-label"
             role="button"
             tabindex="0"
             :title="place"
-            @click="onRootClick(place)"
-            @keydown.enter.prevent="onRootClick(place)"
+            @click="onRootClick(place, 'places')"
+            @keydown.enter.prevent="onRootClick(place, 'places')"
           >
             <span class="ft-row-icon" aria-hidden="true">{{ placeIcon(place) }}</span>
             <span class="ft-row-name">{{ placeLabel(place) }}</span>
@@ -88,7 +88,12 @@
             >×</span
           >
         </div>
-        <FileTreeNode v-if="expanded(place)" :entry="placeEntry(place)" :depth="1" />
+        <FileTreeNode
+          v-if="expanded(place, 'places')"
+          :entry="placeEntry(place)"
+          :depth="1"
+          scope="places"
+        />
       </template>
       <button type="button" class="ft-row" :title="t('files.pickFolder')" @click="pickFolder">
         <span class="ft-caret-off" aria-hidden="true"></span>
@@ -104,10 +109,10 @@
           <button
             type="button"
             class="ft-caret"
-            :aria-expanded="expanded(root)"
+            :aria-expanded="expanded(root, 'projects')"
             :title="t('files.toggleTree')"
-            @click.stop="toggleTreeNode(root)"
-            >{{ expanded(root) ? "▾" : "▸" }}</button
+            @click.stop="toggleTreeNode(root, 'projects')"
+            >{{ expanded(root, "projects") ? "▾" : "▸" }}</button
           >
           <span
             class="ft-row-label"
@@ -115,8 +120,8 @@
             tabindex="0"
             :title="root"
             draggable="true"
-            @click="onRootClick(root)"
-            @keydown.enter.prevent="onRootClick(root)"
+            @click="onRootClick(root, 'projects')"
+            @keydown.enter.prevent="onRootClick(root, 'projects')"
             @dragstart="startPathDrag($event, [root])"
             @contextmenu.prevent="openFileMenu(placeEntry(root), $event.clientX, $event.clientY)"
           >
@@ -125,11 +130,12 @@
           </span>
         </div>
         <FileTreeNode
-          v-if="expanded(root)"
+          v-if="expanded(root, 'projects')"
           v-for="child in childrenOf(root)"
           :key="child.path"
           :entry="child"
           :depth="1"
+          scope="projects"
         />
       </div>
     </div>
@@ -156,6 +162,7 @@ import {
   removePlace,
   setTreeFilter,
   startPathDrag,
+  type TreeScope,
   toggleHidden,
   toggleTreeNode,
   treeChildrenFor,

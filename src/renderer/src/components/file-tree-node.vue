@@ -34,6 +34,7 @@
       :key="child.path"
       :entry="child"
       :depth="depth + 1"
+      :scope="scope"
     />
   </div>
 </template>
@@ -50,6 +51,7 @@ import {
   previewFromTree,
   selectedPath,
   startPathDrag,
+  type TreeScope,
   toggleTreeNode,
   treeChildrenFor,
 } from "../files";
@@ -61,9 +63,14 @@ const props = defineProps<{
   entry: FileEntry;
   /** Indentation depth; the project roots render at 1. */
   depth: number;
+  /**
+   * Which sidebar section this node belongs to; omitted in the session
+   * dock, which shares its unfolding with the browser listing.
+   */
+  scope?: TreeScope;
 }>();
 
-const expanded = computed(() => isTreeNodeExpanded(props.entry.path));
+const expanded = computed(() => isTreeNodeExpanded(props.entry.path, props.scope));
 const isActive = computed(
   () =>
     (browsingDir.value !== null && samePath(browsingDir.value, props.entry.path)) ||
@@ -76,7 +83,7 @@ const children = computed(() => treeChildrenFor(props.entry.path));
 const icon = computed(() => (props.entry.isSymlink ? "🔗" : props.entry.isDir ? "📁" : "📄"));
 
 function toggle(): void {
-  void toggleTreeNode(props.entry.path);
+  void toggleTreeNode(props.entry.path, props.scope);
 }
 
 /**
@@ -95,7 +102,7 @@ function activate(): void {
     void browseTo(props.entry.path);
     return;
   }
-  void toggleTreeNode(props.entry.path);
+  void toggleTreeNode(props.entry.path, props.scope);
 }
 
 /**

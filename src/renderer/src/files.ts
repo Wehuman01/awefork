@@ -128,7 +128,11 @@ export const files = reactive({
   showHidden: settings.files.showHidden,
   quickIncludeHidden: false,
   homePath: null as string | null,
-  /** Sidebar tree: children per expanded directory, plus per-node status. */
+  /**
+   * Sidebar tree: children per expanded directory, plus per-node status.
+   * The expansion map is keyed per section (see treeKey) so the common
+   * places and the projects each keep their own unfolding.
+   */
   treeChildren: {} as Record<string, FileEntry[]>,
   treeLoading: {} as Record<string, boolean>,
   treeError: {} as Record<string, FileError | null>,
@@ -1052,18 +1056,37 @@ export function treeChildrenFor(dir: string): FileEntry[] {
   return children.filter((entry) => entry.name.toLowerCase().includes(needle));
 }
 
+/**
+ * Which sidebar section a tree node's unfolded state belongs to. The two
+ * sections are separate lists — the same folder can be a common place and
+ * a project root at once — and each keeps its own unfolding, so collapsing
+ * one never collapses the other. Omitted scope (the dock, the browser
+ * listing's nested rows) keeps the path-keyed state those two surfaces
+ * share by design: a folder reads as open in both, and its children cost
+ * no second read.
+ */
+export type TreeScope = "places" | "projects";
+
+/** A node's expansion key: its own path, or its path within one section. */
+function treeKey(dir: string, scope?: TreeScope): string {
+  // NUL cannot occur in a path, so one scope's key can never collide with
+  // another's — or with an unscoped one.
+  return scope === undefined ? dir : `${scope}\u0000${dir}`;
+}
+
 /** Expand a node, loading its children on first open (never recursively). */
-export async function toggleTreeNode(dir: string): Promise<void> {
-  if (files.treeExpanded[dir]) {
-    files.treeExpanded[dir] = false;
+export async function toggleTreeNode(dir: string, scope?: TreeScope): Promise<void> {
+  const key = treeKey(dir, scope);
+  if (files.treeExpanded[key]) {
+    files.treeExpanded[key] = false;
     return;
   }
-  files.treeExpanded[dir] = true;
+  files.treeExpanded[key] = true;
   if (files.treeChildren[dir] === undefined) await loadTreeChildren(dir);
 }
 
-export function isTreeNodeExpanded(dir: string): boolean {
-  return files.treeExpanded[dir] === true;
+export function isTreeNodeExpanded(dir: string, scope?: TreeScope): boolean {
+  return files.treeExpanded[treeKey(dir, scope)] === true;
 }
 
 /**
