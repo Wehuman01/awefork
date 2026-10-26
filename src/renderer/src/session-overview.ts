@@ -112,7 +112,11 @@ export function overviewModelLabel(model: OverviewModel | null): string | null {
  * model that produced it. Sessions with no model-bearing row report none.
  */
 export function lastModelOfMessages(
-  messages: readonly { role: "user" | "assistant"; modelId: string | null; variant: string | null }[],
+  messages: readonly {
+    role: "user" | "assistant";
+    modelId: string | null;
+    variant: string | null;
+  }[],
 ): OverviewModel | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];

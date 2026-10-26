@@ -223,9 +223,10 @@ describe("overview model projection", () => {
       variant: null,
     });
     // A model-less tail (an ask, a tool row) falls back to the last real one.
-    expect(
-      lastModelOfMessages([rowOf("assistant", "a/one"), rowOf("assistant", null)]),
-    ).toEqual({ modelId: "a/one", variant: null });
+    expect(lastModelOfMessages([rowOf("assistant", "a/one"), rowOf("assistant", null)])).toEqual({
+      modelId: "a/one",
+      variant: null,
+    });
     expect(lastModelOfMessages([])).toBeNull();
     expect(lastModelOfMessages([rowOf("assistant", null)])).toBeNull();
   });
@@ -240,12 +241,16 @@ describe("overview model projection", () => {
     const stale = row("opencode", "stale", "idle");
     const rows = [reported, unanswered, cached, stale];
     const cache = new Map<string, number>([
-      ["opencode/cached", cached.session.updatedAt],
+      [overviewKey("opencode", "cached"), cached.session.updatedAt],
       // A cache entry from before this session's newest turn is stale.
-      ["opencode/stale", stale.session.updatedAt - 1],
+      [overviewKey("opencode", "stale"), stale.session.updatedAt - 1],
     ]);
 
-    const pending = overviewModelsToFetch(rows, (item) => cache.get(overviewKey(item.backend, item.session.id)) ?? null, 10);
+    const pending = overviewModelsToFetch(
+      rows,
+      (item) => cache.get(overviewKey(item.backend, item.session.id)) ?? null,
+      10,
+    );
     expect(pending.map((item) => item.session.id)).toEqual(["unanswered", "stale"]);
   });
 

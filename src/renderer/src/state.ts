@@ -48,8 +48,8 @@ import type {
   SessionFileChanges,
   SessionSummary,
 } from "../../shared/types";
-import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import { rememberSentAttachments } from "./attachment-preview";
+import { type DraftAttachment, draftFromPrompt, toPromptAttachments } from "./attachments";
 import {
   type ContextUsage,
   contextUsageOf,
@@ -477,6 +477,12 @@ interface AppState {
    * cleared the moment new evidence arrives.
    */
   overviewUnknown: Record<string, string>;
+  /**
+   * Models read from messages for sessions whose listing reports none, keyed by
+   * backend+session. `at` is the session's updatedAt that read saw, so a new
+   * turn re-reads and a quiet session is never fetched twice.
+   */
+  overviewModels: Record<string, { at: number; modelId: string | null; variant: string | null }>;
 }
 
 const state = reactive<AppState>({
@@ -6739,16 +6745,24 @@ export async function ensureOverviewModels(rows: readonly OverviewRow[]): Promis
   if (pending.length === 0) return;
   const queue = [...pending];
   const pass = (async () => {
-    const workers = Array.from({ length: Math.min(OVERVIEW_MODEL_CONCURRENCY, queue.length) }, async () => {
-      for (let row = queue.shift(); row !== undefined; row = queue.shift()) {
-        try {
-          const messages = await window.awefork.messages(row.backend, row.session.id);
-          cacheOverviewModel(row.backend, row.session.id, row.session.updatedAt, lastModelOfMessages(messages));
-        } catch {
-          // Leave the row uncached: the chip stays absent and a later pass retries.
+    const workers = Array.from(
+      { length: Math.min(OVERVIEW_MODEL_CONCURRENCY, queue.length) },
+      async () => {
+        for (let row = queue.shift(); row !== undefined; row = queue.shift()) {
+          try {
+            const messages = await window.awefork.messages(row.backend, row.session.id);
+            cacheOverviewModel(
+              row.backend,
+              row.session.id,
+              row.session.updatedAt,
+              lastModelOfMessages(messages),
+            );
+          } catch {
+            // Leave the row uncached: the chip stays absent and a later pass retries.
+          }
         }
-      }
-    });
+      },
+    );
     await Promise.allSettled(workers);
   })();
   overviewModelPass = pass;
