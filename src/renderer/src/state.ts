@@ -60,7 +60,7 @@ import {
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
 import { listSep, locale, t } from "./i18n";
-import { panels, persistLayout } from "./layout";
+import { leavePreviewView, panels, persistLayout } from "./layout";
 import { createMessageLoader, createMessagePublisher, sameMessages } from "./message-loader";
 import {
   type ParallelGroup,
@@ -1871,6 +1871,10 @@ export async function openSession(
   sessionId: string,
   options: { focus?: boolean } = {},
 ): Promise<void> {
+  // Picking a session is a request for the workbench: with the standalone
+  // preview up (no-browser layout) the middle column returns to the canvas.
+  // A no-op in every other layout, so this needs no mode check.
+  leavePreviewView();
   if (settings.canvas.sessionsInNewTab) {
     await openCanvasTab(sessionId);
   } else {

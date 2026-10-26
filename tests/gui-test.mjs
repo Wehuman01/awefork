@@ -618,6 +618,229 @@ try {
     "sidebar file tab",
   );
   check("sidebar files tab shows common places", tree.tree && tree.places >= 4 && tree.sessionsHidden, JSON.stringify(tree));
+
+  // 4b-v. The sidebar tree lists files, not just folders: an expanded
+  //     place shows its .md rows, and the filter box narrows the loaded
+  //     tree by name. The demo's listDir answers not-found for
+  //     everything, so the place's own listing is handed to the IPC
+  //     boundary the tree reads through. A place (not the project root)
+  //     because the session dock pre-loads the root's children at boot.
+  await retry(() => cdp.evaluate(`(() => {
+    const sections = [...document.querySelectorAll(".ft-section")];
+    const places = sections[0];
+    const label = places?.querySelector(".ft-row-label");
+    const root = label?.getAttribute("title");
+    if (!root) throw new Error("place label missing");
+    window.__treeRoot = root;
+    const entry = (name, isDir) => ({
+      name,
+      path: root + "/" + name,
+      isDir,
+      isSymlink: false,
+      size: isDir ? null : 12,
+      mtime: 1,
+      hidden: false,
+    });
+    const trees = { [root]: [entry("README.md", false), entry("guide.md", false), entry("docs", true)] };
+    window.awefork.listDir = async (dir) =>
+      trees[dir]
+        ? { ok: true, value: { path: dir, entries: trees[dir], capped: false } }
+        : { ok: false, error: { code: "not-found" } };
+    places.querySelector(".ft-caret").click();
+    return root;
+  })()`), 5000, "expand a common place");
+  const treeFiles = await retry(async () => {
+    const names = await cdp.evaluate(`[...document.querySelectorAll(".ft-row-name")].map((n) => n.textContent)`);
+    if (!names.includes("README.md")) {
+      throw new Error(`tree lists no files: ${JSON.stringify(names)}`);
+    }
+    return names;
+  }, 10_000, "tree lists files");
+  check("the sidebar tree lists files alongside folders", true, JSON.stringify(treeFiles));
+  await retry(() => cdp.evaluate(fillInput(".ft-filter input", "readme")), 5000, "type the filter");
+  const filtered = await retry(async () => {
+    const names = await cdp.evaluate(`[...document.querySelectorAll(".ft-row-name")].map((n) => n.textContent)`);
+    if (!names.includes("README.md") || names.includes("guide.md")) {
+      throw new Error(`filter did not narrow the tree: ${JSON.stringify(names)}`);
+    }
+    return names;
+  }, 10_000, "filter narrows the tree");
+  check("the filter box narrows the loaded tree", true, JSON.stringify(filtered));
+  await cdp.evaluate(`document.querySelector(".ft-filter-x").click()`);
+
+  // 4b-vi. Common places belong to the user: ＋ picks a folder into the
+  //     list and × takes it back out. The defaults were seeded at boot.
+  await cdp.evaluate(`(() => {
+    window.awefork.pickDirectory = async () => "/demo/picked";
+    return true;
+  })()`);
+  await retry(() => cdp.evaluate(`(() => {
+    const add = [...document.querySelectorAll(".ft-row")].find((r) =>
+      r.textContent.includes("选择其他文件夹"),
+    );
+    if (!add) throw new Error("add-place row missing");
+    add.click();
+    return true;
+  })()`), 5000, "pick a folder for the places list");
+  const added = await retry(
+    () =>
+      cdp.evaluate(
+        `[...document.querySelectorAll(".ft-row-name")].some((n) => n.textContent === "picked")`,
+      ),
+    5000,
+    "place added",
+  );
+  check("＋ adds a picked folder to the common places", added === true);
+  await retry(() => cdp.evaluate(`(() => {
+    const row = [...document.querySelectorAll(".ft-row")].find((r) =>
+      r.textContent.includes("picked"),
+    );
+    if (!row) throw new Error("picked place row missing");
+    row.querySelector(".ft-row-x").click();
+    return true;
+  })()`), 5000, "remove the picked place");
+  const removed = await retry(
+    () =>
+      cdp.evaluate(
+        `![...document.querySelectorAll(".ft-row-name")].some((n) => n.textContent === "picked")`,
+      ),
+    5000,
+    "place removed",
+  );
+  check("× removes a place from the common places", removed === true);
+
+  // 4b-vii. The middle browser is a setting, not a fixture: turning it off
+  //     in settings folds the 文件 tab away live, a tree click previews in
+  //     the middle column, and ✕ returns to the canvas. Toggled through
+  //     the real settings page — the switch takes effect without a reload,
+  //     which is the behavior worth asserting.
+  const flipMiddleBrowser = async (on) => {
+    await retry(
+      () =>
+        cdp.evaluate(
+          `window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true }))`,
+        ),
+      5000,
+      "open settings",
+    );
+    await retry(() => cdp.evaluate(`Boolean(document.querySelector(".settings-switch"))`), 5000, "settings page");
+    await retry(() => cdp.evaluate(`(() => {
+      const row = [...document.querySelectorAll(".settings-row")].find((r) =>
+        r.querySelector(".settings-row-title")?.textContent.includes("中栏文件浏览器"),
+      );
+      const toggle = row?.querySelector(".settings-switch");
+      if (!toggle) throw new Error("middle-browser row missing");
+      if (toggle.getAttribute("aria-checked") !== ${JSON.stringify(String(on))}) toggle.click();
+      return toggle.getAttribute("aria-checked");
+    })()`), 5000, "flip the middle-browser switch");
+    await retry(
+      () => cdp.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`),
+      5000,
+      "close settings",
+    );
+    await retry(() => cdp.evaluate(`!document.querySelector(".settings-backdrop")`), 5000, "settings closed");
+  };
+
+  await flipMiddleBrowser(false);
+  const noBrowser = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      filesTab: [...document.querySelectorAll(".main-tab")].some((b) => b.textContent.includes("文件")),
+      canvasTab: [...document.querySelectorAll(".main-tab")].some((b) => b.textContent.includes("画布")),
+    })`);
+    if (state.filesTab || !state.canvasTab) {
+      throw new Error(`browser did not fold away: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "the 文件 tab folds away");
+  check("the middle browser's tab is gone when the setting is off", true, JSON.stringify(noBrowser));
+  await retry(() => cdp.evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("文件"));
+    if (!tab) throw new Error("sidebar files tab missing");
+    tab.click();
+    return Boolean(document.querySelector(".ft"));
+  })()`), 5000, "sidebar files tab");
+  await retry(() => cdp.evaluate(`(() => {
+    window.awefork.readTextPreview = async (path) => ({
+      ok: true,
+      value: { path, text: "# " + path + "\\n\\nstandalone preview body\\n", truncated: false, bytes: 32 },
+    });
+    // Expand the home place (the project root's children were pre-loaded
+    // empty by the session dock at boot) and click its file.
+    const sections = [...document.querySelectorAll(".ft-section")];
+    const places = sections[0];
+    const label = places?.querySelector(".ft-row-label");
+    const root = label?.getAttribute("title");
+    if (!root) throw new Error("place label missing");
+    const entry = (name, isDir) => ({
+      name,
+      path: root + "/" + name,
+      isDir,
+      isSymlink: false,
+      size: isDir ? null : 12,
+      mtime: 1,
+      hidden: false,
+    });
+    const trees = { [root]: [entry("README.md", false), entry("docs", true)] };
+    window.awefork.listDir = async (dir) =>
+      trees[dir]
+        ? { ok: true, value: { path: dir, entries: trees[dir], capped: false } }
+        : { ok: false, error: { code: "not-found" } };
+    // The place may still be expanded from the tree test above — clicking
+    // an expanded caret would collapse it and hide the file to click.
+    const caret = places.querySelector(".ft-caret");
+    if (caret.getAttribute("aria-expanded") !== "true") caret.click();
+    return true;
+  })()`), 5000, "expand a common place again");
+  await retry(() => cdp.evaluate(`(() => {
+    const row = [...document.querySelectorAll(".ft-row-label")].find((n) =>
+      n.textContent.includes("README.md"),
+    );
+    if (!row) throw new Error("README row missing");
+    row.click();
+    return true;
+  })()`), 5000, "click the file in the tree");
+  const standalone = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      preview: Boolean(document.querySelector(".fp .fp-head")),
+      markdown: (document.querySelector(".fp-markdown")?.textContent ?? "").includes("standalone preview body"),
+      browser: Boolean(document.querySelector(".fb")),
+      canvas: document.querySelector(".viewport")?.offsetParent !== null,
+    })`);
+    if (!state.preview || !state.markdown || state.browser || state.canvas) {
+      throw new Error(`standalone preview incomplete: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "standalone preview fills the middle column");
+  check("a tree click previews in the middle column with no browser", true, JSON.stringify(standalone));
+  await retry(() => cdp.evaluate(`(() => {
+    const buttons = [...document.querySelectorAll(".fp-head .fp-open")];
+    const close = buttons[buttons.length - 1];
+    if (!close) throw new Error("preview close button missing");
+    close.click();
+    return true;
+  })()`), 5000, "close the preview");
+  const backToCanvas = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      preview: Boolean(document.querySelector(".fp")),
+      canvas: document.querySelector(".viewport")?.offsetParent !== null,
+    })`);
+    if (state.preview || !state.canvas) {
+      throw new Error(`preview did not return to the canvas: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 10_000, "back to the canvas");
+  check("✕ returns from the preview to the canvas", true, JSON.stringify(backToCanvas));
+  // The browser comes back the same way it left — through the setting.
+  await flipMiddleBrowser(true);
+  const browserBack = await retry(async () => {
+    const state = await cdp.evaluate(
+      `[...document.querySelectorAll(".main-tab")].some((b) => b.textContent.includes("文件"))`,
+    );
+    if (!state) throw new Error("browser did not come back");
+    return state;
+  }, 10_000, "the 文件 tab comes back");
+  check("turning the setting back on restores the browser", browserBack === true);
+
   await cdp.evaluate(`[...document.querySelectorAll(".side-tab")].find((b) => b.textContent.includes("会话")).click()`);
   await cdp.evaluate(`[...document.querySelectorAll(".main-tab")].find((b) => b.textContent.includes("画布")).click()`);
 

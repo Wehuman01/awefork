@@ -99,6 +99,20 @@ export interface Settings {
      * about an agent, so a backend switch must not make it disappear.
      */
     residentFolder: string;
+    /**
+     * The sidebar's common-places list, in display order. null = never
+     * seeded: the first boot fills it with the platform defaults (home,
+     * desktop, downloads, documents) once the home path is known, and an
+     * empty array is a user who deleted them all — never re-seeded.
+     */
+    places: string[] | null;
+    /**
+     * The middle column's file browser. Off folds the files view away: the
+     * sidebar becomes the only file navigation and the middle column shows
+     * the quick preview alone (a file click previews it, ✕/Esc or picking a
+     * session returns to the canvas).
+     */
+    middleBrowser: boolean;
   };
   search: {
     scopes: { title: boolean; tag: boolean; body: boolean };
@@ -160,6 +174,10 @@ export const DEFAULT_SETTINGS: Settings = {
     openOnDouble: "preview",
     // No standing folder until the user picks one.
     residentFolder: "",
+    // Seeded from the platform defaults once the home path is known; an
+    // empty list is a deliberate "I deleted them all".
+    places: null,
+    middleBrowser: true,
   },
   search: { scopes: { title: true, tag: true, body: false }, cap: 1000 },
   updates: { checkOnLaunch: true },
@@ -234,6 +252,31 @@ export function sanitizeIgnorePatterns(value: readonly string[]): string[] {
  */
 function pickPath(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Longest common-places list; a dozen is already more than anyone scans. */
+const MAX_PLACES = 12;
+
+/**
+ * The common-places list, or null while it has never been seeded — which is
+ * what tells the files store to fill in the platform defaults. A malformed
+ * entry is dropped rather than failing the whole list; an empty array is
+ * kept, because it means the user deleted every place on purpose.
+ */
+function pickPlaces(value: unknown): string[] | null {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return null;
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const path = item.trim();
+    if (path === "" || seen.has(path)) continue;
+    seen.add(path);
+    list.push(path);
+    if (list.length >= MAX_PLACES) break;
+  }
+  return list;
 }
 
 /** The settings page's resident-folder row writes through the same rule. */
@@ -315,6 +358,8 @@ export function normalizeSettings(raw: unknown): Settings {
         d.files.openOnDouble,
       ),
       residentFolder: pickPath(files.residentFolder),
+      places: pickPlaces(files.places),
+      middleBrowser: pickBool(files.middleBrowser, d.files.middleBrowser),
     },
     search: {
       scopes: {

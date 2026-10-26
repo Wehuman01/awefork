@@ -276,6 +276,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "默认在应用内快速预览；也可以交给系统默认应用打开（右键始终有这一项）。",
     en: "Quick-previews inside the app by default; hand it to the system default app instead (the right-click always offers that).",
   },
+  "settings.middleBrowser": { zh: "中栏文件浏览器", en: "Middle-column file browser" },
+  "settings.middleBrowserDesc": {
+    zh: "关闭后文件只在侧栏导航：中栏只显示快速预览——点文件即预览，✕、Esc 或选择会话后返回画布。",
+    en: "Off folds the files view away: the sidebar becomes the only file navigation and the middle column shows the quick preview alone — a file click previews it, and ✕, Esc or picking a session returns to the canvas.",
+  },
   "settings.openSystem": { zh: "系统打开", en: "System app" },
   "settings.openPreview": { zh: "应用内预览", en: "In-app preview" },
   "settings.filesIgnore": { zh: "忽略的目录与文件", en: "Ignored names" },

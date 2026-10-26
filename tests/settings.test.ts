@@ -169,6 +169,28 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ files: { residentFolder: 7 } }).files.residentFolder).toBe("");
     expect(normalizeSettings({}).files.residentFolder).toBe("");
   });
+
+  it("keeps the common-places list, and null as never-seeded", () => {
+    expect(normalizeSettings({}).files.places).toBeNull();
+    expect(normalizeSettings({ files: { places: null } }).files.places).toBeNull();
+    expect(
+      normalizeSettings({ files: { places: [" /a ", "/a", "", 7, "/b"] } }).files.places,
+    ).toEqual(["/a", "/b"]);
+    // A malformed list reads as never-seeded rather than as "all deleted".
+    expect(normalizeSettings({ files: { places: "nonsense" } }).files.places).toBeNull();
+    expect(normalizeSettings({ files: { places: [] } }).files.places).toEqual([]);
+  });
+
+  it("caps the common-places list", () => {
+    const many = Array.from({ length: 20 }, (_, i) => `/dir-${i}`);
+    expect(normalizeSettings({ files: { places: many } }).files.places).toHaveLength(12);
+  });
+
+  it("defaults the middle browser to on", () => {
+    expect(normalizeSettings({}).files.middleBrowser).toBe(true);
+    expect(normalizeSettings({ files: { middleBrowser: false } }).files.middleBrowser).toBe(false);
+    expect(normalizeSettings({ files: { middleBrowser: "no" } }).files.middleBrowser).toBe(true);
+  });
 });
 
 describe("sanitizeResidentFolder", () => {

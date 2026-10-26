@@ -1246,6 +1246,108 @@ describe("tabs", () => {
   });
 });
 
+describe("sidebar tree navigation", () => {
+  it("seeds the common places with the platform defaults once", async () => {
+    const h = await bootFiles();
+    const { settings } = await import("../src/renderer/src/settings");
+    await h.mod.initFiles();
+    expect(settings.files.places).toEqual([
+      "/home/demo",
+      "/home/demo/Desktop",
+      "/home/demo/Downloads",
+      "/home/demo/Documents",
+    ]);
+    expect(h.mod.places.value).toEqual(settings.files.places);
+  });
+
+  it("adds and removes places without duplicating one", async () => {
+    const h = await bootFiles();
+    await h.mod.initFiles();
+    h.mod.addPlace("/work/app");
+    h.mod.addPlace("/work/app");
+    expect(h.mod.places.value.filter((dir) => dir === "/work/app")).toHaveLength(1);
+    h.mod.removePlace("/work/app");
+    expect(h.mod.places.value).not.toContain("/work/app");
+    // The defaults are removable like any other place.
+    h.mod.removePlace("/home/demo");
+    expect(h.mod.places.value).not.toContain("/home/demo");
+  });
+
+  it("filters the loaded tree, and searches the project when nothing matches", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", [entry("readme.md"), entry("sub", true)]) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.loadTreeChildren("/a");
+    // A loaded match answers for itself — no project search runs.
+    await h.mod.setTreeFilter("/a", "readme");
+    expect(h.mod.files.treeFilter).toBe("readme");
+    expect(h.mod.treeChildrenFor("/a").map((e) => e.name)).toEqual(["readme.md"]);
+    expect(h.mod.files.recursiveResults).toEqual([]);
+    expect(h.api.searchFiles).not.toHaveBeenCalled();
+    // No loaded match: the same box switches to its recursive second state.
+    await h.mod.setTreeFilter("/a", "zzz");
+    expect(h.api.searchFiles).toHaveBeenCalledWith("/a", "zzz", expect.anything());
+    expect(h.mod.files.recursiveResults.map((e) => e.name)).toEqual(["hit.md"]);
+  });
+
+  it("clears the filter and its second state together", async () => {
+    const h = await bootFiles();
+    await h.mod.setTreeFilter("/a", "zzz");
+    expect(h.mod.files.recursiveResults.length).toBeGreaterThan(0);
+    h.mod.clearTreeFilter();
+    expect(h.mod.files.treeFilter).toBe("");
+    expect(h.mod.files.recursiveResults).toEqual([]);
+    expect(h.mod.files.recursiveLoading).toBe(false);
+    expect(h.mod.files.recursiveError).toBeNull();
+  });
+
+  it("previews a tree file in the browser's tab while the middle browser is on", async () => {
+    const h = await bootFiles({
+      listings: { "/a": listing("/a", [entry("readme.md")]) },
+    });
+    await h.mod.browseTo("/a");
+    await h.mod.previewFromTree({ ...entry("readme.md"), path: "/a/readme.md" });
+    // Lands the way a dock click does: on the tab that already shows the
+    // file's own directory.
+    expect(active(h.mod).browsing).toBe("/a");
+    expect(active(h.mod).preview?.path).toBe("/a/readme.md");
+  });
+
+  it("previews a tree file standalone when the middle browser is off", async () => {
+    const h = await bootFiles();
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.middleBrowser = false;
+    await h.mod.previewFromTree(entry("readme.md"));
+    // No tab is claimed and no listing is loaded — the store holds the
+    // preview itself.
+    expect(h.files.preview?.path).toBe("/root/readme.md");
+    expect(active(h.mod).preview).toBeNull();
+    h.mod.clearPreview();
+    expect(h.files.preview).toBeNull();
+  });
+
+  it("steps the standalone preview through the directory's files", async () => {
+    const h = await bootFiles({
+      listings: {
+        "/root": listing("/root", [entry("one.md"), entry("sub", true), entry("two.md")]),
+      },
+    });
+    const { settings } = await import("../src/renderer/src/settings");
+    settings.files.middleBrowser = false;
+    await h.mod.previewFromTree(entry("one.md"));
+    expect(h.files.preview?.path).toBe("/root/one.md");
+    // The directory was never expanded; paging loads its children on demand.
+    await h.mod.stepPreview(1);
+    expect(h.files.preview?.path).toBe("/root/two.md");
+    // The last file stays put, and stepping back returns to the first.
+    await h.mod.stepPreview(1);
+    expect(h.files.preview?.path).toBe("/root/two.md");
+    await h.mod.stepPreview(-1);
+    expect(h.files.preview?.path).toBe("/root/one.md");
+  });
+});
+
 describe("settings mirror", () => {
   it("settings-page writes to settings.files reach the live store", async () => {
     const { mod, files } = await bootFiles({});

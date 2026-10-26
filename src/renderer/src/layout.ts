@@ -20,7 +20,7 @@ export interface PanelState {
 export type PanelSide = "sidebar" | "context";
 
 /** What the middle column shows: the branch canvas or the file browser. */
-export type MainView = "canvas" | "files";
+export type MainView = "canvas" | "files" | "preview";
 
 /** What the sidebar shows: the session navigation or the file tree. */
 export type SidebarView = "sessions" | "files";
@@ -76,10 +76,22 @@ export const settingsOpen = ref(false);
 /** Labs gate for the file browsing system; every files entry consults it. */
 export const fileBrowserEnabled = computed(() => settings.labs.fileBrowser);
 
+/**
+ * The middle column's file browser. Off (with the labs gate on) folds the
+ * files view away: the sidebar is the only file navigation, and a file
+ * picked there previews in the middle column until ✕/Esc or a session
+ * pick returns to the canvas.
+ */
+export const middleBrowserEnabled = computed(() => settings.files.middleBrowser);
+
 /** Which surface the middle column shows; the settings page owns the default,
  *  and the files option only applies while the labs gate is on. */
 export const mainView = ref<MainView>(
-  fileBrowserEnabled.value && settings.canvas.defaultView === "files" ? "files" : "canvas",
+  fileBrowserEnabled.value &&
+    settings.files.middleBrowser &&
+    settings.canvas.defaultView === "files"
+    ? "files"
+    : "canvas",
 );
 
 /** Which surface the sidebar shows. */
@@ -89,8 +101,16 @@ export const sidebarView = ref<SidebarView>("sessions");
 // its session counterpart, so no dead view can stay on screen.
 watch(fileBrowserEnabled, (on) => {
   if (on) return;
-  if (mainView.value === "files") mainView.value = "canvas";
+  if (mainView.value === "files" || mainView.value === "preview") mainView.value = "canvas";
   if (sidebarView.value === "files") sidebarView.value = "sessions";
+});
+
+// Folding the middle browser away mid-session must not leave the files
+// view on screen with no browser behind it; the standalone preview may
+// stay — both layouts can show it.
+watch(middleBrowserEnabled, (on) => {
+  if (on) return;
+  if (mainView.value === "files") mainView.value = "canvas";
 });
 
 export function togglePalette(): void {
@@ -116,6 +136,17 @@ export function setMainView(view: MainView): void {
 export function openFilesView(): void {
   if (!fileBrowserEnabled.value) return;
   mainView.value = "files";
+}
+
+/** Show the standalone preview in the middle column (no-browser mode). */
+export function openPreviewView(): void {
+  mainView.value = "preview";
+}
+
+/** Leave the standalone preview for the canvas; a no-op anywhere else, so
+ *  session picks and the preview's own ✕ can call it unconditionally. */
+export function leavePreviewView(): void {
+  if (mainView.value === "preview") mainView.value = "canvas";
 }
 
 export function openCanvasView(): void {

@@ -26,6 +26,7 @@ import type {
   TextPreview,
 } from "../../shared/file-types";
 import { t } from "./i18n";
+import { openFilesView, openPreviewView } from "./layout";
 import { renderPdfPages } from "./pdf-preview";
 import { settings } from "./settings";
 
@@ -132,9 +133,31 @@ export const files = reactive({
   treeLoading: {} as Record<string, boolean>,
   treeError: {} as Record<string, FileError | null>,
   treeExpanded: {} as Record<string, boolean>,
+  /**
+   * Sidebar tree: the name filter, and its recursive second state — the
+   * project-wide name matches shown when the loaded tree has none.
+   */
+  treeFilter: "",
+  recursiveResults: [] as FileEntry[],
+  recursiveLoading: false,
+  recursiveError: null as FileError | null,
+  /**
+   * The standalone preview: the no-browser mode's only preview, shown in
+   * the middle column. A browser tab's preview lives on the tab; this one
+   * exists so the sidebar can preview with no browser mounted.
+   */
+  preview: null as PreviewState | null,
+  previewSeq: 0,
   /** Short-lived feedback (copy ok/failed, insert hints); auto-clears. */
   notice: null as string | null,
 });
+
+/**
+ * The sidebar's common places, in display order. Derived from settings so
+ * there is one source of truth; null (never seeded) reads as empty until
+ * initFiles fills the defaults in.
+ */
+export const places = computed(() => settings.files.places ?? []);
 
 /** The tab every browser read and write goes through. */
 function activeTab(): FileTab | null {
@@ -231,6 +254,34 @@ export async function initFiles(): Promise<void> {
   } catch {
     files.homePath = null;
   }
+  seedPlaces();
+}
+
+/**
+ * Fill the common-places list with the platform defaults the first time
+ * the app runs — settings.files.places is null until then. An empty list
+ * is a user who deleted every place on purpose, so it is never re-seeded.
+ */
+function seedPlaces(): void {
+  if (settings.files.places !== null) return;
+  const base = files.homePath;
+  if (base === null || base === "") return;
+  const join = (name: string): string =>
+    base.includes("\\") ? `${base}\\${name}` : `${base}/${name}`;
+  settings.files.places = [base, join("Desktop"), join("Downloads"), join("Documents")];
+}
+
+/** Add a folder to the common places (the picker's landing). */
+export function addPlace(path: string): void {
+  const current = settings.files.places ?? [];
+  if (current.some((dir) => samePath(dir, path))) return;
+  settings.files.places = [...current, path];
+}
+
+/** Remove a common place; the defaults are removable like any other. */
+export function removePlace(path: string): void {
+  const current = settings.files.places ?? [];
+  settings.files.places = current.filter((dir) => !samePath(dir, path));
 }
 
 /**
@@ -574,11 +625,15 @@ export function selectOrPreviewEntry(entry: FileEntry): void {
 /** Drop the current preview without touching the selection. */
 export function clearPreview(): void {
   const tab = activeTab();
-  if (!tab) return;
-  tab.previewSeq += 1;
-  tab.preview = null;
-  // Nothing left to read: the folded-away listing comes back.
-  tab.reading = false;
+  if (tab) {
+    tab.previewSeq += 1;
+    tab.preview = null;
+    // Nothing left to read: the folded-away listing comes back.
+    tab.reading = false;
+  }
+  // The standalone preview (no-browser mode) lives on the store.
+  files.previewSeq += 1;
+  files.preview = null;
 }
 
 /**
@@ -757,18 +812,32 @@ export async function previewEntry(entry: FileEntry): Promise<void> {
   await previewOnTab(tab, entry);
 }
 
-/** Preview on the bound tab — never re-reads the active tab. */
-async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
-  const seq = ++tab.previewSeq;
-  tab.selectedPath = entry.path;
-  tab.preview = { path: entry.path, status: "loading" };
+/**
+ * Anything that can hold a preview: a browser tab, or the store itself for
+ * the standalone preview the no-browser mode shows in the middle column.
+ * The sequence number retires reads that lost the race, whichever holder
+ * they were bound to.
+ */
+interface PreviewHolder {
+  preview: PreviewState | null;
+  previewSeq: number;
+}
+
+/**
+ * Read a file into the holder's preview: image, PDF, text, or an honest
+ * error. Every branch is the same for a tab preview and the standalone
+ * one — only where the result lands differs.
+ */
+async function runPreview(holder: PreviewHolder, entry: FileEntry): Promise<void> {
+  const seq = ++holder.previewSeq;
+  holder.preview = { path: entry.path, status: "loading" };
   const image = await window.awefork
     .readImagePreview(entry.path, settings.files.imageCapMb * 1024 * 1024)
     .catch(() => null);
-  if (seq !== tab.previewSeq) return;
+  if (seq !== holder.previewSeq) return;
   if (image?.ok) {
     const value: ImagePreview = image.value;
-    tab.preview = {
+    holder.preview = {
       path: entry.path,
       status: "image",
       dataUrl: value.dataUrl,
@@ -779,7 +848,7 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
   // An image that exists but is too big fails only as an image; surfacing
   // "binary" from the text fallback below would misname the problem.
   if (image && !image.ok && image.error.code === "too-large") {
-    tab.preview = { path: entry.path, status: "error", error: image.error };
+    holder.preview = { path: entry.path, status: "error", error: image.error };
     return;
   }
   // A PDF is rasterized in the renderer, so the document's bytes come over
@@ -789,13 +858,13 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
     const doc = await window.awefork
       .readFileAsDataUrl(entry.path, "application/pdf", MAX_PDF_BYTES)
       .catch(() => null);
-    if (seq !== tab.previewSeq) return;
+    if (seq !== holder.previewSeq) return;
     const read = doc?.ok ? doc : null;
     const bytes = read ? dataUrlToBytes(read.value.dataUrl) : null;
     const rendered = bytes ? await renderPdfPages(bytes) : null;
-    if (seq !== tab.previewSeq) return;
+    if (seq !== holder.previewSeq) return;
     if (rendered && rendered.pages.length > 0) {
-      tab.preview = {
+      holder.preview = {
         path: entry.path,
         status: "pdf",
         pages: rendered.pages,
@@ -808,7 +877,7 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
     // Unreadable, over the cap, or nothing rendered. A PDF must not fall
     // through to the text reader — its bytes would preview as noise — so it
     // lands on the error pane, which offers the system open.
-    tab.preview = {
+    holder.preview = {
       path: entry.path,
       status: "error",
       error: doc && !doc.ok ? doc.error : { code: "binary" },
@@ -818,10 +887,10 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
   const text = await window.awefork
     .readTextPreview(entry.path, settings.files.previewCapKb * 1024)
     .catch(() => null);
-  if (seq !== tab.previewSeq) return;
+  if (seq !== holder.previewSeq) return;
   if (text?.ok) {
     const value: TextPreview = text.value;
-    tab.preview = {
+    holder.preview = {
       path: entry.path,
       status: "text",
       text: value.text,
@@ -832,11 +901,17 @@ async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
   }
   // Not an image and not decodable text: binary (or unreadable) — the UI
   // says so and offers the OS open instead of showing an empty file.
-  tab.preview = {
+  holder.preview = {
     path: entry.path,
     status: "error",
     error: text && !text.ok ? text.error : { code: "binary" },
   };
+}
+
+/** Preview on the bound tab — never re-reads the active tab. */
+async function previewOnTab(tab: FileTab, entry: FileEntry): Promise<void> {
+  tab.selectedPath = entry.path;
+  await runPreview(tab, entry);
 }
 
 /**
@@ -919,17 +994,41 @@ export async function loadTreeChildren(dir: string): Promise<void> {
     files.treeError[dir] = result && !result.ok ? result.error : { code: "unknown" };
     return;
   }
-  // Dot-prefixed entries left out — a project tree is for navigating source,
-  // not for wading through .git and .cache. Files are kept alongside
-  // directories: the tree renderers filter to dirs themselves, and the
-  // session file dock shows everything. The ignore list is applied where
-  // the entries are read, so a settings change reaches loaded trees too.
-  files.treeChildren[dir] = result.value.entries.filter((entry) => !entry.hidden);
+  // Dot-prefixed entries are kept in the cache: the ◉ toggle decides
+  // whether they show, per surface, at read time. Files stay alongside
+  // directories — the tree renderers filter to dirs themselves, the dock
+  // reads everything. The ignore list is applied where the entries are
+  // read, so a settings change reaches loaded trees too.
+  files.treeChildren[dir] = result.value.entries;
 }
 
-/** A directory's loaded children minus the settings' ignored names. */
+/**
+ * A directory's loaded children as the navigation surfaces show them:
+ * ignored names out, and dot-prefixed ones only while ◉ is on. The dock
+ * reads allTreeChildren instead — a project's dotfiles are its business.
+ */
 export function visibleTreeChildren(dir: string): FileEntry[] {
+  return (files.treeChildren[dir] ?? []).filter(
+    (entry) => !isIgnoredName(entry.name) && (files.showHidden || !entry.hidden),
+  );
+}
+
+/** A directory's loaded children minus the settings' ignored names, hidden ones included. */
+export function allTreeChildren(dir: string): FileEntry[] {
   return (files.treeChildren[dir] ?? []).filter((entry) => !isIgnoredName(entry.name));
+}
+
+/**
+ * The tree's rows for a directory, narrowed by the sidebar's name filter.
+ * The filter only narrows what is loaded — a subtree that was never
+ * expanded cannot be known to match, which is what the recursive second
+ * state of the same box is for.
+ */
+export function treeChildrenFor(dir: string): FileEntry[] {
+  const needle = files.treeFilter.trim().toLowerCase();
+  const children = visibleTreeChildren(dir);
+  if (needle === "") return children;
+  return children.filter((entry) => entry.name.toLowerCase().includes(needle));
 }
 
 /** Expand a node, loading its children on first open (never recursively). */
@@ -944,6 +1043,105 @@ export async function toggleTreeNode(dir: string): Promise<void> {
 
 export function isTreeNodeExpanded(dir: string): boolean {
   return files.treeExpanded[dir] === true;
+}
+
+/** True while any loaded tree node's name matches the filter. */
+function treeHasMatch(needle: string): boolean {
+  const lower = needle.toLowerCase();
+  return Object.values(files.treeChildren).some((children) =>
+    children.some((entry) => entry.name.toLowerCase().includes(lower)),
+  );
+}
+
+/** Bumped per keystroke; a slower search than the user's last is dropped. */
+let recursiveSeq = 0;
+
+/**
+ * The sidebar tree's filter box. It narrows the loaded tree live; when the
+ * loaded tree has no match at all, the same box switches to its second
+ * state — a project-wide name search whose rows preview on click. `root`
+ * is the project that search runs against (the caller's selected project,
+ * or the home directory).
+ */
+export async function setTreeFilter(root: string | null, query: string): Promise<void> {
+  files.treeFilter = query;
+  files.recursiveError = null;
+  const needle = query.trim();
+  const seq = ++recursiveSeq;
+  if (needle === "") {
+    files.recursiveResults = [];
+    files.recursiveLoading = false;
+    return;
+  }
+  // The loaded tree answers for itself while it has any match; the
+  // project-wide search is the second state, not a parallel one.
+  if (treeHasMatch(needle) || root === null || root === "") {
+    files.recursiveResults = [];
+    files.recursiveLoading = false;
+    return;
+  }
+  files.recursiveLoading = true;
+  const result = await window.awefork
+    .searchFiles(root, needle, { includeHidden: files.showHidden })
+    .catch(() => null);
+  if (seq !== recursiveSeq) return;
+  files.recursiveLoading = false;
+  if (!result?.ok) {
+    files.recursiveResults = [];
+    files.recursiveError = result && !result.ok ? result.error : { code: "unknown" };
+    return;
+  }
+  // The ignore list hides names from every files surface, so a recursive
+  // hit on an ignored name is dropped rather than previewed with no row.
+  files.recursiveResults = result.value.filter((entry) => !isIgnoredName(entry.name));
+}
+
+/** Drop the filter and its second state together. */
+export function clearTreeFilter(): void {
+  recursiveSeq += 1;
+  files.treeFilter = "";
+  files.recursiveResults = [];
+  files.recursiveLoading = false;
+  files.recursiveError = null;
+}
+
+/**
+ * A file picked in the sidebar tree. With the middle browser on it lands
+ * the way a dock click does: the browser opens on the file's parent
+ * directory and previews it there. With the browser folded away the file
+ * becomes the standalone preview that owns the middle column — there is
+ * no listing to land on, so none is loaded.
+ */
+export async function previewFromTree(entry: FileEntry): Promise<void> {
+  if (settings.files.middleBrowser) {
+    openFilesView();
+    await previewEntry(entry);
+    return;
+  }
+  openPreviewView();
+  await runPreview(files, entry);
+}
+
+/**
+ * Step the standalone preview to the previous/next file in the same
+ * directory — the light reading gesture of the no-browser layout, where
+ * the sidebar tree is the only navigation. Hidden and ignored names are
+ * skipped exactly as the tree skips them; the directory's children are
+ * loaded on demand, so paging works even if it was never expanded.
+ */
+export async function stepPreview(delta: number): Promise<void> {
+  const current = files.preview;
+  if (current === null) return;
+  const parent = parentOf(current.path);
+  if (parent === null) return;
+  if (files.treeChildren[parent] === undefined) await loadTreeChildren(parent);
+  const siblings = visibleTreeChildren(parent).filter((entry) => !entry.isDir);
+  if (siblings.length === 0) return;
+  const index = siblings.findIndex((entry) => samePath(entry.path, current.path));
+  const next = Math.min(Math.max((index < 0 ? 0 : index) + delta, 0), siblings.length - 1);
+  const target = siblings[next];
+  if (!target) return;
+  await runPreview(files, target);
 }
 
 /** One row of the browser's list view: an entry, its depth, its open state. */

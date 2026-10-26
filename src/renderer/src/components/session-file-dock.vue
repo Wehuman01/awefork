@@ -68,16 +68,16 @@ import { displayName } from "../../../shared/file-paths";
 import type { FileEntry } from "../../../shared/file-types";
 import { openFileMenu } from "../file-menu";
 import {
+  allTreeChildren,
   files,
   initFiles,
   loadTreeChildren,
-  previewEntry,
+  previewFromTree,
   selectedPath,
   startPathDrag,
-  visibleTreeChildren,
 } from "../files";
 import { t } from "../i18n";
-import { fileDockOpen, openFilesView, toggleFileDock } from "../layout";
+import { fileDockOpen, toggleFileDock } from "../layout";
 import { store } from "../state";
 import FileTreeNode from "./file-tree-node.vue";
 
@@ -88,7 +88,9 @@ void initFiles();
 const root = computed(() => store.selectedDirectory);
 const rootLabel = computed(() => (root.value ? displayName(root.value) : ""));
 const loading = computed(() => root.value !== null && files.treeLoading[root.value] === true);
-const entries = computed(() => (root.value ? visibleTreeChildren(root.value) : []));
+// The dock shows a project's dotfiles too — a session's .env and config
+// are exactly what one opens it for — so it reads the unfiltered children.
+const entries = computed(() => (root.value ? allTreeChildren(root.value) : []));
 const dirEntries = computed(() => entries.value.filter((entry) => entry.isDir));
 const fileEntries = computed(() => entries.value.filter((entry) => !entry.isDir));
 
@@ -112,8 +114,9 @@ function reload(): void {
 }
 
 function openFile(entry: FileEntry): void {
-  openFilesView();
-  void previewEntry(entry);
+  // Mode-aware: the browser's preview pane while it is mounted, the
+  // standalone preview in the middle column once it is folded away.
+  void previewFromTree(entry);
 }
 
 watch(

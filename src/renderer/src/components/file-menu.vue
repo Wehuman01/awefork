@@ -12,7 +12,7 @@
       @keydown="onKeydown"
     >
       <button
-        v-if="menu.entry.isDir"
+        v-if="menu.entry.isDir && middleBrowserEnabled"
         type="button"
         class="file-menu-item"
         role="menuitem"
@@ -20,7 +20,7 @@
         >{{ t("files.menuOpenFolder") }}</button
       >
       <button
-        v-if="menu.entry.isDir"
+        v-if="menu.entry.isDir && middleBrowserEnabled"
         type="button"
         class="file-menu-item"
         role="menuitem"
@@ -33,9 +33,14 @@
       <button type="button" class="file-menu-item" role="menuitem" @click="act(openSystem)">{{
         t("files.menuOpenSystem")
       }}</button>
-      <button type="button" class="file-menu-item" role="menuitem" @click="act(reveal)">{{
-        t("files.menuReveal")
-      }}</button>
+      <button
+        v-if="middleBrowserEnabled"
+        type="button"
+        class="file-menu-item"
+        role="menuitem"
+        @click="act(reveal)"
+        >{{ t("files.menuReveal") }}</button
+      >
       <div class="file-menu-sep"></div>
       <button
         type="button"
@@ -118,10 +123,10 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { FileEntry, FileStat } from "../../../shared/file-types";
 import { closeFileMenu, fileMenu } from "../file-menu";
-import { browseTo, flashNotice, openFileTabFor, previewEntry, revealEntry } from "../files";
+import { browseTo, flashNotice, openFileTabFor, previewFromTree, revealEntry } from "../files";
 import { formatBytes, formatTimestamp } from "../format";
 import { t } from "../i18n";
-import { openFilesView } from "../layout";
+import { middleBrowserEnabled, openFilesView } from "../layout";
 import { insertDraftText, store } from "../state";
 
 interface InfoState {
@@ -254,8 +259,10 @@ async function writeClipboard(value: string): Promise<boolean> {
 function preview(): void {
   const entry = fileMenu.entry;
   if (!entry || entry.isDir) return;
-  openFilesView();
-  void previewEntry(entry);
+  // Mode-aware: with the middle browser on it lands the browser on the
+  // file's parent; with it folded away the file becomes the standalone
+  // preview in the middle column.
+  void previewFromTree(entry);
 }
 
 /**

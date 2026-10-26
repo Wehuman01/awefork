@@ -796,6 +796,15 @@ function filesSection(): SectionDef {
         },
         true,
       ),
+      toggle(
+        "files.middleBrowser",
+        t("settings.middleBrowser"),
+        t("settings.middleBrowserDesc"),
+        settings.files.middleBrowser,
+        (next) => {
+          settings.files.middleBrowser = next;
+        },
+      ),
       text(
         "files.ignore",
         t("settings.filesIgnore"),
@@ -823,7 +832,8 @@ function filesSection(): SectionDef {
         },
       ),
     ],
-    keywords: "files preview hidden grid ignore resident folder 文件 预览 隐藏 网格 忽略 常驻",
+    keywords:
+      "files preview hidden grid ignore resident folder middle browser 文件 预览 隐藏 网格 忽略 常驻 中栏",
   };
 }
 

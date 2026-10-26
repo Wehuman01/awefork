@@ -54,7 +54,7 @@
         >{{ panels.sidebar.collapsed ? "›" : "‹" }}</button>
       </div>
       <div class="main-col">
-        <nav class="main-tabs" :aria-label="t('files.mainViewLabel')">
+        <nav v-if="mainView !== 'preview'" class="main-tabs" :aria-label="t('files.mainViewLabel')">
           <button
             type="button"
             class="main-tab"
@@ -68,7 +68,7 @@
             >{{ t("files.tabCanvas") }}</button
           >
           <button
-            v-if="fileBrowserEnabled"
+            v-if="fileBrowserEnabled && middleBrowserEnabled"
             type="button"
             class="main-tab"
             :class="{ on: mainView === 'files' }"
@@ -83,7 +83,15 @@
         </nav>
         <CanvasTabs v-show="mainView === 'canvas'" class="story-tabs-slot" />
         <SessionCanvas v-show="mainView === 'canvas'" class="main-body" />
-        <FileBrowser v-show="mainView === 'files'" class="main-body" />
+        <FileBrowser v-if="mainView === 'files' && fileBrowserEnabled && middleBrowserEnabled" class="main-body" />
+        <FilePreview
+          v-if="mainView === 'preview'"
+          class="main-body"
+          :preview="files.preview"
+          :reading="false"
+          standalone
+          @close="closeStandalonePreview"
+        />
       </div>
       <div
         class="col-handle"
@@ -167,6 +175,7 @@ import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
 import FileBrowser from "./components/file-browser.vue";
 import FileMenu from "./components/file-menu.vue";
+import FilePreview from "./components/file-preview.vue";
 import ForkTagDialog from "./components/fork-tag-dialog.vue";
 import HistoryPanel from "./components/history-panel.vue";
 import SessionCanvas from "./components/session-canvas.vue";
@@ -174,7 +183,7 @@ import SettingsPage from "./components/settings-page.vue";
 import SideBar from "./components/side-bar.vue";
 import TopBar from "./components/top-bar.vue";
 import WelcomeDialog from "./components/welcome-dialog.vue";
-import { files, isPathDrag } from "./files";
+import { clearPreview, files, isPathDrag, stepPreview } from "./files";
 import {
   history as historyStore,
   redoSteps,
@@ -185,8 +194,10 @@ import {
 import { t } from "./i18n";
 import {
   fileBrowserEnabled,
+  leavePreviewView,
   type MainView,
   mainView,
+  middleBrowserEnabled,
   PANEL_LIMITS,
   panelStyle,
   panels,
@@ -216,6 +227,16 @@ const downloadSummary = computed(() => {
     : `${mb(progress.downloaded)} MB`;
 });
 
+/**
+ * ✕ (and Esc) on the standalone preview: drop the preview and return to
+ * the canvas. Clearing both holders is deliberate — with the browser
+ * folded away there is one preview to speak of.
+ */
+function closeStandalonePreview(): void {
+  clearPreview();
+  leavePreviewView();
+}
+
 onMounted(() => {
   void init();
   window.addEventListener("keydown", onKeydown);
@@ -244,6 +265,29 @@ function onWindowFocus(): void {
 // ── Ctrl/⌘+Z: undo the most recent history entry. While typing, the
 // keystroke stays a native text undo. ⌘/Ctrl+Shift+H toggles the history panel.
 function onKeydown(event: KeyboardEvent): void {
+  // The standalone preview owns Esc and the arrows while it is up: Esc
+  // returns to the canvas, ↑/↓ step through the file's siblings. A key
+  // typed into a box (a stray focus, not the preview's own surface) is
+  // left to that box.
+  if (mainView.value === "preview") {
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+    ) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeStandalonePreview();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      void stepPreview(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+  }
   if (!(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();
   // ⌘, is the platform convention for settings and works from anywhere,

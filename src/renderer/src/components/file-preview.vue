@@ -42,7 +42,7 @@
           >＋</button
         >
         <button
-          v-if="preview.status !== 'error' && !imageBroken"
+          v-if="preview.status !== 'error' && !imageBroken && !standalone"
           type="button"
           class="fp-open"
           :class="{ on: reading }"
@@ -67,7 +67,7 @@
           class="fp-open"
           :title="t('files.closePreview')"
           :aria-label="t('files.closePreview')"
-          @click="clearPreview"
+          @click="standalone ? emit('close') : clearPreview()"
           >✕</button
         >
       </div>
@@ -162,9 +162,16 @@ const props = defineProps<{
   preview: PreviewState | null;
   /** Reading mode lives on the tab; the pane only reflects and toggles it. */
   reading: boolean;
+  /**
+   * Standalone: the pane is the middle column's whole content (the
+   * no-browser layout), not a browser tab's side pane. Reading mode has
+   * nothing to fold away there, so its toggle is hidden and ✕ asks the
+   * shell to close instead of clearing a tab's preview.
+   */
+  standalone?: boolean;
 }>();
 
-const emit = defineEmits<{ "toggle-reading": [] }>();
+const emit = defineEmits<{ "toggle-reading": []; close: [] }>();
 
 const preview = computed(() => props.preview);
 const reading = computed(() => props.reading);
