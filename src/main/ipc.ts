@@ -18,6 +18,8 @@ import {
 } from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
 import { lineDiff } from "../shared/diff.js";
+import type { DigestsStore } from "../shared/digest-store.js";
+import { normalizeDigestGroup } from "../shared/digest-types.js";
 import { canonicalizeStoredDirs } from "../shared/dirs-store.js";
 import {
   clearSessionChanges,
@@ -191,6 +193,9 @@ function normalizeOverviewListing(value: unknown): OverviewListing | null {
  * Multi-model rounds sidecar (main-owned, when a store is passed in):
  *   roundsList()                -> RoundRecord[]     every persisted round
  *   roundsSave(record)          -> boolean           upsert one round (id-keyed)
+ * Story digests sidecar (main-owned, when a store is passed in):
+ *   digestsList()               -> DigestGroup[]     every persisted digest
+ *   digestsSave(group)          -> boolean           upsert one digest (id-keyed)
  * Multi-window jumps: requestAgentNavigate(backend, session) focuses (or
  * opens) the backend's own window and hands "awefork:agent-navigate"
  * {backend, sessionId} to the window that owns it — the agent window main
@@ -205,6 +210,7 @@ export function registerIpc(
   userDataDir = app.getPath("userData"),
   agentWindows?: Map<BackendId, BrowserWindow>,
   roundsStore?: RoundsStore,
+  digestsStore?: DigestsStore,
 ): void {
   const withAdapter = async (backend: BackendId) => registry.get(backend);
   // Store channels take the backend from the invoke; unknown ids route to the
@@ -407,6 +413,20 @@ export function registerIpc(
       const record = normalizeRoundRecord(value);
       if (!record) return false;
       await roundsStore.save(record);
+      return true;
+    });
+  }
+
+  // ── story digests sidecar (main-owned) ─────────────────────────────────
+  // Same shape and reason as the rounds sidecar above: a digest's canvas ✦
+  // card and reading view must survive a restart, and every window must
+  // restore the same digests.
+  if (digestsStore) {
+    ipcMain.handle("awefork:digestsList", async () => digestsStore.list());
+    ipcMain.handle("awefork:digestsSave", async (_event: IpcMainInvokeEvent, value: unknown) => {
+      const group = normalizeDigestGroup(value);
+      if (!group) return false;
+      await digestsStore.save(group);
       return true;
     });
   }

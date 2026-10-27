@@ -156,6 +156,47 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
     });
   };
 
+  /**
+   * A tool's chip, as the pane's live timeline shows it (the same `message.part`
+   * shape codex emits for its items).
+   *
+   * This is also the run's ONLY liveness signal while a tool executes: verified
+   * against a real 2.1.2 run, a `sleep 20` shell emitted nothing between
+   * `session.tool.called` and `session.tool.success` — no text, no reasoning,
+   * no heartbeat. A watchdog judging silence as "the run ended" would settle a
+   * working turn, so every tool frame carries a live chip.
+   */
+  const emitToolPart = (
+    props: Record<string, unknown>,
+    stateKey: "running" | "completed" | "error",
+    frameCreated: number | null,
+    remembered?: ToolCall,
+  ): void => {
+    const id = sessionId(props);
+    const callId = typeof props.id === "string" ? props.id : null;
+    if (!id || !callId) return;
+    const known = remembered ?? toolCalls.get(`${id}\u0000${callId}`);
+    const message = messageId(props) ?? known?.messageId ?? null;
+    if (!message) return;
+    // `called` names the tool; later frames omit it, so the label rides the
+    // call's own remembered state.
+    const tool =
+      typeof props.name === "string" && props.name !== "" ? props.name : (known?.tool ?? "tool");
+    emit({
+      type: "message.part",
+      sessionId: id,
+      messageId: message,
+      partId: callId,
+      kind: "tool",
+      text: tool,
+      // The chip's start is its own frame's time; later frames only carry the
+      // label (the pane keeps the first start it saw).
+      startedAt: stateKey === "running" ? frameCreated : null,
+      // A terminal frame settles the chip; progress leaves it spinning.
+      endedAt: stateKey === "running" ? null : frameCreated,
+    });
+  };
+
   /** One tool lifecycle frame → one recorder frame, when it names a tracked file. */
   const recordTool = (
     props: Record<string, unknown>,
@@ -321,19 +362,32 @@ export function createV2EventTranslator(deps: V2EventDeps): (frame: V2Frame) => 
             typeof props.id === "string" ? props.id : null,
           );
         }
+        // Record first: the chip's label and the recorder's path both ride the
+        // state `called` writes.
         recordTool(props, "running", undefined);
+        emitToolPart(props, "running", frame.created);
+        return;
+      case "session.tool.progress":
+        // Emitted repeatedly while a tool runs (a long shell reports through
+        // it) — never settles the chip, but always proves the run is alive.
+        emitToolPart(props, "running", frame.created);
         return;
       case "session.tool.success": {
         const callId = typeof props.id === "string" ? props.id : null;
         const key = id && callId ? `${id}\u0000${callId}` : null;
-        recordTool(props, "completed", key ? toolCalls.get(key) : undefined);
+        const remembered = key ? toolCalls.get(key) : undefined;
+        recordTool(props, "completed", remembered);
+        // Before the call is forgotten: a terminal frame carries no tool name.
+        emitToolPart(props, "completed", frame.created, remembered);
         if (key) toolCalls.delete(key);
         return;
       }
       case "session.tool.failed": {
         const callId = typeof props.id === "string" ? props.id : null;
         const key = id && callId ? `${id}\u0000${callId}` : null;
-        recordTool(props, "error", key ? toolCalls.get(key) : undefined);
+        const remembered = key ? toolCalls.get(key) : undefined;
+        recordTool(props, "error", remembered);
+        emitToolPart(props, "error", frame.created, remembered);
         if (key) toolCalls.delete(key);
         return;
       }

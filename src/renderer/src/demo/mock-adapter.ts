@@ -15,6 +15,7 @@
 
 import type { AgentNavigateRequest, BodySearchHit, TagStore } from "../../../shared/awefork-api.js";
 import type { BackendEventEnvelope } from "../../../shared/backend.js";
+import type { DigestGroup } from "../../../shared/digest-types.js";
 import {
   mergeOverviewLedger,
   type OverviewReadEntry,
@@ -514,6 +515,9 @@ export function installMockAdapter(): void {
   // round survives demo navigation but not a reload — the sidecar file is
   // what a real install adds.
   const demoRounds: RoundRecord[] = [];
+  // Demo digests: the same window-local mirror the rounds sidecar keeps in
+  // the real app, so the digest card and reading view render in demo mode.
+  const demoDigests: DigestGroup[] = [];
   const demoUnknown = new Map<string, string>();
   const demoObservedAt: Record<string, number> = {};
   const demoScannedAt: Record<string, number> = {};
@@ -1198,6 +1202,13 @@ export function installMockAdapter(): void {
       const index = demoRounds.findIndex((item) => item.id === record.id);
       if (index >= 0) demoRounds[index] = structuredClone(record);
       else demoRounds.push(structuredClone(record));
+      return true;
+    },
+    digestsList: async () => demoDigests.map((group) => structuredClone(group)),
+    digestsSave: async (group) => {
+      const index = demoDigests.findIndex((item) => item.id === group.id);
+      if (index >= 0) demoDigests[index] = structuredClone(group);
+      else demoDigests.push(structuredClone(group));
       return true;
     },
   };

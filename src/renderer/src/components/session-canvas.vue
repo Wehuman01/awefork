@@ -198,6 +198,7 @@
             <span class="avatar user">🍑</span>
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
             <span v-if="isParallelSummary(node)" class="parallel-summary-badge">✦ {{ t("canvas.parallelSummary") }} v{{ parallelSummaryVersion(node) }}</span>
+            <span v-else-if="isDigestSummary(node)" class="digest-summary-badge">✦ {{ t("canvas.digestSummary") }} v{{ digestSummaryVersion(node) }}</span>
             <button
               v-else-if="parallelSourceOf(node)"
               type="button"
@@ -244,6 +245,16 @@
               :title="t('canvas.parallelOpenSource', { model: source.label })"
               @click.stop="selectNode(source.node)"
             >{{ source.label }}</button>
+          </div>
+          <div v-if="digestSummaryOf(node)" class="digest-summary-sources">
+            <span>{{ t("canvas.digestSources") }}</span>
+            <button
+              v-for="source in digestSummaryOf(node)?.sources ?? []"
+              :key="source.sessionId"
+              type="button"
+              :title="t('canvas.digestOpenSource', { title: source.title })"
+              @click.stop="openDigestSource(source.storyRootId)"
+            >{{ source.title }}</button>
           </div>
           <div class="turn-foot">
             <span
@@ -527,6 +538,7 @@ import { fileKind } from "../../../shared/attachment-kinds";
 import { BACKEND_LABELS } from "../../../shared/backend";
 import type { TurnNode } from "../../../shared/canvas-graph";
 import { COL_GAP, draftCellFor, NODE_WIDTH } from "../../../shared/canvas-graph";
+import type { DigestStorySource } from "../../../shared/digest-types";
 import type { ModelChoice } from "../../../shared/types";
 import { openLocalAttachmentPreview } from "../attachment-preview";
 import { type DraftAttachment, readAttachments } from "../attachments";
@@ -544,6 +556,7 @@ import {
   defaultParallelTargets,
   deleteSession,
   deleteTurn,
+  digestGroups,
   dismissDraft,
   enterCompare,
   forkedFromSelection,
@@ -768,6 +781,57 @@ function openParallelRound(groupId: string): void {
 
 function parallelSummaryVersion(node: TurnNode): number | null {
   return parallelSummaryOf(node)?.version ?? null;
+}
+
+// ── ✦ digest summary cards (事后总结) ─────────────────────────────────
+// The same card decoration a round's summary gets, for digests: the first
+// turn of each version's summary session carries the ✦ badge and the
+// version's source stories as jump buttons. Unlike a round, the sources
+// live in other stories — off this canvas — so there are no link edges to
+// draw; the jumps are the connection.
+
+interface DigestSummaryLinks {
+  node: TurnNode;
+  version: number;
+  sources: DigestStorySource[];
+}
+
+const digestSummaryViews = computed<DigestSummaryLinks[]>(() => {
+  const result: DigestSummaryLinks[] = [];
+  for (const group of digestGroups) {
+    if (group.backend !== store.activeBackend) continue;
+    for (const version of group.versions) {
+      const summaryMessage = store.messagesBySession[version.sessionId]?.find(
+        (message) => message.role === "user",
+      );
+      if (!summaryMessage) continue;
+      const summaryNode = nodeById.value.get(`${version.sessionId}:${summaryMessage.id}`);
+      if (!summaryNode) continue;
+      result.push({ node: summaryNode, version: version.version, sources: version.sources });
+    }
+  }
+  return result;
+});
+
+const digestSummaryByNode = computed(
+  () => new Map(digestSummaryViews.value.map((links) => [links.node.id, links])),
+);
+
+function digestSummaryOf(node: TurnNode): DigestSummaryLinks | null {
+  return digestSummaryByNode.value.get(node.id) ?? null;
+}
+
+function isDigestSummary(node: TurnNode): boolean {
+  return digestSummaryByNode.value.has(node.id);
+}
+
+function digestSummaryVersion(node: TurnNode): number | null {
+  return digestSummaryOf(node)?.version ?? null;
+}
+
+/** Jump to a source story: its root opens the whole story on the canvas. */
+function openDigestSource(sessionId: string): void {
+  void selectSession(sessionId);
 }
 
 // ── active path: the selected turn's lineage back to the story's root ──

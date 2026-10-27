@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, nativeImage, screen } from "electron";
 import type { BackendId } from "../shared/backend.js";
+import { DigestsStore } from "../shared/digest-store.js";
 import { OverviewLedgerStore } from "../shared/overview-ledger.js";
 import { RoundsStore } from "../shared/rounds-store.js";
 import { createBackendRegistry } from "./backend-registry.js";
@@ -27,6 +28,10 @@ const overviewLedger = new OverviewLedgerStore(join(app.getPath("userData"), "ov
 // which branches form a round and its sessions degrade into plain fork
 // cards. Every window restores the same rounds at boot.
 const roundsStore = new RoundsStore(join(app.getPath("userData"), "rounds.json"));
+// The story digests sidecar (事后总结), main-owned for the same reason: a
+// digest's ✦ card and reading view must survive a restart, and every
+// window restores the same digests.
+const digestsStore = new DigestsStore(join(app.getPath("userData"), "digests.json"));
 
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no
@@ -43,7 +48,15 @@ let mainWindow: BrowserWindow | null = null;
 const agentWindows = new Map<BackendId, BrowserWindow>();
 // Registered after agentWindows so multi-window navigations can find the
 // window that owns the target agent.
-registerIpc(registry, openAgentWindow, overviewLedger, undefined, agentWindows, roundsStore);
+registerIpc(
+  registry,
+  openAgentWindow,
+  overviewLedger,
+  undefined,
+  agentWindows,
+  roundsStore,
+  digestsStore,
+);
 registerSaveFileIpc();
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.

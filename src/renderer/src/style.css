@@ -2635,6 +2635,50 @@ html[data-density="compact"] .sess-snips {
   border-color: var(--lavender);
 }
 
+/* A story digest's summary card: the same ✦ family as a round's, with the
+   source stories as jumps — they live in other stories, so the chips are
+   links rather than canvas edges. */
+.digest-summary-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--fork-chip-border);
+  border-radius: 999px 999px 5px 999px;
+  padding: 2px 8px;
+  background: var(--lavender-soft);
+  color: var(--lavender-deep);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.digest-summary-sources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -2px 0 9px 37px;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.digest-summary-sources button {
+  max-width: 122px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--fork-chip-border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--lavender-deep);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digest-summary-sources button:hover {
+  background: var(--lavender-soft);
+  border-color: var(--lavender);
+}
+
 .turn-preview {
   flex: 1;
   font-size: 12.5px;
@@ -8055,6 +8099,15 @@ html[data-theme="dark"] ::selection {
   padding: 4px 9px;
   font-size: 13px;
   font-weight: 700;
+}
+
+/* The digest entry: quieter than ＋ (it is a secondary action on the
+   strip) but same shape, so the tab bar keeps one visual language. */
+.story-tab-digest {
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary-deep);
 }
 
 /* the sidebar's session half keeps its own scroll when the file tab shows */
