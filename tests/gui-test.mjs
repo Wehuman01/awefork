@@ -60,11 +60,14 @@ async function cleanup(code) {
   await Promise.race([demoServer.close(), new Promise((resolve) => setTimeout(resolve, 2000))]);
   process.exit(code);
 }
-// Never let a wedged CDP connection hang a pipeline: hard deadline.
+// Never let a wedged CDP connection hang a pipeline: hard deadline. The
+// full suite (boot, overview, digests, file browser, drops, layout) runs
+// past four minutes on a loaded machine — the deadline is a wedged-
+// connection guard, not a per-section budget.
 setTimeout(() => {
-  console.error("gui smoke: global 240s watchdog fired");
+  console.error("gui smoke: global 480s watchdog fired");
   void cleanup(1);
-}, 240_000).unref();
+}, 480_000).unref();
 process.on("SIGINT", () => void cleanup(130));
 process.on("SIGTERM", () => void cleanup(143));
 
@@ -182,7 +185,14 @@ try {
     () =>
       cdp.evaluate(
         `localStorage.setItem("awefork:settings", ${JSON.stringify(
-          JSON.stringify({ labs: { fileBrowser: true, sessionOverview: true } }),
+          JSON.stringify({
+            labs: {
+              fileBrowser: true,
+              sessionOverview: true,
+              parallelModels: true,
+              parallel: { digest: true },
+            },
+          }),
         )})`,
       ),
     30_000,
@@ -379,6 +389,16 @@ try {
     JSON.stringify(selectedAll),
   );
 
+  // The new result's unread badge lands with the run's idle event — a beat
+  // after the composer unlocks, which is all the settle wait above observes.
+  // Clicking before it arrives hits a disabled bulk-mark (no markable row)
+  // and the click silently does nothing.
+  await retry(async () => {
+    const unread = await cdp.evaluate(
+      `document.querySelectorAll(".overview-float .status-badge.unread").length`,
+    );
+    if (unread === 0) throw new Error("no unread result in the panel yet");
+  }, 10_000, "unread result visible in the panel");
   const markable = await cdp.evaluate(
     `Number(document.querySelector(".overview-float .bulk-mark")?.textContent.match(/·\\s*(\\d+)/)?.[1] ?? 0)`,
   );
@@ -526,6 +546,61 @@ try {
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
   await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "digest dialog closed");
   check("Esc closes the digest dialog", true);
+
+  // 4e. Canvas digest pick: the ✦ card chip arms the selection (the floating
+  //     bar counts it), re-picking the same story neither duplicates nor
+  //     reorders, a card click toggles its story back out, and the bar's
+  //     生成总结 opens the dialog on the canvas picks.
+  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest chip click");
+  const pickBar = await retry(async () => {
+    const bar = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".digest-pick-bar")),
+      count: document.querySelector(".digest-pick-count")?.textContent ?? "",
+    })`);
+    if (!bar.open) throw new Error("digest pick bar not up");
+    return bar;
+  }, 5000, "digest pick bar");
+  check(
+    "the ✦ chip arms the selection with a counting bar",
+    pickBar.count.includes("1"),
+    JSON.stringify(pickBar),
+  );
+
+  // One story is one source: re-picking it is refused, the count stands.
+  await cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`);
+  const stillOne = await cdp.evaluate(
+    `document.querySelector(".digest-pick-count")?.textContent ?? ""`,
+  );
+  check("re-picking the same story does not duplicate", stillOne.includes("1"), stillOne);
+
+  // A card click while armed toggles the story out; the last removal
+  // disarms and the bar goes away.
+  await cdp.evaluate(`document.querySelector(".turn").click()`);
+  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick disarmed");
+  check("clicking a card toggles its story out of the selection", true);
+
+  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest re-arm");
+  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-start").click()`), 5000, "digest pick start");
+  const canvasDigest = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".ddg")),
+      rows: document.querySelectorAll(".ddg-item").length,
+    })`);
+    if (!state.open || state.rows < 1) throw new Error("canvas digest dialog incomplete");
+    return state;
+  }, 5000, "canvas digest dialog open");
+  check(
+    "the bar's 生成总结 opens the dialog on the canvas picks",
+    canvasDigest.rows >= 1,
+    JSON.stringify(canvasDigest),
+  );
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "canvas digest dialog closed");
+
+  // Leave the canvas clean for the sections below.
+  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-cancel").click()`), 5000, "digest pick cancel");
+  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick bar gone");
 
   // 4b. File browser panel: the tabs switch the middle column and the
   //     sidebar, and the panel mounts with its states. The demo adapter has
@@ -1173,7 +1248,16 @@ try {
       sidebar: Boolean(document.querySelector(".sidebar")),
     })`);
     if (reboot.stale || reboot.turns < 2 || !reboot.sidebar) {
-      throw new Error(`reboot incomplete: ${JSON.stringify(reboot)}`);
+      // Name what the fresh document actually shows: a blank canvas after a
+      // reload is a restore-path failure, and a bare timeout says nothing
+      // about which half (selection, tabs, message batch) is missing.
+      const page = await cdp.evaluate(`(() => ({
+        activeRow: Boolean(document.querySelector(".sess-row.active")),
+        tabs: [...document.querySelectorAll(".story-tab")].map((t) => t.textContent?.trim().slice(0, 24)),
+        canvas: document.querySelector(".canvas-empty")?.textContent?.trim().slice(0, 40) ?? null,
+        status: document.querySelector(".canvas-status")?.textContent?.trim() ?? null,
+      }))()`);
+      throw new Error(`reboot incomplete: ${JSON.stringify(reboot)} page=${JSON.stringify(page)}`);
     }
   }, 30_000, "renderer reboot after reload");
   const reloadedWidth = await panelWidth(".sidebar");
