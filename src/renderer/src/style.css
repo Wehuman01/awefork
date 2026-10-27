@@ -3586,6 +3586,11 @@ html[data-density="compact"] .sess-snips {
   cursor: pointer;
 }
 
+.cell:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: 1px;
+}
+
 .cell.left {
   border-left: 3px solid var(--lavender);
 }

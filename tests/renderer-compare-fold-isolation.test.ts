@@ -18,12 +18,49 @@ describe("compare card fold isolation", () => {
   it("resets the fold when the card or its column changes", async () => {
     const cell = await readFile(CELL_PATH, "utf8");
 
-    // The watch key carries the side: a slot reused across a plan rebuild, or
+    // The fold key carries the side: a slot reused across a plan rebuild, or
     // the same card id appearing in the other column, folds shut either way.
-    expect(cell).toMatch(/watch\(\s*\(\) => \[props\.side, props\.cell\?\.id\]/);
-    // A bare cell-id key would let a rebuilt plan's new card inherit the
-    // previous occupant's expansion.
+    expect(cell).toMatch(/const cellKey = computed\(/);
+    expect(cell).toMatch(/watch\(cellKey,/);
+    // The key must be a primitive. A getter returning a fresh array
+    // (`() => [side, cell?.id]`) is a new value on every run, so Vue's
+    // default Object.is check fired the reset on ANY cell-object rebuild:
+    // every background refresh — a streamed delta, a usage nudge, a
+    // re-measured card — rebuilt the columns with the same ids and folded
+    // every open card shut, which read as the compare view collapsing
+    // itself mid-read. A bare cell-id key is wrong for the mirror reason:
+    // it would let a rebuilt plan's new card inherit the previous
+    // occupant's expansion.
+    expect(cell).not.toMatch(/watch\(\s*\(\) => \[/);
     expect(cell).not.toMatch(/watch\(\s*\(\) => props\.cell\?\.id/);
+  });
+
+  it("expands or folds every card from the compare head", async () => {
+    const cell = await readFile(CELL_PATH, "utf8");
+    const context = await readFile(CONTEXT_PATH, "utf8");
+
+    // Reading two full answers is the comparison's main event, so one click
+    // folds both columns open or shut. The counter signal applies once per
+    // click: a card the user folds by hand keeps that choice until the next
+    // command instead of being fought by the boolean on every refresh.
+    expect(context).toMatch(/function toggleAllCells\(\): void \{/);
+    expect(context).toMatch(/allCellsSignal\.value \+= 1/);
+    expect(cell).toMatch(/watch\(\s*\(\) => props\.expandSignal,/);
+    expect(cell).toMatch(/open\.value = props\.expandOpen;/);
+    // Both compare modes render through the same cell, so both wire it.
+    expect(context.match(/:expand-signal="allCellsSignal"/g)).toHaveLength(2);
+    expect(context.match(/:expand-open="allCellsOpen"/g)).toHaveLength(2);
+  });
+
+  it("keeps every card operable from the keyboard", async () => {
+    const cell = await readFile(CELL_PATH, "utf8");
+
+    // A card is a disclosure: focusable, Enter/Space folds it, and the
+    // expanded state is announced. The blank end-of-column cell stays out
+    // of the tab order.
+    expect(cell).toMatch(/:tabindex="cell \? 0 : -1"/);
+    expect(cell).toMatch(/:aria-expanded="cell \? open : undefined"/);
+    expect(cell).toMatch(/@keydown="onCellKey"/);
   });
 
   it("namespaces free side-by-side cell ids by column", async () => {

@@ -7,6 +7,14 @@
         <button
           type="button"
           class="nav-btn"
+          :class="{ 'sync-on': allCellsOpen }"
+          :title="allCellsOpen ? t('branch.collapseAllTitle') : t('branch.expandAllTitle')"
+          :aria-pressed="allCellsOpen"
+          @click="toggleAllCells"
+        >{{ allCellsOpen ? "⤡" : "⤢" }}</button>
+        <button
+          type="button"
+          class="nav-btn"
           :class="{ 'sync-on': syncScroll }"
           :title="t('branch.syncScrollTitle')"
           @click="syncScroll = !syncScroll"
@@ -95,6 +103,8 @@
                 :key="cell.id"
                 :cell="cell"
                 :side="sideOf(ci)"
+                :expand-signal="allCellsSignal"
+                :expand-open="allCellsOpen"
               />
             </div>
           </div>
@@ -138,6 +148,8 @@
                 :key="cell.id"
                 :cell="cell"
                 :side="sideOf(ci)"
+                :expand-signal="allCellsSignal"
+                :expand-open="allCellsOpen"
               />
             </div>
           </div>
@@ -697,6 +709,22 @@ function badgeOf(node: TurnNode): number {
 }
 
 const prefixOpen = ref(false);
+
+/**
+ * Expand/collapse every card in both columns at once. Reading two full
+ * answers is the comparison's main event, and folding each card open by
+ * hand is the chore this replaces. The counter signal applies the command
+ * once per click and leaves hand-folded choices alone until the next one
+ * (see cmp-cell), and a card that arrives later — a turn streaming in —
+ * still starts folded, so a live run does not yank the layout open.
+ */
+const allCellsOpen = ref(false);
+const allCellsSignal = ref(0);
+
+function toggleAllCells(): void {
+  allCellsOpen.value = !allCellsOpen.value;
+  allCellsSignal.value += 1;
+}
 
 const colEls = new Map<number, Element>();
 

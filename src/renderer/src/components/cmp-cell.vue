@@ -2,7 +2,11 @@
   <div
     class="cell"
     :class="[side, { blank: !cell, open }]"
+    :tabindex="cell ? 0 : -1"
+    :role="cell ? 'button' : undefined"
+    :aria-expanded="cell ? open : undefined"
     @click="onCellClick"
+    @keydown="onCellKey"
   >
     <template v-if="cell">
       <div class="cell-top">
@@ -69,10 +73,17 @@ import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import { MarkdownView } from "./markdown-view";
 
-const props = defineProps<{
-  cell: DisplayCell | null;
-  side: "left" | "right";
-}>();
+const props = withDefaults(
+  defineProps<{
+    cell: DisplayCell | null;
+    side: "left" | "right";
+    /** Bumped by the compare head's expand/collapse-all; 0 = no command yet. */
+    expandSignal?: number;
+    /** Whether that command opens (true) or folds (false) the cards. */
+    expandOpen?: boolean;
+  }>(),
+  { expandSignal: 0, expandOpen: false },
+);
 
 const flagTitle = computed(() =>
   props.cell?.flag === "inherited" ? t("cmp.inheritedTitle") : t("cmp.upstreamTitle"),
@@ -85,12 +96,31 @@ const flagTitle = computed(() =>
  * is keyed by (side, cell id): both the row index and the card itself must
  * match before an expansion survives, and the two columns' ids are namespaced
  * apart even when their sessions mint the same message ids.
+ *
+ * The key is a primitive string on purpose. A getter returning a fresh array
+ * (`() => [side, cell?.id]`) is a new value on every run, so Vue's default
+ * Object.is check fires the callback on ANY cell-object rebuild: every
+ * background refresh — a streamed delta, a usage nudge, a re-measured card —
+ * rebuilt the columns with the same ids and folded every open card shut,
+ * which read as the compare view collapsing itself mid-read. The primitive
+ * fires only when the side or the card id actually changes.
  */
+const cellKey = computed(() => (props.cell ? `${props.side}:${props.cell.id}` : props.side));
 const open = ref(false);
+watch(cellKey, () => {
+  open.value = false;
+});
+
+/**
+ * The compare head's expand/collapse-all. A counter rather than a boolean so
+ * the command applies exactly once per click: a card the user folds by hand
+ * afterwards keeps that choice until the next command, instead of being
+ * fought by the boolean on every later refresh.
+ */
 watch(
-  () => [props.side, props.cell?.id] as const,
-  () => {
-    open.value = false;
+  () => props.expandSignal,
+  (signal) => {
+    if (signal > 0) open.value = props.expandOpen;
   },
 );
 
@@ -104,6 +134,15 @@ function onCellClick(event: MouseEvent): void {
   if (target?.closest("a, button")) return;
   if (window.getSelection()?.toString()) return;
   if (props.cell) open.value = !open.value;
+}
+
+/** The same toggle from the keyboard — a card is a disclosure, so it focuses
+ *  and Enter/Space fold it, like every other interactive surface here. */
+function onCellKey(event: KeyboardEvent): void {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  if (!props.cell) return;
+  event.preventDefault();
+  open.value = !open.value;
 }
 
 function previewOf(cell: DisplayCell): string {

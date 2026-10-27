@@ -284,6 +284,14 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "同步滚动：滚轮滚动时两栏一起下滑",
     en: "Sync scroll: the wheel carries both columns down together",
   },
+  "branch.expandAllTitle": {
+    zh: "展开全部卡片（再点一次全部折叠）",
+    en: "Expand every card (click again to fold them all)",
+  },
+  "branch.collapseAllTitle": {
+    zh: "折叠全部卡片",
+    en: "Fold every card shut",
+  },
   "branch.select": { zh: "选中", en: "Select" },
   "branch.jumpLatest": { zh: "跳到这个会话的最新回合", en: "Jump to this session's latest turn" },
   "branch.latest": { zh: "⤓ 最新", en: "⤓ Latest" },
