@@ -756,9 +756,14 @@ export const favoriteSessions = computed<SessionSummary[]>(() => {
 /**
  * What the canvas draws: the selected session's whole story. The full
  * session list stays in the sidebar; stars live in the favorites shelf.
+ * The pool is every visible session, not just the current directory's: a
+ * fork is cut into whichever directory the client had selected, so a story
+ * routinely spans directories, and capping the pool here would silently
+ * truncate it — the sidebar tree, the tab strip's story-root dedupe and the
+ * overview's subtree counts all resolve parents over the full list.
  */
 export const canvasSessions = computed<SessionSummary[]>(() =>
-  selectCanvasSessions(directorySessions.value, state.lineage, state.selectedId),
+  selectCanvasSessions(visibleSessions.value, state.lineage, state.selectedId),
 );
 
 /**
