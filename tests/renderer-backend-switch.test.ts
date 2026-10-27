@@ -232,6 +232,22 @@ describe("backend switch cache", () => {
     expect(h.store.sessions.map((s) => s.id)).toEqual(["s1"]);
   });
 
+  it("re-probes a stale offline flag while the backend stays quiet", async () => {
+    const h = await bootState();
+    // One failed refresh flags the workspace offline…
+    (h.api.sessions as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("thread/list timed out after 60000ms"),
+    );
+    await h.refreshSessions();
+    expect(h.store.connectionError).toContain("timed out");
+    // …and nothing else would retry it: no session event fires while the
+    // backend is quiet, and the user should not have to find the refresh
+    // button. The slow re-probe lands on its own and clears the flag.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(h.store.connectionError).toBeNull();
+    expect(h.store.sessions.map((s) => s.id)).toEqual(["s1"]);
+  });
+
   it("does not apply an old backend's tag-write result to the active backend", async () => {
     const h = await bootState();
     let resolveWrite!: (store: TagStore) => void;

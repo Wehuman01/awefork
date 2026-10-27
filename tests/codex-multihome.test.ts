@@ -272,6 +272,28 @@ describe("codex multi-home facade", () => {
     expect(sessions.map((s) => s.id)).toEqual(["own"]);
   });
 
+  it("still lists the default home when a foreign home's listing fails", async () => {
+    // A wedged account app-server (or a thread/list that outlives the request
+    // deadline) fails the fetch, not just the spawn: the whole backend must
+    // not read as disconnected over one foreign account.
+    const homes: CodexHome[] = [
+      { id: "default", path: "/homes/default", label: "Codex" },
+      { id: "wedged", path: "/homes/wedged", label: "wedged" },
+    ];
+    const defaultAdapter = fakeHomeAdapter(homes[0], ["own"]);
+    const wedged = fakeHomeAdapter(homes[1], []);
+    wedged.listSessions.mockRejectedValue(new Error("thread/list timed out after 60000ms"));
+    const facade = createCodexMultiHomeAdapter({
+      lineagePath: "/tmp/lineage.json",
+      homes: () => homes,
+      createHomeAdapter: (home) =>
+        home.id === "wedged" ? Promise.resolve(wedged) : Promise.resolve(defaultAdapter),
+      defaultHomePath: () => "/homes/default",
+    });
+    const sessions = await facade.listSessions();
+    expect(sessions.map((s) => s.id)).toEqual(["own"]);
+  });
+
   it("reads a foreign session through its own home", async () => {
     const { facade, byHome } = makeFacade({ default: [], cxo: ["foreign"] });
     await facade.listSessions();
