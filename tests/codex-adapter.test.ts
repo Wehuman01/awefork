@@ -884,6 +884,95 @@ describe("createCodexAdapter listSessions()", () => {
     });
     expect(sessions.find((s) => s.id === "t2")?.origin).toBe("root");
   });
+
+  it("adopts the parent a rollout recorded when thread/list reports none", async () => {
+    // codex's thread/list answers every thread with forkedFromId: null — the
+    // parent link lives only in the rollout's session_meta record. A fork cut
+    // by the codex CLI therefore reads as a root without this.
+    const { client } = fakeClient({
+      "thread/list": () => ({
+        data: [
+          { id: "parent", name: null, preview: "父", cwd: "/a", createdAt: 100, updatedAt: 300 },
+          { id: "child", name: null, preview: "子", cwd: "/a", createdAt: 100, updatedAt: 400 },
+        ],
+        nextCursor: null,
+      }),
+    });
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      forkParents: async () => ({ child: "parent" }),
+    });
+
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "child")).toMatchObject({
+      parentSessionId: "parent",
+      origin: "fork",
+    });
+    expect(sessions.find((s) => s.id === "parent")?.origin).toBe("root");
+  });
+
+  it("keeps the server's own parent when the rollout disagrees", async () => {
+    const { client } = fakeClient({
+      "thread/list": () => ({
+        data: [
+          { id: "parent", name: null, preview: "父", cwd: "/a", createdAt: 100, updatedAt: 300 },
+          {
+            id: "child",
+            name: null,
+            preview: "子",
+            forkedFromId: "parent",
+            cwd: "/a",
+            createdAt: 100,
+            updatedAt: 400,
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      forkParents: async () => ({ child: "somewhere-else" }),
+    });
+
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "child")).toMatchObject({
+      parentSessionId: "parent",
+      origin: "fork",
+    });
+  });
+
+  it("does not read the rollouts when the server already reports the parent", async () => {
+    const { client } = fakeClient({
+      "thread/list": () => ({
+        data: [
+          {
+            id: "child",
+            name: null,
+            preview: "子",
+            forkedFromId: "parent",
+            cwd: "/a",
+            createdAt: 100,
+            updatedAt: 400,
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+    let read = false;
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      forkParents: async () => {
+        read = true;
+        return {};
+      },
+    });
+
+    await adapter.listSessions();
+    expect(read).toBe(false);
+  });
 });
 
 describe("createCodexAdapter listModels()", () => {

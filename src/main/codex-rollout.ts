@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { CodexTurnSettings } from "../shared/codex-adapter.js";
-import { findRolloutRelPath } from "./codex-homes.js";
+import { findRolloutRelPath, listRolloutFiles } from "./codex-homes.js";
 
 /** turnId → the settings that turn ran with. */
 export type CodexTurnContexts = Record<string, CodexTurnSettings>;
@@ -92,4 +92,90 @@ function parseTurnContexts(text: string): CodexTurnContexts {
 
 function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
+}
+
+/**
+ * Every session in a home that was forked, mapped to the parent it forked
+ * from.
+ *
+ * codex's `thread/list` answers every thread with `forkedFromId: null` — the
+ * parent link lives only in the rollout's `session_meta` record, and only
+ * `thread/read` carries it back. A fork cut by the codex CLI (or by codex
+ * itself) is therefore invisible to a listing: awefork's own fork sidecar
+ * records only the forks awefork cut, so every other fork reads as a root and
+ * its story falls apart into separate branches on the canvas.
+ *
+ * The rollout is the one place the link is written, so it is the one place
+ * worth reading. Only the first record of each file is needed, which keeps
+ * this to a small read per session instead of a full parse.
+ */
+export async function readForkParents(homePath: string): Promise<Record<string, string>> {
+  const cached = forkParentCache.get(homePath);
+  if (cached && Date.now() - cached.readAt < FORK_PARENT_TTL_MS) return cached.parents;
+  const parents: Record<string, string> = {};
+  for (const path of listRolloutFiles(homePath)) {
+    const parent = await readForkParentOf(path);
+    if (parent) parents[parent.sessionId] = parent.parentId;
+  }
+  forkParentCache.set(homePath, { parents, readAt: Date.now() });
+  return parents;
+}
+
+/**
+ * How long a home's fork parents stay valid.
+ *
+ * A fork's parent never changes once written, and a new fork adds a session
+ * rather than editing one, so a stale entry only means a fork made in the
+ * last interval is not yet visible as a branch. The listing reads the
+ * rollouts on every refresh, so the cache keeps a refresh from walking the
+ * whole sessions tree.
+ */
+const FORK_PARENT_TTL_MS = 5_000;
+
+/** Per-home fork parents, read from the rollouts. */
+const forkParentCache = new Map<string, { parents: Record<string, string>; readAt: number }>();
+
+interface ForkParent {
+  sessionId: string;
+  parentId: string;
+}
+
+/**
+ * The parent one rollout recorded, or null when the file names no parent.
+ *
+ * The record's own `session_id` is the session's id: a rollout file can hold
+ * another session's copied prefix (codex writes one file per fork point), and
+ * the id that matters is the one the record states.
+ */
+async function readForkParentOf(path: string): Promise<ForkParent | null> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(path, "r");
+    // The session_meta record is the first line; a chunk big enough for it
+    // avoids reading a multi-megabyte rollout into memory.
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(64 * 1024), 0, 64 * 1024, 0);
+    if (bytesRead === 0) return null;
+    const firstLine = buffer.toString("utf8", 0, bytesRead).split("\n")[0] ?? "";
+    let record: { type?: unknown; payload?: Record<string, unknown> };
+    try {
+      record = JSON.parse(firstLine);
+    } catch {
+      // A torn first line: the session is still being written.
+      return null;
+    }
+    if (record.type !== "session_meta") return null;
+    const sessionId = textOrNull(record.payload?.session_id);
+    const parentId = textOrNull(record.payload?.forked_from_id);
+    // A session that forked from itself is not a fork — codex writes that
+    // shape for a resumed thread, and treating it as one would make the
+    // story walk loop.
+    if (!sessionId || !parentId || parentId === sessionId) return null;
+    return { sessionId, parentId };
+  } catch {
+    // Pruned between the listing and the read, or unreadable: the caller
+    // keeps the thread's own (parentless) shape.
+    return null;
+  } finally {
+    await handle?.close();
+  }
 }

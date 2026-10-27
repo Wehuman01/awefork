@@ -19,7 +19,7 @@ import {
   discoverCodexHomes,
   findRolloutRelPath,
 } from "./codex-homes.js";
-import { readTurnContexts } from "./codex-rollout.js";
+import { readForkParents, readTurnContexts } from "./codex-rollout.js";
 import { ensureCodexServer } from "./codex-server.js";
 
 export interface CodexMultiHomeOptions {
@@ -114,6 +114,10 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       // Each home reads its own rollouts: the per-turn model settings live
       // beside the session they belong to.
       turnContexts: (sessionId) => readTurnContexts(home.path, sessionId),
+      // The fork parents live in the rollouts too: codex's thread/list answers
+      // every thread with forkedFromId: null, so a fork cut by the codex CLI
+      // would read as a root and its story would break into separate branches.
+      forkParents: () => readForkParents(home.path),
       // A fork cut inside prompt()'s writer-conflict recovery is registered
       // here, not through the facade's fork() — without this the new branch
       // stays absent from thread/list (it carries only copied prefix turns)

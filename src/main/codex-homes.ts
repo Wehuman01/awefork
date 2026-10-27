@@ -108,6 +108,38 @@ function subDirs(path: string): string[] {
 }
 
 /**
+ * Every rollout file in a home, absolute paths.
+ *
+ * A home's sessions live under sessions/<year>/<month>/<day>/rollout-…jsonl.
+ * The walk is a plain directory scan: the listing needs every file's first
+ * record, so a per-session lookup (findRolloutRelPath) would rescan the same
+ * tree once per session.
+ */
+export function listRolloutFiles(homePath: string): string[] {
+  const root = join(homePath, "sessions");
+  const files: string[] = [];
+  for (const year of subDirs(root)) {
+    for (const month of subDirs(join(root, year))) {
+      for (const day of subDirs(join(root, year, month))) {
+        const dayPath = join(root, year, month, day);
+        let entries: string[];
+        try {
+          entries = readdirSync(dayPath);
+        } catch {
+          // A non-directory at the day position, or a dir pruned by codex's
+          // retention between the listing and this read.
+          continue;
+        }
+        for (const file of entries) {
+          if (file.endsWith(".jsonl")) files.push(join(dayPath, file));
+        }
+      }
+    }
+  }
+  return files;
+}
+
+/**
  * The home a session's rollout file actually lives in — the honest answer to
  * "which CODEX_HOME must a terminal codex run under to see this session?".
  * The default home is searched first, so a session imported into it (the

@@ -67,6 +67,20 @@ export interface CodexAdapterOptions {
    */
   turnContexts?: (sessionId: string) => Promise<Record<string, CodexTurnSettings>>;
   /**
+   * The parent each session forked from, keyed by session id — read from the
+   * rollouts.
+   *
+   * codex's `thread/list` answers every thread with `forkedFromId: null`; the
+   * parent link lives only in the rollout's `session_meta` record, and only
+   * `thread/read` carries it back. A fork cut by the codex CLI (rather than
+   * by awefork, which records its own forks in the lineage sidecar) therefore
+   * reads as a root — and its story breaks into separate branches on the
+   * canvas. The rollouts are the one place the link is written.
+   *
+   * Read only when the listing leaves a thread parentless.
+   */
+  forkParents?: () => Promise<Record<string, string>>;
+  /**
    * A fork this adapter cut on its own (the writer-conflict continuation),
    * reported so the host can list it before codex's `thread/list` projects
    * it. A fork carrying only copied prefix turns is absent from that listing
@@ -283,19 +297,37 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   const secToMs = (seconds: number | null | undefined): number | null =>
     typeof seconds === "number" ? seconds * 1000 : null;
 
-  const mapThread = (thread: CodexThread): SessionSummary => ({
-    id: thread.id,
-    title: thread.name || thread.preview || "(untitled session)",
-    directory: thread.cwd ?? "",
-    parentSessionId: thread.forkedFromId ?? thread.parentThreadId ?? null,
-    origin: thread.forkedFromId ? "fork" : thread.parentThreadId ? "subagent" : "root",
-    createdAt: secToMs(thread.createdAt) ?? Date.now(),
-    updatedAt: secToMs(thread.updatedAt) ?? Date.now(),
-    // thread/list carries the thread's current model settings, so the overview
-    // can name a model without reading a single turn.
-    modelId: thread.model ?? null,
-    variant: thread.reasoningEffort ?? null,
-  });
+  /**
+   * A thread's parent, as the server states it: the fork source for a branch,
+   * the spawning thread for a subagent.
+   */
+  const serverParentOf = (thread: CodexThread): string | null =>
+    thread.forkedFromId ?? thread.parentThreadId ?? null;
+
+  const mapThread = (thread: CodexThread, forkParent?: string): SessionSummary => {
+    // The server's own answer wins; the rollout's parent is the fallback for
+    // the forks codex's listing leaves parentless.
+    const parentSessionId = serverParentOf(thread) ?? forkParent ?? null;
+    return {
+      id: thread.id,
+      title: thread.name || thread.preview || "(untitled session)",
+      directory: thread.cwd ?? "",
+      parentSessionId,
+      origin: thread.forkedFromId
+        ? "fork"
+        : thread.parentThreadId
+          ? "subagent"
+          : parentSessionId
+            ? "fork"
+            : "root",
+      createdAt: secToMs(thread.createdAt) ?? Date.now(),
+      updatedAt: secToMs(thread.updatedAt) ?? Date.now(),
+      // thread/list carries the thread's current model settings, so the overview
+      // can name a model without reading a single turn.
+      modelId: thread.model ?? null,
+      variant: thread.reasoningEffort ?? null,
+    };
+  };
 
   /**
    * Walk one thread's turns pages (ascending) to the end.
@@ -624,6 +656,35 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return message.includes("is not materialized yet") || message.includes("no rollout found");
   }
 
+  /**
+   * The rollouts' parents for the threads the listing left parentless.
+   *
+   * Reading the rollouts costs a directory walk, so it happens only when the
+   * listing actually leaves a thread parentless — a home whose listing names
+   * every parent never touches the disk. A read that fails leaves the threads
+   * as the server stated them: a parentless thread is a root, and that is
+   * what it was before this fallback existed.
+   */
+  async function readRolloutForkParents(threads: CodexThread[]): Promise<Record<string, string>> {
+    const reader = options.forkParents;
+    if (!reader) return {};
+    const parentless = threads.filter((thread) => !serverParentOf(thread));
+    if (parentless.length === 0) return {};
+    try {
+      const parents = await reader();
+      const wanted = new Set(parentless.map((thread) => thread.id));
+      const picked: Record<string, string> = {};
+      for (const [id, parent] of Object.entries(parents)) {
+        if (wanted.has(id)) picked[id] = parent;
+      }
+      return picked;
+    } catch {
+      // The rollouts could not be read (pruned, unreadable, no home): the
+      // threads keep the shape the server gave them.
+      return {};
+    }
+  }
+
   return {
     kind: "codex",
 
@@ -638,10 +699,16 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         threads.push(...(page.data ?? []));
         cursor = page.nextCursor ?? null;
       } while (cursor);
+      // The rollouts are read only when the listing leaves a thread parentless:
+      // codex's own answer wins, and a listing that already names every
+      // parent never touches the disk.
+      const parents = await readRolloutForkParents(threads);
       // Same once-per-listing canonicalization as the opencode side: thread
       // cwds arrive as the shell spelled them, symlink variants included.
       return canonicalizeSessionDirectories(
-        threads.map(mapThread).sort((a, b) => b.updatedAt - a.updatedAt),
+        threads
+          .map((thread) => mapThread(thread, parents[thread.id]))
+          .sort((a, b) => b.updatedAt - a.updatedAt),
       );
     },
 
