@@ -3742,6 +3742,31 @@ html[data-density="compact"] .sess-snips {
   border-top: 3px solid var(--mint);
 }
 
+/* The pane's jump button, same idea: rides the column's own bottom while
+   the reader is caught up elsewhere, and names what landed below. */
+.cmp-jump {
+  position: sticky;
+  bottom: 8px;
+  z-index: 1;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #e5d9cf);
+  background: var(--surface, #fffdfb);
+  color: var(--text, #4a3f39);
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 3px 12px rgb(80 55 40 / 12%);
+  cursor: pointer;
+}
+
+.cmp-jump:hover {
+  background: var(--surface-hover, #f7efe9);
+}
+
 .cmp-fcol-head {
   position: sticky;
   top: 0;

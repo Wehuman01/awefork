@@ -106,6 +106,13 @@
                 :expand-signal="allCellsSignal"
                 :expand-open="allCellsOpen"
               />
+              <button
+                v-if="colIsAway(ci) && colNewTurnsOf(ci) > 0"
+                type="button"
+                class="cmp-jump"
+                :title="t('branch.jumpLatest')"
+                @click="pinColBottom(ci, true)"
+              >{{ t("branch.newTurns", { n: colNewTurnsOf(ci) }) }}</button>
             </div>
           </div>
         </template>
@@ -151,6 +158,13 @@
                 :expand-signal="allCellsSignal"
                 :expand-open="allCellsOpen"
               />
+              <button
+                v-if="colIsAway(ci) && colNewTurnsOf(ci) > 0"
+                type="button"
+                class="cmp-jump"
+                :title="t('branch.jumpLatest')"
+                @click="pinColBottom(ci, true)"
+              >{{ t("branch.newTurns", { n: colNewTurnsOf(ci) }) }}</button>
             </div>
           </div>
         </template>
@@ -734,8 +748,52 @@ function setColEl(index: number, el: unknown): void {
 }
 
 function scrollLatest(index: number): void {
+  pinColBottom(index, true);
+}
+
+/**
+ * Stream follow, one state per column, on the pane's own constant so a
+ * compare column behaves exactly like the message list: a column the
+ * reader parked at the bottom keeps up with a run as it streams, and the
+ * moment they scroll up to reread it holds their place and counts the
+ * turns that land below instead. Comparing two live runs is the case
+ * this exists for — one side streams while the other is being read.
+ */
+const BOTTOM_SLACK_PX = 32;
+const colAway = ref<[boolean, boolean]>([false, false]);
+const colNewTurns = ref<[number, number]>([0, 0]);
+let colTurnsSeen: [number, number] = [0, 0];
+
+/** Land a column on its newest content: the follow target, the pill's
+ *  jump, and where a compare over an already-running side opens. */
+function pinColBottom(index: number, smooth: boolean): void {
   const el = colEls.get(index);
-  if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  if (!el) return;
+  if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  else el.scrollTop = el.scrollHeight;
+  colAway.value[index] = false;
+  colNewTurns.value[index] = 0;
+}
+
+/** Recompute one column's away state — the scroll listener's job, and the
+ *  only writer of the "reading back" flag. */
+function syncColAway(index: number): void {
+  const el = colEls.get(index);
+  if (!el) return;
+  const away = el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_SLACK_PX;
+  colAway.value[index] = away;
+  if (!away) colNewTurns.value[index] = 0;
+}
+
+/** Template readers for the per-column state — indexing a tuple with the
+ *  loop's plain number reads as possibly-undefined under the project's
+ *  tsconfig, and a pill must never render "↓ undefined". */
+function colIsAway(index: number): boolean {
+  return colAway.value[index] === true;
+}
+
+function colNewTurnsOf(index: number): number {
+  return colNewTurns.value[index] ?? 0;
 }
 
 /**
@@ -750,13 +808,25 @@ const syncScroll = ref(false);
 /** The column currently being dragged by the user, to avoid echo loops. */
 let syncingFrom: Element | null = null;
 
+/**
+ * The last ratio the relay applied and the column it came from. A card
+ * expanding or folding afterwards changes that column's height, so the
+ * pair is re-anchored to the same ratio of the new range instead of
+ * silently knocked out of step (see the content watch below).
+ */
+let lastSyncFrom: number | null = null;
+let lastSyncRatio = 0;
+
 function onColScroll(index: number, event: Event): void {
+  syncColAway(index);
   if (!syncScroll.value) return;
   const source = event.currentTarget as HTMLElement | null;
   if (!source || source === syncingFrom) return;
   const span = source.scrollHeight - source.clientHeight;
   if (span <= 0) return;
   const ratio = source.scrollTop / span;
+  lastSyncFrom = index;
+  lastSyncRatio = ratio;
   syncingFrom = source;
   for (const [other, el] of colEls) {
     if (other === index) continue;
@@ -771,6 +841,50 @@ function onColScroll(index: number, event: Event): void {
   });
 }
 
+/**
+ * New content in a column — a streamed delta, a turn that landed, a card
+ * that changed height. "Was the reader at the bottom" is answered BEFORE
+ * the DOM updates (the pane's rule): afterwards the grown column would
+ * make a followed reader look parked mid-column. A followed column is
+ * re-pinned; a column being read back keeps its place and counts the
+ * turns that arrived below it.
+ */
+watch([pairColumns, freeColumns], () => {
+  const wasAtBottom: boolean[] = [];
+  for (const index of [0, 1] as const) {
+    const el = colEls.get(index);
+    wasAtBottom[index] = el
+      ? el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
+      : false;
+  }
+  void nextTick(() => {
+    // A synced pair re-anchors first, on the post-update heights: the
+    // expanded card's column grew, so the other rides the same ratio of
+    // its own new range.
+    if (syncScroll.value && lastSyncFrom !== null) {
+      const other = lastSyncFrom === 0 ? 1 : 0;
+      const el = colEls.get(other);
+      if (el) {
+        const span = el.scrollHeight - el.clientHeight;
+        if (span > 0) el.scrollTop = lastSyncRatio * span;
+      }
+    }
+    const columns = pairColumns.value.length > 0 ? pairColumns.value : freeColumns.value;
+    for (const index of [0, 1] as const) {
+      const el = colEls.get(index);
+      if (!el) continue;
+      const turns = columns?.[index]?.cells.length ?? 0;
+      if (wasAtBottom[index]) {
+        el.scrollTop = el.scrollHeight;
+        colNewTurns.value[index] = 0;
+      } else if (colAway.value[index] && turns > colTurnsSeen[index]) {
+        colNewTurns.value[index] += turns - colTurnsSeen[index];
+      }
+      colTurnsSeen[index] = turns;
+    }
+  });
+});
+
 /** Jump into one of the compared sessions — a fresh selection tears the lens down. */
 function selectColumn(sessionId: string): void {
   void selectSession(sessionId);
@@ -782,7 +896,23 @@ watch(
   () => store.compare,
   () => {
     prefixOpen.value = false;
+    // Every card of the new pair starts folded, so the head's toggle offers
+    // "expand" again instead of remembering the previous pair's state.
+    allCellsOpen.value = false;
     colEls.clear();
+    colAway.value = [false, false];
+    colNewTurns.value = [0, 0];
+    colTurnsSeen = [0, 0];
+    lastSyncFrom = null;
+    // A side that is already running opens on its newest turn — the stream
+    // is why the comparison is open. A settled pair opens at the fork.
+    const pair = store.compare;
+    if (pair) {
+      void nextTick(() => {
+        if (store.running[pair.leftId]) pinColBottom(0, false);
+        if (store.running[pair.rightId]) pinColBottom(1, false);
+      });
+    }
   },
 );
 

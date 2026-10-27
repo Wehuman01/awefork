@@ -292,6 +292,10 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "折叠全部卡片",
     en: "Fold every card shut",
   },
+  "branch.newTurns": {
+    zh: "↓ {n} 个新回合",
+    en: "↓ {n} new turns",
+  },
   "branch.select": { zh: "选中", en: "Select" },
   "branch.jumpLatest": { zh: "跳到这个会话的最新回合", en: "Jump to this session's latest turn" },
   "branch.latest": { zh: "⤓ 最新", en: "⤓ Latest" },
