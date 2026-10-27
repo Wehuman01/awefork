@@ -76,6 +76,105 @@ const DIRECTORY = "/demo/shop-api";
 /** A second project — exercises cross-directory jumps (favorites shelf). */
 const DIRECTORY_2 = "/demo/web-app";
 
+/**
+ * Runtime-created demo state, persisted so a page reload behaves like the
+ * real thing. The mock is the renderer's stand-in for a backend, and a
+ * backend keeps its sessions across a navigation: a reload that silently
+ * dropped every session the user just forked would leave a restored canvas
+ * tab pointing at a session nobody lists — an empty canvas under a live
+ * title, with no way back but a click. It would also make the tab-restore
+ * path (and anything else that outlives a navigation) untestable in demo
+ * mode, and the browser demo worse than the app it demonstrates.
+ *
+ * Only runtime state travels: the seeded defs are code and rebuild
+ * themselves. Pins, marks, trash and archive stay window-local on purpose —
+ * they are the demo's own scope, not the backend's.
+ */
+const RUNTIME_KEY = "awefork:demo-runtime";
+
+interface DemoRuntimeState {
+  defs: SessionDef[];
+  lineage: Record<string, ForkRecord>;
+  /** Cached rows of runtime sessions; their defs carry no turns of their own. */
+  messages: Record<string, ChatMessage[]>;
+}
+
+const EMPTY_RUNTIME: DemoRuntimeState = { defs: [], lineage: {}, messages: {} };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** One persisted session; null when the entry is not a def we can stand behind. */
+function runtimeDef(value: unknown): SessionDef | null {
+  if (!isRecord(value)) return null;
+  const { id, title, origin, parent, atMessageId, turns, minutesAgo } = value;
+  if (typeof id !== "string" || id === "" || typeof title !== "string") return null;
+  if (origin !== "root" && origin !== "fork") return null;
+  if (parent !== null && typeof parent !== "string") return null;
+  if (atMessageId !== null && typeof atMessageId !== "string") return null;
+  if (!Array.isArray(turns) || typeof minutesAgo !== "number") return null;
+  return {
+    ...(value as unknown as SessionDef),
+    id,
+    title,
+    origin,
+    parent,
+    atMessageId,
+    turns,
+    minutesAgo,
+  };
+}
+
+function runtimeLineage(value: unknown): Record<string, ForkRecord> {
+  if (!isRecord(value)) return {};
+  const out: Record<string, ForkRecord> = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (!isRecord(entry) || typeof entry.parentId !== "string") continue;
+    out[id] = entry as unknown as ForkRecord;
+  }
+  return out;
+}
+
+function runtimeMessages(value: unknown): Record<string, ChatMessage[]> {
+  if (!isRecord(value)) return {};
+  const out: Record<string, ChatMessage[]> = {};
+  for (const [id, rows] of Object.entries(value)) {
+    if (!Array.isArray(rows)) continue;
+    const usable = rows.every(
+      (row) => isRecord(row) && typeof row.id === "string" && typeof row.role === "string",
+    );
+    if (usable) out[id] = rows as ChatMessage[];
+  }
+  return out;
+}
+
+/** Read the persisted runtime state; anything unreadable reads as empty. */
+function readRuntime(): DemoRuntimeState {
+  if (typeof localStorage === "undefined") return EMPTY_RUNTIME;
+  try {
+    const raw = localStorage.getItem(RUNTIME_KEY);
+    if (!raw) return EMPTY_RUNTIME;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return EMPTY_RUNTIME;
+    return {
+      defs: (Array.isArray(parsed.defs) ? parsed.defs : [])
+        .flatMap((def) => {
+          const record = runtimeDef(def);
+          return record ? [record] : [];
+        })
+        .slice(0, MAX_PERSISTED_SESSIONS),
+      lineage: runtimeLineage(parsed.lineage),
+      messages: runtimeMessages(parsed.messages),
+    };
+  } catch {
+    return EMPTY_RUNTIME;
+  }
+}
+
+/** Bound on the persisted runtime set; the demo is a demo, not an archive. */
+const MAX_PERSISTED_SESSIONS = 64;
+
 const SESSION_DEFS: SessionDef[] = [
   {
     id: "s-root",
@@ -437,6 +536,13 @@ export function installMockAdapter(): void {
   }
 
   const messages = new Map<string, ChatMessage[]>();
+  // Last launch's runtime sessions come back before anything reads the maps,
+  // so the very first sessions() answer already lists them — the same
+  // contract a backend gives on a cold start. Their cached rows ride along
+  // because a runtime def carries no turns of its own.
+  const persisted = readRuntime();
+  for (const def of persisted.defs) defs.set(def.id, def);
+  for (const [id, rows] of Object.entries(persisted.messages)) messages.set(id, rows);
   const ensureMessages = (id: string): ChatMessage[] => {
     let list = messages.get(id);
     if (!list) {
@@ -550,7 +656,61 @@ export function installMockAdapter(): void {
     for (const handler of handlers) handler({ backend: "opencode", event });
   };
   let promptSeq = 0;
+  // Ids are minted from a counter that restarts at zero, so a persisted
+  // demo-fork-3 would be silently overwritten by the next fork without this.
+  for (const def of persisted.defs) {
+    const seq = /^demo-(?:new|fork|export)-(\d+)$/.exec(def.id);
+    if (seq) promptSeq = Math.max(promptSeq, Number(seq[1]));
+  }
   const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
+
+  // ── runtime persistence ─────────────────────────────────────────────
+  // Debounced because a prompt lands in a burst of mutations, and flushed on
+  // pagehide so a reload never races the writer. Seeded defs are code and
+  // rebuild themselves, so only the runtime set travels.
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistRuntime = (): void => {
+    if (typeof localStorage === "undefined") return;
+    const seeded = new Set(SESSION_DEFS.map((def) => def.id));
+    const runtimeDefs = [...defs.values()].filter((def) => !seeded.has(def.id));
+    const runtimeLineage: Record<string, ForkRecord> = {};
+    for (const [id, record] of Object.entries(lineage)) {
+      if (!seeded.has(id)) runtimeLineage[id] = record;
+    }
+    const runtimeMessages: Record<string, ChatMessage[]> = {};
+    for (const [id, rows] of messages) {
+      if (!seeded.has(id)) runtimeMessages[id] = rows;
+    }
+    try {
+      localStorage.setItem(
+        RUNTIME_KEY,
+        JSON.stringify({
+          defs: runtimeDefs.slice(-MAX_PERSISTED_SESSIONS),
+          lineage: runtimeLineage,
+          messages: runtimeMessages,
+        }),
+      );
+    } catch {
+      // Quota or a locked-down storage: the demo loses its reload memory,
+      // exactly as it had none before.
+    }
+  };
+  const schedulePersist = (): void => {
+    if (persistTimer !== null) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      persistRuntime();
+    }, 120);
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", () => {
+      if (persistTimer !== null) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+      }
+      persistRuntime();
+    });
+  }
 
   window.awefork = {
     ready: async () => ({ ok: true }),
@@ -615,6 +775,7 @@ export function installMockAdapter(): void {
       });
       const created = summaries().find((s) => s.id === id);
       if (!created) throw new Error(`demo session ${id} missing after creation`);
+      schedulePersist();
       return created;
     },
     fork: async (_backend, sessionId, atMessageId, forkOptions) => {
@@ -640,6 +801,7 @@ export function installMockAdapter(): void {
       };
       const created = summaries().find((s) => s.id === id);
       if (!created) throw new Error(`demo fork ${id} missing after creation`);
+      schedulePersist();
       return created;
     },
     // Standalone copy: the branch path materialized as its own turns, no
@@ -668,6 +830,7 @@ export function installMockAdapter(): void {
       });
       const created = summaries().find((s) => s.id === id);
       if (!created) throw new Error(`demo export ${id} missing after creation`);
+      schedulePersist();
       return created;
     },
     deleteSession: async (_backend, sessionId) => {
@@ -683,6 +846,7 @@ export function installMockAdapter(): void {
       void _gonePref;
       forkPrefs = keptPrefs;
       pruneOrphanColors();
+      schedulePersist();
       return pins;
     },
     deleteMessage: async (_backend, sessionId, messageId) => {
@@ -690,6 +854,7 @@ export function installMockAdapter(): void {
       const index = list.findIndex((m) => m.id === messageId);
       if (index >= 0) list.splice(index, 1);
       marks = marks.filter((k) => k !== `${sessionId}:${messageId}`);
+      schedulePersist();
     },
     prompt: async (_backend, sessionId, text, model, attachments) => {
       promptSeq += 1;
@@ -790,6 +955,7 @@ export function installMockAdapter(): void {
           () => {
             timers.delete(sessionId);
             ensureMessages(sessionId).push(user, assistant);
+            schedulePersist();
             emit({ type: "session.updated", sessionId });
             emit({ type: "session.idle", sessionId });
           },
@@ -868,6 +1034,7 @@ export function installMockAdapter(): void {
           () => {
             timers.delete(sessionId);
             ensureMessages(sessionId).push(marker, summary);
+            schedulePersist();
             emit({ type: "session.updated", sessionId });
             emit({ type: "session.compressed", sessionId });
             emit({ type: "session.idle", sessionId });
@@ -884,7 +1051,10 @@ export function installMockAdapter(): void {
     },
     renameSession: async (_backend, sessionId, title) => {
       const def = defs.get(sessionId);
-      if (def) def.title = title;
+      if (def) {
+        def.title = title;
+        schedulePersist();
+      }
     },
     pins: async () => pins,
     togglePin: async (_backend, sessionId) => {
