@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { CodexTurnSettings } from "../shared/codex-adapter.js";
 import { findRolloutRelPath, listRolloutFiles } from "./codex-homes.js";
@@ -151,11 +152,12 @@ async function readForkParentOf(path: string): Promise<ForkParent | null> {
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
     handle = await fs.open(path, "r");
-    // The session_meta record is the first line; a chunk big enough for it
-    // avoids reading a multi-megabyte rollout into memory.
-    const { buffer, bytesRead } = await handle.read(Buffer.alloc(64 * 1024), 0, 64 * 1024, 0);
-    if (bytesRead === 0) return null;
-    const firstLine = buffer.toString("utf8", 0, bytesRead).split("\n")[0] ?? "";
+    // Only the first line is needed, but its length is not bounded — the
+    // session_meta record carries the model's base instructions, which grow
+    // with the prompt. Reading until the newline avoids a fixed chunk that a
+    // long instruction would outgrow.
+    const firstLine = await readFirstLine(handle);
+    if (firstLine === null) return null;
     let record: { type?: unknown; payload?: Record<string, unknown> };
     try {
       record = JSON.parse(firstLine);
@@ -179,3 +181,35 @@ async function readForkParentOf(path: string): Promise<ForkParent | null> {
     await handle?.close();
   }
 }
+
+/**
+ * The file's first line, without its newline; null when the file is empty.
+ *
+ * A rollout's first record is the session_meta, whose length is not bounded
+ * (it carries the model's base instructions), so the read keeps going until
+ * the newline rather than stopping at a fixed chunk. A cap keeps a damaged
+ * file with no newline from being read to its end: past it the line is not a
+ * session_meta record any more, and the caller treats it as absent.
+ */
+async function readFirstLine(handle: FileHandle): Promise<string | null> {
+  const decoder = new TextDecoder("utf-8");
+  let line = "";
+  let total = 0;
+  const buffer = Buffer.alloc(16 * 1024);
+  for (;;) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+    if (bytesRead === 0) break;
+    const chunk = decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
+    const newline = chunk.indexOf("\n");
+    if (newline >= 0) return line + chunk.slice(0, newline);
+    line += chunk;
+    total += chunk.length;
+    if (total > FIRST_LINE_LIMIT_BYTES) return null;
+  }
+  const rest = decoder.decode();
+  if (rest.length === 0 && line.length === 0) return null;
+  return line + rest;
+}
+
+/** A session_meta record is far below this; a first line past it is not one. */
+const FIRST_LINE_LIMIT_BYTES = 1024 * 1024;

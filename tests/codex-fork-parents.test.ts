@@ -132,6 +132,44 @@ describe("readForkParents", () => {
     expect(await readForkParents(home)).toEqual({ "deep-child": "deep-parent" });
   });
 
+  it("reads a session whose first record is longer than one read chunk", async () => {
+    const home = makeHome();
+    const day = join(home, "sessions", "2026", "10", "27");
+    mkdirSync(day, { recursive: true });
+    // The session_meta record carries the model's base instructions, so its
+    // length is not bounded — the read must not stop at a fixed chunk.
+    const long = "x".repeat(200_000);
+    writeFileSync(
+      join(day, "rollout-2026-10-27T12-29-43-long-child.jsonl"),
+      `${JSON.stringify({
+        type: "session_meta",
+        payload: {
+          session_id: "long-child",
+          id: "long-child",
+          forked_from_id: "long-parent",
+          base_instructions: { text: long },
+        },
+      })}\n${JSON.stringify({ type: "event_msg", payload: { type: "noise" } })}\n`,
+    );
+
+    expect(await readForkParents(home)).toEqual({ "long-child": "long-parent" });
+  });
+
+  it("reads nothing from a first line longer than the cap", async () => {
+    const home = makeHome();
+    const day = join(home, "sessions", "2026", "10", "27");
+    mkdirSync(day, { recursive: true });
+    // A first line with no newline and more content than a session_meta record
+    // ever carries: the read stops at the cap instead of pulling the whole
+    // file in, and the session reads as having no parent.
+    writeFileSync(
+      join(day, "rollout-2026-10-27T12-29-43-oversize.jsonl"),
+      `{"type":"session_meta","payload":{"session_id":"oversize","forked_from_id":"parent","pad":"${"x".repeat(2 * 1024 * 1024)}"}`,
+    );
+
+    expect(await readForkParents(home)).toEqual({});
+  });
+
   it("caches a home's parents, so a second read does not walk the tree again", async () => {
     const home = makeHome();
     writeRollout(home, "cached-1", [
