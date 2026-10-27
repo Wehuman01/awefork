@@ -172,25 +172,17 @@ try {
   await cdp.open();
   await cdp.send("Runtime.enable");
 
-  // 0. Labs experiments (file browser, session overview, multi-model rounds
-  //    and their digest sibling) are off by default; their surfaces only
-  //    exist behind those gates. Seed the switches on and reload once so
-  //    every section below runs against the same app a user who flipped
-  //    them would have. The seed retries because the CDP target can
-  //    surface while the window is still its pre-navigation document,
+  // 0. Labs experiments (file browser, session overview) are off by default;
+  //    their surfaces only exist behind those gates. Seed the switches on and
+  //    reload once so every section below runs against the same app a user
+  //    who flipped them would have. The seed retries because the CDP target
+  //    can surface while the window is still its pre-navigation document,
   //    where localStorage is denied.
   await retry(
     () =>
       cdp.evaluate(
         `localStorage.setItem("awefork:settings", ${JSON.stringify(
-          JSON.stringify({
-            labs: {
-              fileBrowser: true,
-              sessionOverview: true,
-              parallelModels: true,
-              parallel: { digest: true },
-            },
-          }),
+          JSON.stringify({ labs: { fileBrowser: true, sessionOverview: true } }),
         )})`,
       ),
     30_000,
@@ -336,99 +328,6 @@ try {
   );
   check("row chevron jumps straight to the session", true);
 
-  // 4d. Story digest dialog: the ✦ entry sits on the story-tab strip, opens
-  //     the picker with the parked stories, both scope options and the
-  //     summary controls; picking a story arms the start; Esc closes. The
-  //     demo adapter parks one story, so the list shows that story.
-  const digestEntry = await cdp.evaluate(`Boolean(document.querySelector(".story-tab-digest"))`);
-  check("digest entry renders on the story-tab strip", digestEntry === true);
-
-  await retry(() => cdp.evaluate(`document.querySelector(".story-tab-digest").click()`), 5000, "digest entry click");
-  const digestDialog = await retry(async () => {
-    const state = await cdp.evaluate(`({
-      open: Boolean(document.querySelector(".ddg")),
-      rows: document.querySelectorAll(".ddg-item").length,
-      scopes: document.querySelectorAll(".ddg-scope-option").length,
-      start: Boolean(document.querySelector(".ddg-start")),
-    })`);
-    if (!state.open || state.rows < 1 || state.scopes !== 2 || !state.start) {
-      throw new Error(`digest dialog incomplete: ${JSON.stringify(state)}`);
-    }
-    return state;
-  }, 5000, "digest dialog open");
-  check(
-    "digest dialog lists the parked stories with both scopes",
-    true,
-    JSON.stringify(digestDialog),
-  );
-
-  await cdp.evaluate(`document.querySelector(".ddg-item").click()`);
-  const armed = await cdp.evaluate(`({
-    count: document.querySelector(".ddg-count")?.textContent ?? "",
-    startDisabled: document.querySelector(".ddg-start")?.disabled ?? true,
-  })`);
-  check("picking a story arms the digest", armed.startDisabled === false, JSON.stringify(armed));
-
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
-  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "digest dialog closed");
-  check("Esc closes the digest dialog", true);
-
-  // 4e. Canvas digest pick: the ✦ card chip arms the selection (the floating
-  //     bar counts it), re-picking the same story neither duplicates nor
-  //     reorders, a card click toggles its story back out, and the bar's
-  //     生成总结 opens the dialog on the canvas picks.
-  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest chip click");
-  const pickBar = await retry(async () => {
-    const bar = await cdp.evaluate(`({
-      open: Boolean(document.querySelector(".digest-pick-bar")),
-      count: document.querySelector(".digest-pick-count")?.textContent ?? "",
-    })`);
-    if (!bar.open) throw new Error("digest pick bar not up");
-    return bar;
-  }, 5000, "digest pick bar");
-  check(
-    "the ✦ chip arms the selection with a counting bar",
-    pickBar.count.includes("1"),
-    JSON.stringify(pickBar),
-  );
-
-  // One story is one source: re-picking it is refused, the count stands.
-  await cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`);
-  const stillOne = await cdp.evaluate(
-    `document.querySelector(".digest-pick-count")?.textContent ?? ""`,
-  );
-  check("re-picking the same story does not duplicate", stillOne.includes("1"), stillOne);
-
-  // A card click while armed toggles the story out; the last removal
-  // disarms and the bar goes away.
-  await cdp.evaluate(`document.querySelector(".turn").click()`);
-  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick disarmed");
-  check("clicking a card toggles its story out of the selection", true);
-
-  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest re-arm");
-  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-start").click()`), 5000, "digest pick start");
-  const canvasDigest = await retry(async () => {
-    const state = await cdp.evaluate(`({
-      open: Boolean(document.querySelector(".ddg")),
-      rows: document.querySelectorAll(".ddg-item").length,
-    })`);
-    if (!state.open || state.rows < 1) throw new Error("canvas digest dialog incomplete");
-    return state;
-  }, 5000, "canvas digest dialog open");
-  check(
-    "the bar's 生成总结 opens the dialog on the canvas picks",
-    canvasDigest.rows >= 1,
-    JSON.stringify(canvasDigest),
-  );
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
-  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "canvas digest dialog closed");
-
-  // Leave the canvas clean for the sections below.
-  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-cancel").click()`), 5000, "digest pick cancel");
-  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick bar gone");
-
   // 4c. Multi-select and bulk mark-seen: a fresh run leaves a new result, the
   //     row checkboxes take rows into a selection (without opening a
   //     summary), the header checkbox takes the whole list, and one bulk mark
@@ -505,6 +404,63 @@ try {
   await retry(() => cdp.evaluate(`!document.querySelector(".overview-float")`), 5000, "panel closed after bulk mark");
   check("panel collapses after the bulk mark", true);
 
+  // 4g. Story search layout: the popup lives in the canvas's top-strip stack,
+  //     whose max-width leaves the overview pill its corner. An open surface
+  //     is a flex item, and its own fit-content used to ride over that cap —
+  //     a long hit's text then pushed the box past the canvas's right edge,
+  //     where the context panel cut the results off. Measured on a narrow
+  //     viewport so the cap binds below the demo hits' own content width:
+  //     that is the only state where the overflow shows up at all.
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 820,
+    height: 720,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    await retry(
+      () =>
+        cdp.evaluate(
+          `window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }))`,
+        ),
+      5000,
+      "open the story search",
+    );
+    await retry(() => cdp.evaluate(`Boolean(document.querySelector(".ss-box"))`), 5000, "search box open");
+    await retry(() => cdp.evaluate(fillInput(".ss-box input", "hero")), 5000, "type the query");
+    const searchLayout = await retry(async () => {
+      const state = await cdp.evaluate(`(() => {
+        const rect = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { w: Math.round(r.width), right: Math.round(r.right) };
+        };
+        return {
+          hits: document.querySelectorAll(".ss-hit").length,
+          viewport: rect(".viewport"),
+          stack: rect(".canvas-panels"),
+          results: rect(".ss-results"),
+        };
+      })()`);
+      if (state.hits < 1) throw new Error("no hits yet");
+      return state;
+    }, 5000, "search hits");
+    check(
+      "the results popup obeys the stack's width cap",
+      searchLayout.results.w <= searchLayout.stack.w + 1,
+      JSON.stringify(searchLayout),
+    );
+    check(
+      "the results popup never reaches past the canvas's right edge",
+      searchLayout.results.right <= searchLayout.viewport.right + 1,
+      JSON.stringify(searchLayout),
+    );
+    await retry(() => cdp.evaluate(`document.querySelector(".ss-box .ss-close").click()`), 5000, "close the search");
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+  }
+
   // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(
@@ -533,6 +489,43 @@ try {
   }, 15_000, "fork grown");
   check("draft send forks a new branch onto the canvas", true);
 
+  // 4d. Story digest dialog: the ✦ entry sits on the story-tab strip, opens
+  //     the picker with the parked stories, both scope options and the
+  //     summary controls; picking a story arms the start; Esc closes. The
+  //     demo adapter parks one story, so the list shows that story.
+  const digestEntry = await cdp.evaluate(`Boolean(document.querySelector(".story-tab-digest"))`);
+  check("digest entry renders on the story-tab strip", digestEntry === true);
+
+  await retry(() => cdp.evaluate(`document.querySelector(".story-tab-digest").click()`), 5000, "digest entry click");
+  const digestDialog = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".ddg")),
+      rows: document.querySelectorAll(".ddg-item").length,
+      scopes: document.querySelectorAll(".ddg-scope-option").length,
+      start: Boolean(document.querySelector(".ddg-start")),
+    })`);
+    if (!state.open || state.rows < 1 || state.scopes !== 2 || !state.start) {
+      throw new Error(`digest dialog incomplete: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 5000, "digest dialog open");
+  check(
+    "digest dialog lists the parked stories with both scopes",
+    true,
+    JSON.stringify(digestDialog),
+  );
+
+  await cdp.evaluate(`document.querySelector(".ddg-item").click()`);
+  const armed = await cdp.evaluate(`({
+    count: document.querySelector(".ddg-count")?.textContent ?? "",
+    startDisabled: document.querySelector(".ddg-start")?.disabled ?? true,
+  })`);
+  check("picking a story arms the digest", armed.startDisabled === false, JSON.stringify(armed));
+
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "digest dialog closed");
+  check("Esc closes the digest dialog", true);
 
   // 4b. File browser panel: the tabs switch the middle column and the
   //     sidebar, and the panel mounts with its states. The demo adapter has

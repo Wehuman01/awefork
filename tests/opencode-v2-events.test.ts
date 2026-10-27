@@ -199,6 +199,75 @@ describe("v2 text and reasoning streams", () => {
   });
 });
 
+describe("v2 tool lifecycle keeps the run observable", () => {
+  // A long tool is the one stretch of a run with no text or reasoning
+  // traffic: verified against a real 2.1.2 run, a `sleep 20` shell produced
+  // ZERO frames for 20 s between the shell starting and exiting. Without a
+  // liveness signal here the run watchdog sees a silent session and settles a
+  // run that is still working — which is exactly the pane freezing mid-turn
+  // while the terminal keeps printing.
+  it("surfaces tool.called as a live tool part", () => {
+    const { translate, events } = setup();
+    translate(
+      frame("session.tool.called", {
+        sessionID: SESSION,
+        assistantMessageID: MESSAGE,
+        id: "call_1",
+        name: "shell",
+        input: { command: "sleep 20" },
+      }),
+    );
+    expect(events).toEqual([
+      {
+        type: "message.part",
+        sessionId: SESSION,
+        messageId: MESSAGE,
+        partId: "call_1",
+        kind: "tool",
+        text: "shell",
+        startedAt: 1000,
+        endedAt: null,
+      },
+    ]);
+  });
+
+  it("settles the same tool part on success and on failure", () => {
+    const { translate, events } = setup();
+    const base = { sessionID: SESSION, assistantMessageID: MESSAGE, id: "call_1" };
+    translate(frame("session.tool.called", { ...base, name: "shell" }, 1000));
+    translate(frame("session.tool.success", { ...base }, 2000));
+    translate(frame("session.tool.called", { ...base, name: "shell" }, 3000));
+    translate(frame("session.tool.failed", { ...base, error: { message: "boom" } }, 4000));
+    expect(
+      events.map((e) => [
+        e.type,
+        (e as { partId?: string }).partId,
+        (e as { endedAt?: number | null }).endedAt,
+      ]),
+    ).toEqual([
+      ["message.part", "call_1", null],
+      ["message.part", "call_1", 2000],
+      ["message.part", "call_1", null],
+      ["message.part", "call_1", 4000],
+    ]);
+    expect(events.every((e) => e.type === "message.part")).toBe(true);
+    expect((events[0] as { kind: string }).kind).toBe("tool");
+  });
+
+  it("keeps the chip label and spinning state across progress frames", () => {
+    const { translate, events } = setup();
+    const base = { sessionID: SESSION, assistantMessageID: MESSAGE, id: "call_1" };
+    translate(frame("session.tool.called", { ...base, name: "shell" }, 1000));
+    // Progress carries no name: the label learned at `called` must survive,
+    // and the part must stay open so the chip keeps spinning.
+    translate(frame("session.tool.progress", { ...base, metadata: {} }, 2000));
+    expect(events).toHaveLength(2);
+    const progress = events[1] as { text: string; endedAt: number | null };
+    expect(progress.text).toBe("shell");
+    expect(progress.endedAt).toBeNull();
+  });
+});
+
 describe("v2 tool lifecycle feeds the file-change recorder", () => {
   it("records running at tool.called with the parsed input's path", () => {
     const { translate, toolFrames } = setup();

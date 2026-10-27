@@ -5792,18 +5792,26 @@ code.md-code {
   left: 16px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   z-index: 5;
   /* The stack shares the canvas's top strip with the overview trigger: an
-     open surface caps its width so it fits beside the pill once the pill
-     dodges to the corner, and the floor keeps the box usable when the
-     canvas is too narrow for both — there the whole stack drops below the
-     pill's row instead (see the overview section below). */
-  max-width: min(380px, max(200px, calc(100% - 440px)));
+     open surface takes the width the pill leaves it once the pill dodges
+     to the corner, so the box follows the canvas — and with it the context
+     panel being dragged — instead of sitting at one fixed width; the floor
+     keeps the box usable when the canvas is too narrow for both, and there
+     the whole stack drops below the pill's row instead (see the overview
+     section below). Stretch, not flex-start: an open surface is a flex item
+     whose own fit-content rides over this cap, so a long hit's text pushes
+     the box past the canvas's right edge, where the context panel cuts it
+     off. The closed-state pill opts back out with align-self below. */
+  max-width: max(200px, calc(100% - 440px));
 }
 
 .panel-pill {
+  /* The pill hugs its label while the stack stretches its open surfaces to
+     the cap above. */
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;

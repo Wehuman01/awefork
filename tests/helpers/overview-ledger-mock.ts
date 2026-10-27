@@ -7,6 +7,7 @@ import {
   overviewKey,
   recordOverviewSettle,
 } from "../../src/shared/overview-ledger-types";
+import type { OverviewListing } from "../../src/shared/overview-listing";
 
 /**
  * In-memory stand-in for the main-owned overview unread ledger, for tests
@@ -170,7 +171,13 @@ export function createOverviewCacheMock(): Pick<
 > {
   return {
     overviewListings: async () => ({}),
-    overviewPublishListing: async () => true,
+    // The real boundary: ipcRenderer.invoke structured-clones its arguments
+    // and throws synchronously on a payload it cannot clone (a Vue reactive
+    // proxy, say). Cloning here keeps every publish in the suite honest.
+    overviewPublishListing: (_backend: BackendId, listing: OverviewListing) => {
+      structuredClone(listing);
+      return Promise.resolve(true);
+    },
     onOverviewListing: () => () => {},
     overviewRunning: async () => [],
   };

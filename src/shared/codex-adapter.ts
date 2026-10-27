@@ -1,6 +1,6 @@
 import { canonicalizeSessionDirectories } from "./canonical-paths.js";
 import { withInlineFiles } from "./inline-attachments.js";
-import { recordFork, removeFork } from "./lineage-store.js";
+import { readDetachedExportIds, recordFork, removeFork } from "./lineage-store.js";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -304,22 +304,32 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   const serverParentOf = (thread: CodexThread): string | null =>
     thread.forkedFromId ?? thread.parentThreadId ?? null;
 
-  const mapThread = (thread: CodexThread, forkParent?: string): SessionSummary => {
+  const mapThread = (
+    thread: CodexThread,
+    forkParent?: string,
+    detached?: ReadonlySet<string>,
+  ): SessionSummary => {
+    // A detached export's copy carries codex's own forkedFromId stamp, which
+    // must not surface: to every view the copy is the plain root it was
+    // exported as, not a branch hanging off its source (see exportSession).
+    const isDetached = detached?.has(thread.id) === true;
     // The server's own answer wins; the rollout's parent is the fallback for
     // the forks codex's listing leaves parentless.
-    const parentSessionId = serverParentOf(thread) ?? forkParent ?? null;
+    const parentSessionId = isDetached ? null : (serverParentOf(thread) ?? forkParent ?? null);
     return {
       id: thread.id,
       title: thread.name || thread.preview || "(untitled session)",
       directory: thread.cwd ?? "",
       parentSessionId,
-      origin: thread.forkedFromId
-        ? "fork"
-        : thread.parentThreadId
-          ? "subagent"
-          : parentSessionId
-            ? "fork"
-            : "root",
+      origin: isDetached
+        ? "root"
+        : thread.forkedFromId
+          ? "fork"
+          : thread.parentThreadId
+            ? "subagent"
+            : parentSessionId
+              ? "fork"
+              : "root",
       createdAt: secToMs(thread.createdAt) ?? Date.now(),
       updatedAt: secToMs(thread.updatedAt) ?? Date.now(),
       // thread/list carries the thread's current model settings, so the overview
@@ -640,6 +650,53 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
   }
 
   /**
+   * thread/fork with awefork's cut semantics: keep everything through the
+   * turn containing `atMessageId` (null = the whole thread). A stale anchor
+   * fails here, before any copy exists. Version drift (a CLI without
+   * fork.lastTurnId) degrades to fork + rollback on the copy. Returns the
+   * copy's summary; the caller records lineage as it sees fit — a nested
+   * branch, or a detached export.
+   */
+  async function cutForkCopy(
+    sessionId: string,
+    atMessageId: string | null,
+  ): Promise<SessionSummary> {
+    let lastTurnId: string | null = null;
+    if (atMessageId) {
+      const turn = await turnOfItem(sessionId, atMessageId);
+      if (!turn) {
+        throw new Error(
+          `Message ${atMessageId} not found in session ${sessionId}. Refresh the session and try again.`,
+        );
+      }
+      lastTurnId = turn.id;
+    }
+    const params: Record<string, unknown> = { threadId: sessionId };
+    if (lastTurnId && supportsLastTurnFork(options.cliVersion)) {
+      params.lastTurnId = lastTurnId;
+    }
+    const response = await client.request<{ thread?: CodexThread }>("thread/fork", params);
+    const thread = response?.thread;
+    if (!thread) throw new Error("codex thread/fork returned no thread");
+    // Version drift: the fork ran uncut; roll the copy back to the
+    // requested turn count with the (deprecated but present) rollback API.
+    if (lastTurnId && !supportsLastTurnFork(options.cliVersion)) {
+      const turns = await listTurns(thread.id);
+      const keepThrough = turns.findIndex((t) => t.id === lastTurnId);
+      const drop = keepThrough >= 0 ? turns.length - (keepThrough + 1) : 0;
+      if (drop > 0)
+        await client.request("thread/rollback", { threadId: thread.id, numTurns: drop });
+      if (!forkFallbackLogged) {
+        forkFallbackLogged = true;
+        console.warn(
+          `codex ${options.cliVersion ?? "unknown"} lacks thread/fork.lastTurnId; degraded to fork + rollback`,
+        );
+      }
+    }
+    return mapThread(thread);
+  }
+
+  /**
    * A refused writer is a real, actionable state: another codex process
    * (typically an aweswitch session) owns the thread. Say so rather than
    * echoing codex's wording about writers and locks.
@@ -703,11 +760,15 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       // codex's own answer wins, and a listing that already names every
       // parent never touches the disk.
       const parents = await readRolloutForkParents(threads);
+      // Detached exports (see exportSession) carry codex's own fork stamp on
+      // the copy's thread; their lineage record suppresses it here, the same
+      // way opencode v2's fork.sessionID is suppressed on that side.
+      const detached = await readDetachedExportIds(lineagePath);
       // Same once-per-listing canonicalization as the opencode side: thread
       // cwds arrive as the shell spelled them, symlink variants included.
       return canonicalizeSessionDirectories(
         threads
-          .map((thread) => mapThread(thread, parents[thread.id]))
+          .map((thread) => mapThread(thread, parents[thread.id], detached))
           .sort((a, b) => b.updatedAt - a.updatedAt),
       );
     },
@@ -797,39 +858,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         });
         return { ...summary, origin: "fork", parentSessionId: sessionId };
       }
-      let lastTurnId: string | null = null;
-      if (atMessageId) {
-        const turn = await turnOfItem(sessionId, atMessageId);
-        if (!turn) {
-          throw new Error(
-            `Message ${atMessageId} not found in session ${sessionId}. Refresh the session and try again.`,
-          );
-        }
-        lastTurnId = turn.id;
-      }
-      const params: Record<string, unknown> = { threadId: sessionId };
-      if (lastTurnId && supportsLastTurnFork(options.cliVersion)) {
-        params.lastTurnId = lastTurnId;
-      }
-      const response = await client.request<{ thread?: CodexThread }>("thread/fork", params);
-      const thread = response?.thread;
-      if (!thread) throw new Error("codex thread/fork returned no thread");
-      // Version drift: the fork ran uncut; roll the copy back to the
-      // requested turn count with the (deprecated but present) rollback API.
-      if (lastTurnId && !supportsLastTurnFork(options.cliVersion)) {
-        const turns = await listTurns(thread.id);
-        const keepThrough = turns.findIndex((t) => t.id === lastTurnId);
-        const drop = keepThrough >= 0 ? turns.length - (keepThrough + 1) : 0;
-        if (drop > 0)
-          await client.request("thread/rollback", { threadId: thread.id, numTurns: drop });
-        if (!forkFallbackLogged) {
-          forkFallbackLogged = true;
-          console.warn(
-            `codex ${options.cliVersion ?? "unknown"} lacks thread/fork.lastTurnId; degraded to fork + rollback`,
-          );
-        }
-      }
-      const summary = mapThread(thread);
+      const summary = await cutForkCopy(sessionId, atMessageId);
       await recordFork(lineagePath, summary.id, {
         parentId: sessionId,
         atMessageId,
@@ -838,11 +867,25 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       return { ...summary, origin: "fork", parentSessionId: sessionId };
     },
 
-    // A codex fork's parent linkage lives in codex itself (thread.forkedFrom),
-    // so a detached copy cannot be produced — the renderer hides the export
-    // affordance (capabilities.exportBranch === false); this throws if reached.
-    async exportSession() {
-      throw new Error("codex does not support exporting a detached session");
+    /**
+     * Copy the branch through atMessageId out as a standalone session: the
+     * same thread/fork copy primitive as fork, but detached. codex stamps
+     * forkedFromId on the copy's own thread, and awefork never rewrites an
+     * agent's own storage — so the copy is recorded as detached in our own
+     * lineage sidecar instead, and every awefork view suppresses that stamp
+     * (the same mechanism opencode v2's fork.sessionID uses there). Inside
+     * codex's store the link survives; in awefork the copy is the plain
+     * root an export promises — no canvas branch, no inherited tags.
+     */
+    async exportSession(sessionId, atMessageId) {
+      const summary = await cutForkCopy(sessionId, atMessageId);
+      await recordFork(lineagePath, summary.id, {
+        parentId: sessionId,
+        atMessageId,
+        createdAt: summary.createdAt,
+        detached: true,
+      });
+      return { ...summary, origin: "root", parentSessionId: null };
     },
 
     /**

@@ -1209,6 +1209,113 @@ describe("createCodexAdapter fork()", () => {
   });
 });
 
+describe("createCodexAdapter exportSession()", () => {
+  it("exports the branch through the cut message as a detached root", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/turns/list": () => turnPageFixture([TURN_FIXTURE]),
+      "thread/fork": () => ({
+        thread: {
+          id: "export-1",
+          forkedFromId: "s1",
+          cwd: "/demo",
+          createdAt: 1726000099,
+          updatedAt: 1726000099,
+        },
+      }),
+    });
+    const lineagePath = await tempLineagePath();
+    const adapter = createCodexAdapter({ client, lineagePath, cliVersion: "0.154.0" });
+
+    const exported = await adapter.exportSession("s1", "u1");
+    // Same copy primitive and cut semantics as fork — lastTurnId is the
+    // turn containing the cut message — but the copy lands as a plain root.
+    expect(callsOf("thread/fork")[0]?.params).toMatchObject({
+      threadId: "s1",
+      lastTurnId: "turn-1",
+    });
+    expect(exported).toMatchObject({ id: "export-1", origin: "root", parentSessionId: null });
+    // The lineage record exists only to suppress codex's own forkedFromId
+    // stamp on the copy: detached, so no view reads it as a branch.
+    const saved = JSON.parse(await readFile(lineagePath, "utf8"));
+    expect(saved["export-1"]).toMatchObject({
+      parentId: "s1",
+      atMessageId: "u1",
+      detached: true,
+    });
+  });
+
+  it("exports the whole thread when atMessageId is null", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/fork": () => ({
+        thread: { id: "export-2", forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 1 },
+      }),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const exported = await adapter.exportSession("s1", null);
+    expect(callsOf("thread/fork")[0]?.params).toEqual({ threadId: "s1" });
+    expect(callsOf("thread/turns/list")).toHaveLength(0);
+    expect(exported).toMatchObject({ id: "export-2", origin: "root", parentSessionId: null });
+  });
+
+  it("lists a detached export as a root while a real fork keeps its branch", async () => {
+    // codex stamps forkedFromId on every copy's own thread. The export's
+    // detached lineage record is the only thing that keeps the copy reading
+    // as a root — and it must not leak onto an ordinary fork of the same
+    // source, which stays nested.
+    let forkCalls = 0;
+    const { client } = fakeClient({
+      "thread/fork": () => {
+        forkCalls += 1;
+        const id = forkCalls === 1 ? "export-1" : "fork-9";
+        return { thread: { id, forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 2 } };
+      },
+      "thread/list": () => ({
+        data: [
+          { id: "s1", name: "源", cwd: "/a", createdAt: 100, updatedAt: 100 },
+          {
+            id: "export-1",
+            name: null,
+            preview: "导出的副本",
+            forkedFromId: "s1",
+            cwd: "/a",
+            createdAt: 100,
+            updatedAt: 200,
+          },
+          {
+            id: "fork-9",
+            name: null,
+            preview: "普通分支",
+            forkedFromId: "s1",
+            cwd: "/a",
+            createdAt: 100,
+            updatedAt: 300,
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath: await tempLineagePath(),
+      cliVersion: "0.154.0",
+    });
+
+    await adapter.exportSession("s1", null);
+    await adapter.fork("s1", null);
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "export-1")).toMatchObject({
+      origin: "root",
+      parentSessionId: null,
+    });
+    expect(sessions.find((s) => s.id === "fork-9")).toMatchObject({
+      origin: "fork",
+      parentSessionId: "s1",
+    });
+    expect(sessions.find((s) => s.id === "s1")?.origin).toBe("root");
+  });
+});
+
 describe("createCodexAdapter prompt/abort", () => {
   it("starts a turn with model + effort and aborts via the active turn pair", async () => {
     const { client, callsOf } = fakeClient({
@@ -1637,14 +1744,6 @@ describe("createCodexAdapter unsupported surfaces", () => {
     expect(await adapter.messageAttachments("s1", "u1")).toEqual([]);
     await expect(adapter.deleteMessage("s1", "u1")).rejects.toThrow(
       "codex does not support deleting a single message",
-    );
-  });
-
-  it("refuses detached export — codex fork linkage lives in the backend", async () => {
-    const { client } = fakeClient({});
-    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
-    await expect(adapter.exportSession("s1", null)).rejects.toThrow(
-      "codex does not support exporting a detached session",
     );
   });
 

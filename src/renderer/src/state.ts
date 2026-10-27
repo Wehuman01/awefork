@@ -920,9 +920,14 @@ export const favoriteSessions = computed<SessionSummary[]>(() => {
 /**
  * What the canvas draws: the selected session's whole story. The full
  * session list stays in the sidebar; stars live in the favorites shelf.
+ * The pool is every visible session, not just the current directory's: a
+ * fork is cut into whichever directory the client had selected, so a story
+ * routinely spans directories, and capping the pool here would silently
+ * truncate it — the sidebar tree, the tab strip's story-root dedupe and the
+ * overview's subtree counts all resolve parents over the full list.
  */
 export const canvasSessions = computed<SessionSummary[]>(() =>
-  selectCanvasSessions(directorySessions.value, state.lineage, state.selectedId),
+  selectCanvasSessions(visibleSessions.value, state.lineage, state.selectedId),
 );
 
 /**
@@ -1446,6 +1451,10 @@ const WATCH_MAX_TICKS = 160;
 // failed instead. Recovery stays possible: a revived backend reconnects the
 // stream, and a still-running session's next delta re-lights it.
 const WATCH_UNREACHABLE_TICKS = 20;
+// Slack for "this row belongs to the run being watched": a watch armed from a
+// `message.started` frame races the row it describes, which the server created
+// moments earlier.
+const OPEN_TURN_SLACK_MS = 5_000;
 
 // One interval drives every watch. Parallel branches are the app's core move,
 // and an interval per session made N running sessions poll N times per tick;
@@ -1896,11 +1905,18 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
       );
       // This window holds the freshest view of the active backend, so share
       // it: the windows not showing this agent render this listing instead of
-      // waiting for their own sweeps to catch up.
+      // waiting for their own sweeps to catch up. The payload crosses the IPC
+      // boundary, which structured-clones its arguments: state.trash and
+      // state.archive are Vue reactive proxies and throw a DataCloneError
+      // there — synchronously, inside this try, which used to paint the whole
+      // workspace 未连接 on every refresh. Plain copies keep it clone-safe.
       publishOverviewListing(backend, {
         sessions,
-        trash: state.trash,
-        archive: state.archive,
+        trash: [...state.trash],
+        archive: {
+          sessions: state.archive.sessions.map((entry) => ({ ...entry })),
+          directories: state.archive.directories.map((entry) => ({ ...entry })),
+        },
         fetchedAt: Date.now(),
         error: null,
       });
@@ -2777,6 +2793,24 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
     live.ticks = 0;
     live.messages = snapshot;
   }
+  // A turn with an unfinished assistant row is still open. This is the ONE
+  // signal a long tool leaves behind: verified against a real 2.1.2 run, a
+  // `sleep 20` shell emitted nothing at all between tool.called and
+  // tool.success, and the server kept `time.completed` null for the whole
+  // 45 s probe. The row is proof the turn is running, so the silence cap must
+  // not apply while one is open — otherwise the watchdog settles a working run
+  // and the pane freezes mid-turn while the terminal keeps printing.
+  //
+  // Only rows from this turn count: an older aborted row (or one a crashed run
+  // left behind) must not pin this run open forever. The slack covers a watch
+  // armed from a `message.started` frame — the row it describes was created
+  // moments before that frame arrived.
+  const openTurn = messages.some(
+    (m) =>
+      m.role === "assistant" &&
+      m.completedAt === null &&
+      m.createdAt >= live.sentAt - OPEN_TURN_SLACK_MS,
+  );
   // A multi-step run completes one assistant row per step; a step that ended
   // in "tool-calls" is mid-run, not done. Treating it as finished settled the
   // run early and froze the turn at "(tool call, no text reply)" while the
@@ -2789,7 +2823,7 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
       m.completedAt >= live.sentAt &&
       m.finish !== "tool-calls",
   );
-  if (done || live.ticks >= WATCH_MAX_TICKS) {
+  if (done || (live.ticks >= WATCH_MAX_TICKS && !openTurn)) {
     stopWatch(live.backend, sessionId);
     // A completion row is evidence the run ended; running out of patience is
     // not. The silent case only frees the spinner — it must not mint a result.
@@ -7587,10 +7621,16 @@ function adoptOverviewListing(backend: BackendId, listing: OverviewListing): voi
 /** Store what this window fetched where every window can read it. */
 function publishOverviewListing(backend: BackendId, listing: OverviewListing): void {
   if (!settings.labs.sessionOverview) return;
-  void window.awefork.overviewPublishListing(backend, listing).catch(() => {
-    // A failed publish only costs the other windows their shortcut; their own
-    // sweeps still list the backend.
-  });
+  try {
+    void window.awefork.overviewPublishListing(backend, listing).catch(() => {
+      // A failed publish only costs the other windows their shortcut; their own
+      // sweeps still list the backend.
+    });
+  } catch {
+    // invoke throws synchronously on a payload it cannot clone. The publish is
+    // best-effort by contract: a failed one must never reach the caller's
+    // catch and read as the backend going offline.
+  }
 }
 
 /**

@@ -64,10 +64,12 @@ function createTestApi(options: { runError?: string | null } = {}): {
   api: AweforkApi;
   send: (backend: BackendId, event: AgentEvent) => void;
   failMessages: (value: boolean) => void;
+  /** Replace the session's rows — a poll that sees a still-unfinished turn. */
+  setRows: (next: ChatMessage[]) => void;
 } {
   let onEnvelope: ((envelope: BackendEventEnvelope) => void) | null = null;
   let failMessages = false;
-  const rows = [USER_ROW, assistantRow(options.runError ?? null)];
+  const fixture = { rows: [USER_ROW, assistantRow(options.runError ?? null)] as ChatMessage[] };
   const api: AweforkApi = {
     ready: async () => ({ ok: true }),
     sessions: async (backend: BackendId) => ({
@@ -76,7 +78,7 @@ function createTestApi(options: { runError?: string | null } = {}): {
     }),
     messages: async (_backend, sessionId) => {
       if (failMessages) throw new Error("backend gone");
-      return sessionId === "c1" ? [{ ...USER_ROW, id: "c1m1" }] : rows;
+      return sessionId === "c1" ? [{ ...USER_ROW, id: "c1m1" }] : fixture.rows;
     },
     models: async () => [],
     messageAttachments: async () => [],
@@ -147,6 +149,9 @@ function createTestApi(options: { runError?: string | null } = {}): {
     failMessages: (value: boolean) => {
       failMessages = value;
     },
+    setRows: (next: ChatMessage[]) => {
+      fixture.rows = next;
+    },
   };
 }
 
@@ -181,6 +186,7 @@ async function bootState(
         throw new Error("multi-window boots deliver events through the shared main mock");
       }),
     failMessages: scripted?.failMessages ?? (() => {}),
+    setRows: scripted?.setRows ?? (() => {}),
   };
 }
 
@@ -206,6 +212,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // The long-tool test deliberately leaves a run open, so its watchdog
+  // interval outlives the test. Clearing before switching to real timers keeps
+  // a leftover poll from firing into the NEXT test's api mock — that mock wraps
+  // `messages` and re-enters it, which surfaced as a stray stack overflow.
+  vi.clearAllTimers();
   vi.useRealTimers();
   delete (globalThis as unknown as { window?: unknown }).window;
   delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
@@ -432,6 +443,62 @@ describe("overview rows over the store", () => {
       "unknown",
     );
     expect(h.store.overviewRead["opencode:s1"]).toBeUndefined();
+  });
+
+  it("keeps a run alive while its turn is still unfinished on the server", async () => {
+    // The pane froze mid-turn on a long tool: verified against a real 2.1.2
+    // run, a `sleep 20` shell emits NOTHING between tool.called and
+    // tool.success, so the poll sees a byte-identical snapshot every tick and
+    // the watchdog counted itself up to the cap while the run was working.
+    // An unfinished row of this turn is proof the turn is open — not silence.
+    const h = await bootState();
+    h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.setRows([
+      { ...USER_ROW, id: "m1" },
+      {
+        ...assistantRow(null),
+        id: "m2",
+        text: "",
+        completedAt: null,
+        finish: null,
+        createdAt: Date.now(),
+      },
+    ]);
+    // Past the silent cap (160 ticks) while still mid-tool.
+    await vi.advanceTimersByTimeAsync(170 * 1500);
+    expect(h.store.running.s1).toBe(true);
+    expect(h.store.overviewRead["opencode:s1"]).toBeUndefined();
+    // Let the turn finish so no watchdog survives into the next test.
+    h.setRows([
+      { ...USER_ROW, id: "m1" },
+      { ...assistantRow(null), id: "m2", text: "done", completedAt: Date.now(), finish: "stop" },
+    ]);
+    await vi.advanceTimersByTimeAsync(3 * 1500);
+  });
+
+  it("still settles once the turn's final row completes", async () => {
+    const h = await bootState();
+    h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m2" });
+    h.setRows([
+      { ...USER_ROW, id: "m1" },
+      {
+        ...assistantRow(null),
+        id: "m2",
+        text: "",
+        completedAt: null,
+        finish: null,
+        createdAt: Date.now(),
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(30 * 1500);
+    expect(h.store.running.s1).toBe(true);
+    h.setRows([
+      { ...USER_ROW, id: "m1" },
+      { ...assistantRow(null), id: "m2", text: "done", completedAt: Date.now(), finish: "stop" },
+    ]);
+    await vi.advanceTimersByTimeAsync(3 * 1500);
+    expect(h.store.running.s1).toBeFalsy();
+    expect(h.store.recent.s1).toBeTypeOf("number");
   });
 
   it("calls a lost connection unknown, not failed", async () => {
