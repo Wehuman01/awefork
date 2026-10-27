@@ -23,6 +23,7 @@
     "src/shared/overview-ledger-types.ts",
     "src/shared/overview-listing.ts",
     "src/shared/rounds-types.ts",
+    "src/shared/digest-types.ts",
     "src/shared/attachment-kinds.ts",
     "src/shared/session-tree.ts",
     "src/shared/turns.ts",

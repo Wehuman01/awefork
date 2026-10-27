@@ -70,6 +70,30 @@ export const dict: Record<string, Entry> = {
     zh: "汇总 · {prompt} · {time}",
     en: "Summary · {prompt} · {time}",
   },
+  "state.digestSessionTitle": {
+    zh: "总结 · {titles} · {time}",
+    en: "Digest · {titles} · {time}",
+  },
+  "state.digestNoTurns": {
+    zh: "选中的故事没有可总结的轮次：{titles}",
+    en: "The picked stories have no turns to summarize: {titles}",
+  },
+  "state.digestForkFailed": {
+    zh: "创建总结分支失败：{error}",
+    en: "Could not create the digest branch: {error}",
+  },
+  "state.digestTimeout": {
+    zh: "总结长时间没有完成，可能后端已断开。可重新总结。",
+    en: "The digest never finished — the backend may have dropped. Summarize again.",
+  },
+  "state.digestNoText": {
+    zh: "总结已结束，但未收到可展示的正文。",
+    en: "The digest finished without readable text.",
+  },
+  "state.digestSourcesGone": {
+    zh: "来源故事已不存在，无法重新总结；历史版本仍可查看。",
+    en: "The source stories are gone; earlier versions remain readable.",
+  },
   "state.compressForkTitle": {
     zh: "🧹 压缩 · {title}",
     en: "🧹 Compact · {title}",

@@ -328,6 +328,44 @@ try {
   );
   check("row chevron jumps straight to the session", true);
 
+  // 4d. Story digest dialog: the ✦ entry sits on the story-tab strip, opens
+  //     the picker with the parked stories, both scope options and the
+  //     summary controls; picking a story arms the start; Esc closes. The
+  //     demo adapter parks one story, so the list shows that story.
+  const digestEntry = await cdp.evaluate(`Boolean(document.querySelector(".story-tab-digest"))`);
+  check("digest entry renders on the story-tab strip", digestEntry === true);
+
+  await retry(() => cdp.evaluate(`document.querySelector(".story-tab-digest").click()`), 5000, "digest entry click");
+  const digestDialog = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".ddg")),
+      rows: document.querySelectorAll(".ddg-item").length,
+      scopes: document.querySelectorAll(".ddg-scope-option").length,
+      start: Boolean(document.querySelector(".ddg-start")),
+    })`);
+    if (!state.open || state.rows < 1 || state.scopes !== 2 || !state.start) {
+      throw new Error(`digest dialog incomplete: ${JSON.stringify(state)}`);
+    }
+    return state;
+  }, 5000, "digest dialog open");
+  check(
+    "digest dialog lists the parked stories with both scopes",
+    true,
+    JSON.stringify(digestDialog),
+  );
+
+  await cdp.evaluate(`document.querySelector(".ddg-item").click()`);
+  const armed = await cdp.evaluate(`({
+    count: document.querySelector(".ddg-count")?.textContent ?? "",
+    startDisabled: document.querySelector(".ddg-start")?.disabled ?? true,
+  })`);
+  check("picking a story arms the digest", armed.startDisabled === false, JSON.stringify(armed));
+
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "digest dialog closed");
+  check("Esc closes the digest dialog", true);
+
   // 4c. Multi-select and bulk mark-seen: a fresh run leaves a new result, the
   //     row checkboxes take rows into a selection (without opening a
   //     summary), the header checkbox takes the whole list, and one bulk mark
@@ -431,6 +469,7 @@ try {
     }
   }, 15_000, "fork grown");
   check("draft send forks a new branch onto the canvas", true);
+
 
   // 4b. File browser panel: the tabs switch the middle column and the
   //     sidebar, and the panel mounts with its states. The demo adapter has

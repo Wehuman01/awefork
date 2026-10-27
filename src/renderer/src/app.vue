@@ -114,6 +114,7 @@
     <CommandPalette />
     <ForkTagDialog />
     <CompressDialog />
+    <DigestDialog />
     <WelcomeDialog />
     <HistoryPanel />
     <FileMenu />
@@ -173,6 +174,7 @@ import BranchContext from "./components/branch-context.vue";
 import CanvasTabs from "./components/canvas-tabs.vue";
 import CommandPalette from "./components/command-palette.vue";
 import CompressDialog from "./components/compress-dialog.vue";
+import DigestDialog from "./components/digest-dialog.vue";
 import FileBrowser from "./components/file-browser.vue";
 import FileMenu from "./components/file-menu.vue";
 import FilePreview from "./components/file-preview.vue";

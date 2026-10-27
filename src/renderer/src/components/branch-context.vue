@@ -187,7 +187,7 @@
       <div class="ctx-head">
         <span class="ctx-icon">💬</span>
         <div class="ctx-headings">
-          <div class="ctx-title">{{ parallelRoundGroup && showParallelResults ? pt("title") : t("branch.contextTitle") }}</div>
+          <div class="ctx-title">{{ parallelRoundGroup && showParallelResults ? pt("title") : digestGroup && showDigestResults ? dt("panelTitle") : t("branch.contextTitle") }}</div>
           <div class="ctx-sub" :title="selectedSession?.title ?? ''">
             <template v-if="turnMeta">{{ turnMeta }} · </template>{{ selectedSession?.title || t("branch.pickNode") }}
           </div>
@@ -261,7 +261,7 @@
       <!-- The marker's meaning in words, on its own row: the head is already
            tight with the nav buttons, and squeezing this in turned the title
            into a vertical strip on a narrow pane. -->
-      <div v-if="isEmptyContext(store.selectedId) && !(parallelRoundGroup && showParallelResults)" class="ctx-cut-note">
+      <div v-if="isEmptyContext(store.selectedId) && !(parallelRoundGroup && showParallelResults) && !(digestGroup && showDigestResults)" class="ctx-cut-note">
         <span class="ctx-cut-glyph">✂</span>
         <span>{{ t("cut.paneNote") }}</span>
       </div>
@@ -271,6 +271,10 @@
       <div v-if="parallelRoundGroup" class="parallel-reading-tabs">
         <button type="button" :class="{ on: showParallelResults }" :aria-pressed="showParallelResults" @click="showParallelResults = true">✦ {{ pt("summaryTab") }}</button>
         <button type="button" :class="{ on: !showParallelResults }" :aria-pressed="!showParallelResults" @click="showParallelResults = false">{{ pt("conversationTab") }}</button>
+      </div>
+      <div v-else-if="digestGroup" class="parallel-reading-tabs">
+        <button type="button" :class="{ on: showDigestResults }" :aria-pressed="showDigestResults" @click="showDigestResults = true">✦ {{ dt("summaryTab") }}</button>
+        <button type="button" :class="{ on: !showDigestResults }" :aria-pressed="!showDigestResults" @click="showDigestResults = false">{{ dt("conversationTab") }}</button>
       </div>
       <ParallelResults
         v-if="parallelRoundGroup && showParallelResults"
@@ -283,12 +287,19 @@
         @retry="retryParallelSource"
         @stop="stopParallelSource"
       />
+      <DigestResults
+        v-else-if="digestGroup && showDigestResults"
+        :group="digestGroup"
+        :viewing-session-id="store.selectedId"
+        @open="openDigestSource"
+        @resummarize="resummarizeCurrentDigest"
+      />
       <MessageList
         v-else-if="selectedSession"
         :session="selectedSession"
         :messages="paneMessages"
-        :collapsed-user-message-id="parallelSummaryInputId"
-        :collapsed-user-message-label="pt('summaryInput')"
+        :collapsed-user-message-id="parallelSummaryInputId ?? digestSummaryInputId"
+        :collapsed-user-message-label="digestGroup ? dt('summaryInput') : pt('summaryInput')"
         :running="isRunning"
         :stream-parts="store.streamParts"
         :error="null"
@@ -379,8 +390,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { TurnNode } from "../../../shared/canvas-graph";
+import type { DigestGroup } from "../../../shared/digest-types";
 import { buildTurns, type Turn } from "../../../shared/turns";
 import type { ModelChoice, PromptAttachment, SessionSummary } from "../../../shared/types";
+import { dt } from "../digest-i18n";
 import { formatDuration, formatTokens } from "../format";
 import { t } from "../i18n";
 import {
@@ -399,6 +412,7 @@ import {
   compareWithParent,
   composerModelFor,
   compressSession,
+  digestGroupForSession,
   enterCompare,
   exitCompare,
   exportBranchMarkdown,
@@ -413,6 +427,7 @@ import {
   parallelGroupForSession,
   parallelRoundOwner,
   queuedPromptCount,
+  resummarizeDigest,
   retryParallelTarget,
   retryTurn,
   selectedSession,
@@ -436,6 +451,7 @@ import {
 import ChatInput from "./chat-input.vue";
 import CmpCell, { type DisplayCell } from "./cmp-cell.vue";
 import CompareComposer from "./compare-composer.vue";
+import DigestResults from "./digest-results.vue";
 import FileChangesCard from "./file-changes-card.vue";
 import InteractionInline from "./interaction-inline.vue";
 import MessageList from "./message-list.vue";
@@ -524,6 +540,45 @@ function retryParallelSource(targetId: string): void {
 function stopParallelSource(targetId: string): void {
   const group = currentParallelGroup.value;
   if (group) void stopParallelTarget(group.id, targetId);
+}
+
+// ── ✦ story digest reading view (事后总结) ───────────────────────────
+/**
+ * The digest whose summary the pane is showing. Unlike a round, only the
+ * summary session itself is a digest surface — the anchor story is an
+ * ordinary story the user was reading, and its pane keeps showing it.
+ */
+const digestGroup = computed<DigestGroup | null>(() =>
+  digestGroupForSession(store.activeBackend, store.selectedId),
+);
+const showDigestResults = ref(true);
+/** The digest prompt is this summary session's first user row; the
+ *  conversation tab collapses it like a round's summary input. */
+const digestSummaryInputId = computed(() => {
+  if (!digestGroup.value || !store.selectedId) return null;
+  return (
+    store.messagesBySession[store.selectedId]?.find((message) => message.role === "user")?.id ??
+    null
+  );
+});
+watch(
+  () => [store.selectedId, digestGroup.value?.id] as const,
+  () => {
+    // Landing on any version's summary opens the digest view, so an older
+    // card the canvas sent the user to shows what that card promised.
+    showDigestResults.value = digestGroup.value !== null;
+  },
+  { immediate: true },
+);
+function openDigestSource(sessionId: string): Promise<void> {
+  // A source story is a story, not a digest surface: its pane reads as the
+  // conversation it is.
+  showDigestResults.value = false;
+  return selectSession(sessionId);
+}
+function resummarizeCurrentDigest(): void {
+  const group = digestGroup.value;
+  if (group) void resummarizeDigest(group.id);
 }
 // a new conversation landed: the fresh session is selected and mounted by now — put the
 // caret in the pane composer so its first prompt starts with a keystroke.

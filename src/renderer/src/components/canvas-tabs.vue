@@ -36,6 +36,14 @@
       @click="newSession()"
       >＋</button
     >
+    <button
+      type="button"
+      class="story-tab story-tab-digest"
+      :title="t('canvas.digestEntry')"
+      :aria-label="t('canvas.digestEntry')"
+      @click="openDigest()"
+      >✦</button
+    >
   </div>
 </template>
 
@@ -48,6 +56,7 @@ import {
   closeCanvasTab,
   createSession,
   reorderCanvasTab,
+  setDigestDialogOpen,
   store,
   tabRootSession,
 } from "../state";
@@ -95,6 +104,11 @@ async function close(id: string): Promise<void> {
 
 async function newSession(): Promise<void> {
   await createSession();
+}
+
+/** The after-the-fact digest entry: pick the open stories, summarize them. */
+function openDigest(): void {
+  setDigestDialogOpen(true);
 }
 
 /** Middle-click closes, like a browser tab. */

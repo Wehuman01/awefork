@@ -5,6 +5,7 @@ import type {
   BackendsResult,
 } from "./backend.js";
 import type { LineDiffResult } from "./diff.js";
+import type { DigestGroup } from "./digest-types.js";
 import type {
   DirListing,
   FileEntry,
@@ -444,4 +445,13 @@ export interface AweforkApi {
    */
   roundsList(): Promise<RoundRecord[]>;
   roundsSave(record: RoundRecord): Promise<boolean>;
+  /**
+   * Story digests sidecar (main-owned, one file every window shares). Same
+   * contract as the rounds sidecar: `digestsList` restores the digests at
+   * boot (their ✦ cards and reading views must not depend on which window
+   * ran them), `digestsSave` upserts one digest (false when it fails
+   * validation).
+   */
+  digestsList(): Promise<DigestGroup[]>;
+  digestsSave(group: DigestGroup): Promise<boolean>;
 }

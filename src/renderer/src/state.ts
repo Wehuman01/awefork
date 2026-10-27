@@ -18,6 +18,8 @@ import {
   type TurnNode,
 } from "../../shared/canvas-graph";
 import { selectCanvasSessions, storyRootOf } from "../../shared/canvas-scope";
+import type { DigestGroup, DigestScope } from "../../shared/digest-types";
+import { restoreDigestGroup } from "../../shared/digest-types";
 import { samePath } from "../../shared/file-paths";
 import type { OverviewReadUpdate } from "../../shared/overview-ledger-types";
 import {
@@ -62,6 +64,13 @@ import {
   latestContextTokens,
   latestContextWindow,
 } from "./context-usage";
+import {
+  buildDigestPrompt,
+  buildDigestStoryMaterial,
+  type DigestStoryMaterial,
+  sourceRecordOf,
+} from "./digest-sources";
+import { digestRecordFromGroup } from "./digests";
 import { shortPath } from "./format";
 import { track, trackEvent } from "./history";
 import { listSep, locale, t } from "./i18n";
@@ -127,6 +136,67 @@ export type { ParallelSummarySettings } from "./parallel-groups";
 
 /** Group metadata stays separate from native conversation history. */
 export const parallelGroups = reactive<ParallelGroup[]>([]);
+
+/**
+ * The after-the-fact digests (多故事事后总结), window-local memory like the
+ * rounds above; the main-owned digests.json sidecar is what makes them
+ * survive a restart (see persistDigest / loadDigestsFromMain).
+ */
+export const digestGroups = reactive<DigestGroup[]>([]);
+
+/** How many stories one digest may summarize — the dialog's hard cap too. */
+export const MAX_DIGEST_STORIES = 4;
+
+/**
+ * The digest a session belongs to: its summary fork of any version. Unlike
+ * a round, the anchor story is NOT a digest surface — it is an ordinary
+ * story the user was reading, and its pane keeps showing that story.
+ */
+export function digestGroupForSession(
+  backend: BackendId,
+  sessionId: string | null,
+): DigestGroup | null {
+  if (!sessionId) return null;
+  return (
+    digestGroups.find(
+      (group) =>
+        group.backend === backend &&
+        (group.summarySessionId === sessionId ||
+          group.versions.some((version) => version.sessionId === sessionId)),
+    ) ?? null
+  );
+}
+
+/** One pickable story in the digest dialog: a canvas tab carrying a story. */
+export interface DigestStoryOption {
+  tabId: string;
+  storyRootId: string;
+  /** Session the tab had selected — where the story's chain ends. */
+  sessionId: string;
+  /** Turn the tab had locked (`sessionId:messageId`); the "current turn" scope reads it. */
+  selectedTurnId: string | null;
+  title: string;
+}
+
+/**
+ * The open stories, in tab order. A digest summarizes what the user was
+ * working on, and the tab strip is exactly that set — blank tabs (no story
+ * yet) are not candidates.
+ */
+export const digestStoryOptions = computed<DigestStoryOption[]>(() =>
+  state.canvasTabs.flatMap((tab): DigestStoryOption[] => {
+    if (!tab.rootId || !tab.selectedId) return [];
+    return [
+      {
+        tabId: tab.id,
+        storyRootId: tab.rootId,
+        sessionId: tab.selectedId,
+        selectedTurnId: tab.selectedTurnId,
+        title: tabRootSession(tab)?.title || t("canvas.tabBlank"),
+      },
+    ];
+  }),
+);
 
 export function parallelGroupForSession(
   backend: BackendId,
@@ -422,6 +492,8 @@ interface AppState {
     model: ModelChoice | null;
     viaFork: boolean;
   } | null;
+  /** The open story-digest dialog (事后总结的故事选择); null state = closed. */
+  digestDialogOpen: boolean;
   /** Latest compaction completion notice; drives the 🗜 toast, auto-clears. */
   compressedToast: string | null;
   /**
@@ -577,6 +649,7 @@ const state = reactive<AppState>({
   comparePickFrom: null,
   forkTagAsk: null,
   compressAsk: null,
+  digestDialogOpen: false,
   compressedToast: null,
   infoToast: null,
   paneModels: {},
@@ -1517,6 +1590,9 @@ export async function init(): Promise<void> {
   // load resolves, so a round's canvas badges and reading view are in place
   // by the time its sessions render.
   void loadRoundsFromMain();
+  // The same restore for after-the-fact digests: their ✦ cards and reading
+  // views must not depend on which window ran them.
+  void loadDigestsFromMain();
   // The landing side of a multi-window overview jump: this window was handed a
   // session by another window (or by the newly opened one it belongs to). The
   // ready claim tells main which backend this window owns its navigations for,
@@ -6145,6 +6221,342 @@ async function createParallelSummary(
   // including the failure paths above, so a restored round never claims a
   // summary that did not land.
   persistRound(group);
+}
+
+// ── after-the-fact digests (多故事事后总结) ──────────────────────────────
+//
+// The retroactive sibling of a round: up to four stories the user already
+// ran are summarized into one ✂ empty-context fork on the first story's
+// tree. The summary machinery is the round's (fork → rename → prompt →
+// settle → read back → version); what differs is the material — whole
+// stories, or one locked turn each, instead of fresh answers. Extraction
+// and the prompt therefore live in digest-sources.ts (pure, tested), and
+// the durable record mirrors RoundRecord in digest-types.ts.
+
+/**
+ * The story's sessions, root first: walk parents from the parked tip up
+ * while the chain stays inside the visible set, then reverse. A fork's
+ * copied prefix is not re-read as its own turns — the walk stops at the
+ * first parent the window does not know, exactly like storyRootOf.
+ */
+function storySessionPath(sessionId: string): string[] {
+  const byId = new Map(state.sessions.map((session) => [session.id, session]));
+  const path: string[] = [];
+  const walked = new Set<string>();
+  let current: string | null = sessionId;
+  while (current && byId.has(current) && !walked.has(current)) {
+    walked.add(current);
+    path.push(current);
+    const parent: string | null =
+      state.lineage[current]?.parentId ?? byId.get(current)?.parentSessionId ?? null;
+    current = parent && byId.has(parent) ? parent : null;
+  }
+  return path.reverse();
+}
+
+/** Load (or reuse) the rows of every session on a story's path. */
+async function loadStoryMessages(
+  path: readonly string[],
+  backend: BackendId,
+): Promise<Record<string, readonly ChatMessage[]>> {
+  const messages: Record<string, readonly ChatMessage[]> = {};
+  for (const id of path) {
+    messages[id] =
+      state.messagesBySession[id] ?? (await loadSessionMessages(id, false, backend)) ?? [];
+  }
+  return messages;
+}
+
+/** The message id half of a `sessionId:messageId` turn key; null when absent. */
+function messageIdOfTurnKey(key: string | null): string | null {
+  if (!key) return null;
+  const at = key.indexOf(":");
+  return at < 0 ? null : key.slice(at + 1);
+}
+
+function digestStamp(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Mirror one digest into the main-owned sidecar so a restart still draws
+ *  its ✦ card and reading view. Fire-and-forget: a failed write costs the
+ *  digest its decorations after the next restart, nothing more. */
+function persistDigest(group: DigestGroup): void {
+  void Promise.resolve()
+    .then(() => window.awefork.digestsSave(digestRecordFromGroup(group)))
+    .catch(() => {
+      // No main process (demo mode, a test boot) or an unwritable sidecar:
+      // digests stay window-local, exactly as before persistence existed.
+    });
+}
+
+/**
+ * Restore the digests the sidecar knows about into this window's list.
+ * Same contract as loadRoundsFromMain: restored digests are inert — a run
+ * nobody watched reads as "unknown" rather than finished, so nothing
+ * restored ever looks busy.
+ */
+async function loadDigestsFromMain(): Promise<void> {
+  try {
+    const groups = await window.awefork.digestsList();
+    for (const group of groups) {
+      if (digestGroups.some((item) => item.id === group.id)) continue;
+      digestGroups.push(restoreDigestGroup(group));
+    }
+  } catch {
+    // No main process (demo mode, a test boot) or an unreadable sidecar:
+    // digests stay window-local, exactly as before persistence existed.
+  }
+}
+
+/** One picked story resolved to its digest material; null when it has none. */
+async function digestMaterialOf(
+  option: {
+    sessionId: string;
+    storyRootId: string;
+    title: string;
+    /** The turn a "turn" scope reads, as a `sessionId:messageId` key. */
+    selectedTurnId: string | null;
+  },
+  scope: DigestScope,
+  backend: BackendId,
+): Promise<DigestStoryMaterial | null> {
+  const path = storySessionPath(option.sessionId);
+  if (path.length === 0) return null;
+  const messages = await loadStoryMessages(path, backend);
+  const material = buildDigestStoryMaterial({
+    sessionId: option.sessionId,
+    storyRootId: option.storyRootId,
+    title: option.title,
+    path,
+    messages,
+    selectedTurnId: option.selectedTurnId,
+    scope,
+  });
+  return material.turns.length > 0 ? material : null;
+}
+
+export interface DigestRequest {
+  /** Canvas tab ids of the picked stories, in send order (≤ MAX_DIGEST_STORIES). */
+  tabIds: string[];
+  scope: DigestScope;
+  model: ModelChoice | null;
+  length: "brief" | "standard";
+}
+
+/**
+ * Summarize the picked stories. The summary lands as a ✂ empty-context
+ * fork on the first story's tree — the same shape a round's summary takes,
+ * so the canvas ✦ card, the source list and the reading panel all work
+ * unchanged. Returns false (with the reason on the action-error toast)
+ * when the request cannot run.
+ */
+export async function startDigest(request: DigestRequest): Promise<boolean> {
+  const backend = state.activeBackend;
+  const tabs = request.tabIds.flatMap((id) => {
+    const tab = state.canvasTabs.find((item) => item.id === id);
+    if (!tab?.rootId || !tab.selectedId) return [];
+    return [tab];
+  });
+  if (tabs.length === 0 || tabs.length > MAX_DIGEST_STORIES) return false;
+  state.digestDialogOpen = false;
+  state.actionError = null;
+
+  const materials: DigestStoryMaterial[] = [];
+  const empty: string[] = [];
+  for (const tab of tabs) {
+    const material = await digestMaterialOf(
+      {
+        sessionId: tab.selectedId as string,
+        storyRootId: tab.rootId as string,
+        title: tabRootSession(tab)?.title || t("canvas.tabBlank"),
+        selectedTurnId: tab.selectedTurnId,
+      },
+      request.scope,
+      backend,
+    );
+    if (material) materials.push(material);
+    else empty.push(tabRootSession(tab)?.title || t("canvas.tabBlank"));
+  }
+  if (materials.length === 0) {
+    state.actionError = t("state.digestNoTurns", { titles: empty.join(listSep.value) });
+    return false;
+  }
+
+  // The first story hosts the digest: its parked tip is the fork base and
+  // its locked turn (when it has one) is where the ✂ branch hangs.
+  const first = tabs[0];
+  if (!first) return false;
+  const anchorSessionId = first.selectedId as string;
+  const anchorMessageId = messageIdOfTurnKey(first.selectedTurnId);
+  const directory =
+    state.sessions.find((session) => session.id === anchorSessionId)?.directory ?? "";
+  let forked: SessionSummary;
+  try {
+    forked = await window.awefork.fork(backend, anchorSessionId, anchorMessageId, {
+      context: "none",
+    });
+  } catch (error) {
+    state.actionError = t("state.digestForkFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+  const group: DigestGroup = reactive({
+    id: `digest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    backend,
+    directory,
+    anchorSessionId,
+    anchorMessageId,
+    createdAt: Date.now(),
+    scope: request.scope,
+    sources: materials.map(sourceRecordOf),
+    summarySessionId: forked.id,
+    status: "running",
+    text: "",
+    error: null,
+    versions: [],
+    settings: { model: request.model ? { ...request.model } : null, length: request.length },
+  });
+  digestGroups.push(group);
+  persistDigest(group);
+  await runDigestSummary(group, materials);
+  return true;
+}
+
+/**
+ * Re-run a digest against its stories' current content. Each version is a
+ * fresh fork — the earlier ones stay readable as history, exactly like a
+ * round's summary versions. Sources that no longer resolve are dropped
+ * with the reason on the record; a digest with no resolvable source left
+ * fails instead of silently summarizing nothing.
+ */
+export async function resummarizeDigest(groupId: string): Promise<void> {
+  const group = digestGroups.find((item) => item.id === groupId);
+  if (!group || group.status === "running") return;
+  state.actionError = null;
+  const materials: DigestStoryMaterial[] = [];
+  for (const source of group.sources) {
+    const material = await digestMaterialOf(
+      {
+        sessionId: source.sessionId,
+        storyRootId: source.storyRootId,
+        title: source.title,
+        selectedTurnId: source.turnMessageId,
+      },
+      group.scope,
+      group.backend,
+    );
+    if (material) materials.push(material);
+  }
+  if (materials.length === 0) {
+    group.status = "failed";
+    group.error = t("state.digestSourcesGone");
+    persistDigest(group);
+    return;
+  }
+  let forked: SessionSummary;
+  try {
+    forked = await window.awefork.fork(
+      group.backend,
+      group.anchorSessionId,
+      group.anchorMessageId,
+      { context: "none" },
+    );
+  } catch (error) {
+    group.status = "failed";
+    group.error = t("state.digestForkFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    persistDigest(group);
+    return;
+  }
+  group.summarySessionId = forked.id;
+  // Fresh provenance for the new version: the sources it was built from,
+  // not the ones the previous version read.
+  group.sources = materials.map(sourceRecordOf);
+  persistDigest(group);
+  await runDigestSummary(group, materials);
+}
+
+/**
+ * One summary run against `materials`: the round's summary skeleton with
+ * the digest prompt. A failure keeps the last good text and versions
+ * intact — a failed re-summary must not cost the user the digest that
+ * already worked.
+ */
+async function runDigestSummary(
+  group: DigestGroup,
+  materials: readonly DigestStoryMaterial[],
+): Promise<void> {
+  const summarySessionId = group.summarySessionId;
+  if (!summarySessionId) return;
+  group.status = "running";
+  group.error = null;
+  const prompt = buildDigestPrompt(materials, group.settings.length, locale.value);
+  try {
+    try {
+      await window.awefork.renameSession(
+        group.backend,
+        summarySessionId,
+        t("state.digestSessionTitle", {
+          titles: group.sources.map((source) => truncate(source.title, 12)).join("/"),
+          time: digestStamp(group.createdAt),
+        }),
+      );
+    } catch {
+      /* The digest does not depend on an optional title. */
+    }
+    const result = await sendPromptToBackend(
+      group.backend,
+      summarySessionId,
+      prompt,
+      group.settings.model,
+      [],
+    );
+    if (result.error) throw new Error(result.error);
+    if (group.backend === state.activeBackend) await refreshSessions();
+    if (!(await waitForParallelSettle(group.backend, summarySessionId))) {
+      throw new Error(t("state.digestTimeout"));
+    }
+    let reply: ReturnType<typeof parallelReply> = { status: "unknown", text: "", error: null };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      reply = parallelReply(await window.awefork.messages(group.backend, summarySessionId), prompt);
+      if (reply.status !== "unknown") break;
+      if (attempt < 2) await pauseParallelPoll();
+    }
+    group.status = reply.status;
+    group.error = reply.error ?? (reply.status === "failed" ? t("state.digestNoText") : null);
+    if (reply.status === "done") {
+      group.text = reply.text;
+      group.versions.push({
+        version: group.versions.length + 1,
+        sessionId: summarySessionId,
+        createdAt: Date.now(),
+        scope: group.scope,
+        sources: group.sources.map((source) => ({ ...source })),
+      });
+    }
+  } catch (error) {
+    group.status = "failed";
+    group.error = error instanceof Error ? error.message : String(error);
+  }
+  // The outcome (and this version's session) is on record now — including
+  // the failure paths, so a restored digest never claims a summary that
+  // did not land.
+  persistDigest(group);
+  if (group.backend === state.activeBackend) {
+    await refreshSessions();
+    // Land on the digest card: the user asked for this summary, and the
+    // canvas has it — a jump they would otherwise have to hunt for.
+    void selectSession(summarySessionId);
+  }
+}
+
+/** Open / close the story-digest dialog (canvas toolbar entry). */
+export function setDigestDialogOpen(open: boolean): void {
+  state.digestDialogOpen = open;
+  if (open) state.actionError = null;
 }
 
 export async function sendPanePrompt(

@@ -16,6 +16,7 @@ import type {
   BackendsResult,
 } from "../shared/backend.js";
 import type { LineDiffResult } from "../shared/diff.js";
+import type { DigestGroup } from "../shared/digest-types.js";
 import type {
   DirListing,
   FileEntry,
@@ -319,6 +320,9 @@ const api: AweforkApi = {
   roundsList: (): Promise<RoundRecord[]> => ipcRenderer.invoke("awefork:roundsList"),
   roundsSave: (record: RoundRecord): Promise<boolean> =>
     ipcRenderer.invoke("awefork:roundsSave", record),
+  digestsList: (): Promise<DigestGroup[]> => ipcRenderer.invoke("awefork:digestsList"),
+  digestsSave: (group: DigestGroup): Promise<boolean> =>
+    ipcRenderer.invoke("awefork:digestsSave", group),
 };
 
 contextBridge.exposeInMainWorld("awefork", api);
