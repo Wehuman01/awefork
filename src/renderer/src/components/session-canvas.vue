@@ -419,7 +419,16 @@
       />
     </div>
 
-    <div v-if="graph.nodes.length === 0 && store.connectionError" class="canvas-empty">
+    <!-- Offline is a session-view state: it presumes a session was open and
+         lost its backend, and its remedy (reload sessions) presumes a session
+         list a failed fetch never produced. With nothing selected the canvas
+         falls through to the neutral empty state — the top bar already carries
+         the connection status, so a fresh entry never opens on a full-canvas
+         alarm. -->
+    <div
+      v-if="graph.nodes.length === 0 && store.connectionError && store.selectedId"
+      class="canvas-empty"
+    >
       <div class="empty-mascot">🔌</div>
       <p class="empty-title">{{ t("canvas.offlineTitle", { backend: backendLabel }) }}</p>
       <p class="empty-sub">{{ t("canvas.offlineSub") }}</p>
