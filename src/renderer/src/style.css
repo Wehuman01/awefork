@@ -920,6 +920,58 @@ textarea {
   margin: -6px 0 10px;
 }
 
+/*
+  Runs still in flight in agents this window is not showing. One row, one chip
+  per backend; the chip is a link because the number alone is not actionable —
+  clicking it takes the user to that agent (its own window in multi-window
+  mode, an in-place switch otherwise).
+*/
+.background-runs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -6px 0 10px;
+}
+
+.background-runs-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #e5d9cf);
+  background: var(--surface-soft, #faf5f1);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--ink-soft, #7a6a60);
+  cursor: pointer;
+}
+
+.background-runs-item:hover {
+  background: var(--primary-soft, #fdeee6);
+  border-color: var(--primary, #e8845a);
+  color: var(--primary-deep, #b4552f);
+}
+
+/* The same live-dot language the running chips use, at sidebar scale. */
+.background-runs-item > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary, #e8845a);
+  animation: background-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes background-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* search hit highlighting — shared by row titles and body snippets. */
 mark.hl {
   background: var(--primary-soft);

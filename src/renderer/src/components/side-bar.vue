@@ -119,6 +119,25 @@
       >
     </div>
     <p v-if="bodyScanning" class="body-scan">{{ t("sidebar.bodyScanning") }}</p>
+    <!--
+      Runs in flight in agents this window is not showing. Their state is real
+      (the runs stream through the parked runtime and settle normally), but the
+      visible maps only carry the active backend — without this line the user
+      would have to switch to each agent to learn something is still going.
+    -->
+    <p v-if="backgroundRuns.length > 0" class="background-runs" role="status">
+      <span
+        v-for="entry in backgroundRuns"
+        :key="entry.backend"
+        class="background-runs-item"
+        :title="t('sidebar.backgroundRunsTitle', { backend: backendLabel(entry.backend) })"
+        @click="revealBackgroundBackend(entry.backend)"
+        ><i aria-hidden="true"></i>{{ t("sidebar.backgroundRuns", {
+          backend: backendLabel(entry.backend),
+          n: entry.count,
+        }) }}</span
+      >
+    </p>
     <div v-if="allTags.length > 0" class="tag-shelf-zone">
       <div id="tag-shelf" class="tag-shelf">
         <button
@@ -814,6 +833,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import type { BodySearchHit } from "../../../shared/awefork-api";
+import type { BackendId } from "../../../shared/backend";
 import {
   bodySearchTerms,
   firstMatchRange,
@@ -840,6 +860,7 @@ import {
   archivedDirectoryViews,
   archivedSessionViews,
   archiveSession,
+  backgroundRunCounts,
   beginComparePick,
   cancelComparePick,
   chooseResidentFolder,
@@ -858,6 +879,7 @@ import {
   isResidentFolder,
   isTurnMarked,
   jumpToMessage,
+  openAgentWindow,
   openCanvasTab,
   openSession,
   openSessionTerminal,
@@ -873,6 +895,7 @@ import {
   setTagColor,
   store,
   subtreeSessionIds,
+  switchBackend,
   switchDirectory,
   tagBg,
   tagColor,
@@ -884,6 +907,7 @@ import {
   turnGraph,
   visibleSessions,
 } from "../state";
+
 import FileTree from "./file-tree.vue";
 import SessionFileDock from "./session-file-dock.vue";
 
@@ -899,6 +923,27 @@ const expandedOverride = ref<Record<string, boolean>>({});
 function clearQuery(): void {
   query.value = "";
   searchInputEl.value?.focus();
+}
+
+// ── background runs in other agents ───────────────────────────────────
+
+/** One row per non-active backend that has runs in flight. */
+const backgroundRuns = backgroundRunCounts;
+
+/** The switcher's label for a backend, so the row reads the same as the menu. */
+function backendLabel(backend: BackendId): string {
+  return store.backendList.find((entry) => entry.id === backend)?.label ?? backend;
+}
+
+/**
+ * Take the user to a backend with runs in flight. Multi-window opens (or
+ * focuses) that agent's own window — the current workspace stays exactly
+ * where it is, which is the point of having separate windows. Without
+ * multi-window there is nowhere else to look, so the row switches in place.
+ */
+function revealBackgroundBackend(backend: BackendId): void {
+  if (settings.canvas.multiWindow) void openAgentWindow(backend);
+  else void switchBackend(backend);
 }
 
 // ── enhanced search (✦) ─────────────────────────────────────────────

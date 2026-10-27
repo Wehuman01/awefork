@@ -610,6 +610,30 @@ const state = reactive<AppState>({
 
 export const store = readonly(state);
 
+/**
+ * How many runs each non-active backend has in flight. The visible maps only
+ * carry the active backend, so a window parked on opencode has no way to see
+ * that codex still has turns running — the runs are real (they stream through
+ * the parked runtime) but nothing on screen says so. The overview trigger
+ * counts them for the panel; this is the sidebar's one-line version, and the
+ * number is the same fact.
+ */
+export const backgroundRunCounts = computed<Array<{ backend: BackendId; count: number }>>(() => {
+  const counts: Array<{ backend: BackendId; count: number }> = [];
+  for (const [backend, slot] of Object.entries(state.backgroundRuns)) {
+    if (backend === state.activeBackend || !slot) continue;
+    const count = Object.keys(slot.running).length;
+    if (count > 0) counts.push({ backend: backend as BackendId, count });
+  }
+  // Backend-list order (the switcher's order), not the map's insertion order,
+  // so the row does not reshuffle as runs come and go.
+  return counts.sort(
+    (a, b) =>
+      state.backendList.findIndex((info) => info.id === a.backend) -
+      state.backendList.findIndex((info) => info.id === b.backend),
+  );
+});
+
 /** Readonly shape of a chat message as seen by components. */
 export type ReadonlyChatMessage = (typeof store)["messagesBySession"][string][number];
 

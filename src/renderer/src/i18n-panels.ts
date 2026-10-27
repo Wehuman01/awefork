@@ -45,6 +45,14 @@ export const dict: Record<string, { zh: string; en: string }> = {
   },
   "sidebar.resetSearch": { zh: "↺ 恢复默认搜索", en: "↺ Reset search" },
   "sidebar.bodyScanning": { zh: "⟳ 正在搜索正文…", en: "⟳ Searching bodies…" },
+  "sidebar.backgroundRuns": {
+    zh: "{backend} 还有 {n} 个在跑",
+    en: "{backend}: {n} still running",
+  },
+  "sidebar.backgroundRunsTitle": {
+    zh: "去看看 {backend}（多窗口模式下会打开它自己的窗口）",
+    en: "Go to {backend} (opens its own window in multi-window mode)",
+  },
   "sidebar.clearTagFilter": { zh: "点击取消这个筛选", en: "Click to clear this filter" },
   "sidebar.filterByTag": { zh: "只看带这个标签的会话", en: "Show only sessions with this tag" },
   "sidebar.collapseTags": { zh: "收起标签", en: "Collapse tags" },
