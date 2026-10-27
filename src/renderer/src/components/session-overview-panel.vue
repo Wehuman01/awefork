@@ -78,15 +78,17 @@
         <span>{{ t("overview.colActivity") }}</span>
       </div>
 
-      <div class="float-session-list">
+      <div ref="listEl" class="float-session-list">
         <div
           v-for="row in visibleRows"
           :key="rowKey(row)"
+          :data-row-key="rowKey(row)"
           class="float-session-row"
           :class="{
             selected: store.overview.selectedKey === rowKey(row),
             current: isCurrent(row),
             checked: isChecked(row),
+            cursor: cursorKey === rowKey(row),
           }"
         >
           <!-- Multi-select checkbox. A sibling of the row's main button, never
@@ -298,6 +300,7 @@ import {
   matchesOverviewAgent,
   matchesOverviewFilter,
   matchesOverviewQuery,
+  moveOverviewCursor,
   type OverviewFilter,
   type OverviewRow,
   type OverviewSummary,
@@ -340,6 +343,7 @@ const placed = ref(false);
 const query = ref("");
 const agent = ref<"all" | BackendId>("all");
 const searchInput = ref<HTMLInputElement | null>(null);
+const listEl = ref<HTMLElement | null>(null);
 
 /**
  * The multi-selection: `${backend}:${sessionId}` keys the user checked, plus
@@ -406,6 +410,70 @@ const selectedRow = computed<OverviewRow | null>(() => {
   return overviewRows.value.find((row) => rowKey(row) === key) ?? null;
 });
 
+/**
+ * The row the keyboard is on, independent of `selectedKey` (which row's
+ * summary is expanded) and of `checked` (the multi-select). Three separate
+ * questions, three separate states: conflating them would make opening a
+ * summary with the mouse move the keyboard cursor, and a bulk mark-seen
+ * selection jump when the arrows move.
+ */
+const cursorKey = ref<string | null>(null);
+
+/**
+ * Move the keyboard cursor by `step` rows. The fold itself is a pure function
+ * (session-overview.ts) so its edge cases are testable without a DOM; this
+ * wrapper adds the reactive bookkeeping and the scroll.
+ */
+function moveCursor(step: number): void {
+  const rows = visibleRows.value;
+  const next = moveOverviewCursor(rows.map(rowKey), cursorKey.value, step);
+  if (next === null || next === cursorKey.value) return;
+  cursorKey.value = next;
+  void nextTick(() => scrollCursorIntoView());
+}
+
+/**
+ * Keep the cursor's row on screen. The list scrolls on its own (a floating
+ * panel with a max height), so moving past the edge must bring the row with
+ * it instead of leaving the cursor invisible.
+ */
+function scrollCursorIntoView(): void {
+  const key = cursorKey.value;
+  if (key === null) return;
+  const el = listEl.value?.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(key)}"]`);
+  el?.scrollIntoView({ block: "nearest" });
+}
+
+/** The row the cursor is on, for Enter. */
+function cursorRow(): OverviewRow | null {
+  const key = cursorKey.value;
+  if (key === null) return null;
+  return visibleRows.value.find((row) => rowKey(row) === key) ?? null;
+}
+
+// A filter, search or agent change can drop the cursor's row from the list;
+// holding a key that is no longer shown would make Enter do nothing.
+watch(visibleRows, (rows) => {
+  const key = cursorKey.value;
+  if (key !== null && !rows.some((row) => rowKey(row) === key)) cursorKey.value = null;
+});
+
+// Opening the panel puts the cursor on the first row: the list is sorted with
+// what needs the user first, so "the top row" is the right default answer.
+watch(
+  () => store.overview.open,
+  (open) => {
+    if (!open) {
+      cursorKey.value = null;
+      return;
+    }
+    void nextTick(() => {
+      const first = visibleRows.value[0];
+      if (first) cursorKey.value = rowKey(first);
+    });
+  },
+);
+
 function rowKey(row: OverviewRow): string {
   return overviewKey(row.backend, row.session.id);
 }
@@ -452,6 +520,9 @@ function toggleCheck(row: OverviewRow, event: MouseEvent): void {
 
 /** Plain click expands the summary; ⌘-click (ctrl off macOS) or shift-click selects instead. */
 function onRowClick(row: OverviewRow, event: MouseEvent): void {
+  // A click also moves the keyboard cursor, so the next arrow key continues
+  // from where the user just pointed instead of from wherever it was.
+  cursorKey.value = rowKey(row);
   if (event.metaKey || event.ctrlKey || event.shiftKey) {
     toggleCheck(row, event);
     return;
@@ -827,6 +898,38 @@ function onDocKeydown(event: KeyboardEvent): void {
   searchInput.value?.focus();
 }
 
+/**
+ * Arrow keys walk the list and Enter jumps. Kept separate from
+ * `onDocKeydown` because that one owns the panel-wide Escape and "/" keys;
+ * this one only fires while the panel is open and never steals a keystroke
+ * from a text field (typing a query, or a row's own input).
+ */
+function onListKeydown(event: KeyboardEvent): void {
+  if (!store.overview.open) return;
+  const target = event.target as HTMLElement | null;
+  if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+  if (target?.isContentEditable) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // j/k mirror the arrows for readers used to them; both walk the same cursor.
+  const step =
+    event.key === "ArrowDown" || event.key === "j"
+      ? 1
+      : event.key === "ArrowUp" || event.key === "k"
+        ? -1
+        : 0;
+  if (step !== 0) {
+    event.preventDefault();
+    moveCursor(step);
+    return;
+  }
+  if (event.key === "Enter") {
+    const row = cursorRow();
+    if (!row) return;
+    event.preventDefault();
+    void jump(row);
+  }
+}
+
 function onWindowResize(): void {
   if (store.overview.open && placed.value) clampPosition();
 }
@@ -896,6 +999,7 @@ watch(
 onMounted(() => {
   document.addEventListener("pointerdown", onDocPointerDown, true);
   document.addEventListener("keydown", onDocKeydown);
+  document.addEventListener("keydown", onListKeydown);
   window.addEventListener("resize", onWindowResize);
 });
 
@@ -903,6 +1007,7 @@ onUnmounted(() => {
   stopSweep();
   document.removeEventListener("pointerdown", onDocPointerDown, true);
   document.removeEventListener("keydown", onDocKeydown);
+  document.removeEventListener("keydown", onListKeydown);
   window.removeEventListener("resize", onWindowResize);
 });
 </script>

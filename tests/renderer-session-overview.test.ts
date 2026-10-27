@@ -12,6 +12,7 @@ import {
   matchesOverviewFilter,
   matchesOverviewQuery,
   mergeOverviewLedger,
+  moveOverviewCursor,
   OVERVIEW_MODEL_BATCH,
   type OverviewReadLedger,
   type OverviewRow,
@@ -195,6 +196,41 @@ describe("overview ordering", () => {
     expect(counts.unread).toBe(2);
     expect(counts.idle).toBe(1);
     expect(counts.running).toBe(0);
+  });
+});
+
+describe("overview keyboard cursor", () => {
+  const keys = ["opencode:a", "opencode:b", "codex:c"];
+
+  it("starts at the top on a first move down, and at the bottom on a first move up", () => {
+    // A fresh panel has no cursor yet; ↓ must land on the first row rather
+    // than skipping it, and ↑ on the last.
+    expect(moveOverviewCursor(keys, null, 1)).toBe("opencode:a");
+    expect(moveOverviewCursor(keys, null, -1)).toBe("codex:c");
+  });
+
+  it("walks one row at a time in both directions", () => {
+    expect(moveOverviewCursor(keys, "opencode:a", 1)).toBe("opencode:b");
+    expect(moveOverviewCursor(keys, "opencode:b", -1)).toBe("opencode:a");
+  });
+
+  it("stops at both ends instead of wrapping", () => {
+    // Wrapping would make a held arrow key jump the whole list; the cursor
+    // parks on the last reachable row instead.
+    expect(moveOverviewCursor(keys, "codex:c", 1)).toBe("codex:c");
+    expect(moveOverviewCursor(keys, "opencode:a", -1)).toBe("opencode:a");
+  });
+
+  it("treats a cursor whose row was filtered out as unset", () => {
+    // A search or agent change can drop the cursor's row from the list. The
+    // next move must land on a row that is actually listed.
+    expect(moveOverviewCursor(keys, "codex:gone", 1)).toBe("opencode:a");
+    expect(moveOverviewCursor(keys, "codex:gone", -1)).toBe("codex:c");
+  });
+
+  it("has no cursor when nothing is listed", () => {
+    expect(moveOverviewCursor([], null, 1)).toBeNull();
+    expect(moveOverviewCursor([], "opencode:a", -1)).toBeNull();
   });
 });
 

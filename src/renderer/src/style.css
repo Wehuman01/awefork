@@ -7220,6 +7220,17 @@ code.md-code {
   border-color: var(--primary-border);
 }
 
+/*
+  The keyboard cursor. Distinct from .selected (summary expanded) and
+  .checked (multi-selection): an outline marks where the arrows are without
+  claiming either of those, so Enter's target is visible on a row the user has
+  not opened.
+*/
+.float-session-row.cursor {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 .float-session-name {
   display: flex;
   align-items: center;

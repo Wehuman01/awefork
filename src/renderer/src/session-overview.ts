@@ -340,3 +340,29 @@ export function overviewCounts(rows: readonly OverviewRow[]): Record<OverviewSta
   for (const row of rows) counts[row.status] += 1;
   return counts;
 }
+
+/**
+ * Where the keyboard cursor lands after moving `step` rows through `keys`.
+ *
+ * The cursor is its own state, separate from which row's summary is open and
+ * from the multi-selection — so this fold takes only the list's keys and the
+ * cursor's current key. Three cases the panel depends on:
+ *
+ * - a cursor that is not in the list (never set, or its row was filtered out)
+ *   starts at the top when moving down and at the bottom when moving up,
+ *   rather than skipping a row;
+ * - moving past either end stays on the last reachable row instead of
+ *   wrapping, because wrapping makes a held arrow key jump the whole list;
+ * - an empty list has no cursor at all.
+ */
+export function moveOverviewCursor(
+  keys: readonly string[],
+  current: string | null,
+  step: number,
+): string | null {
+  if (keys.length === 0) return null;
+  const index = current === null ? -1 : keys.indexOf(current);
+  if (index < 0) return step < 0 ? (keys[keys.length - 1] ?? null) : (keys[0] ?? null);
+  const next = Math.min(Math.max(index + step, 0), keys.length - 1);
+  return keys[next] ?? null;
+}

@@ -91,8 +91,8 @@ export const dict: Record<string, { zh: string; en: string }> = {
 
   // ── footer + errors ─────────────────────────────────────────────────────
   "overview.footer": {
-    zh: "单击看摘要 · ⌘点击多选 · 双击或 ↗ 跳转 · Esc 收起",
-    en: "Click for a summary · ⌘-click to multi-select · double-click or ↗ to jump · Esc closes",
+    zh: "单击看摘要 · ⌘点击多选 · ↑↓ 选择 · Enter 跳转 · Esc 收起",
+    en: "Click for a summary · ⌘-click to multi-select · ↑↓ to move · Enter to jump · Esc closes",
   },
   "overview.jumpSwitchFailed": { zh: "无法切换到 {backend}", en: "Couldn't switch to {backend}" },
   "overview.jumpWindowFailed": {
