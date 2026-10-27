@@ -1729,11 +1729,18 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
       );
       // This window holds the freshest view of the active backend, so share
       // it: the windows not showing this agent render this listing instead of
-      // waiting for their own sweeps to catch up.
+      // waiting for their own sweeps to catch up. The payload crosses the IPC
+      // boundary, which structured-clones its arguments: state.trash and
+      // state.archive are Vue reactive proxies and throw a DataCloneError
+      // there — synchronously, inside this try, which used to paint the whole
+      // workspace 未连接 on every refresh. Plain copies keep it clone-safe.
       publishOverviewListing(backend, {
         sessions,
-        trash: state.trash,
-        archive: state.archive,
+        trash: [...state.trash],
+        archive: {
+          sessions: state.archive.sessions.map((entry) => ({ ...entry })),
+          directories: state.archive.directories.map((entry) => ({ ...entry })),
+        },
         fetchedAt: Date.now(),
         error: null,
       });
@@ -7094,10 +7101,16 @@ function adoptOverviewListing(backend: BackendId, listing: OverviewListing): voi
 /** Store what this window fetched where every window can read it. */
 function publishOverviewListing(backend: BackendId, listing: OverviewListing): void {
   if (!settings.labs.sessionOverview) return;
-  void window.awefork.overviewPublishListing(backend, listing).catch(() => {
-    // A failed publish only costs the other windows their shortcut; their own
-    // sweeps still list the backend.
-  });
+  try {
+    void window.awefork.overviewPublishListing(backend, listing).catch(() => {
+      // A failed publish only costs the other windows their shortcut; their own
+      // sweeps still list the backend.
+    });
+  } catch {
+    // invoke throws synchronously on a payload it cannot clone. The publish is
+    // best-effort by contract: a failed one must never reach the caller's
+    // catch and read as the backend going offline.
+  }
 }
 
 /**
