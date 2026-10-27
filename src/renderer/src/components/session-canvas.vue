@@ -125,6 +125,7 @@
           'cmp-l': cmpRole(node) === 'l',
           'cmp-r': cmpRole(node) === 'r',
           'cmp-anchor': cmpRole(node) === 'anchor',
+          'digest-picked': digestPickOrderOf(node.sessionId) > 0,
           pickable: pickArmed,
           'drop-on': isDropTarget(node),
         }"
@@ -193,9 +194,21 @@
         >
           ＋
         </button>
+        <!-- ✦ arms the digest selection with this card's story. The digest
+             is the retroactive sibling of a multi-model round, so it rides
+             the same labs switch plus its own opt-out row. -->
+        <button
+          v-if="digestEnabled"
+          type="button"
+          class="digest-chip"
+          :class="{ on: digestPickOrderOf(node.sessionId) > 0 }"
+          :title="t('canvas.digestPickTitle')"
+          @click.stop="armDigestPick(node.sessionId, node.kind === 'turn' && node.messageId ? node.id : null)"
+        >✦</button>
         <template v-if="node.kind === 'turn'">
           <div class="turn-head">
             <span class="avatar user">🍑</span>
+            <span v-if="digestPickOrderOf(node.sessionId) > 0" class="digest-order" :title="t('canvas.digestPicked')">{{ digestPickOrderOf(node.sessionId) }}</span>
             <span class="turn-title" :title="node.title">{{ node.title }}</span>
             <span v-if="isParallelSummary(node)" class="parallel-summary-badge">✦ {{ t("canvas.parallelSummary") }} v{{ parallelSummaryVersion(node) }}</span>
             <span v-else-if="isDigestSummary(node)" class="digest-summary-badge">✦ {{ t("canvas.digestSummary") }} v{{ digestSummaryVersion(node) }}</span>
@@ -481,6 +494,14 @@
       <span>{{ t("canvas.pickBanner", { title: pickFromTitle }) }}</span>
       <button type="button" :title="t('canvas.cancelEsc')" @click="cancelComparePick()">✕</button>
     </div>
+    <!-- Armed digest selection (事后总结的画布点选): the stories picked with
+         the ✦ card buttons. Sits outside .world like the pick banner, and
+         stops mousedown so working the bar never starts a pan. -->
+    <div v-if="digestEnabled && store.digestPicks.length > 0" class="digest-pick-bar" @mousedown.stop>
+      <span class="digest-pick-count">{{ t("canvas.digestPickCount", { n: store.digestPicks.length, max: MAX_DIGEST_STORIES }) }}</span>
+      <button type="button" class="digest-pick-cancel" :title="t('canvas.cancelEsc')" @click="cancelDigestPicks()">✕</button>
+      <button type="button" class="digest-pick-start" @click="setDigestDialogOpen(true)">{{ t("canvas.digestPickStart") }}</button>
+    </div>
     <div class="canvas-tools">
       <div class="zoom-ctl">
         <button type="button" @click="zoomBy(0.85)">−</button>
@@ -549,14 +570,18 @@ import { joinPaths } from "../path-insert";
 import { MAX_PARALLEL_TARGETS, settings } from "../settings";
 import {
   activeChain,
+  armDigestPick,
   cancelComparePick,
+  cancelDigestPicks,
   cardHeights,
   childTurnIds,
   comparePlan,
   defaultParallelTargets,
   deleteSession,
   deleteTurn,
+  digestEnabled,
   digestGroups,
+  digestPickOrderOf,
   dismissDraft,
   enterCompare,
   forkedFromSelection,
@@ -564,6 +589,7 @@ import {
   isSessionTip,
   isTurnDelete,
   isTurnMarked,
+  MAX_DIGEST_STORIES,
   openDraft,
   parallelGroups,
   recentAlphaFor,
@@ -574,6 +600,7 @@ import {
   sendDraft,
   sendDraftParallel,
   setActiveCanvasTabView,
+  setDigestDialogOpen,
   setDraftAttachments,
   setDraftContextMode,
   setDraftModel,
@@ -583,6 +610,7 @@ import {
   storySearchHits,
   tagColor,
   tagsOf,
+  toggleDigestPick,
   toggleFavoriteModel,
   toggleTurnMark,
   turnGraph,
@@ -1081,6 +1109,13 @@ function selectNode(node: TurnNode): void {
       return;
     }
     void enterCompare(from, node.sessionId);
+    return;
+  }
+  // Armed digest selection: the click toggles the card's story in or out
+  // instead of selecting the turn — the same reroute compare's pick mode
+  // puts on this handler. Removing the last story disarms.
+  if (store.digestPicks.length > 0) {
+    toggleDigestPick(node.sessionId, node.kind === "turn" && node.messageId ? node.id : null);
     return;
   }
   void selectTurn(node);

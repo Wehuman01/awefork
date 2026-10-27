@@ -150,6 +150,18 @@ describe("normalizeSettings", () => {
     ).toBe(false);
   });
 
+  it("keeps the story-digest switch on by default and honors an explicit off", () => {
+    // The digest shipped as part of multi-model summarization, so its
+    // switch is the opt-out — the default is on, not the labs usual off.
+    expect(normalizeSettings({}).labs.parallel.digest).toBe(true);
+    expect(normalizeSettings({ labs: { parallel: { digest: false } } }).labs.parallel.digest).toBe(
+      false,
+    );
+    expect(normalizeSettings({ labs: { parallel: { digest: "off" } } }).labs.parallel.digest).toBe(
+      true,
+    );
+  });
+
   it("shows every overview trigger stat until one is turned off", () => {
     expect(normalizeSettings({}).labs.overview).toEqual({
       showRunning: true,

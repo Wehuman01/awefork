@@ -197,7 +197,6 @@ async function bootState(options: { restored?: DigestGroup[] } = {}) {
   // state a user leaves behind (story A with a locked turn, story B without).
   await state.selectTurn({ id: `${ROOT_A.id}:a-u1`, sessionId: ROOT_A.id } as TurnNode);
   await state.openCanvasTab(ROOT_B.id);
-  const tabs = state.store.canvasTabs;
   return {
     state,
     store: state.store,
@@ -206,7 +205,12 @@ async function bootState(options: { restored?: DigestGroup[] } = {}) {
     digestsSave,
     histories,
     key,
-    tabIds: [tabs[0]?.id ?? "", tabs[1]?.id ?? ""],
+    stories: state.digestStoryOptions.value.map((option) => ({
+      storyRootId: option.storyRootId,
+      sessionId: option.sessionId,
+      selectedTurnId: option.selectedTurnId,
+      title: option.title,
+    })),
     emit: (event: AgentEvent, backend: BackendId = "codex") => handler?.({ backend, event }),
     append(id: string, answer: ChatMessage) {
       const k = key("codex", id);
@@ -264,7 +268,7 @@ describe("story digests", () => {
   it("forks the summary on the first story with no inherited context", async () => {
     const h = await bootState();
     await runDigest(h, {
-      tabIds: h.tabIds,
+      stories: h.stories,
       scope: "story",
       model: null,
       length: "standard",
@@ -279,7 +283,7 @@ describe("story digests", () => {
 
   it("sends both stories' turns as scoped material and records the version", async () => {
     const h = await bootState();
-    await runDigest(h, { tabIds: h.tabIds, scope: "story", model: null, length: "brief" });
+    await runDigest(h, { stories: h.stories, scope: "story", model: null, length: "brief" });
     const group = required(h.state.digestGroups[0]);
     expect(group.status).toBe("done");
     expect(group.text).toBe("跨故事总结完成");
@@ -303,7 +307,7 @@ describe("story digests", () => {
 
   it("turn scope sends only the locked turn, or the latest when none is locked", async () => {
     const h = await bootState();
-    await runDigest(h, { tabIds: h.tabIds, scope: "turn", model: null, length: "brief" });
+    await runDigest(h, { stories: h.stories, scope: "turn", model: null, length: "brief" });
     const group = required(h.state.digestGroups[0]);
     expect(group.scope).toBe("turn");
     expect(
@@ -323,7 +327,7 @@ describe("story digests", () => {
 
   it("addresses the digest by its summary session, never by the anchor story", async () => {
     const h = await bootState();
-    await runDigest(h, { tabIds: h.tabIds, scope: "story", model: null, length: "brief" });
+    await runDigest(h, { stories: h.stories, scope: "story", model: null, length: "brief" });
     const group = required(h.state.digestGroups[0]);
     expect(h.state.digestGroupForSession("codex", group.summarySessionId)).toBe(group);
     expect(h.state.digestGroupForSession("codex", ROOT_A.id)).toBeNull();
@@ -332,7 +336,7 @@ describe("story digests", () => {
 
   it("mirrors every state change into the sidecar", async () => {
     const h = await bootState();
-    await runDigest(h, { tabIds: h.tabIds, scope: "story", model: null, length: "brief" });
+    await runDigest(h, { stories: h.stories, scope: "story", model: null, length: "brief" });
     const group = required(h.state.digestGroups[0]);
     const saved = h.digestsSave.mock.calls.map((call) => call[0]);
     // Once as the skeleton (running), once as the landed version.
@@ -344,7 +348,7 @@ describe("story digests", () => {
 
   it("re-summarizing lands a second version on a fresh fork", async () => {
     const h = await bootState();
-    await runDigest(h, { tabIds: h.tabIds, scope: "story", model: null, length: "brief" });
+    await runDigest(h, { stories: h.stories, scope: "story", model: null, length: "brief" });
     const group = required(h.state.digestGroups[0]);
     const firstSummaryId = group.summarySessionId;
 

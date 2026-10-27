@@ -74,6 +74,10 @@ export const dict: Record<string, Entry> = {
     zh: "总结 · {titles} · {time}",
     en: "Digest · {titles} · {time}",
   },
+  "state.digestPicksMaxed": {
+    zh: "一次最多总结 {max} 条故事，先取消一条再选。",
+    en: "One digest takes at most {max} stories — remove one before picking another.",
+  },
   "state.digestNoTurns": {
     zh: "选中的故事没有可总结的轮次：{titles}",
     en: "The picked stories have no turns to summarize: {titles}",

@@ -914,6 +914,17 @@ function labsSection(): SectionDef {
           },
         ),
       ),
+      nested(
+        toggle(
+          "labs.parallelDigest",
+          t("settings.parallelDigest"),
+          t("settings.parallelDigestDesc"),
+          settings.labs.parallel.digest,
+          (next) => {
+            settings.labs.parallel.digest = next;
+          },
+        ),
+      ),
     );
   }
   rows.push(

@@ -57,6 +57,16 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "打开故事「{title}」",
     en: 'Open story "{title}"',
   },
+  "canvas.digestPickTitle": {
+    zh: "总结这个故事（再点其他故事，至多 4 条）",
+    en: "Digest this story (click more stories, up to 4)",
+  },
+  "canvas.digestPicked": { zh: "已选入总结", en: "Picked for digest" },
+  "canvas.digestPickCount": {
+    zh: "已选 {n} / {max} 条故事",
+    en: "{n} / {max} stories picked",
+  },
+  "canvas.digestPickStart": { zh: "生成总结", en: "Summarize" },
   "canvas.tabBlank": { zh: "新画板", en: "New canvas" },
   "canvas.deleteTurnTitle": {
     zh: "删除这个回合（更早的对话保留）",

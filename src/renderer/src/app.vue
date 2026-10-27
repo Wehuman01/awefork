@@ -209,6 +209,7 @@ import {
   toggleSettings,
 } from "./layout";
 import {
+  cancelDigestPicks,
   dismissActionError,
   dismissUpdateBanner,
   init,
@@ -289,6 +290,14 @@ function onKeydown(event: KeyboardEvent): void {
       void stepPreview(event.key === "ArrowDown" ? 1 : -1);
       return;
     }
+  }
+  // Esc drops an armed digest selection — the floating bar's ✕ does the
+  // same. While the digest dialog is up its own Esc handler owns the key:
+  // closing the dialog must not also throw the canvas selection away.
+  if (event.key === "Escape" && store.digestPicks.length > 0 && !store.digestDialogOpen) {
+    event.preventDefault();
+    cancelDigestPicks();
+    return;
   }
   if (!(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();

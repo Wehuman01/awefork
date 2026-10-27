@@ -410,6 +410,11 @@ export const dict: Record<string, { zh: string; en: string }> = {
     zh: "一轮的全部回答和汇总就绪后，自动跳到该轮的阅读视图，不用再找卡片上的 ⇄ 徽标。",
     en: "When a round's answers and summary are all in, jump straight to its reading view instead of hunting for the ⇄ badge on a card.",
   },
+  "settings.parallelDigest": { zh: "画布点选总结", en: "Canvas-picked story digest" },
+  "settings.parallelDigestDesc": {
+    zh: "关闭后画布卡片上的 ✦ 和故事标签栏的 ✦ 入口一并消失；已生成的总结仍可读。默认值与多模型汇总共用。",
+    en: "Turning it off removes the ✦ chip on canvas cards and the ✦ entry on the story-tab strip; digests already made stay readable. Shares the multi-model summary defaults.",
+  },
   "settings.overviewShowRunning": { zh: "胶囊显示「运行中」计数", en: "Pill shows “running”" },
   "settings.overviewShowRunningDesc": {
     zh: "关闭后触发条不再占这个位置；面板里照样列得出。",

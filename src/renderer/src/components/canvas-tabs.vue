@@ -37,6 +37,7 @@
       >＋</button
     >
     <button
+      v-if="digestEnabled"
       type="button"
       class="story-tab story-tab-digest"
       :title="t('canvas.digestEntry')"
@@ -55,6 +56,7 @@ import {
   type CanvasTab,
   closeCanvasTab,
   createSession,
+  digestEnabled,
   reorderCanvasTab,
   setDigestDialogOpen,
   store,

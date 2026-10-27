@@ -148,6 +148,13 @@ export interface Settings {
       summaryLength: ParallelSummaryLength;
       /** Jump to the round's reading view when the round finishes. */
       autoOpenReading: boolean;
+      /**
+       * The after-the-fact digest (事后总结): summarize stories picked on
+       * the canvas with the ✦ buttons. On by default — it shipped as part
+       * of multi-model summarization, and the switch is the opt-out for
+       * users who only ever send rounds.
+       */
+      digest: boolean;
     };
     /**
      * Which of the overview pill's three counts are shown. A stat turned off
@@ -201,6 +208,7 @@ export const DEFAULT_SETTINGS: Settings = {
       summaryModel: null,
       summaryLength: "brief",
       autoOpenReading: false,
+      digest: true,
     },
     overview: { showRunning: true, showWaiting: true, showUnread: true },
   },
@@ -406,6 +414,7 @@ export function normalizeSettings(raw: unknown): Settings {
           d.labs.parallel.summaryLength,
         ),
         autoOpenReading: pickBool(parallel.autoOpenReading, d.labs.parallel.autoOpenReading),
+        digest: pickBool(parallel.digest, d.labs.parallel.digest),
       },
       overview: {
         showRunning: pickBool(overview.showRunning, d.labs.overview.showRunning),

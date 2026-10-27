@@ -198,6 +198,89 @@ export const digestStoryOptions = computed<DigestStoryOption[]>(() =>
   }),
 );
 
+/**
+ * One canvas-picked story for a digest. The clicked card decides the
+ * session the material walk starts from and the turn a "turn" scope reads;
+ * the story root is the digest's unit — two cards of one tree are one
+ * story, never two overlapping sources.
+ */
+export interface DigestStoryPick {
+  storyRootId: string;
+  /** Session the clicked card belongs to — where the story's chain ends. */
+  sessionId: string;
+  /** The clicked turn (`sessionId:messageId`); null for a tip card. */
+  selectedTurnId: string | null;
+  title: string;
+}
+
+/** Resolve a card's story to a pick; null when the window knows no root. */
+function digestPickOfCard(sessionId: string, turnId: string | null): DigestStoryPick | null {
+  const rootId = storyRootOf(visibleSessions.value, state.lineage, sessionId);
+  if (!rootId) return null;
+  const root = visibleSessions.value.find((session) => session.id === rootId);
+  return { storyRootId: rootId, sessionId, selectedTurnId: turnId, title: root?.title ?? "" };
+}
+
+/** 1-based position of a card's story in the armed selection; 0 = not picked. */
+export function digestPickOrderOf(sessionId: string): number {
+  const rootId = storyRootOf(visibleSessions.value, state.lineage, sessionId);
+  if (!rootId) return 0;
+  const index = state.digestPicks.findIndex((pick) => pick.storyRootId === rootId);
+  return index < 0 ? 0 : index + 1;
+}
+
+/**
+ * The ✦ card button: arm the selection with this card's story. A story
+ * already picked is left in place (its position is the user's); at the cap
+ * the click says so instead of silently doing nothing.
+ */
+export function armDigestPick(sessionId: string, turnId: string | null = null): void {
+  const pick = digestPickOfCard(sessionId, turnId);
+  if (!pick) return;
+  if (state.digestPicks.some((item) => item.storyRootId === pick.storyRootId)) return;
+  if (state.digestPicks.length >= MAX_DIGEST_STORIES) {
+    state.actionError = t("state.digestPicksMaxed", { max: MAX_DIGEST_STORIES });
+    return;
+  }
+  state.actionError = null;
+  state.digestPicks = [...state.digestPicks, pick];
+}
+
+/**
+ * A canvas card click while the selection is armed: toggle the card's story
+ * in or out — the same reroute compare's pick mode puts on selectNode.
+ * Removing the last story disarms.
+ */
+export function toggleDigestPick(sessionId: string, turnId: string | null = null): void {
+  const rootId = storyRootOf(visibleSessions.value, state.lineage, sessionId);
+  if (!rootId) return;
+  if (state.digestPicks.some((pick) => pick.storyRootId === rootId)) {
+    state.digestPicks = state.digestPicks.filter((pick) => pick.storyRootId !== rootId);
+    return;
+  }
+  armDigestPick(sessionId, turnId);
+}
+
+/** Drop the armed selection (the floating bar's ✕, Esc, a consumed digest). */
+export function cancelDigestPicks(): void {
+  state.digestPicks = [];
+}
+
+/**
+ * The digest's gate: the multi-model labs switch AND its own opt-out row
+ * in settings. Every entry (the tab strip's ✦, the canvas ✦ chip and its
+ * floating bar) reads this one flag, so the feature can never be half
+ * reachable. Flipping it off mid-selection drops the armed picks — a
+ * selection the entries can no longer act on must not linger.
+ */
+export const digestEnabled = computed(
+  () => settings.labs.parallelModels && settings.labs.parallel.digest,
+);
+
+watch(digestEnabled, (on) => {
+  if (!on) cancelDigestPicks();
+});
+
 export function parallelGroupForSession(
   backend: BackendId,
   sessionId: string | null,
@@ -494,6 +577,13 @@ interface AppState {
   } | null;
   /** The open story-digest dialog (事后总结的故事选择); null state = closed. */
   digestDialogOpen: boolean;
+  /**
+   * Canvas-armed digest selection: the stories picked with the ✦ card
+   * button, in pick order (≤ MAX_DIGEST_STORIES). Empty = not armed. The
+   * floating bar shows while armed and hands these to the dialog as its
+   * pre-picked set.
+   */
+  digestPicks: DigestStoryPick[];
   /** Latest compaction completion notice; drives the 🗜 toast, auto-clears. */
   compressedToast: string | null;
   /**
@@ -650,6 +740,7 @@ const state = reactive<AppState>({
   forkTagAsk: null,
   compressAsk: null,
   digestDialogOpen: false,
+  digestPicks: [],
   compressedToast: null,
   infoToast: null,
   paneModels: {},
@@ -6337,8 +6428,8 @@ async function digestMaterialOf(
 }
 
 export interface DigestRequest {
-  /** Canvas tab ids of the picked stories, in send order (≤ MAX_DIGEST_STORIES). */
-  tabIds: string[];
+  /** Picked stories, in digest order (≤ MAX_DIGEST_STORIES). */
+  stories: DigestStoryPick[];
   scope: DigestScope;
   model: ModelChoice | null;
   length: "brief" | "standard";
@@ -6353,30 +6444,17 @@ export interface DigestRequest {
  */
 export async function startDigest(request: DigestRequest): Promise<boolean> {
   const backend = state.activeBackend;
-  const tabs = request.tabIds.flatMap((id) => {
-    const tab = state.canvasTabs.find((item) => item.id === id);
-    if (!tab?.rootId || !tab.selectedId) return [];
-    return [tab];
-  });
-  if (tabs.length === 0 || tabs.length > MAX_DIGEST_STORIES) return false;
+  const stories = request.stories.slice(0, MAX_DIGEST_STORIES);
+  if (stories.length === 0) return false;
   state.digestDialogOpen = false;
   state.actionError = null;
 
   const materials: DigestStoryMaterial[] = [];
   const empty: string[] = [];
-  for (const tab of tabs) {
-    const material = await digestMaterialOf(
-      {
-        sessionId: tab.selectedId as string,
-        storyRootId: tab.rootId as string,
-        title: tabRootSession(tab)?.title || t("canvas.tabBlank"),
-        selectedTurnId: tab.selectedTurnId,
-      },
-      request.scope,
-      backend,
-    );
+  for (const story of stories) {
+    const material = await digestMaterialOf(story, request.scope, backend);
     if (material) materials.push(material);
-    else empty.push(tabRootSession(tab)?.title || t("canvas.tabBlank"));
+    else empty.push(story.title);
   }
   if (materials.length === 0) {
     state.actionError = t("state.digestNoTurns", { titles: empty.join(listSep.value) });
@@ -6384,10 +6462,10 @@ export async function startDigest(request: DigestRequest): Promise<boolean> {
   }
 
   // The first story hosts the digest: its parked tip is the fork base and
-  // its locked turn (when it has one) is where the ✂ branch hangs.
-  const first = tabs[0];
+  // its clicked turn (when it has one) is where the ✂ branch hangs.
+  const first = stories[0];
   if (!first) return false;
-  const anchorSessionId = first.selectedId as string;
+  const anchorSessionId = first.sessionId;
   const anchorMessageId = messageIdOfTurnKey(first.selectedTurnId);
   const directory =
     state.sessions.find((session) => session.id === anchorSessionId)?.directory ?? "";
@@ -6402,6 +6480,9 @@ export async function startDigest(request: DigestRequest): Promise<boolean> {
     });
     return false;
   }
+  // The selection is consumed: the floating bar disarms so canvas clicks
+  // select again, and the digest's own ✦ card is the surface from here.
+  cancelDigestPicks();
   const group: DigestGroup = reactive({
     id: `digest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     backend,

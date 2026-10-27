@@ -172,17 +172,25 @@ try {
   await cdp.open();
   await cdp.send("Runtime.enable");
 
-  // 0. Labs experiments (file browser, session overview) are off by default;
-  //    their surfaces only exist behind those gates. Seed the switches on and
-  //    reload once so every section below runs against the same app a user
-  //    who flipped them would have. The seed retries because the CDP target
-  //    can surface while the window is still its pre-navigation document,
+  // 0. Labs experiments (file browser, session overview, multi-model rounds
+  //    and their digest sibling) are off by default; their surfaces only
+  //    exist behind those gates. Seed the switches on and reload once so
+  //    every section below runs against the same app a user who flipped
+  //    them would have. The seed retries because the CDP target can
+  //    surface while the window is still its pre-navigation document,
   //    where localStorage is denied.
   await retry(
     () =>
       cdp.evaluate(
         `localStorage.setItem("awefork:settings", ${JSON.stringify(
-          JSON.stringify({ labs: { fileBrowser: true, sessionOverview: true } }),
+          JSON.stringify({
+            labs: {
+              fileBrowser: true,
+              sessionOverview: true,
+              parallelModels: true,
+              parallel: { digest: true },
+            },
+          }),
         )})`,
       ),
     30_000,
@@ -365,6 +373,61 @@ try {
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
   await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "digest dialog closed");
   check("Esc closes the digest dialog", true);
+
+  // 4e. Canvas digest pick: the ✦ card chip arms the selection (the floating
+  //     bar counts it), re-picking the same story neither duplicates nor
+  //     reorders, a card click toggles its story back out, and the bar's
+  //     生成总结 opens the dialog on the canvas picks.
+  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest chip click");
+  const pickBar = await retry(async () => {
+    const bar = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".digest-pick-bar")),
+      count: document.querySelector(".digest-pick-count")?.textContent ?? "",
+    })`);
+    if (!bar.open) throw new Error("digest pick bar not up");
+    return bar;
+  }, 5000, "digest pick bar");
+  check(
+    "the ✦ chip arms the selection with a counting bar",
+    pickBar.count.includes("1"),
+    JSON.stringify(pickBar),
+  );
+
+  // One story is one source: re-picking it is refused, the count stands.
+  await cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`);
+  const stillOne = await cdp.evaluate(
+    `document.querySelector(".digest-pick-count")?.textContent ?? ""`,
+  );
+  check("re-picking the same story does not duplicate", stillOne.includes("1"), stillOne);
+
+  // A card click while armed toggles the story out; the last removal
+  // disarms and the bar goes away.
+  await cdp.evaluate(`document.querySelector(".turn").click()`);
+  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick disarmed");
+  check("clicking a card toggles its story out of the selection", true);
+
+  await retry(() => cdp.evaluate(`document.querySelector(".turn .digest-chip").click()`), 5000, "digest re-arm");
+  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-start").click()`), 5000, "digest pick start");
+  const canvasDigest = await retry(async () => {
+    const state = await cdp.evaluate(`({
+      open: Boolean(document.querySelector(".ddg")),
+      rows: document.querySelectorAll(".ddg-item").length,
+    })`);
+    if (!state.open || state.rows < 1) throw new Error("canvas digest dialog incomplete");
+    return state;
+  }, 5000, "canvas digest dialog open");
+  check(
+    "the bar's 生成总结 opens the dialog on the canvas picks",
+    canvasDigest.rows >= 1,
+    JSON.stringify(canvasDigest),
+  );
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await retry(() => cdp.evaluate(`!document.querySelector(".ddg")`), 5000, "canvas digest dialog closed");
+
+  // Leave the canvas clean for the sections below.
+  await retry(() => cdp.evaluate(`document.querySelector(".digest-pick-cancel").click()`), 5000, "digest pick cancel");
+  await retry(() => cdp.evaluate(`!document.querySelector(".digest-pick-bar")`), 5000, "digest pick bar gone");
 
   // 4c. Multi-select and bulk mark-seen: a fresh run leaves a new result, the
   //     row checkboxes take rows into a selection (without opening a

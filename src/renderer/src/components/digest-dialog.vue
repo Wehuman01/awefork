@@ -11,31 +11,42 @@
         <header class="ddg-head">
           <strong>{{ dt("title") }}</strong>
           <span class="ddg-count" :title="dt('maxed', { max })">
-            {{ dt("count", { n: picked.length, max }) }}
+            {{ dt("count", { n: selectionCount, max }) }}
           </span>
           <button type="button" class="ddg-close" :title="t('settings.close')" @click="setDigestDialogOpen(false)">✕</button>
         </header>
-        <p class="ddg-hint">{{ dt("hint") }}</p>
+        <p class="ddg-hint">{{ canvasMode ? dt("pickedHint") : dt("hint") }}</p>
         <div class="ddg-list">
-          <button
-            v-for="option in options"
-            :key="option.tabId"
-            type="button"
-            class="ddg-item"
-            :class="{ on: isPicked(option.tabId) }"
-            :disabled="!isPicked(option.tabId) && atMax"
-            :title="!isPicked(option.tabId) && atMax ? dt('maxed', { max }) : option.title"
-            @click="toggle(option.tabId)"
-          >
+          <!-- Canvas mode: the stories picked on the canvas, in pick order.
+               Read-only on purpose — the canvas is where the selection is
+               edited; this list is the confirmation of what was chosen. -->
+          <div v-for="(pick, index) in canvasPicks" :key="pick.storyRootId" class="ddg-item on">
             <span class="ddg-main">
-              <span class="ddg-name">{{ option.title }}</span>
-              <span class="ddg-sub">{{ subOf(option) }}</span>
+              <span class="ddg-name">{{ pick.title }}</span>
             </span>
-            <!-- The position the story holds in the digest, not just a tick:
-                 the send order is what the reader sees as 1/4, 2/4, … -->
-            <span v-if="orderOf(option.tabId) > 0" class="ddg-check" :title="dt('count', { n: orderOf(option.tabId), max })">{{ orderOf(option.tabId) }}</span>
-          </button>
-          <p v-if="options.length === 0" class="ddg-empty">{{ dt("empty") }}</p>
+            <span class="ddg-check" :title="dt('count', { n: index + 1, max })">{{ index + 1 }}</span>
+          </div>
+          <template v-if="!canvasMode">
+            <button
+              v-for="option in options"
+              :key="option.tabId"
+              type="button"
+              class="ddg-item"
+              :class="{ on: isPicked(option.tabId) }"
+              :disabled="!isPicked(option.tabId) && atMax"
+              :title="!isPicked(option.tabId) && atMax ? dt('maxed', { max }) : option.title"
+              @click="toggle(option.tabId)"
+            >
+              <span class="ddg-main">
+                <span class="ddg-name">{{ option.title }}</span>
+                <span class="ddg-sub">{{ subOf(option) }}</span>
+              </span>
+              <!-- The position the story holds in the digest, not just a tick:
+                   the send order is what the reader sees as 1/4, 2/4, … -->
+              <span v-if="orderOf(option.tabId) > 0" class="ddg-check" :title="dt('count', { n: orderOf(option.tabId), max })">{{ orderOf(option.tabId) }}</span>
+            </button>
+            <p v-if="options.length === 0" class="ddg-empty">{{ dt("empty") }}</p>
+          </template>
         </div>
         <fieldset class="ddg-scope">
           <legend class="ddg-scope-label">{{ dt("scopeLabel") }}</legend>
@@ -83,7 +94,7 @@
           <button
             type="button"
             class="ddg-start"
-            :disabled="picked.length === 0 || running"
+            :disabled="selectionCount === 0 || running"
             @click="start"
           >{{ dt("start") }}</button>
         </footer>
@@ -115,6 +126,19 @@ const length = ref<"brief" | "standard">("standard");
 const scope = ref<"story" | "turn">("story");
 const picked = ref<string[]>([]);
 const running = ref(false);
+
+/**
+ * Canvas-picked stories (the ✦ card buttons' armed selection). When the
+ * dialog opens with picks armed it confirms those instead of offering the
+ * tab list — the selection already happened on the canvas, and asking the
+ * user to repeat it in a list would be a second, weaker version of the
+ * same choice.
+ */
+const canvasPicks = computed(() => store.digestPicks);
+const canvasMode = computed(() => canvasPicks.value.length > 0);
+const selectionCount = computed(() =>
+  canvasMode.value ? canvasPicks.value.length : picked.value.length,
+);
 
 // Esc closes while the dialog is up — the app-level handler owns the
 // canvas's own Esc surfaces, so this one is scoped to the dialog's lifetime.
@@ -170,11 +194,27 @@ function toggleFavorite(choice: ModelChoice): void {
 }
 
 async function start(): Promise<void> {
-  if (picked.value.length === 0 || running.value) return;
+  if (running.value) return;
+  const stories = canvasMode.value
+    ? canvasPicks.value.map((pick) => ({ ...pick }))
+    : picked.value.flatMap((id) => {
+        const option = digestStoryOptions.value.find((item) => item.tabId === id);
+        return option
+          ? [
+              {
+                storyRootId: option.storyRootId,
+                sessionId: option.sessionId,
+                selectedTurnId: option.selectedTurnId,
+                title: option.title,
+              },
+            ]
+          : [];
+      });
+  if (stories.length === 0) return;
   running.value = true;
   try {
     await startDigest({
-      tabIds: [...picked.value],
+      stories,
       scope: scope.value,
       model: model.value,
       length: length.value,

@@ -8,6 +8,10 @@ const dictionary = {
     en: "Pick up to 4 stories and summarize their records into one digest.",
   },
   count: { zh: "{n} / {max}", en: "{n} / {max}" },
+  pickedHint: {
+    zh: "以下是在画布上选中的故事，顺序即总结中的顺序；要改选择，回到画布点选。",
+    en: "The stories picked on the canvas, in digest order. Edit the selection back on the canvas.",
+  },
   maxed: { zh: "最多 {max} 条故事", en: "At most {max} stories" },
   empty: {
     zh: "还没有打开的故事。先在画布上打开几条故事。",
