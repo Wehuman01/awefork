@@ -242,20 +242,20 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       // and the default home's copy is the live one.
       const perHome = await Promise.all(
         homes.map(async (home): Promise<{ home: CodexHome; sessions: SessionSummary[] }> => {
-          let adapter: AgentAdapter;
           if (home.id === DEFAULT_HOME_ID) {
             // The primary home failing is a real backend failure: propagate.
-            adapter = await defaultAdapter();
-          } else {
-            // A foreign account that won't spawn must not kill the list.
-            try {
-              adapter = await ensureHome(home);
-            } catch (error) {
-              console.warn(`codex home ${home.id} unavailable: ${String(error)}`);
-              return { home, sessions: [] };
-            }
+            return { home, sessions: await (await defaultAdapter()).listSessions() };
           }
-          return { home, sessions: await adapter.listSessions() };
+          // A foreign account that won't spawn — or whose server then fails to
+          // list (a wedged app-server, a listing that outlives the request
+          // deadline) — must not kill the list either: that account's rows
+          // drop out and the rest of the backend stays connected.
+          try {
+            return { home, sessions: await (await ensureHome(home)).listSessions() };
+          } catch (error) {
+            console.warn(`codex home ${home.id} unavailable: ${String(error)}`);
+            return { home, sessions: [] };
+          }
         }),
       );
       const merged: SessionSummary[] = [];

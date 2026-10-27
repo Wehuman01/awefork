@@ -65,7 +65,11 @@
         </button>
       </div>
     </div>
-    <div class="topbar-status" :class="connectionError ? 'bad' : 'ok'">
+    <div
+      class="topbar-status"
+      :class="connectionError ? 'bad' : 'ok'"
+      :title="connectionError ?? undefined"
+    >
       <span class="status-dot"></span>
       {{ connectionError ? t("topbar.disconnected", { label: activeLabel }) : t("topbar.connected", { label: activeLabel }) }}
     </div>

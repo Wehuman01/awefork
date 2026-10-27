@@ -101,6 +101,7 @@ import {
   sanitizeResidentFolder,
   settings,
 } from "./settings";
+import { loadTabs, reviveTabs, saveTabs } from "./tabs-restore";
 
 /** One canvas tab: a story (fork tree) parked next to the active one. */
 export interface CanvasTab {
@@ -1335,6 +1336,7 @@ async function bootBackend(
   const ready = await window.awefork.ready(backend);
   if (!ready.ok) {
     state.connectionError = ready.error ?? `Failed to start the ${backend} server.`;
+    scheduleConnectionRetry();
     return;
   }
   try {
@@ -1385,6 +1387,24 @@ async function bootBackend(
     if (remembered) state.selectedDirectory = remembered;
   } catch {
     // Best-effort: a missing sidecar falls back to the auto-select below.
+  }
+  // Last launch's tabs, revived before the session load so the refill and
+  // the first selection see them: a parked tab claims its story, the
+  // active tab's selection lands as the opening view, and the strip paints
+  // with the first frame instead of blanking to one empty tab. Ids are
+  // minted fresh (they are per-launch); the strip binds by story root.
+  const storedTabs = loadTabs(backend);
+  if (storedTabs) {
+    const { tabs, activeIndex } = reviveTabs(storedTabs);
+    canvasTabSeq += tabs.length;
+    state.canvasTabs = tabs;
+    const active = tabs[activeIndex];
+    if (active) {
+      state.activeCanvasTabId = active.id;
+      state.selectedId = active.selectedId;
+      state.selectedTurnId = active.selectedTurnId;
+      if (active.directory) state.selectedDirectory = active.directory;
+    }
   }
   try {
     state.trash = (await window.awefork.trash(backend)).map((entry) => entry.id);
@@ -1642,6 +1662,29 @@ async function initialSessionLoad(options: { markSeen?: boolean } = {}): Promise
 }
 
 /**
+ * Re-probe a workspace flagged offline. The flag clears only on a successful
+ * fetch, and while the backend stays quiet nothing else retries one — a
+ * transient failure (a slow spawn, one foreign home timing out, a server
+ * mid-restart) would otherwise read as offline until the next session event
+ * or a manual refresh. A first boot that never got past its handshake retries
+ * the whole boot (pins, marks, trash and all); a booted workspace only needs
+ * the session list again. The first success clears the flag and the loop
+ * stops on its own.
+ */
+const CONNECTION_RETRY_MS = 15_000;
+let connectionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleConnectionRetry(): void {
+  if (connectionRetryTimer !== null) return;
+  connectionRetryTimer = setTimeout(() => {
+    connectionRetryTimer = null;
+    if (state.connectionError === null) return;
+    if (state.booted) void refreshSessions();
+    else void bootBackend(state.activeBackend);
+  }, CONNECTION_RETRY_MS);
+}
+
+/**
  * Execute the hard deletes a previous run left pending (app quit inside the
  * grace window, or a flush that failed). Entries that fail to delete are
  * dropped from the trash anyway — the session simply stays alive server-side,
@@ -1749,6 +1792,7 @@ export async function refreshSessions(options: { markSeen?: boolean } = {}): Pro
     // A failure from a parked world must not flag the active one offline.
     if (generation === workspaceGeneration && backend === state.activeBackend) {
       state.connectionError = error instanceof Error ? error.message : String(error);
+      scheduleConnectionRetry();
     }
   }
 }
@@ -1791,6 +1835,39 @@ async function leaveEmptiedDirectory(): Promise<void> {
 
 let canvasTabSeq = 1;
 
+/**
+ * Persist the live tabs for the ACTIVE backend — the restore source on the
+ * next launch. Called from every tab write path (open, close, activate,
+ * reorder, selection change), debounced because a selection burst would
+ * otherwise write per click. Blank-only strips still persist: closing every
+ * tab and reopening must not resurrect yesterday's set.
+ */
+let persistTabsTimer: ReturnType<typeof setTimeout> | null = null;
+
+function persistTabs(): void {
+  if (persistTabsTimer !== null) return;
+  persistTabsTimer = setTimeout(() => {
+    persistTabsTimer = null;
+    // Mid-switch the visible strip belongs to no backend: resetWorkspace
+    // has already blanked it and bootBackend has not revived the target's
+    // set yet. Writing here would clobber the incoming backend's saved
+    // tabs with one blank tab. Same guard as the composer flush.
+    if (composerLoadedFor === null && state.canvasTabs.length === 1) return;
+    const backend = state.activeBackend;
+    const active = state.activeCanvasTabId;
+    saveTabs(
+      backend,
+      state.canvasTabs.map((tab) => ({
+        rootId: tab.rootId,
+        selectedId: tab.selectedId,
+        selectedTurnId: tab.selectedTurnId,
+        directory: tab.directory,
+      })),
+      state.canvasTabs.find((t) => t.id === active)?.selectedId ?? null,
+    );
+  }, 300);
+}
+
 export const activeCanvasTab = computed<CanvasTab | null>(
   () => state.canvasTabs.find((t) => t.id === state.activeCanvasTabId) ?? null,
 );
@@ -1812,6 +1889,7 @@ function syncActiveTab(): void {
   tab.selectedTurnId = state.selectedTurnId;
   tab.directory = state.selectedDirectory;
   tab.rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+  persistTabs();
 }
 
 /**
@@ -1882,6 +1960,7 @@ export async function activateCanvasTab(tabId: string): Promise<void> {
   const tab = state.canvasTabs.find((t) => t.id === tabId);
   if (!tab) return;
   state.activeCanvasTabId = tabId;
+  persistTabs();
   state.canvasTabRestoreRequest = { tabId, nonce: Date.now() };
   if (tab.selectedId) {
     await selectSession(tab.selectedId);
@@ -1946,6 +2025,7 @@ export async function openCanvasTab(
   const at = state.canvasTabs.findIndex((t) => t.id === state.activeCanvasTabId);
   state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at + 1, 0, tab);
   state.activeCanvasTabId = tab.id;
+  persistTabs();
   state.canvasTabRestoreRequest = { tabId: tab.id, nonce: Date.now() };
   await selectSession(sessionId, { focus: true, markSeen: options.markSeen });
 }
@@ -1992,8 +2072,10 @@ export async function closeCanvasTab(tabId: string): Promise<void> {
     state.selectedId = null;
     state.selectedTurnId = null;
     state.streamParts = [];
+    persistTabs();
     return;
   }
+  persistTabs();
   if (!wasActive) return;
   const next = state.canvasTabs[Math.min(index, state.canvasTabs.length - 1)];
   if (next) await activateCanvasTab(next.id);
@@ -2014,6 +2096,7 @@ export function reorderCanvasTab(tabId: string, beforeTabId: string | null): voi
       ? state.canvasTabs.length
       : state.canvasTabs.findIndex((t) => t.id === beforeTabId);
   state.canvasTabs.splice(at < 0 ? state.canvasTabs.length : at, 0, moved);
+  persistTabs();
 }
 
 /** Live camera write from the canvas: park the view on the active tab. */
@@ -6549,6 +6632,7 @@ async function revalidateBackend(
     if (backend !== state.activeBackend || generation !== workspaceGeneration) return;
     if (!ready.ok) {
       state.connectionError = ready.error ?? `Failed to start the ${backend} server.`;
+      scheduleConnectionRetry();
       return;
     }
     await refreshSessions(options);
@@ -6557,6 +6641,7 @@ async function revalidateBackend(
   } catch (error) {
     if (backend === state.activeBackend && generation === workspaceGeneration) {
       state.connectionError = error instanceof Error ? error.message : String(error);
+      scheduleConnectionRetry();
     }
   }
 }
