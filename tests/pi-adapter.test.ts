@@ -40,6 +40,10 @@ const FIXTURES: Record<string, string> = {
     FIXTURE_DIR,
     "2026-07-20T09-00-20-000Z_55c53b20-97e4-4f30-9a3f-0000000000e5.jsonl",
   ),
+  "s6-cli-fork": join(
+    FIXTURE_DIR,
+    "2026-07-02T10-00-00-000Z_55c53b20-97e4-4f30-9a3f-0000000000a2.jsonl",
+  ),
 };
 
 interface RpcChild {
@@ -248,6 +252,42 @@ describe("createPiAdapter listSessions()", () => {
       origin: "fork",
       parentSessionId: "s1-mixed",
     });
+  });
+
+  it("resolves a fork pi recorded in its own header when the sidecar has none", async () => {
+    // pi writes the fork into the child's header as parentSession — the SOURCE
+    // FILE's name, not its session id. A fork cut by the pi CLI (outside
+    // awefork) has no sidecar record, so without this it reads as a root.
+    const { adapter } = await makeHarness(["s5-fork", "s6-cli-fork"]);
+
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "s6-cli-fork")).toMatchObject({
+      origin: "fork",
+      parentSessionId: "s5-fork",
+    });
+  });
+
+  it("keeps the sidecar's parent over the header's when both name one", async () => {
+    const { adapter, lineagePath } = await makeHarness(["s5-fork", "s6-cli-fork"]);
+    const { recordFork } = await import("../src/shared/lineage-store");
+    await recordFork(lineagePath, "s6-cli-fork", {
+      parentId: "s1-mixed",
+      atMessageId: "m-q0",
+      createdAt: 2,
+    });
+
+    const sessions = await adapter.listSessions();
+    expect(sessions.find((s) => s.id === "s6-cli-fork")).toMatchObject({
+      origin: "fork",
+      parentSessionId: "s1-mixed",
+    });
+  });
+
+  it("leaves a session a root when its header names no parent", async () => {
+    const { adapter } = await makeHarness(["s1-mixed", "s4-late"]);
+
+    const sessions = await adapter.listSessions();
+    expect(sessions.every((s) => s.origin === "root" && s.parentSessionId === null)).toBe(true);
   });
 });
 

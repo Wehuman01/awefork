@@ -107,6 +107,8 @@ interface PiHeader {
   id?: string;
   cwd?: string;
   timestamp?: string;
+  /** pi writes the source FILE's name here when a fork copies it. */
+  parentSession?: string;
 }
 
 interface ParsedSession {
@@ -210,7 +212,12 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
         continue;
       }
       if (parsed.type === "session") {
-        header = { id: str(parsed.id), cwd: str(parsed.cwd), timestamp: str(parsed.timestamp) };
+        header = {
+          id: str(parsed.id),
+          cwd: str(parsed.cwd),
+          timestamp: str(parsed.timestamp),
+          parentSession: str(parsed.parentSession),
+        };
       } else if (typeof parsed.id === "string") {
         entries.push(parsed as unknown as PiEntry);
       }
@@ -440,6 +447,33 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
   };
 
   /**
+   * The parent session id a header recorded, or null when it names none.
+   *
+   * pi's fork writes `parentSession` as the SOURCE FILE's path (see
+   * session-manager's forkSession), so the file → session-id map turns it
+   * into a parent awefork can draw. A file no longer in the store (deleted,
+   * or a store moved between runs) names no known session and the fork stays
+   * a root — never a dangling edge.
+   */
+  const headerParentIdOf = (
+    parsed: ParsedSession,
+    idByFile: Map<string, string>,
+  ): string | null => {
+    const parentFile = parsed.header?.parentSession;
+    if (!parentFile) return null;
+    // pi spells the source as a bare name, or as a path; the map is keyed on
+    // the name, so both resolve.
+    const id = idByFile.get(parentFile) ?? idByFile.get(fileNameOf(parentFile));
+    return id && id !== parsed.header?.id ? id : null;
+  };
+
+  /** The last path segment, on either separator — shared/ imports no node built-ins. */
+  const fileNameOf = (path: string): string => {
+    const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return slash === -1 ? path : path.slice(slash + 1);
+  };
+
+  /**
    * The id→file table, rebuilt lazily. A mutation marks its own session
    * stale — the next refresh re-parses only those files instead of the whole
    * store. create/fork add files the mutation cannot name, so they drop the
@@ -561,12 +595,26 @@ export function createPiAdapter(options: PiAdapterOptions): AgentAdapter {
       const lineage = await readLineage(lineagePath);
       const table = await refreshIndex(true);
       const summaries: SessionSummary[] = [];
+      // pi's header names the parent by FILE, so the file → session-id map is
+      // what turns it into a parent awefork can draw. Keyed on the file NAME:
+      // the header spells the source as a bare name (or a path), and the
+      // store's own listing gives absolute paths.
+      const idByFile = new Map<string, string>();
+      for (const [id, parsed] of table) {
+        if (parsed.file) idByFile.set(fileNameOf(parsed.file), id);
+      }
       for (const parsed of table.values()) {
         const summary = mapSession(parsed);
         const fork = lineage[summary.id];
         if (fork) {
           summary.origin = "fork";
           summary.parentSessionId = fork.parentId;
+        } else {
+          const headerParent = headerParentIdOf(parsed, idByFile);
+          if (headerParent) {
+            summary.origin = "fork";
+            summary.parentSessionId = headerParent;
+          }
         }
         summaries.push(summary);
       }
