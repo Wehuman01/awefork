@@ -655,7 +655,7 @@ describe("capabilities and store paths", () => {
       attachments: true,
       fileChanges: false,
       compress: true,
-      exportBranch: false,
+      exportBranch: true,
     });
     expect(await registry.capabilities("opencode")).toEqual({
       deleteMessage: true,

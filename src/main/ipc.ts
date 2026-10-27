@@ -526,9 +526,10 @@ export function registerIpc(
     },
   );
 
-  // Standalone copy of a branch: same native fork primitive, no lineage
-  // record — the exported session lands as a plain root session. Rejects on
-  // backends whose fork linkage lives in the backend itself (capabilities).
+  // Standalone copy of a branch: same native fork primitive, detached — the
+  // exported session lands as a plain root session, its server-side fork
+  // link suppressed by the detached lineage record. Rejects on backends
+  // whose linkage cannot be suppressed that way (capabilities).
   ipcMain.handle(
     "awefork:exportSession",
     async (

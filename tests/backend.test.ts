@@ -53,14 +53,14 @@ describe("backendCapabilities", () => {
     });
   });
 
-  it("gates codex to no message delete and compaction, but allows attachments", () => {
+  it("gates codex to no message delete, but allows attachments, compaction and export", () => {
     expect(backendCapabilities("codex")).toEqual({
       deleteMessage: false,
       deleteSession: true,
       attachments: true,
       fileChanges: false,
       compress: true,
-      exportBranch: false,
+      exportBranch: true,
     });
   });
 

@@ -44,9 +44,14 @@ export interface BackendCapabilities {
    */
   compress: boolean;
   /**
-   * Copying a branch out as a standalone native session. Needs a fork whose
-   * parent linkage awefork owns (opencode's sidecar lineage) — a backend
-   * that records fork parents itself cannot offer a detached copy.
+   * Copying a branch out as a standalone native session. Uses the same
+   * server-side copy primitive as fork, but the copy lands as a plain root:
+   * where the backend stamps its own fork link on the copy (opencode v2's
+   * `fork.sessionID`, codex's `forkedFromId`), that link is suppressed
+   * through a detached lineage record in every awefork view — the agent's
+   * own storage keeps it, since awefork never rewrites it. A backend whose
+   * linkage cannot be suppressed this way (pi's copy bakes the parent into
+   * the new file header) does not offer the export.
    */
   exportBranch: boolean;
 }
@@ -140,18 +145,21 @@ export function backendCapabilities(
 ): BackendCapabilities {
   switch (backend) {
     case "codex":
-      // codex records fork parents itself, so no detached export; no
-      // single-message delete. Compaction is thread/compact/start (a turn of
-      // its own, streamed like any run). Images ride turn/start's localImage
-      // input items (staged as files by main); non-image attachments have no
-      // file part, so the adapter inlines them into the prompt text.
+      // codex stamps forkedFromId on its own threads, so an export's copy is
+      // detached the way opencode v2's is: a detached lineage record
+      // suppresses the link in every awefork view, while codex's own store
+      // keeps it (awefork never rewrites agent storage). No single-message
+      // delete. Compaction is thread/compact/start (a turn of its own,
+      // streamed like any run). Images ride turn/start's localImage input
+      // items (staged as files by main); non-image attachments have no file
+      // part, so the adapter inlines them into the prompt text.
       return {
         deleteMessage: false,
         deleteSession: true,
         attachments: true,
         fileChanges: false,
         compress: true,
-        exportBranch: false,
+        exportBranch: true,
       };
     case "pi":
       // pi sessions are append-only files: no message delete, no session

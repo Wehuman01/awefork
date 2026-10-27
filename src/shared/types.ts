@@ -634,8 +634,10 @@ export interface AgentAdapter {
    * the same server-side copy primitive as fork, but detached: no canvas
    * branch, just a plain root session the backend's own tools can open and
    * continue anywhere. `atMessageId === null` copies the session at its
-   * latest state. Backends whose fork linkage lives inside the backend itself
-   * (and therefore cannot detach) reject.
+   * latest state. Where the backend stamps its own fork link on the copy
+   * (opencode v2's `fork.sessionID`, codex's `forkedFromId`), a detached
+   * lineage record suppresses that link in every awefork view; a backend
+   * whose linkage cannot be suppressed this way (pi) rejects.
    */
   exportSession(sessionId: string, atMessageId: string | null): Promise<SessionSummary>;
   /** Permanently remove a session (and awefork's lineage record for it). */
