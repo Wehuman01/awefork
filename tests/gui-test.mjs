@@ -404,6 +404,63 @@ try {
   await retry(() => cdp.evaluate(`!document.querySelector(".overview-float")`), 5000, "panel closed after bulk mark");
   check("panel collapses after the bulk mark", true);
 
+  // 4g. Story search layout: the popup lives in the canvas's top-strip stack,
+  //     whose max-width leaves the overview pill its corner. An open surface
+  //     is a flex item, and its own fit-content used to ride over that cap —
+  //     a long hit's text then pushed the box past the canvas's right edge,
+  //     where the context panel cut the results off. Measured on a narrow
+  //     viewport so the cap binds below the demo hits' own content width:
+  //     that is the only state where the overflow shows up at all.
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 820,
+    height: 720,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    await retry(
+      () =>
+        cdp.evaluate(
+          `window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }))`,
+        ),
+      5000,
+      "open the story search",
+    );
+    await retry(() => cdp.evaluate(`Boolean(document.querySelector(".ss-box"))`), 5000, "search box open");
+    await retry(() => cdp.evaluate(fillInput(".ss-box input", "hero")), 5000, "type the query");
+    const searchLayout = await retry(async () => {
+      const state = await cdp.evaluate(`(() => {
+        const rect = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { w: Math.round(r.width), right: Math.round(r.right) };
+        };
+        return {
+          hits: document.querySelectorAll(".ss-hit").length,
+          viewport: rect(".viewport"),
+          stack: rect(".canvas-panels"),
+          results: rect(".ss-results"),
+        };
+      })()`);
+      if (state.hits < 1) throw new Error("no hits yet");
+      return state;
+    }, 5000, "search hits");
+    check(
+      "the results popup obeys the stack's width cap",
+      searchLayout.results.w <= searchLayout.stack.w + 1,
+      JSON.stringify(searchLayout),
+    );
+    check(
+      "the results popup never reaches past the canvas's right edge",
+      searchLayout.results.right <= searchLayout.viewport.right + 1,
+      JSON.stringify(searchLayout),
+    );
+    await retry(() => cdp.evaluate(`document.querySelector(".ss-box .ss-close").click()`), 5000, "close the search");
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+  }
+
   // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(
