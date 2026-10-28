@@ -103,7 +103,7 @@
       </svg>
 
       <article
-        v-for="node in graph.nodes"
+        v-for="node in visibleNodes"
         :key="node.id"
         :ref="cardRef"
         :data-node-id="node.id"
@@ -1649,6 +1649,36 @@ watch(graph, (g) => {
   for (const id of Object.keys(cardHeights)) {
     if (!live.has(id)) delete cardHeights[id];
   }
+});
+
+// ── viewport culling ────────────────────────────────────────────────
+// A real directory holds hundreds of cards while the window shows a dozen.
+// The card v-for used to draw all of them, so every pan frame, zoom tick and
+// stream delta re-rendered the whole graph: at 530 cards a drag frame cost
+// ~32ms against ~6ms for the 40 cards actually near the viewport. Layout,
+// edges, the minimap and search still work off the full graph — only the
+// card elements are culled to what the viewport shows, plus a margin so a
+// fast pan never pops cards in.
+const VIEW_MARGIN = 240;
+
+const visibleNodes = computed<TurnNode[]>(() => {
+  const nodes = graph.value.nodes;
+  const { w, h } = viewportSize.value;
+  // Before the first measurement the viewport rect is unknown — render
+  // everything for that frame rather than nothing.
+  if (w === 0 || h === 0) return nodes;
+  const s = scale.value;
+  const left = -tx.value / s - VIEW_MARGIN;
+  const top = -ty.value / s - VIEW_MARGIN;
+  const right = (w - tx.value) / s + VIEW_MARGIN;
+  const bottom = (h - ty.value) / s + VIEW_MARGIN;
+  return nodes.filter(
+    (node) =>
+      node.x + NODE_WIDTH >= left &&
+      node.x <= right &&
+      node.y + node.height >= top &&
+      node.y <= bottom,
+  );
 });
 
 const showMinimap = computed(() => settings.canvas.minimap && graph.value.nodes.length > 0);
