@@ -531,20 +531,11 @@
            per-node styles (that churn was the jank on large graphs). -->
       <div class="mm-layer" :style="mmLayerStyle">
         <div
-          v-for="n in mmNodes"
-          :key="`mm-${n.id}`"
+          v-for="dot in mmDots"
+          :key="`mm-${dot.id}`"
           class="mm-node"
-          :class="{
-            stub: n.kind === 'stub',
-            on: activePathIds.has(n.id),
-            desc: isMapSubtree(n),
-            running: isNodeRunning(n),
-            waiting: isNodeWaiting(n),
-            recent: isNodeRecent(n),
-            hit: searchHitIds.has(n.id),
-            marked: isTurnMarked(n.id),
-          }"
-          :style="{ ...mmNodeStyle(n), '--recent-alpha': recentAlpha(n) }"
+          :class="dot.className"
+          :style="dot.style"
         ></div>
       </div>
       <div class="mm-view" :style="mmViewStyle"></div>
@@ -1734,17 +1725,22 @@ const mmLayerStyle = computed(() => {
   };
 });
 
-function mmNodeStyle(node: TurnNode): Record<string, string> {
+/** One dot's CSS text. A string (not an object) so a camera move can skip the
+ *  element entirely: Vue short-circuits equal style strings, while an object
+ *  style rewrites every property on every render. */
+function mmNodeStyle(node: TurnNode): string {
   const g = minimapGeometry.value;
-  if (!g) return { display: "none" };
-  return {
-    left: `${g.offX + (node.x - g.minX) * g.s}px`,
-    top: `${g.offY + (node.y - g.minY) * g.s}px`,
-    width: `${Math.max(4, NODE_WIDTH * g.s)}px`,
-    height: `${Math.max(3, node.height * g.s)}px`,
-    // at this size the 1px outline is half the footprint and reads as mush
-    borderWidth: g.s > 0.09 ? "1px" : "0",
-  };
+  if (!g) return "display:none";
+  // At this size the 1px outline is half the footprint and reads as mush.
+  const borderWidth = g.s > 0.09 ? "1px" : "0";
+  return [
+    `left:${g.offX + (node.x - g.minX) * g.s}px`,
+    `top:${g.offY + (node.y - g.minY) * g.s}px`,
+    `width:${Math.max(4, NODE_WIDTH * g.s)}px`,
+    `height:${Math.max(3, node.height * g.s)}px`,
+    `border-width:${borderWidth}`,
+    `--recent-alpha:${recentAlpha(node)}`,
+  ].join(";");
 }
 
 /** Paint order for overlapping minimap dots: plain → stub → subtree → hit →
@@ -1771,6 +1767,39 @@ function mmNodeRank(node: TurnNode): number {
   if (isMapSubtree(node)) return 2;
   return node.kind === "stub" ? 1 : 0;
 }
+
+/**
+ * Dot descriptors, built only when the graph, the selection or a dot's state
+ * changes — never on a camera move. The map draws its dots from these, so
+ * panning and zooming re-diff plain strings instead of re-evaluating every
+ * dot's classes and styles: at 1,500 nodes that evaluation was ~7ms per pan
+ * frame, while the camera itself only moves the layer and the view rect.
+ */
+interface MmDot {
+  id: string;
+  className: string;
+  style: string;
+}
+
+const mmDots = computed<MmDot[]>(() =>
+  mmNodes.value.map((node) => {
+    const classes = [
+      node.kind === "stub" ? "stub" : "",
+      activePathIds.value.has(node.id) ? "on" : "",
+      isMapSubtree(node) ? "desc" : "",
+      isNodeRunning(node) ? "running" : "",
+      isNodeWaiting(node) ? "waiting" : "",
+      isNodeRecent(node) ? "recent" : "",
+      searchHitIds.value.has(node.id) ? "hit" : "",
+      isTurnMarked(node.id) ? "marked" : "",
+    ].filter(Boolean);
+    return {
+      id: node.id,
+      className: classes.join(" "),
+      style: mmNodeStyle(node),
+    };
+  }),
+);
 
 /** The viewport's current slice of world space, drawn on the minimap. */
 const mmViewStyle = computed(() => {

@@ -29,7 +29,11 @@ describe("canvas waiting tint", () => {
   it("binds the waiting class on the card, the flag and the minimap dot", async () => {
     const canvas = await readFile(CANVAS_PATH, "utf8");
     expect(canvas).toMatch(/running: isNodeRunning\(node\),\n\s+waiting: isNodeWaiting\(node\),/);
-    expect(canvas).toMatch(/running: isNodeRunning\(n\),\n\s+waiting: isNodeWaiting\(n\),/);
+    // The map dot's classes are built once per graph change (mmDots) and the
+    // template binds that descriptor — a per-frame class object was the jank.
+    expect(canvas).toMatch(/isNodeRunning\(node\) \? "running" : ""/);
+    expect(canvas).toMatch(/isNodeWaiting\(node\) \? "waiting" : ""/);
+    expect(canvas).toMatch(/:class="dot\.className"/);
     expect(canvas).toMatch(/:class="\{ waiting: isNodeWaiting\(node\) \}"/);
     // the flag names the state instead of claiming the run is working
     expect(canvas).toMatch(
