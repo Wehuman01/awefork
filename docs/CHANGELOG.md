@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.6
+
+- **The canvas draws only the cards near the viewport** — the card v-for rendered every turn node, so each pan frame, zoom tick and stream delta re-rendered the whole graph even though the window shows a dozen cards. At 530 cards a drag frame cost ~32ms, a zoom tick ~38ms and a stream delta ~29ms; culling to the viewport plus a 240px margin drops them to ~3.6ms / ~3.5ms / ~0.1ms. Layout, edges, the minimap and search still read the full graph — only the card elements are culled, so nothing about the story's shape changes. The frame before the viewport is measured renders everything, so a fresh canvas never paints empty.
+- **The minimap's dots stay off the per-frame render path** — the map's dots evaluated eight class conditions and rebuilt a style object per dot on every render, so a pan frame at 1,530 nodes spent ~7ms there while the camera only moves the layer transform and the view rect. Dots are descriptors now (class string + CSS text) rebuilt only when the graph, the selection or a dot's state changes; a camera move re-diffs plain strings Vue can skip. At 1,530 nodes drag drops 10.3ms → 3.6ms and zoom 10.0 → 3.9. The waiting-tint test pins the descriptor wiring instead of the old inline class object.
+
+### Install
+
+Installers attached: `awefork-0.5.6-universal.dmg` (macOS universal — Intel and Apple Silicon in one package; unsigned, so on first launch right-click the app and choose Open, or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`), `awefork-0.5.6-arm64.dmg` (macOS arm64 only, smaller download) and `awefork-0.5.6-x64-setup.exe` (Windows x64).
+
 ## v0.5.5
 
 - **Summarize up to four stories you already ran (事后总结)** — the retroactive sibling of a multi-model round: pick stories on the canvas — the ✦ button on a card arms a selection, picked cards wear a lavender ring and an order badge, a floating bar counts them and confirms into the digest dialog, and the story-tab strip's ✦ entry opens the same picker for parked stories. Up to four, each summarized whole (recent 20 turns / 8k chars, omission counted) or from its locked turn with the latest as stand-in, at the summary model and length you choose. The digest lands as a ✂ empty-context fork on the first story's tree — the same card, badge and reading pane a round's summary uses — with a version selector, the source stories as jumps and re-summarize (fresh material, fresh fork per version). Records are durable in the main-owned digests sidecar mirroring the rounds store, and a run nobody watched restores as "unknown", never as finished or busy; the reading view drops the round-only retry/stop/compare it never had.
