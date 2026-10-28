@@ -2088,6 +2088,26 @@ export const activeCanvasTab = computed<CanvasTab | null>(
   () => state.canvasTabs.find((t) => t.id === state.activeCanvasTabId) ?? null,
 );
 
+/**
+ * Last summary each open tab's title resolved to, keyed by the story root
+ * the tab was parked with. A refresh can drop a session from the listing
+ * (opencode merges one query per worktree and swallows a failed one, codex's
+ * thread/list omits a fresh thread until its first rollout lands, a cold
+ * server answers before its scan) while the tab keeps its record on
+ * purpose — the prune's grace window owns that record. Resolving a title
+ * against the live listing alone renamed such a tab to "New canvas" while
+ * its canvas was still loaded; the pane keeps a stand-in for exactly this
+ * gap (selectedSession / lastSelectedSummary), and this is the strip's.
+ * Entries are forgotten when a tab's root changes or its tab closes, so the
+ * map tracks the open strip rather than every story ever seen.
+ */
+const tabStorySummaries = new Map<string, SessionSummary>();
+
+/** Drop a tab's cached title stand-in: its root moved, or its tab closed. */
+function forgetTabStory(rootId: string | null): void {
+  if (rootId !== null) tabStorySummaries.delete(rootId);
+}
+
 /** The story-root sessions the open tabs point at, tab order. */
 export function tabRootSession(tab: CanvasTab): SessionSummary | null {
   if (!tab.rootId) return null;
@@ -2096,10 +2116,23 @@ export function tabRootSession(tab: CanvasTab): SessionSummary | null {
   // (opencode merges one query per worktree and swallows a failed one). The
   // tab still shows that story, so name it from the selection rather than
   // letting the strip rename a live tab to "New canvas".
-  if (root) return root;
-  return tab.selectedId
-    ? (visibleSessions.value.find((s) => s.id === tab.selectedId) ?? null)
-    : null;
+  if (root) {
+    tabStorySummaries.set(tab.rootId, root);
+    return root;
+  }
+  if (tab.selectedId) {
+    const selected = visibleSessions.value.find((s) => s.id === tab.selectedId);
+    if (selected) {
+      tabStorySummaries.set(tab.rootId, selected);
+      return selected;
+    }
+  }
+  // The whole story dropped out of this listing: the tab keeps its record
+  // (and the canvas its story) through the grace window, so the title keeps
+  // the last summary this same root was seen with instead of flipping to
+  // "New canvas" over a listing gap. A record the prune blanked has no entry
+  // left — a dead story stays nameless.
+  return tabStorySummaries.get(tab.rootId) ?? null;
 }
 
 /**
@@ -2113,10 +2146,20 @@ function syncActiveTab(): void {
   tab.selectedId = state.selectedId;
   tab.selectedTurnId = state.selectedTurnId;
   tab.directory = state.selectedDirectory;
+  const previousRoot = tab.rootId;
   if (state.selectedId === null) {
     tab.rootId = null;
+    forgetTabStory(previousRoot);
   } else if (visibleSessions.value.some((s) => s.id === state.selectedId)) {
-    tab.rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+    const rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+    if (rootId !== previousRoot) forgetTabStory(previousRoot);
+    tab.rootId = rootId;
+    // Warm the title stand-in here, where the story is known to be listed:
+    // a later refresh that drops it must not rename the tab over the gap.
+    if (rootId !== null) {
+      const root = visibleSessions.value.find((s) => s.id === rootId);
+      if (root) tabStorySummaries.set(rootId, root);
+    }
   }
   // A selection this listing dropped keeps the root it was parked with: the
   // prune's grace window owns that record, and re-rooting here would rename
@@ -2179,6 +2222,7 @@ function pruneCanvasTabs(): boolean {
         continue;
       }
       tabSessionMissingSince.delete(tab.selectedId);
+      forgetTabStory(tab.rootId);
       tab.selectedId = null;
       tab.selectedTurnId = null;
       tab.rootId = null;
@@ -2192,6 +2236,7 @@ function pruneCanvasTabs(): boolean {
       // still has so dedupe and the title follow the live tree.
       if (sessionMissingPastGrace(tab.rootId, now)) {
         tabSessionMissingSince.delete(tab.rootId);
+        forgetTabStory(tab.rootId);
         tab.rootId = storyRootOf(visibleSessions.value, state.lineage, tab.selectedId);
       }
     } else if (tab.rootId !== null) {
@@ -2243,6 +2288,7 @@ export async function activateCanvasTab(tabId: string): Promise<void> {
     // catches up on refresh): a failed restore blanks the tab instead of
     // leaving it claiming a story the canvas isn't showing.
     if (state.selectedId !== tab.selectedId) {
+      forgetTabStory(tab.rootId);
       tab.selectedId = null;
       tab.selectedTurnId = null;
       tab.rootId = null;
@@ -2328,6 +2374,8 @@ export async function openSession(
 export async function closeCanvasTab(tabId: string): Promise<void> {
   const index = state.canvasTabs.findIndex((t) => t.id === tabId);
   if (index < 0) return;
+  const closing = state.canvasTabs[index];
+  if (closing) forgetTabStory(closing.rootId);
   const wasActive = state.activeCanvasTabId === tabId;
   state.canvasTabs.splice(index, 1);
   delete state.canvasTabViews[tabId];
@@ -7345,6 +7393,9 @@ function resetWorkspace(): void {
   searchQuery.value = "";
   activeTabStoryDied = false;
   canvasTabSeq += 1;
+  // The strip is gone with the outgoing backend; the incoming one's titles
+  // re-warm from its own listings.
+  tabStorySummaries.clear();
   state.canvasTabs = [
     {
       id: `tab-${canvasTabSeq}`,

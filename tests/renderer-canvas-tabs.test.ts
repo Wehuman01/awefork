@@ -221,11 +221,45 @@ describe("canvas tabs", () => {
     const parked = state.store.canvasTabs.find((t) => t.id === storyATab);
     expect(parked?.rootId).toBeNull();
     expect(parked?.selectedId).toBeNull();
+    // A tab blanked for real has no story to name: the strip shows the blank
+    // "New canvas" title, and no stand-in resurrects the dead story's name.
+    if (parked) expect(state.tabRootSession(parked)).toBeNull();
     // The dying story was the ACTIVE tab, so the live selection blanks with
     // it — and the story-b tab survives untouched in the background.
     expect(state.store.selectedId).toBeNull();
     const survivor = state.store.canvasTabs.find((t) => t.rootId === "story-b");
     expect(survivor).toBeDefined();
+  });
+
+  it("keeps a tab's title while the listing drops its whole story", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a"); // story-a active, story-b parked
+    const parkedId = state.store.canvasTabs.find((t) => t.selectedId === "story-b")?.id;
+    expect(parkedId).toBeDefined();
+
+    // A partial listing drops the parked tab's whole story: opencode's
+    // worktree query failed, codex rescanned, a cold server answered before
+    // its scan. The tab keeps its record by design — the prune's grace
+    // window owns it — so a loaded tab must not rename itself to
+    // "New canvas" over the gap.
+    apiSessions = [STORY_A];
+    await state.refreshSessions();
+
+    const parked = state.store.canvasTabs.find((t) => t.id === parkedId);
+    expect(parked?.selectedId).toBe("story-b");
+    expect(parked?.rootId).toBe("story-b");
+    if (parked) expect(state.tabRootSession(parked)?.title).toBe(STORY_B.title);
+
+    // The active tab's story drops in the same refresh: the strip names it
+    // from the same stand-in, the live selection and its pane survive with
+    // it, and nothing refills over the parked record.
+    apiSessions = [];
+    await state.refreshSessions();
+    expect(state.store.selectedId).toBe("story-a");
+    expect(state.selectedSession.value?.id).toBe("story-a");
+    const active = state.activeCanvasTab.value;
+    expect(active).toBeDefined();
+    if (active) expect(state.tabRootSession(active)?.title).toBe(STORY_A.title);
   });
 
   it("gives a parked tab the same grace window as the active one", async () => {
@@ -244,6 +278,7 @@ describe("canvas tabs", () => {
     const parked = state.store.canvasTabs.find((t) => t.id === parkedId);
     expect(parked?.selectedId).toBe("story-b");
     expect(parked?.rootId).toBe("story-b");
+    if (parked) expect(state.tabRootSession(parked)?.title).toBe(STORY_B.title);
 
     // It parks blank only after the session stayed missing past the grace.
     vi.advanceTimersByTime(9_000);
