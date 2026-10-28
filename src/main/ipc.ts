@@ -17,6 +17,7 @@ import {
   canonicalizeDirectoryList,
 } from "../shared/canonical-paths.js";
 import { readComposer, writeComposer } from "../shared/composer-store.js";
+import type { DiagnosticUpdate } from "../shared/diagnostics.js";
 import { lineDiff } from "../shared/diff.js";
 import type { DigestsStore } from "../shared/digest-store.js";
 import { normalizeDigestGroup } from "../shared/digest-types.js";
@@ -79,6 +80,7 @@ import {
   codexRolloutProviderFallback,
   terminalDefaultCodexHome,
 } from "./codex-homes.js";
+import type { Diagnostics } from "./diagnostics.js";
 import { convertDocumentToText } from "./document-convert.js";
 import {
   listDirectory,
@@ -196,6 +198,12 @@ function normalizeOverviewListing(value: unknown): OverviewListing | null {
  * Story digests sidecar (main-owned, when a store is passed in):
  *   digestsList()               -> DigestGroup[]     every persisted digest
  *   digestsSave(group)          -> boolean           upsert one digest (id-keyed)
+ * Status panel diagnostics (main-owned ring buffer, wired by
+ * registerDiagnosticsIpc):
+ *   diagnostics()               -> DiagnosticEntry[] buffered console tail
+ *   clearDiagnostics()          -> void              app-global clear (broadcast)
+ * New entries and the clear arrive on "awefork:diagnostic" as
+ * {entry?, cleared?}.
  * Multi-window jumps: requestAgentNavigate(backend, session) focuses (or
  * opens) the backend's own window and hands "awefork:agent-navigate"
  * {backend, sessionId} to the window that owns it — the agent window main
@@ -1162,5 +1170,26 @@ export function registerIpc(
     return downloadAndInstallUpdate(String(version ?? ""), (progress) => {
       if (!sender.isDestroyed()) sender.send("awefork:update-progress", progress);
     });
+  });
+}
+
+/**
+ * Status panel channels. The buffer is app-global — one main process, one
+ * tail of what its console said — so every window reads the same entries and
+ * the clear is broadcast rather than applied per window: a panel cleared in
+ * one window must not resurrect its entries in another. The subscription
+ * lives for the app's lifetime, matching registry.forward's contract.
+ */
+export function registerDiagnosticsIpc(diagnostics: Diagnostics): void {
+  const broadcast = (update: DiagnosticUpdate): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send("awefork:diagnostic", update);
+    }
+  };
+  diagnostics.subscribe((entry) => broadcast({ entry }));
+  ipcMain.handle("awefork:diagnostics", async () => diagnostics.snapshot());
+  ipcMain.handle("awefork:diagnosticsClear", async () => {
+    diagnostics.clear();
+    broadcast({ cleared: true });
   });
 }

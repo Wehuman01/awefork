@@ -15,6 +15,7 @@ import type {
   BackendId,
   BackendsResult,
 } from "../shared/backend.js";
+import type { DiagnosticEntry, DiagnosticUpdate } from "../shared/diagnostics.js";
 import type { LineDiffResult } from "../shared/diff.js";
 import type { DigestGroup } from "../shared/digest-types.js";
 import type {
@@ -323,6 +324,13 @@ const api: AweforkApi = {
   digestsList: (): Promise<DigestGroup[]> => ipcRenderer.invoke("awefork:digestsList"),
   digestsSave: (group: DigestGroup): Promise<boolean> =>
     ipcRenderer.invoke("awefork:digestsSave", group),
+  diagnostics: (): Promise<DiagnosticEntry[]> => ipcRenderer.invoke("awefork:diagnostics"),
+  clearDiagnostics: (): Promise<void> => ipcRenderer.invoke("awefork:diagnosticsClear"),
+  onDiagnostic: (handler: (update: DiagnosticUpdate) => void): (() => void) => {
+    const listener = (_event: unknown, payload: unknown) => handler(payload as DiagnosticUpdate);
+    ipcRenderer.on("awefork:diagnostic", listener);
+    return () => ipcRenderer.removeListener("awefork:diagnostic", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("awefork", api);

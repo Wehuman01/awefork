@@ -38,6 +38,7 @@
     "src/shared/file-paths.ts",
     "src/shared/file-types.ts",
     "src/shared/diff.ts",
+    "src/shared/diagnostics.ts",
     "src/shared/agents/*.json",
     "src/shared/agent-descriptor.ts"
   ]

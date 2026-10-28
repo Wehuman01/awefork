@@ -1385,6 +1385,19 @@ export function installMockAdapter(): void {
       else demoDigests.push(structuredClone(group));
       return true;
     },
+    // Status panel: the demo has no main process to fail, so the buffer
+    // starts with one scripted entry and stays empty afterwards — enough to
+    // show the panel's shape without faking a crash.
+    diagnostics: async () => [
+      {
+        seq: 1,
+        at: Date.now() - 60_000,
+        level: "warn" as const,
+        text: t("demo.diagnosticsSample"),
+      },
+    ],
+    clearDiagnostics: async () => {},
+    onDiagnostic: () => () => {},
   };
 
   // Demo interaction asks: the dataset has no backend to block on, so these

@@ -65,13 +65,21 @@
         </button>
       </div>
     </div>
-    <div
-      class="topbar-status"
-      :class="connectionError ? 'bad' : 'ok'"
-      :title="connectionError ?? undefined"
-    >
-      <span class="status-dot"></span>
-      {{ connectionError ? t("topbar.disconnected", { label: activeLabel }) : t("topbar.connected", { label: activeLabel }) }}
+    <div class="topbar-status-wrap" @click.stop>
+      <button
+        type="button"
+        class="topbar-status"
+        :class="statusTone"
+        :aria-expanded="statusOpen"
+        aria-haspopup="dialog"
+        :title="statusTitle"
+        @click="toggleStatus"
+      >
+        <span class="status-dot"></span>
+        {{ connectionError ? t("topbar.disconnected", { label: activeLabel }) : t("topbar.connected", { label: activeLabel }) }}
+        <span v-if="unseenErrors > 0" class="status-badge" role="status">{{ unseenErrors }}</span>
+      </button>
+      <StatusPanel v-if="statusOpen" class="status-pop" @close="statusOpen = false" />
     </div>
     <button
       type="button"
@@ -170,9 +178,11 @@ import {
   store,
   switchBackend,
   switchDirectory,
+  unseenErrorCount,
 } from "../state";
 import { cycleTheme, theme, themeGlyph } from "../theme";
 import HistoryButton from "./history-button.vue";
+import StatusPanel from "./status-panel.vue";
 
 const open = ref(false);
 const versionOpen = ref(false);
@@ -183,6 +193,24 @@ const backendOpen = ref(false);
 const multiWindow = computed(() => settings.canvas.multiWindow);
 const currentDirectory = computed(() => store.selectedDirectory ?? "");
 const connectionError = computed(() => store.connectionError);
+// The status dot doubles as the log panel's handle: a disconnected backend
+// or an unread background error both light it, and the badge counts what
+// the user has not looked at yet.
+const unseenErrors = computed(() => unseenErrorCount.value);
+const statusOpen = ref(false);
+const statusTone = computed(() =>
+  connectionError.value !== null || unseenErrors.value > 0 ? "bad" : "ok",
+);
+const statusTitle = computed(
+  () =>
+    connectionError.value ??
+    (unseenErrors.value > 0
+      ? t("status.unseenErrors", { n: unseenErrors.value })
+      : t("status.open")),
+);
+const toggleStatus = (): void => {
+  statusOpen.value = !statusOpen.value;
+};
 const backendList = computed(() => store.backendList);
 const activeBackend = computed(() => store.activeBackend);
 const activeVersionWarning = computed(
@@ -272,11 +300,13 @@ function closeOnOutsideClick(): void {
   open.value = false;
   versionOpen.value = false;
   backendOpen.value = false;
+  statusOpen.value = false;
 }
 
 function closeOnEscape(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     pendingBackend.value = null;
+    statusOpen.value = false;
   }
 }
 

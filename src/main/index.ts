@@ -6,7 +6,8 @@ import { DigestsStore } from "../shared/digest-store.js";
 import { OverviewLedgerStore } from "../shared/overview-ledger.js";
 import { RoundsStore } from "../shared/rounds-store.js";
 import { createBackendRegistry } from "./backend-registry.js";
-import { registerIpc } from "./ipc.js";
+import { createDiagnostics, hookUnhandledRejections, installConsoleTee } from "./diagnostics.js";
+import { registerDiagnosticsIpc, registerIpc } from "./ipc.js";
 import { registerSaveFileIpc } from "./save-file.js";
 import {
   readBackendSelection,
@@ -33,6 +34,15 @@ const roundsStore = new RoundsStore(join(app.getPath("userData"), "rounds.json")
 // window restores the same digests.
 const digestsStore = new DigestsStore(join(app.getPath("userData"), "digests.json"));
 
+// The status panel's source: a bounded tail of everything this process says
+// with console.error/warn — backend children dying, spawns failing,
+// subscriptions collapsing. A packaged launch has no terminal to print those
+// to, which is exactly when they matter, so the tee is installed before any
+// backend can spawn. Pure module, no electron: ipc.ts reads the same buffer.
+const diagnostics = createDiagnostics();
+installConsoleTee(diagnostics);
+hookUnhandledRejections(diagnostics);
+
 // GUI smoke mode (tests/gui-test.mjs): load the demo vite server instead of
 // the built renderer and skip the preload — the renderer then sees no
 // window.awefork and installs its in-memory mock adapter. Packaged builds
@@ -58,6 +68,7 @@ registerIpc(
   digestsStore,
 );
 registerSaveFileIpc();
+registerDiagnosticsIpc(diagnostics);
 // The updater's macOS relaunch exits via app.exit(0), which never fires
 // before-quit — hook the same teardown so no backend child survives the swap.
 // Keep-alive is forced off here on purpose: an update swap must not leave the

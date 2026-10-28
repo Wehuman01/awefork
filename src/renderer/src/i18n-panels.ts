@@ -563,6 +563,10 @@ Fix item 1 first: register the middleware once on the route group; one line clos
   // ── demo/mock-adapter.ts (generated/operational strings) ──────────────
   "demo.providerLocal": { zh: "Ollama 本地", en: "Ollama local" },
   "demo.newSessionTitle": { zh: "新对话", en: "New chat" },
+  "demo.diagnosticsSample": {
+    zh: "演示模式：这是状态面板的示例条目（真实环境里这里显示主进程后台命令的报错）。",
+    en: "Demo mode: this is a sample status-panel entry (a real install shows the main process's background-command errors here).",
+  },
   "demo.forkTitle": { zh: "{title} 的分支", en: "Fork of {title}" },
   "demo.forkFallback": { zh: "会话", en: "session" },
   "demo.exportTitle": { zh: "{title}（导出）", en: "{title} (exported)" },

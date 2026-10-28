@@ -4,6 +4,7 @@ import type {
   BackendId,
   BackendsResult,
 } from "./backend.js";
+import type { DiagnosticEntry, DiagnosticUpdate } from "./diagnostics.js";
 import type { LineDiffResult } from "./diff.js";
 import type { DigestGroup } from "./digest-types.js";
 import type {
@@ -454,4 +455,16 @@ export interface AweforkApi {
    */
   digestsList(): Promise<DigestGroup[]>;
   digestsSave(group: DigestGroup): Promise<boolean>;
+  /**
+   * Status panel: the buffered main-process console lines of this app
+   * session — backend children dying, spawns failing, subscriptions
+   * collapsing — the failures a packaged launch has no terminal to print.
+   * App-global (one buffer, every window reads the same tail), in-memory
+   * only, oldest dropped past the cap. `onDiagnostic` streams new entries
+   * and the app-global clear; subscribe before the snapshot resolves so
+   * nothing that lands in between is missed.
+   */
+  diagnostics(): Promise<DiagnosticEntry[]>;
+  clearDiagnostics(): Promise<void>;
+  onDiagnostic(handler: (update: DiagnosticUpdate) => void): () => void;
 }

@@ -8,6 +8,7 @@ import type {
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
+import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -163,6 +164,7 @@ async function bootState(options: { composer?: PersistedComposer | null } = {}) 
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
     ...createOverviewCacheMock(),
+    ...createDiagnosticsMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

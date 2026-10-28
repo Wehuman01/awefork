@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { SessionSummary } from "../src/shared/types";
+import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -142,6 +143,7 @@ async function bootState(
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
     ...createOverviewCacheMock(),
+    ...createDiagnosticsMock(),
   } as unknown as AweforkApi;
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
 

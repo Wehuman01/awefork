@@ -8,6 +8,7 @@ import type {
   PersistedComposer,
   SessionSummary,
 } from "../src/shared/types";
+import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -142,6 +143,7 @@ function createTestApi(options: { runError?: string | null } = {}): {
     // listing. A single-window test sees an empty cache and no running set.
     ...createOverviewCacheMock(),
     ...createOverviewLedgerMock(),
+    ...createDiagnosticsMock(),
   };
   return {
     api,
@@ -977,14 +979,28 @@ describe("overview navigation", () => {
 
     // A second run settles while the jump's message load is in flight; the
     // jump pinned revision 1, so revision 2 has to stay unread.
+    // A second run settles while the jump's message load is in flight; the
+    // jump pinned revision 1, so revision 2 has to stay unread. The events
+    // fire once: the refresh they trigger re-enters the overview projection,
+    // which reads model-less sessions' bodies, and an unguarded wrapper
+    // recurses through that read until the stack dies.
     const originalMessages = api.messages;
+    let secondRun = false;
     api.messages = async (backend: BackendId, sessionId: string) => {
-      if (sessionId === "s1") {
+      if (sessionId === "s1" && !secondRun) {
+        secondRun = true;
         h.send("opencode", { type: "message.started", sessionId: "s1", messageId: "m3" });
         h.send("opencode", { type: "session.idle", sessionId: "s1" });
         await Promise.resolve();
       }
-      return originalMessages(backend, sessionId);
+      const rows = await originalMessages(backend, sessionId);
+      // A real second run leaves its own assistant row behind. The fixture
+      // is static, so without this row the settle folds under the first
+      // run's observation id and the ledger (correctly) refuses to bump the
+      // revision — the row is what makes the second result a result.
+      return secondRun && sessionId === "s1"
+        ? [...rows, { ...assistantRow(), id: "m3", text: "第二次回答" }]
+        : rows;
     };
     await h.state.jumpToOverviewSession("opencode", "s1");
     await vi.advanceTimersByTimeAsync(1_000);

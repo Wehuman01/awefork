@@ -15,6 +15,7 @@
  * is `"zh"` so the UI stays Chinese unless the user picks EN.
  */
 import { computed, ref, watch } from "vue";
+import { dict as dictDiagnogs } from "./i18n-diagnostics";
 import { dict as dictDialogs } from "./i18n-dialogs";
 import { dict as dictMessages } from "./i18n-messages";
 import { dict as dictOverview } from "./i18n-overview";
@@ -176,10 +177,10 @@ const DICT: Dict = {
   "app.clickToClose": { zh: "（点击关闭）", en: " (click to close)" },
 };
 
-// Per-surface dictionaries (state/shell/dialogs/messages/panels) live in
-// sibling i18n-*.ts modules and are merged in here so every call site uses
-// the single `t()` below. The fragments import nothing from this file, so
-// the merge stays cycle-free.
+// Per-surface dictionaries (state/shell/dialogs/messages/panels/diagnostics)
+// live in sibling i18n-*.ts modules and are merged in here so every call
+// site uses the single `t()` below. The fragments import nothing from this
+// file, so the merge stays cycle-free.
 Object.assign(
   DICT,
   dictState,
@@ -189,6 +190,7 @@ Object.assign(
   dictPanels,
   dictSettings,
   dictOverview,
+  dictDiagnogs,
 );
 
 const PLACEHOLDER = /\{(\w+)\}/g;

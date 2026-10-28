@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi, TagStore } from "../src/shared/awefork-api";
 import type { BackendEventEnvelope, BackendId } from "../src/shared/backend";
 import type { ChatMessage, SessionSummary } from "../src/shared/types";
+import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -112,6 +113,7 @@ async function bootState() {
     fileChangeDiff: async () => null,
     onEvent: (_handler: (envelope: BackendEventEnvelope) => void) => () => {},
     ...createOverviewLedgerMock(),
+    ...createDiagnosticsMock(),
     // The publish's real boundary: ipcRenderer.invoke structured-clones its
     // arguments and throws synchronously on a payload it cannot clone.
     overviewListings: async () => ({}),

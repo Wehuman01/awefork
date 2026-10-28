@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi, TagStore } from "../src/shared/awefork-api";
 import type { TurnNode } from "../src/shared/canvas-graph";
 import type { ChatMessage, SessionSummary } from "../src/shared/types";
+import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
 /**
@@ -164,6 +165,7 @@ async function bootState(options: { tags?: TagStore } = {}) {
     onEvent: () => () => {},
     ...createOverviewLedgerMock(),
     ...createOverviewCacheMock(),
+    ...createDiagnosticsMock(),
   };
   (globalThis as unknown as { window: { awefork: AweforkApi } }).window = { awefork: api };
   const state = await import("../src/renderer/src/state");

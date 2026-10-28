@@ -546,6 +546,177 @@ textarea {
   box-shadow: 0 0 0 3px #fbe3df;
 }
 
+/* the status dot is the background log's handle: click opens the panel, the
+   badge counts errors the user has not looked at yet */
+
+.topbar-status-wrap {
+  position: relative;
+  margin-left: auto;
+}
+
+button.topbar-status {
+  border-radius: 9px;
+  padding: 4px 9px;
+}
+
+button.topbar-status:hover {
+  background: var(--primary-soft);
+}
+
+.status-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* status panel: the main process's console tail, newest last */
+
+.status-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(480px, calc(100vw - 32px));
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lift);
+  z-index: 50;
+}
+
+.status-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.status-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.status-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-action {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.status-action:hover:not(:disabled) {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.status-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.status-close {
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: var(--ink-faint);
+}
+
+.status-close:hover {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.status-subtitle {
+  margin: 0;
+  padding: 8px 12px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.status-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 6px 8px;
+}
+
+.status-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 10px;
+}
+
+.status-row:hover {
+  background: var(--primary-soft);
+}
+
+.status-time {
+  font-size: 10px;
+  color: var(--ink-faint);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-level {
+  font-size: 10px;
+  font-weight: 800;
+  margin-right: 6px;
+}
+
+.status-row.error .status-level {
+  color: var(--danger);
+}
+
+.status-row.warn .status-level {
+  color: var(--warn-text);
+}
+
+/* stderr tails are multi-line; clamp to two lines until the row is clicked */
+.status-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.status-row.expanded .status-text {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.status-empty {
+  margin: 0;
+  padding: 6px 12px 16px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
 /* version pill + its one-item menu (Check for updates) */
 
 .version-wrap {

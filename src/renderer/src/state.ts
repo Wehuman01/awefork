@@ -18,6 +18,7 @@ import {
   type TurnNode,
 } from "../../shared/canvas-graph";
 import { selectCanvasSessions, storyRootOf } from "../../shared/canvas-scope";
+import type { DiagnosticEntry, DiagnosticUpdate } from "../../shared/diagnostics";
 import type { DigestGroup, DigestScope } from "../../shared/digest-types";
 import { restoreDigestGroup } from "../../shared/digest-types";
 import { samePath } from "../../shared/file-paths";
@@ -675,10 +676,20 @@ interface AppState {
    * turn re-reads and a quiet session is never fetched twice.
    */
   overviewModels: Record<string, { at: number; modelId: string | null; variant: string | null }>;
+  /**
+   * Status panel: the main process's buffered console tail, app-global and
+   * shared by every window. `diagnosticsSeenSeq` is the badge watermark —
+   * error-level entries past it are unseen, so opening the panel retires
+   * them without touching the list.
+   */
+  diagnostics: DiagnosticEntry[];
+  diagnosticsSeenSeq: number;
 }
 
 const state = reactive<AppState>({
   connectionError: null,
+  diagnostics: [],
+  diagnosticsSeenSeq: 0,
   canvasTabs: [
     { id: "tab-1", rootId: null, selectedId: null, selectedTurnId: null, directory: null },
   ],
@@ -1693,6 +1704,28 @@ export async function init(): Promise<void> {
   // The same restore for after-the-fact digests: their ✦ cards and reading
   // views must not depend on which window ran them.
   void loadDigestsFromMain();
+  // Status panel: the app-global console tail. Subscribe before the snapshot
+  // resolves, then merge by seq — a backend spawn failing while this window
+  // is still booting streams entries the in-flight snapshot has not seen,
+  // and a plain replace would drop exactly those.
+  window.awefork.onDiagnostic((update: DiagnosticUpdate) => {
+    if (update.cleared) {
+      state.diagnostics = [];
+      return;
+    }
+    if (update.entry) state.diagnostics.push(update.entry);
+  });
+  void window.awefork
+    .diagnostics()
+    .then((entries: DiagnosticEntry[]) => {
+      const known = new Set(state.diagnostics.map((entry) => entry.seq));
+      const missing = entries.filter((entry) => !known.has(entry.seq));
+      state.diagnostics = [...state.diagnostics, ...missing].sort((a, b) => a.seq - b.seq);
+    })
+    .catch(() => {
+      // The panel stays empty; a failed snapshot read costs the history, not
+      // the live feed.
+    });
   // The landing side of a multi-window overview jump: this window was handed a
   // session by another window (or by the newly opened one it belongs to). The
   // ready claim tells main which backend this window owns its navigations for,
@@ -3532,6 +3565,40 @@ export async function togglePin(sessionId: string): Promise<void> {
 /** True when this turn node is marked as a key conversation. */
 export function isTurnMarked(nodeId: string): boolean {
   return state.marks.includes(nodeId);
+}
+
+// ── status panel diagnostics ─────────────────────────────────────────
+
+/**
+ * Error-level entries the user has not seen the panel for yet — what the
+ * top-bar badge counts. The watermark (not a counter) is the truth: an entry
+ * that streams in while the panel is open never badges, and one that landed
+ * before this window opened still does.
+ */
+export const unseenErrorCount = computed(
+  () =>
+    state.diagnostics.filter(
+      (entry) => entry.level === "error" && entry.seq > state.diagnosticsSeenSeq,
+    ).length,
+);
+
+/** Retire the badge: the panel is open, so nothing in it is unseen anymore. */
+export function markDiagnosticsSeen(): void {
+  const last = state.diagnostics.at(-1);
+  state.diagnosticsSeenSeq = last ? last.seq : state.diagnosticsSeenSeq;
+}
+
+/**
+ * Drop the app-global buffer. The clear is main's to make — it broadcasts,
+ * and every window's list (this one included) empties from that broadcast —
+ * so a failed IPC leaves the shown history exactly as it was.
+ */
+export async function clearDiagnostics(): Promise<void> {
+  try {
+    await window.awefork.clearDiagnostics();
+  } catch {
+    // The panel keeps its entries; the user can retry.
+  }
 }
 
 /** Every marked turn node currently on the canvas, graph order. */
