@@ -2057,7 +2057,16 @@ export const activeCanvasTab = computed<CanvasTab | null>(
 
 /** The story-root sessions the open tabs point at, tab order. */
 export function tabRootSession(tab: CanvasTab): SessionSummary | null {
-  return tab.rootId ? (visibleSessions.value.find((s) => s.id === tab.rootId) ?? null) : null;
+  if (!tab.rootId) return null;
+  const root = visibleSessions.value.find((s) => s.id === tab.rootId);
+  // A listing can drop the root row while the tab's own session survives
+  // (opencode merges one query per worktree and swallows a failed one). The
+  // tab still shows that story, so name it from the selection rather than
+  // letting the strip rename a live tab to "New canvas".
+  if (root) return root;
+  return tab.selectedId
+    ? (visibleSessions.value.find((s) => s.id === tab.selectedId) ?? null)
+    : null;
 }
 
 /**
@@ -2071,7 +2080,14 @@ function syncActiveTab(): void {
   tab.selectedId = state.selectedId;
   tab.selectedTurnId = state.selectedTurnId;
   tab.directory = state.selectedDirectory;
-  tab.rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+  if (state.selectedId === null) {
+    tab.rootId = null;
+  } else if (visibleSessions.value.some((s) => s.id === state.selectedId)) {
+    tab.rootId = storyRootOf(visibleSessions.value, state.lineage, state.selectedId);
+  }
+  // A selection this listing dropped keeps the root it was parked with: the
+  // prune's grace window owns that record, and re-rooting here would rename
+  // the tab to "New canvas" over a listing gap.
   persistTabs();
 }
 
@@ -2083,36 +2099,70 @@ function syncActiveTab(): void {
  */
 let activeTabStoryDied = false;
 
-/** When the selected session last went missing from a refresh; null = present. */
-let selectionMissingSince: number | null = null;
+/**
+ * When a session claimed by an open tab last went missing from a listing,
+ * keyed by session id: absent = the session was present. Only sessions some
+ * tab still points at are tracked, so the map stays as small as the strip.
+ */
+const tabSessionMissingSince = new Map<string, number>();
 
 /**
- * How long a refresh may drop the selected session before its tab is parked
- * blank. codex's thread/list can briefly omit a thread (a fresh one before
- * its first rollout lands, or a store rescan): pruning on a single miss
- * unmounts the pane's composer and loses whatever was typed in it.
+ * How long a refresh may drop a session before its tab is parked blank.
+ * A listing is not proof of deletion: opencode merges one query per worktree
+ * and swallows a failed one, codex's thread/list can briefly omit a thread
+ * (a fresh one before its first rollout lands, or a store rescan), and a
+ * cold server answers before its scan finishes. Parking on a single miss
+ * unmounts the pane's composer (losing the typed draft) and turns every
+ * background tab into an empty "New canvas" — so the grace covers every tab,
+ * not just the active one.
  */
 const SELECTION_PRUNE_GRACE_MS = 8_000;
 
-/** Tabs whose story vanished park as blank tabs; live ones re-resolve roots.
- * Returns true while the selected session is merely missing from this refresh
- * but still inside its grace window — the caller then parks nothing and
- * refills nothing. */
-function pruneCanvasTabs(): boolean {
-  if (state.selectedId !== null && !visibleSessions.value.some((s) => s.id === state.selectedId)) {
-    if (selectionMissingSince === null) selectionMissingSince = Date.now();
-    if (Date.now() - selectionMissingSince < SELECTION_PRUNE_GRACE_MS) return true;
-  } else {
-    selectionMissingSince = null;
+/** True once `sessionId` has stayed missing past the grace window. */
+function sessionMissingPastGrace(sessionId: string, now: number): boolean {
+  const since = tabSessionMissingSince.get(sessionId);
+  if (since === undefined) {
+    tabSessionMissingSince.set(sessionId, now);
+    return false;
   }
+  return now - since >= SELECTION_PRUNE_GRACE_MS;
+}
+
+/** Tabs whose story vanished park as blank tabs; live ones re-resolve roots.
+ * Returns true while the active tab's selection is merely missing from this
+ * refresh but still inside its grace window — the caller then parks nothing
+ * and refills nothing. */
+function pruneCanvasTabs(): boolean {
+  const now = Date.now();
   const visible = new Set(visibleSessions.value.map((s) => s.id));
+  let selectionInGrace = false;
   for (const tab of state.canvasTabs) {
     if (tab.selectedId !== null && !visible.has(tab.selectedId)) {
+      // Every tab gets the same grace, the active one included: one partial
+      // listing must not wipe the strip into blank "New canvas" tabs (the
+      // blank is persisted, so it would never heal).
+      if (!sessionMissingPastGrace(tab.selectedId, now)) {
+        if (tab.id === state.activeCanvasTabId) selectionInGrace = true;
+        continue;
+      }
+      tabSessionMissingSince.delete(tab.selectedId);
       tab.selectedId = null;
       tab.selectedTurnId = null;
       tab.rootId = null;
-    } else if (tab.rootId !== null && !visible.has(tab.rootId)) {
-      tab.rootId = null;
+      continue;
+    }
+    if (tab.selectedId !== null) tabSessionMissingSince.delete(tab.selectedId);
+    if (tab.rootId !== null && !visible.has(tab.rootId)) {
+      // The recorded root row dropped out while the tab's own session
+      // survived: the story isn't gone, it lost its top row. Keep the record
+      // inside the grace window, then re-root at the top the surviving chain
+      // still has so dedupe and the title follow the live tree.
+      if (sessionMissingPastGrace(tab.rootId, now)) {
+        tabSessionMissingSince.delete(tab.rootId);
+        tab.rootId = storyRootOf(visibleSessions.value, state.lineage, tab.selectedId);
+      }
+    } else if (tab.rootId !== null) {
+      tabSessionMissingSince.delete(tab.rootId);
     }
   }
   // The active tab's own snapshot fields just went blank while the live
@@ -2127,7 +2177,7 @@ function pruneCanvasTabs(): boolean {
   } else {
     syncActiveTab();
   }
-  return false;
+  return selectionInGrace;
 }
 
 /**
@@ -2138,10 +2188,19 @@ function pruneCanvasTabs(): boolean {
  */
 export async function activateCanvasTab(tabId: string): Promise<void> {
   if (tabId === state.activeCanvasTabId) return;
-  activeTabStoryDied = false;
-  syncActiveTab();
   const tab = state.canvasTabs.find((t) => t.id === tabId);
   if (!tab) return;
+  // The tab's session can be missing from the last listing while the backend
+  // still has it (a stale listing, a partial worktree merge, a session created
+  // a moment ago in another window). Ask again before erasing the tab: this is
+  // the same listing a session event would schedule, and only a backend that
+  // still doesn't know the session proves the story died.
+  if (tab.selectedId && !visibleSessions.value.some((s) => s.id === tab.selectedId)) {
+    await refreshSessions();
+    if (!state.canvasTabs.includes(tab)) return; // closed while the fetch ran
+  }
+  activeTabStoryDied = false;
+  syncActiveTab();
   state.activeCanvasTabId = tabId;
   persistTabs();
   state.canvasTabRestoreRequest = { tabId, nonce: Date.now() };

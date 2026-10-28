@@ -212,6 +212,12 @@ describe("canvas tab restore across restarts", () => {
     apiSessions = [STORY_A];
     const second = await bootState();
     expect(second.store.canvasTabs.length).toBe(2);
+    // The first listing of a launch is exactly the one a cold server can
+    // answer incompletely, so a restored tab gets the same grace every other
+    // tab now gets — then the dead story parks blank.
+    await second.refreshSessions();
+    expect(second.store.canvasTabs.length).toBe(2);
+    await vi.advanceTimersByTimeAsync(9_000);
     await second.refreshSessions();
     const live = second.store.canvasTabs.filter((t) => t.rootId !== null);
     expect(live.length).toBe(1);

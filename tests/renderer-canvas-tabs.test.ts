@@ -226,6 +226,79 @@ describe("canvas tabs", () => {
     expect(survivor).toBeDefined();
   });
 
+  it("gives a parked tab the same grace window as the active one", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a"); // story-a active, story-b parked
+    const parkedId = state.store.canvasTabs.find((t) => t.selectedId === "story-b")?.id;
+    expect(parkedId).toBeDefined();
+
+    // A partial listing — opencode merges one query per worktree and swallows
+    // a failed one a[] — still shows the active story but not the parked one.
+    apiSessions = [STORY_A];
+    await state.refreshSessions();
+
+    // One miss is not proof: the parked tab keeps its story (and its title)
+    // instead of turning into a blank "New canvas" tab.
+    const parked = state.store.canvasTabs.find((t) => t.id === parkedId);
+    expect(parked?.selectedId).toBe("story-b");
+    expect(parked?.rootId).toBe("story-b");
+
+    // It parks blank only after the session stayed missing past the grace.
+    vi.advanceTimersByTime(9_000);
+    await state.refreshSessions();
+    const gone = state.store.canvasTabs.find((t) => t.id === parkedId);
+    expect(gone?.selectedId).toBeNull();
+    expect(gone?.rootId).toBeNull();
+  });
+
+  it("keeps a parked tab's title when the listing drops its story root", async () => {
+    const state = await bootState();
+    apiSessions = [STORY_A, STORY_B, FORK_OF_A];
+    await state.refreshSessions();
+    // Park a tab on the fork, then land on the story-b tab so the fork tab is
+    // the inactive one when the listing loses the story-a root row.
+    await state.openCanvasTab("a-fork");
+    const forkTab = state.store.canvasTabs.find((t) => t.selectedId === "a-fork");
+    expect(state.tabRootSession(forkTab!)?.id).toBe("story-a");
+    await state.activateCanvasTab(
+      state.store.canvasTabs.find((t) => t.selectedId === "story-b")!.id,
+    );
+
+    apiSessions = [STORY_B, FORK_OF_A]; // the worktree holding story-a dropped out
+    await state.refreshSessions();
+
+    const tab = state.store.canvasTabs.find((t) => t.id === forkTab?.id);
+    // Inside the grace window the record keeps its real root, and the title
+    // falls back to the live fork — not "New canvas".
+    expect(tab?.rootId).toBe("story-a");
+    expect(state.tabRootSession(tab!)?.id).toBe("a-fork");
+
+    // Past the grace the story is re-rooted at the top its chain still has, so
+    // dedupe and the title follow the live tree instead of a dead row.
+    vi.advanceTimersByTime(9_000);
+    await state.refreshSessions();
+    const rerooted = state.store.canvasTabs.find((t) => t.id === forkTab?.id);
+    expect(rerooted?.rootId).toBe("a-fork");
+    expect(state.tabRootSession(rerooted!)?.id).toBe("a-fork");
+  });
+
+  it("heals a tab activation that raced a stale listing", async () => {
+    const state = await bootState();
+    await state.openCanvasTab("story-a");
+    const parkedId = state.store.canvasTabs.find((t) => t.selectedId === "story-b")?.id;
+
+    // The listing is stale (story-b created in another window a moment ago,
+    // or a worktree query dropped out). Activating the parked tab must ask
+    // the backend again before it decides the story died.
+    apiSessions = [STORY_A];
+    await state.refreshSessions(); // grace keeps story-b parked
+    apiSessions = [STORY_A, STORY_B];
+    await state.activateCanvasTab(parkedId as string);
+    expect(state.store.selectedId).toBe("story-b");
+    const tab = state.store.canvasTabs.find((t) => t.id === parkedId);
+    expect(tab?.selectedId).toBe("story-b");
+  });
+
   it("a blank tab can adopt a NEW story on refresh", async () => {
     const state = await bootState();
     // What closing the last tab leaves (formerly the ＋ button's blank tab):
