@@ -679,7 +679,11 @@ export function installMockAdapter(): void {
     }
     const runtimeMessages: Record<string, ChatMessage[]> = {};
     for (const [id, rows] of messages) {
-      if (!seeded.has(id)) runtimeMessages[id] = rows;
+      // An empty cache must NOT travel: a runtime def carries no turns of
+      // its own, so a persisted [] would answer every later messages() call
+      // and the inherited prefix (rebuilt from the lineage on a cache miss)
+      // would be gone for good.
+      if (!seeded.has(id) && rows.length > 0) runtimeMessages[id] = rows;
     }
     try {
       localStorage.setItem(
