@@ -14,6 +14,7 @@ type FakeHomeAdapter = AgentAdapter & {
   messages: Mock;
   createSession: Mock;
   fork: Mock;
+  exportSession: Mock;
   deleteSession: Mock;
   prompt: Mock;
   respondInteraction: Mock;
@@ -49,6 +50,7 @@ function fakeHomeAdapter(
     listModels: vi.fn().mockResolvedValue([]),
     createSession: vi.fn(),
     fork: vi.fn().mockResolvedValue(makeSummary("forked", 100)),
+    exportSession: vi.fn().mockResolvedValue(makeSummary("exported", 100)),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     deleteMessage: vi.fn().mockResolvedValue(undefined),
     renameSession: vi.fn().mockResolvedValue(undefined),
@@ -241,6 +243,43 @@ describe("codex multi-home facade", () => {
     expect(forked).toMatchObject({ id: "fork-1", origin: "fork", parentSessionId: "parent" });
     const sessions = await facade.listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["fork-1", "parent"]);
+  });
+
+  it("keeps a just-exported copy listed before its first own turn", async () => {
+    // An export cuts the same copy a fork does, so thread/list omits it
+    // until its first own turn. Without the memo row the renderer's
+    // selectSession would find no such session and silently no-op — the
+    // export would look like nothing happened at all.
+    const { facade, byHome } = makeFacade({ default: ["parent"] });
+    (homeAdapter(byHome, "default").exportSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...makeSummary("exported-1", 300),
+      origin: "root",
+      parentSessionId: null,
+    });
+    const exported = await facade.exportSession("parent", null);
+    expect(exported).toMatchObject({ id: "exported-1", origin: "root", parentSessionId: null });
+    expect(homeAdapter(byHome, "default").exportSession).toHaveBeenCalledWith("parent", null);
+    const sessions = await facade.listSessions();
+    expect(sessions.map((s) => s.id)).toEqual(["exported-1", "parent"]);
+  });
+
+  it("retires an exported copy's memo row once the server lists it", async () => {
+    let serverListsExport = false;
+    const { facade, byHome } = makeFacade({ default: ["parent"] });
+    (homeAdapter(byHome, "default").listSessions as ReturnType<typeof vi.fn>).mockImplementation(
+      async () =>
+        serverListsExport
+          ? [makeSummary("exported-1", 400), makeSummary("parent", 100)]
+          : [makeSummary("parent", 100)],
+    );
+    (homeAdapter(byHome, "default").exportSession as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeSummary("exported-1", 300),
+    );
+    await facade.exportSession("parent", null);
+    serverListsExport = true;
+    const sessions = await facade.listSessions();
+    expect(sessions.filter((s) => s.id === "exported-1")).toHaveLength(1);
+    expect(sessions.find((s) => s.id === "exported-1")?.updatedAt).toBe(400);
   });
 
   it("drops the memo row when the session is deleted before the server lists it", async () => {

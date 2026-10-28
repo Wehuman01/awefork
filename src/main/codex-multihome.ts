@@ -320,10 +320,18 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       return forked;
     },
 
-    // Export is capability-gated off for codex (fork linkage lives in the
-    // backend); the underlying adapter's rejection is the honest answer.
+    // Export cuts the same copy primitive fork does, so the same memo
+    // applies: a just-cut copy carries only prefix turns and thread/list
+    // does not list it until its first own turn — without the row the
+    // renderer could never select the session the export just made. The
+    // copy lands in the source session's home; continuing it later imports
+    // it to the default account through prompt, like any foreign history.
     async exportSession(sessionId, atMessageId) {
-      return (await adapterFor(sessionId)).exportSession(sessionId, atMessageId);
+      const ownerId = owners.get(sessionId) ?? DEFAULT_HOME_ID;
+      const exported = await (await adapterFor(sessionId)).exportSession(sessionId, atMessageId);
+      owners.set(exported.id, ownerId);
+      unlistedSessions.set(exported.id, { summary: exported, createdAt: Date.now() });
+      return exported;
     },
 
     async deleteSession(sessionId) {
@@ -364,8 +372,8 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
       await (await adapterFor(sessionId)).prompt(sessionId, text, model, attachments);
     },
 
-    // Compaction is capability-gated off for codex; the underlying adapter's
-    // rejection is the honest answer.
+    // Compaction is a turn of the thread's own (thread/compact/start),
+    // streamed like any run; completion arrives as session.compressed.
     async compress(sessionId, model) {
       await (await adapterFor(sessionId)).compress(sessionId, model);
     },
