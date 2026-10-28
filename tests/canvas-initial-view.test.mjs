@@ -116,11 +116,30 @@ window.__run = async ({ panDuringLoad }) => {
     }
   }
   await selected;
-  // Settle: ResizeObserver heights, the load-end pass, one paint.
-  for (let i = 0; i < 12; i++) { await frame(); await new Promise(r => setTimeout(r, 25)); }
+  // Settle: the load-end pass lands on a double rAF after the batch, and the
+  // ResizeObserver heights that re-band the rows can arrive after it. A fixed
+  // frame count measures wherever the camera happened to be — on a loaded
+  // machine the pass easily lands past it, and the check then reports a
+  // camera that was merely late as one that never arrived. Wait for the
+  // camera to actually stop moving instead; .world's transform is set
+  // imperatively (no CSS transition), so a stable string is a settled camera.
+  // Bounded, so a camera that never settles still fails rather than hangs.
+  let lastTransform = null;
+  let stableFrames = 0;
+  const settleDeadline = performance.now() + 10_000;
+  while (performance.now() < settleDeadline && stableFrames < 8) {
+    await frame();
+    const now = document.querySelector('.world').style.transform;
+    if (now === lastTransform) stableFrames += 1;
+    else {
+      stableFrames = 0;
+      lastTransform = now;
+    }
+  }
   trace.push({ at: 'settled', nodes: turnGraph.value.nodes.length, ...unwrap(selectedRects()),
     loading: state.loadingCanvas, panPreserved: manualTransform === null ? null
-      : manualTransform === document.querySelector('.world').style.transform });
+      : manualTransform === document.querySelector('.world').style.transform,
+    transform: document.querySelector('.world').style.transform });
   app.unmount();
   await nextTick();
   return trace;
