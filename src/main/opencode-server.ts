@@ -104,7 +104,7 @@ function shellMayProvide(key: string): boolean {
 }
 
 /**
- * The interactive shell's full export set, probed once per app session.
+ * The interactive shell's full export set, shared by concurrent launches.
  * Agent configs resolve credentials from the environment (opencode's
  * `{env:NAME}` provider keys), and those exports usually live in rc files
  * (~/.zshrc) that a Finder/Dock launch never sources — so the probe is what
@@ -112,12 +112,34 @@ function shellMayProvide(key: string): boolean {
  * Windows GUI apps inherit the user-profile environment from the registry,
  * and the candidate dirs cover its common installs.
  */
-function loginShellEnv(): Promise<Record<string, string> | null> {
-  loginShellEnvPromise ??= probeLoginShellEnv();
-  return loginShellEnvPromise;
+export function createLoginShellEnvProbe(
+  probe: () => Promise<Record<string, string> | null>,
+): () => Promise<Record<string, string> | null> {
+  let pending: Promise<Record<string, string> | null> | null = null;
+  let cached: Record<string, string> | null = null;
+  let expiresAt = 0;
+
+  return () => {
+    if (cached && Date.now() < expiresAt) return Promise.resolve(cached);
+    if (!pending) {
+      // A temporary login-shell failure must not start a long-lived agent
+      // without its proxy or credentials. Retry once before falling back.
+      pending = probe()
+        .then((vars) => vars ?? probe())
+        .then((vars) => {
+          cached = vars;
+          expiresAt = vars ? Date.now() + 30_000 : 0;
+          return vars;
+        })
+        .finally(() => {
+          pending = null;
+        });
+    }
+    return pending;
+  };
 }
 
-let loginShellEnvPromise: Promise<Record<string, string> | null> | null = null;
+const loginShellEnv = createLoginShellEnvProbe(probeLoginShellEnv);
 
 async function probeLoginShellEnv(): Promise<Record<string, string> | null> {
   if (process.platform !== "darwin") return null;

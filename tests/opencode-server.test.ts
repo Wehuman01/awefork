@@ -5,9 +5,10 @@ import { createServer, type Server } from "node:http";
 import { createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   buildSpawnEnv,
+  createLoginShellEnvProbe,
   ensureOpencodeServer,
   parseLsofListeningPorts,
   parseNetstatListeningPorts,
@@ -256,6 +257,63 @@ describe("resolveSpawnEnv", () => {
     const env = await resolveSpawnEnv({ PATH: "/usr/bin:/bin" }, home, async () => null, "darwin");
     // Original entries survive; only machine-local candidate dirs may lead.
     expect(env.PATH?.endsWith("/usr/bin:/bin")).toBe(true);
+  });
+
+  test("retries a failed shell probe before launching an agent", async () => {
+    const probe = vi
+      .fn<() => Promise<Record<string, string> | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ https_proxy: "http://127.0.0.1:7890" });
+    const shellEnv = createLoginShellEnvProbe(probe);
+    const home = fakeHome();
+    const guiEnv = { PATH: "/usr/bin:/bin" };
+
+    const first = await resolveSpawnEnv(guiEnv, home, shellEnv, "darwin");
+
+    expect(first.https_proxy).toBe("http://127.0.0.1:7890");
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  test("retries again on a later launch if both shell probes fail", async () => {
+    const probe = vi
+      .fn<() => Promise<Record<string, string> | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ https_proxy: "http://127.0.0.1:7890" });
+    const shellEnv = createLoginShellEnvProbe(probe);
+    const home = fakeHome();
+    const guiEnv = { PATH: "/usr/bin:/bin" };
+
+    expect((await resolveSpawnEnv(guiEnv, home, shellEnv, "darwin")).https_proxy).toBeUndefined();
+    expect((await resolveSpawnEnv(guiEnv, home, shellEnv, "darwin")).https_proxy).toBe(
+      "http://127.0.0.1:7890",
+    );
+    expect(probe).toHaveBeenCalledTimes(3);
+  });
+
+  test("shares concurrent probes and refreshes shell exports after the cache expires", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const probe = vi
+        .fn<() => Promise<Record<string, string> | null>>()
+        .mockResolvedValueOnce({ https_proxy: "http://127.0.0.1:7890" })
+        .mockResolvedValueOnce({ https_proxy: "http://127.0.0.1:7891" });
+      const shellEnv = createLoginShellEnvProbe(probe);
+      const home = fakeHome();
+      const guiEnv = { PATH: "/usr/bin:/bin" };
+      const resolve = () => resolveSpawnEnv(guiEnv, home, shellEnv, "darwin");
+
+      const [first, concurrent] = await Promise.all([resolve(), resolve()]);
+      expect(first.https_proxy).toBe("http://127.0.0.1:7890");
+      expect(concurrent.https_proxy).toBe("http://127.0.0.1:7890");
+      expect(probe).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(32_000);
+      expect((await resolve()).https_proxy).toBe("http://127.0.0.1:7891");
+      expect(probe).toHaveBeenCalledTimes(2);
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 
