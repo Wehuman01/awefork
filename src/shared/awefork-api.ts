@@ -295,6 +295,13 @@ export interface AweforkApi {
    * interrupt, and what keep-alive would let finish in the background.
    */
   runningSessionCount(): Promise<number>;
+  /**
+   * Report a run the watchdog can no longer observe (the backend went
+   * unreachable mid-run and will never settle it), so main drops it from the
+   * in-flight set the quit confirmation asks about. Returns whether an entry
+   * was actually dropped.
+   */
+  reportRunUnknown(backend: string, sessionId: string): Promise<boolean>;
   /** Open a local drive path (reply references) with the OS handler. */
   openPath(target: string): Promise<{ ok: boolean; error?: string }>;
   /** Native folder picker for the ＋ New directory entry; null when canceled. */

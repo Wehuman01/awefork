@@ -101,6 +101,14 @@ export interface BackendRegistry {
    * message.started until its session.idle (or a session-scoped error).
    */
   runningSessions(): Array<{ backend: BackendId; sessionId: string }>;
+  /**
+   * Forget one session's in-flight run without a settle event. A backend that
+   * died silently (no session.idle, no session-scoped error) leaves its runs
+   * in the table forever — the quit confirmation would keep claiming work
+   * that is not there. The renderer's watchdog is the authority on "this run
+   * is no longer observable" and reports it here.
+   */
+  dropRunning(backend: BackendId, sessionId: string): boolean;
   /** The persisted quitKeepAlive setting, cached for the sync quit path. */
   quitKeepAlive(): boolean;
   /** Cache and persist the setting; takes effect on the next quit. */
@@ -559,6 +567,16 @@ export function createBackendRegistry(userDataDir: string): BackendRegistry {
     },
 
     runningSessions: () => [...running.values()],
+
+    dropRunning(backend, sessionId) {
+      // The renderer's watchdog reported this run unobservable (the backend
+      // went unreachable mid-run and never settled it). Without this the
+      // quit confirmation keeps claiming a turn that no longer exists.
+      const key = `${backend}:${sessionId}`;
+      const dropped = running.delete(key);
+      runIds.delete(key);
+      return dropped;
+    },
 
     quitKeepAlive: () => quitKeepAliveCached,
 

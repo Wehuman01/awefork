@@ -79,6 +79,14 @@ export const CLAUDE_IDLE_MS = 120_000;
  */
 const TRANSCRIPT_LIST_TTL_MS = 1_000;
 
+/**
+ * A read that lands mid-flush sees the user row without its reply. Wait this
+ * long, this many times, for the final assistant row to land — then give up
+ * and return what is on disk (the caller's settle path re-reads anyway).
+ */
+const MESSAGES_REREAD_MS = 150;
+const MESSAGES_REREAD_ATTEMPTS = 3;
+
 const COMPACT_BOUNDARY_PREFIX = "This session is being continued from a previous conversation";
 
 const MODEL_CATALOG: readonly ModelOption[] = [
@@ -1166,12 +1174,16 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       const parsed = await parseTranscript(file);
       const rows = mapRows(parsed.rows);
       // The child appends its final assistant row on its way out; a read
-      // racing that write sees the user row alone. One short re-read closes
-      // the gap without a polling loop in every caller.
+      // racing that write sees the user row alone. Poll briefly for the row
+      // to land — the mtime-keyed parse cache makes each retry free when the
+      // file has not changed — and give up rather than block the caller: the
+      // renderer's own settle path re-reads on idle anyway.
       if (rows.length > 0 && rows[rows.length - 1]?.role === "user") {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        const again = await parseTranscript(file);
-        return mapRows(again.rows);
+        for (let attempt = 0; attempt < MESSAGES_REREAD_ATTEMPTS; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, MESSAGES_REREAD_MS));
+          const again = mapRows((await parseTranscript(file)).rows);
+          if (again.length === 0 || again[again.length - 1]?.role !== "user") return again;
+        }
       }
       return rows;
     },

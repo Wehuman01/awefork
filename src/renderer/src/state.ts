@@ -1339,11 +1339,28 @@ function pruneSettledParts(backend: BackendId, sessionId: string, messages: Chat
 /** Sessions whose messages have been requested (or are already cached). */
 const attemptedMessages = new Set<string>();
 
+/**
+ * How many sessions' message rows this window keeps. The cache deliberately
+ * survives a backend switch (its ids never collide, and keeping them makes a
+ * switch back instant), so without a cap a long-lived window that browses
+ * every session grows without end — every other renderer cache (the ledger,
+ * the overview models) is bounded for the same reason.
+ */
+const MAX_CACHED_SESSIONS = 400;
+
 const publishMessages = createMessagePublisher({
   generation: (backend, sessionId) => messageLoads.generation(backend, sessionId),
   apply(backend, sessionId, messages) {
     state.messagesBySession[sessionId] = messages;
     pruneSettledParts(backend, sessionId, messages);
+    // Evict oldest-first, but never the session just written (it is the one
+    // on screen, or the one being loaded right now).
+    const keys = Object.keys(state.messagesBySession);
+    for (const key of keys) {
+      if (keys.length <= MAX_CACHED_SESSIONS) break;
+      if (key === sessionId || key === state.selectedId) continue;
+      delete state.messagesBySession[key];
+    }
   },
 });
 
@@ -2922,6 +2939,12 @@ async function checkForCompletion(key: string, watch: CompletionWatch): Promise<
       // The backend went unreachable mid-run: we know the run is no longer
       // observable, not that it ended. Release the spinner as "unknown".
       settleRun(live.backend, sessionId, "unknown");
+      // No idle or error will ever settle this run, so main's in-flight set
+      // would keep it forever — the quit confirmation would claim work that
+      // is gone. Tell main to drop it; a failed report costs nothing.
+      void window.awefork?.reportRunUnknown?.(live.backend, sessionId).catch(() => {
+        // An older preload has no channel; the local state is already settled.
+      });
     }
     return;
   }
@@ -7863,6 +7886,13 @@ let overviewSweepPromise: Promise<void> | null = null;
 const OVERVIEW_SWEEP_MS = 30_000;
 const OVERVIEW_BOOT_SWEEP_DELAY_MS = 3_000;
 /**
+ * How many changed sessions one reconcile sweep reads messages for at once.
+ * An offline stretch can leave dozens of sessions changed; one IPC round trip
+ * each in sequence would stall the sweep on the slowest read. Same shape as
+ * the overview panel's model-enrichment pass.
+ */
+const OVERVIEW_RECONCILE_CONCURRENCY = 6;
+/**
  * Compare updated sessions with the last list snapshot and recover an
  * assistant reply added while the app was closed. First sight establishes a
  * baseline, so existing history is never called new.
@@ -7879,48 +7909,69 @@ async function reconcileOverviewSessions(
   // re-project every row once per swept session.
   const found = new Map<string, { at: number; model: OverviewModel | null }>();
   const priorScanAt = state.overviewScannedAt[backend] ?? 0;
+  // Sessions whose list timestamp moved since the last sweep — each needs a
+  // messages read to see whether a reply actually landed. Read them with
+  // bounded concurrency: offline periods can leave dozens of sessions
+  // changed, and one IPC round trip each in sequence stalls the sweep.
+  const changed: SessionSummary[] = [];
   for (const session of sessions) {
     if (!Number.isFinite(session.updatedAt) || session.updatedAt <= 0) continue;
-    const key = overviewKey(backend, session.id);
-    const previous = state.overviewObservedAt[key];
+    const previous = state.overviewObservedAt[overviewKey(backend, session.id)];
     const createdOffline =
       priorScanAt > 0 && previous === undefined && session.createdAt > priorScanAt;
     if (
       (previous !== undefined && session.updatedAt > previous) ||
       (createdOffline && session.updatedAt > session.createdAt)
     ) {
-      let messages: ChatMessage[];
-      try {
-        messages = await window.awefork.messages(backend, session.id);
-      } catch {
-        continue;
-      }
-      const latestReply = [...messages]
-        .reverse()
-        .find(
-          (message) =>
-            message.role === "assistant" &&
-            message.finish !== "tool-calls" &&
-            (message.completedAt !== null || message.error !== null),
-        );
-      // The read is already paid for: cache the model this session last ran on
-      // so the overview's row shows it without a second fetch.
-      found.set(key, { at: session.updatedAt, model: lastModelOfMessages(messages) });
-      const completedAt = latestReply?.completedAt ?? latestReply?.createdAt ?? 0;
-      const previousResultAt = state.overviewRead[key]?.settledAt ?? 0;
-      const resultBaseline = previous ?? session.createdAt;
-      let canAdvance = true;
-      if (latestReply && completedAt > resultBaseline && completedAt > previousResultAt) {
-        canAdvance = await recordOverviewOutcome(
-          backend,
-          session.id,
-          latestReply.error ? "failed" : "settled",
-          state.overviewUnknown[key],
-          overviewMessageObservationId(backend, session.id, latestReply.id),
-        );
-      }
-      if (!canAdvance) continue;
+      changed.push(session);
     }
+  }
+  const reads = new Map<string, ChatMessage[] | null>();
+  const queue = [...changed];
+  const workers = Array.from(
+    { length: Math.min(OVERVIEW_RECONCILE_CONCURRENCY, queue.length) },
+    async () => {
+      for (let session = queue.shift(); session !== undefined; session = queue.shift()) {
+        try {
+          reads.set(session.id, await window.awefork.messages(backend, session.id));
+        } catch {
+          // A failed read leaves the session uncounted: its observedAt is not
+          // advanced, so the next sweep retries it.
+          reads.set(session.id, null);
+        }
+      }
+    },
+  );
+  await Promise.allSettled(workers);
+  for (const session of changed) {
+    const key = overviewKey(backend, session.id);
+    const messages = reads.get(session.id);
+    if (messages === undefined || messages === null) continue;
+    const latestReply = [...messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "assistant" &&
+          message.finish !== "tool-calls" &&
+          (message.completedAt !== null || message.error !== null),
+      );
+    // The read is already paid for: cache the model this session last ran on
+    // so the overview's row shows it without a second fetch.
+    found.set(key, { at: session.updatedAt, model: lastModelOfMessages(messages) });
+    const completedAt = latestReply?.completedAt ?? latestReply?.createdAt ?? 0;
+    const previousResultAt = state.overviewRead[key]?.settledAt ?? 0;
+    const resultBaseline = state.overviewObservedAt[key] ?? session.createdAt;
+    let canAdvance = true;
+    if (latestReply && completedAt > resultBaseline && completedAt > previousResultAt) {
+      canAdvance = await recordOverviewOutcome(
+        backend,
+        session.id,
+        latestReply.error ? "failed" : "settled",
+        state.overviewUnknown[key],
+        overviewMessageObservationId(backend, session.id, latestReply.id),
+      );
+    }
+    if (!canAdvance) continue;
     updates.push({ id: session.id, updatedAt: session.updatedAt });
   }
   applyOverviewModelCache(found);

@@ -1021,6 +1021,22 @@ export function registerIpc(
   // offering to turn keep-alive on, so the user knows what will survive.
   ipcMain.handle("awefork:runningSessionCount", () => registry.runningSessions().length);
 
+  /**
+   * The renderer's watchdog watched a run it can no longer observe (the
+   * backend went unreachable mid-run), so no session.idle or session-scoped
+   * error will ever settle it. Drop it here, or the quit confirmation keeps
+   * claiming work that is gone. Only the unreachable path reports; a silent
+   * timeout still leaves the entry, because there the backend may well be
+   * alive and finishing the turn.
+   */
+  ipcMain.handle(
+    "awefork:reportRunUnknown",
+    async (_event: IpcMainInvokeEvent, backend: BackendId, sessionId: string) => {
+      if (!isBackendId(backend) || typeof sessionId !== "string" || sessionId === "") return false;
+      return registry.dropRunning(backend, sessionId);
+    },
+  );
+
   // ── app-level ────────────────────────────────────────────────────────────
 
   // Local file references in replies (agent output is full of them — Windows

@@ -1238,6 +1238,8 @@ export function installMockAdapter(): void {
     quitKeepAlive: async () => false,
     setQuitKeepAlive: async () => ({ ok: true }),
     runningSessionCount: async () => 0,
+    // No main process to hold the in-flight set in the demo.
+    reportRunUnknown: async () => false,
     // The demo has no sidecar recorder; the pane never shows the card here.
     fileChanges: async () => null,
     fileChangeDiff: async () => null,

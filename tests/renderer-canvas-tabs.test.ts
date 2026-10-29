@@ -296,27 +296,32 @@ describe("canvas tabs", () => {
     // the inactive one when the listing loses the story-a root row.
     await state.openCanvasTab("a-fork");
     const forkTab = state.store.canvasTabs.find((t) => t.selectedId === "a-fork");
-    expect(state.tabRootSession(forkTab!)?.id).toBe("story-a");
-    await state.activateCanvasTab(
-      state.store.canvasTabs.find((t) => t.selectedId === "story-b")!.id,
-    );
+    expect(forkTab).toBeDefined();
+    if (!forkTab) return;
+    expect(state.tabRootSession(forkTab)?.id).toBe("story-a");
+    const storyBTab = state.store.canvasTabs.find((t) => t.selectedId === "story-b");
+    expect(storyBTab).toBeDefined();
+    if (!storyBTab) return;
+    await state.activateCanvasTab(storyBTab.id);
 
     apiSessions = [STORY_B, FORK_OF_A]; // the worktree holding story-a dropped out
     await state.refreshSessions();
 
-    const tab = state.store.canvasTabs.find((t) => t.id === forkTab?.id);
+    const tab = state.store.canvasTabs.find((t) => t.id === forkTab.id);
     // Inside the grace window the record keeps its real root, and the title
     // falls back to the live fork — not "New canvas".
     expect(tab?.rootId).toBe("story-a");
-    expect(state.tabRootSession(tab!)?.id).toBe("a-fork");
+    expect(tab).toBeDefined();
+    if (tab) expect(state.tabRootSession(tab)?.id).toBe("a-fork");
 
     // Past the grace the story is re-rooted at the top its chain still has, so
     // dedupe and the title follow the live tree instead of a dead row.
     vi.advanceTimersByTime(9_000);
     await state.refreshSessions();
-    const rerooted = state.store.canvasTabs.find((t) => t.id === forkTab?.id);
+    const rerooted = state.store.canvasTabs.find((t) => t.id === forkTab.id);
     expect(rerooted?.rootId).toBe("a-fork");
-    expect(state.tabRootSession(rerooted!)?.id).toBe("a-fork");
+    expect(rerooted).toBeDefined();
+    if (rerooted) expect(state.tabRootSession(rerooted)?.id).toBe("a-fork");
   });
 
   it("heals a tab activation that raced a stale listing", async () => {

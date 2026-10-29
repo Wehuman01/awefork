@@ -49,6 +49,8 @@ interface HomeEntry {
 interface RoutedInteraction {
   adapter: AgentAdapter;
   innerRequestId: string;
+  /** The session the ask belongs to, so its run's end can retire it. */
+  sessionId: string | null;
 }
 
 /**
@@ -161,8 +163,21 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
     interactions.set(facadeRequestId, {
       adapter,
       innerRequestId: event.request.requestId,
+      sessionId: event.request.sessionId ?? null,
     });
     return { ...event, request: { ...event.request, requestId: facadeRequestId } };
+  }
+
+  /**
+   * Retire the asks a session's turn was blocking on. Codex never emits
+   * `interaction.settled`, and the renderer drops a queued ask locally when
+   * the turn ends (idle / error) without replying — so the facade entry would
+   * otherwise stay in the map for the rest of the app's life, one per ask.
+   */
+  function retireSessionInteractions(sessionId: string): void {
+    for (const [facadeId, routed] of interactions) {
+      if (routed.sessionId === sessionId) interactions.delete(facadeId);
+    }
   }
 
   async function ensureHome(home: CodexHome): Promise<AgentAdapter> {
@@ -178,7 +193,19 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
         // drops events while no subscriber is attached, and a re-subscribe
         // picks the cached adapter's stream back up instead of finding its
         // handlers torn down (dispose tears them down with the adapter).
-        await adapter.subscribe((event) => emit(retagInteraction(event, adapter)));
+        await adapter.subscribe((event) => {
+          // A turn's end retires the asks it was blocking on: codex never
+          // settles them, and the renderer drops them locally, so without
+          // this the facade's routing map would grow one entry per ask.
+          if (
+            (event.type === "session.idle" || event.type === "server.error") &&
+            "sessionId" in event &&
+            event.sessionId
+          ) {
+            retireSessionInteractions(event.sessionId);
+          }
+          emit(retagInteraction(event, adapter));
+        });
         entry.connected = true;
         if (entry.crashed) {
           entry.crashed = false;

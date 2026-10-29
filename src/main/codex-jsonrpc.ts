@@ -180,6 +180,11 @@ export function createCodexJsonRpc(
       return;
     }
     if (typeof frame.method === "string") {
+      // A frame with both a method and an id is a server request: it is
+      // answered below and ALSO handed to the notification handler, which
+      // ignores every method it does not know. Keeping both deliveries means
+      // a frame that is only ever a notification still reaches the adapter's
+      // handlers when a server adds an id to it.
       if (frame.id !== undefined && frame.id !== null) {
         handleServerRequest(frame.id, frame.method, frame.params ?? null);
       }
