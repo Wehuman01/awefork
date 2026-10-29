@@ -12,7 +12,7 @@
     <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.5.6-7C3AED?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-0.5.7-7C3AED?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%E2%89%A522-0EA5E9?style=flat-square" alt="Node">
     <img src="https://img.shields.io/badge/license-MPL--2.0-22C55E?style=flat-square" alt="License">
   </p>
@@ -75,7 +75,7 @@ The idea of treating sessions as a branching graph originates from [PiX](https:/
 
 ## Install
 
-**Download** — grab `awefork-<version>-arm64.dmg` (macOS, Apple Silicon) from the [latest release](https://github.com/wehuman01/awefork/releases/latest) and drag it into Applications. The build is unsigned: on first launch, right-click the app and choose Open (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
+**Download** — grab `awefork-<version>-universal.dmg` (macOS, Intel and Apple Silicon in one package; `awefork-<version>-arm64.dmg` is the smaller Apple-Silicon-only build) from the [latest release](https://github.com/wehuman01/awefork/releases/latest) and drag it into Applications. The build is unsigned: on first launch, right-click the app and choose Open (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/awefork.app`).
 
 **Windows** — build it from source with `npm run dist:win` (NSIS installer). The selected agent CLI must be on PATH; npm-style installs (`.cmd` shims) are picked up automatically.
 
