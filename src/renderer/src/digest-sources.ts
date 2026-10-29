@@ -62,6 +62,13 @@ export interface DigestStoryInput {
   path: readonly string[];
   /** Loaded rows per session on the path; missing sessions contribute nothing. */
   messages: Readonly<Record<string, readonly ChatMessage[]>>;
+  /**
+   * Fork records for the story's sessions. A fork's copied prefix is its
+   * parent's history, not new material — the builder trims it per session
+   * with the canvas graph's shared-prefix rule. Absent (older callers) means
+   * no trimming.
+   */
+  lineage?: Readonly<Record<string, { parentId?: string | null; context?: string }>>;
   /** The parked tab's locked turn (`sessionId:messageId`), when it has one. */
   selectedTurnId: string | null;
   scope: DigestScope;
@@ -96,9 +103,23 @@ export function digestTurnsOfSession(
  * a summary is for, and the omitted count says what was left out.
  */
 export function buildDigestStoryMaterial(input: DigestStoryInput): DigestStoryMaterial {
-  const all = input.path.flatMap((sessionId) =>
-    digestTurnsOfSession(sessionId, input.messages[sessionId] ?? []),
-  );
+  const turnsOf = new Map<string, DigestTurn[]>();
+  for (const sessionId of input.path) {
+    turnsOf.set(sessionId, digestTurnsOfSession(sessionId, input.messages[sessionId] ?? []));
+  }
+  // A fork's copied prefix is its parent's history, not new material: the
+  // story lists root first, so the parent's turns are already in — counting
+  // the copy again doubles them in the model's material and eats the budget
+  // with repeats. Trim each session's inherited prefix (same rule the canvas
+  // graph uses to keep a fork from redrawing its ancestor's story).
+  const all: DigestTurn[] = [];
+  for (const sessionId of input.path) {
+    const parentId = input.lineage?.[sessionId]?.parentId ?? null;
+    const inherited =
+      parentId !== null ? sharedPrefixCount(sessionId, parentId, turnsOf) : 0;
+    const own = (turnsOf.get(sessionId) ?? []).slice(inherited);
+    all.push(...own);
+  }
   if (input.scope === "turn") {
     const wanted = input.selectedTurnId;
     const locked = wanted

@@ -1,5 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -126,13 +126,17 @@ async function spawnClaudeChild(cwd: string, plan: ClaudeSpawnPlan): Promise<Cla
   let dead = false;
   let exitCode: number | null = null;
   let stderrTail = "";
+  /** Set by kill(): the exit that follows is ours, not a crash. */
+  let killed = false;
 
   const settleExit = () => {
     if (dead) return;
     dead = true;
-    const detail = isCmdNotFound(exitCode)
-      ? missingCliMessage("claude", "Install it with: npm install -g @anthropic-ai/claude-code")
-      : `exit ${exitCode ?? "signal"}${stderrTail ? ` — ${stderrTail}` : ""}`;
+    const detail = killed
+      ? "stopped by awefork"
+      : isCmdNotFound(exitCode)
+        ? missingCliMessage("claude", "Install it with: npm install -g @anthropic-ai/claude-code")
+        : `exit ${exitCode ?? "signal"}${stderrTail ? ` — ${stderrTail}` : ""}`;
     const cb = exitHandler;
     exitHandler = null;
     cb?.(detail);
@@ -185,12 +189,19 @@ async function spawnClaudeChild(cwd: string, plan: ClaudeSpawnPlan): Promise<Cla
     },
     onExit(handler) {
       if (dead) {
-        handler(`exit ${exitCode ?? "signal"}`);
+        handler(
+          killed
+            ? "stopped by awefork"
+            : isCmdNotFound(exitCode)
+              ? missingCliMessage("claude", "Install it with: npm install -g @anthropic-ai/claude-code")
+              : `exit ${exitCode ?? "signal"}`,
+        );
         return;
       }
       exitHandler = handler;
     },
     kill() {
+      killed = true;
       if (child.pid && process.platform === "win32") {
         spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
           stdio: "ignore",
@@ -219,6 +230,16 @@ export async function claudeNodeSeams(): Promise<ClaudeAdapterNodeSeams> {
     spawnCompactChild: (sessionId, cwd) => spawnClaudeChild(cwd, { kind: "resume", sessionId }),
     listTranscriptFiles: () => listTranscripts(root),
     readTranscript: (path) => readFile(path, "utf8"),
+    // The adapter's parse cache stamps its entries with this; a stat is far
+    // cheaper than re-reading and re-parsing a whole transcript.
+    statTranscript: async (path) => {
+      try {
+        const info = await stat(path);
+        return { mtimeMs: info.mtimeMs, size: info.size };
+      } catch {
+        return null;
+      }
+    },
     projectDirs: async () => {
       try {
         const entries = await readdir(root, { withFileTypes: true });

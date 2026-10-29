@@ -303,6 +303,22 @@ export interface SessionFileChanges {
 export type AgentEvent =
   | { type: "session.updated"; sessionId: string }
   | { type: "message.started"; sessionId: string; messageId: string }
+  /**
+   * A streamed message's identity was resolved after its deltas went out.
+   * Backends that stream deltas before naming the message's durable id (claude
+   * streams `message_start` → deltas → `assistant`, and the assistant frame
+   * carries the transcript row id) announce the durable id here: the renderer
+   * re-tags the live parts collected under `streamId` to `messageId`, so they
+   * match the reloaded history and get pruned when the row lands.
+   */
+  | {
+      type: "message.identified";
+      sessionId: string;
+      /** The id the parts were streamed under. */
+      streamId: string;
+      /** The id the parts now belong to. */
+      messageId: string;
+    }
   | {
       type: "message.delta";
       sessionId: string;

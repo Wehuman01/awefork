@@ -356,7 +356,18 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
   return { nodes, edges };
 }
 
-function sharedPrefixCount(
+/**
+ * How many of `sessionId`'s leading turns are a copy of `parentId`'s — the
+ * inherited prefix a fork carries. Shared by the canvas layout (which skips
+ * them so a branch does not redraw its ancestor's story) and the digest
+ * builder (which must not count the same turn twice when it flattens a
+ * story's sessions into one material list).
+ *
+ * Three fallbacks, cheapest first, because a fork's copy can keep ids
+ * (exact), re-key them (time + prompt text, which a copy preserves), or do
+ * neither (the recorded fork position, `lineage.atMessageId`).
+ */
+export function sharedPrefixCount(
   sessionId: string,
   parentId: string,
   turnsOf: ReadonlyMap<string, Turn[]>,

@@ -71,6 +71,14 @@ export const CLAUDE_SPAWN_SENTINEL = "__CLAUDE_SPAWN__";
 /** An idle prompt child (no run in flight) is reaped after this quiet window. */
 export const CLAUDE_IDLE_MS = 120_000;
 
+/**
+ * How long a memoized store file list stays valid. The walk is readdir-only,
+ * but `findTranscriptFile` (and with it every prompt's spawn planning) pays
+ * for it, so the answer is reused for a moment — and dropped the instant a
+ * run can have written a file, which is the only thing that changes it.
+ */
+const TRANSCRIPT_LIST_TTL_MS = 1_000;
+
 const COMPACT_BOUNDARY_PREFIX = "This session is being continued from a previous conversation";
 
 const MODEL_CATALOG: readonly ModelOption[] = [
@@ -196,6 +204,11 @@ export interface ClaudeAdapterNodeSeams {
   listTranscriptFiles(): Promise<string[]>;
   /** Raw UTF-8 text of one transcript file. */
   readTranscript(path: string): Promise<string>;
+  /**
+   * Optional mtime+size of one transcript file, for the parse cache. Absent
+   * (tests, fakes) means every read re-parses — correct, just not memoized.
+   */
+  statTranscript?(path: string): Promise<{ mtimeMs: number; size: number } | null>;
   /** The store root's project directories, best-effort (missing = empty). */
   projectDirs(): Promise<string[]>;
 }
@@ -233,10 +246,35 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
    * child's `result` frame. message.started/idle bookkeeping rides it.
    */
   const running = new Set<string>();
+  /**
+   * Sessions whose user pressed stop: the CLI answers an interrupt with
+   * `is_error` + `error_during_execution` (a diagnostic string, not a failure
+   * the user should see), so that result settles as a clean stop instead.
+   */
+  const interruptRequested = new Set<string>();
   /** Cached detached-export ids so mapSession can scrub their fork links. */
   let detached: ReadonlySet<string> = new Set();
-  /** The newest live assistant uuid per session, for delta routing. */
+  /**
+   * The id the run's live deltas carry. The real CLI streams a message as
+   * `message_start → content_block_delta… → assistant`, so every delta arrives
+   * BEFORE the frame that names the transcript row id — the id is taken from
+   * `message_start` (unique per message, present before the first delta) and
+   * re-aligned to the transcript uuid when the `assistant` frame lands.
+   * Cleared when the run settles so a later turn can never inherit the
+   * previous message's id (a completed row under a stale id silently drops
+   * every delta the renderer receives for it).
+   */
   const liveMessageIds = new Map<string, string>();
+  /** Sessions whose current message announced itself with a `message_start`. */
+  const sawMessageStart = new Set<string>();
+  /** Fallback id counter for CLIs that stream no `message_start`. */
+  let liveFallbackSeq = 0;
+  /** Parsed transcripts keyed by file, valid while mtime+size hold. */
+  const parseCache = new Map<string, { mtimeMs: number; size: number; parsed: ParsedTranscript }>();
+  /** Cached store file list; dropped whenever a run can have written a file. */
+  let transcriptFilesCache: { at: number; files: string[] } | null = null;
+  /** Set by dispose: an in-flight spawn resolves into a killed child, not the pool. */
+  let disposed = false;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
 
@@ -288,8 +326,28 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
    * own title after a compaction) and `custom-title` (what rename_session
    * wrote) — are kept in `meta` so a single read answers both history and
    * title.
+   *
+   * The parse is cached per file while its mtime+size hold: a session listing
+   * walks the whole store (the overview panel re-lists every agent on a slow
+   * tick), and re-reading plus re-parsing every transcript each time made
+   * that O(total store bytes) per sweep. `listSessions` also merges the
+   * pending (not yet materialized) sessions in, so a session whose transcript
+   * does not exist yet still lists.
    */
   const parseTranscript = async (file: string): Promise<ParsedTranscript> => {
+    // A cheap stat before the read: when the file has not changed since the
+    // last parse, the cached parse is still the truth.
+    const stamp = options.statTranscript ? await options.statTranscript(file) : null;
+    if (stamp) {
+      const cached = parseCache.get(file);
+      if (
+        cached &&
+        cached.mtimeMs === stamp.mtimeMs &&
+        cached.size === stamp.size
+      ) {
+        return cached.parsed;
+      }
+    }
     let text: string;
     try {
       text = await options.readTranscript(file);
@@ -326,7 +384,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         }
       }
     }
-    return { file, rows, cwd, meta };
+    const parsed: ParsedTranscript = { file, rows, cwd, meta };
+    if (stamp) parseCache.set(file, { mtimeMs: stamp.mtimeMs, size: stamp.size, parsed });
+    return parsed;
   };
 
   /** True for the rows the conversation renders (attachment rows chain but don't show). */
@@ -583,12 +643,34 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     return messages;
   };
 
+  /**
+   * The store's transcript files, walked once per logical pass. The walk
+   * itself is cheap (readdir only) but it is called from `findTranscriptFile`,
+   * which every prompt pays twice — so the result is memoized for a short
+   * window and dropped whenever a run can have written a file, which is the
+   * only thing that changes the answer.
+   */
+  const listTranscriptFiles = async (): Promise<string[]> => {
+    const at = Date.now();
+    if (transcriptFilesCache && at - transcriptFilesCache.at < TRANSCRIPT_LIST_TTL_MS) {
+      return transcriptFilesCache.files;
+    }
+    const files = await options.listTranscriptFiles();
+    transcriptFilesCache = { at, files };
+    return files;
+  };
+
+  /** Drop the memoized file list: a run may have materialized a transcript. */
+  const invalidateTranscriptFiles = (): void => {
+    transcriptFilesCache = null;
+  };
+
   /** The encoded-cwd project dir currently holding the given session id, or null. */
   const findTranscriptFile = async (sessionId: string): Promise<string | null> => {
     // Session ids are UUIDs, so the file name is exact and unique across the
     // store; matching the suffix avoids re-deriving the encoded-cwd dir.
     const needle = `${sessionId}.jsonl`;
-    const files = await options.listTranscriptFiles();
+    const files = await listTranscriptFiles();
     return files.find((file) => file.endsWith(needle)) ?? null;
   };
 
@@ -672,7 +754,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
 
   const listStoreSessions = async (): Promise<SessionSummary[]> => {
     detached = await readDetachedExportIds(lineagePath);
-    const files = await options.listTranscriptFiles();
+    const files = await listTranscriptFiles();
     const summaries: SessionSummary[] = [];
     const seen = new Set<string>();
     for (const file of files) {
@@ -743,10 +825,20 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       // The copy has been materialized (or named): neither claim is needed.
       pendingResume.delete(sessionId);
       pendingForkCut.delete(sessionId);
+      if (disposed) {
+        // dispose() ran while this spawn was in flight: the child is not
+        // pooled, so nothing will ever kill it. Do it here, or a detached
+        // process group outlives the app that spawned it.
+        child.kill();
+        throw new Error("claude adapter was disposed");
+      }
       sessions.set(sessionId, child);
       child.setEventHandler((frame) => handleFrame(sessionId, frame));
       child.onExit((detail) => {
         sessions.delete(sessionId);
+        liveMessageIds.delete(sessionId);
+        sawMessageStart.delete(sessionId);
+        interruptRequested.delete(sessionId);
         if (running.has(sessionId)) {
           running.delete(sessionId);
           emit({ type: "server.error", sessionId, message: `claude exited: ${detail}` });
@@ -763,6 +855,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     running.delete(sessionId);
     scheduleReap(sessionId);
     emit({ type: "session.idle", sessionId });
+    // A settled run may have materialized a transcript (a fork's copy, a
+    // rename's custom-title row), so the memoized file list is stale.
+    invalidateTranscriptFiles();
   };
 
   const handleFrame = (sessionId: string, frame: Record<string, unknown>): void => {
@@ -776,19 +871,25 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       handleControlRequest(sessionId, frame);
       return;
     }
-    if (type === "assistant") {
-      // The uuid is the row id the transcript will carry, so live deltas and
-      // the reloaded history agree on which message a part belongs to.
-      const messageId =
-        typeof (frame as { uuid?: unknown }).uuid === "string"
-          ? (frame as { uuid: string }).uuid
-          : `live-${now()}`;
-      liveMessageIds.set(sessionId, messageId);
-      emit({ type: "message.started", sessionId, messageId });
-      return;
-    }
     if (type === "stream_event") {
       const event = (isBlock(frame.event) ? frame.event : {}) as Record<string, unknown>;
+      if (event.type === "message_start") {
+        // The real CLI streams one message as
+        // message_start → content_block_delta… → assistant, so every delta
+        // arrives BEFORE the frame that names the transcript row id. The
+        // streamed id therefore comes from here — the API message id, unique
+        // per message and present before the first delta — and the assistant
+        // frame below re-tags what was collected under it.
+        const message = (isBlock(event.message) ? event.message : {}) as Record<string, unknown>;
+        const messageId =
+          typeof message.id === "string" && message.id !== ""
+            ? message.id
+            : `live-${(liveFallbackSeq += 1)}`;
+        liveMessageIds.set(sessionId, messageId);
+        sawMessageStart.add(sessionId);
+        emit({ type: "message.started", sessionId, messageId });
+        return;
+      }
       if (event.type !== "content_block_delta") return;
       const delta = (isBlock(event.delta) ? event.delta : {}) as Record<string, unknown>;
       const text =
@@ -814,12 +915,45 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       });
       return;
     }
+    if (type === "assistant") {
+      // The frame's uuid is the id the transcript row carries, and its
+      // message.id is the id this message's deltas went out under — the two
+      // id spaces only meet here. Re-tag the collected parts so the live
+      // bubble and the reloaded history agree on one message.
+      const uuid =
+        typeof (frame as { uuid?: unknown }).uuid === "string"
+          ? (frame as { uuid: string }).uuid
+          : null;
+      const streamId = liveMessageIds.get(sessionId);
+      if (uuid !== null && streamId !== undefined && streamId !== uuid) {
+        emit({ type: "message.identified", sessionId, streamId, messageId: uuid });
+      }
+      if (uuid !== null) liveMessageIds.set(sessionId, uuid);
+      if (!sawMessageStart.delete(sessionId)) {
+        // A CLI that streams no message_start: the run's first step is only
+        // announced here, so the renderer still sees it start.
+        emit({
+          type: "message.started",
+          sessionId,
+          messageId: uuid ?? `live-${(liveFallbackSeq += 1)}`,
+        });
+      }
+      return;
+    }
     if (type === "result") {
       // A failed run reports ONLY here: no transcript row is written, and the
       // CLI's stderr never reaches the renderer. Surfacing it as a
       // session-scoped error is what makes "the model never answered" visible
-      // instead of a silently successful empty turn.
+      // instead of a silently successful empty turn. An interrupt answers
+      // with is_error too (a diagnostic string, not a failure the user asked
+      // about), so a requested stop settles clean instead.
+      liveMessageIds.delete(sessionId);
+      sawMessageStart.delete(sessionId);
       if (frame.is_error === true) {
+        if (interruptRequested.delete(sessionId)) {
+          settleRun(sessionId);
+          return;
+        }
         const detail = errorDetailOf(frame);
         running.delete(sessionId);
         scheduleReap(sessionId);
@@ -827,6 +961,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         emit({ type: "session.idle", sessionId });
         return;
       }
+      interruptRequested.delete(sessionId);
       settleRun(sessionId);
     }
   };
@@ -1181,7 +1316,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
      * makes the CLI write a `custom-title` row into the transcript (verified
      * against 2.1.236 and 2.1.310), which `titleOf` reads back — so the title
      * survives a restart instead of living only in awefork's state. It needs a
-     * live child, so one is spawned for the session when none is pooled.
+     * live child, so one is spawned for the session when none is pooled — and
+     * that child is reaped on the normal idle clock, because a rename is the
+     * only thing this spawn ever does.
      */
     async renameSession(sessionId, title) {
       const trimmed = title.trim();
@@ -1195,6 +1332,9 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         request_id: `awefork-rename-${now()}`,
         request: { subtype: "rename_session", title: trimmed },
       });
+      // The rename may have just spawned the child: without a reap timer it
+      // would sit pooled for the rest of the app's life when no prompt follows.
+      scheduleReap(sessionId);
     },
 
     async prompt(sessionId, text, model, attachments) {
@@ -1304,6 +1444,10 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     async abort(sessionId) {
       const child = sessions.get(sessionId);
       if (!child) throw new Error("this session has no turn running right now");
+      // The CLI answers an interrupt with `is_error` + a diagnostic string
+      // rather than a clean result; the flag makes the settle below treat it
+      // as the stop the user asked for instead of a failed run.
+      interruptRequested.add(sessionId);
       child.send({
         type: "control_request",
         request_id: `awefork-interrupt-${now()}`,
@@ -1323,6 +1467,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     },
 
     dispose() {
+      disposed = true;
       emitEvent = null;
       // awefork's process exits on quit, which also kills the adapter's event
       // sink and reap timers. Claude Code has no detached server that could
@@ -1334,6 +1479,15 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       sessions.clear();
       spawning.clear();
       pendingAsks.clear();
+      pending.clear();
+      pendingResume.clear();
+      pendingForkCut.clear();
+      liveMessageIds.clear();
+      sawMessageStart.clear();
+      interruptRequested.clear();
+      running.clear();
+      parseCache.clear();
+      transcriptFilesCache = null;
     },
   };
   return adapter;
@@ -1351,6 +1505,9 @@ function errorDetailOf(frame: Record<string, unknown>): string {
   if (errors.length > 0) return errors.join("; ");
   if (typeof frame.result === "string" && frame.result !== "") return frame.result;
   const subtype = typeof frame.subtype === "string" ? frame.subtype : null;
+  // An interrupt's diagnostic string names an internal frame type and reads
+  // as a failure to the user who asked for the stop; say what happened.
+  if (subtype === "error_during_execution") return "the run stopped unexpectedly";
   return subtype === null ? "claude reported a failed run" : `claude run failed (${subtype})`;
 }
 
