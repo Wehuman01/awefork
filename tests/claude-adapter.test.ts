@@ -424,7 +424,9 @@ describe("claude prompt", () => {
     const { adapter, children, events } = await makeHarness([S1]);
     await adapter.prompt(S1, "hi", null, []);
     const child = children.spawned[0];
-    child?.fire({ type: "assistant", uuid: "m1" });
+    // The real CLI order: message_start, then the deltas, then the assistant
+    // frame that names the transcript row.
+    child?.fire({ type: "stream_event", event: { type: "message_start", message: { id: "m1" } } });
     child?.fire({
       type: "stream_event",
       event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } },
@@ -444,21 +446,117 @@ describe("claude prompt", () => {
     expect(deltas[1]).toMatchObject({ kind: "thinking", delta: "hm", partId: "m1:1" });
   });
 
+  it("keeps streaming a second turn's reply instead of dropping it", async () => {
+    // The bug this guards: the first turn's deltas used to go out under the
+    // transcript row id the assistant frame named, and the id was never
+    // cleared — so every later turn's deltas carried the PREVIOUS message's
+    // id, matched a row the renderer had already completed, and were dropped
+    // (the reply appeared only after the run settled and the transcript was
+    // reloaded). Verified against the real 2.1.236 CLI: message_start
+    // (event.message.id) → content_block_delta… → assistant (uuid = the row).
+    const { adapter, children, events } = await makeHarness([S1]);
+    await adapter.prompt(S1, "first", null, []);
+    const child = children.spawned[0];
+    const messageStart = (id: string) => ({
+      type: "stream_event",
+      event: { type: "message_start", message: { id } },
+    });
+    const textDelta = (text: string) => ({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+    });
+
+    // Turn one: stream, complete, settle.
+    child?.fire(messageStart("msg-1"));
+    child?.fire(textDelta("first answer"));
+    child?.fire({ type: "assistant", uuid: "row-1", message: { id: "msg-1" } });
+    child?.fire({ type: "result", is_error: false });
+    events.length = 0;
+
+    // Turn two: the same frames, a fresh message id.
+    await adapter.prompt(S1, "second", null, []);
+    child?.fire(messageStart("msg-2"));
+    child?.fire(textDelta("second answer"));
+
+    const deltas = events.filter((e) => e.type === "message.delta");
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({ messageId: "msg-2", delta: "second answer" });
+    // The parts are re-tagged to the transcript row id once it is known, so
+    // the live bubble and the reloaded history share one message id.
+    child?.fire({ type: "assistant", uuid: "row-2", message: { id: "msg-2" } });
+    const identified = events.find((e) => e.type === "message.identified");
+    expect(identified).toMatchObject({ streamId: "msg-2", messageId: "row-2" });
+  });
+
+  it("settles an interrupted run clean instead of reporting a failure", async () => {
+    // The CLI answers an interrupt with is_error + a diagnostic string; the
+    // user asked for the stop, so no error banner and no failed result.
+    const { adapter, children, events } = await makeHarness([S1]);
+    await adapter.prompt(S1, "hi", null, []);
+    await adapter.abort(S1);
+    children.spawned[0]?.fire({
+      type: "result",
+      is_error: true,
+      subtype: "error_during_execution",
+      errors: ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"],
+    });
+
+    expect(events.some((e) => e.type === "server.error")).toBe(false);
+    const idle = events.find((e) => e.type === "session.idle");
+    expect(idle).toBeDefined();
+  });
+
+  it("kills a child that resolves after dispose instead of pooling it", async () => {
+    // The spawn raced dispose: the child must not enter the pool, or nothing
+    // ever kills it — and it is detached, so it outlives the app.
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const child = {
+      send: () => {},
+      setEventHandler: () => {},
+      onExit: () => {},
+      kill: () => {},
+    };
+    let killed = false;
+    const tracked = { ...child, kill: () => (killed = true) };
+    const adapter = createClaudeAdapter({
+      lineagePath: "/nonexistent-lineage.jsonl",
+      spawnChild: async () => {
+        await gate;
+        return tracked as never;
+      },
+      listTranscriptFiles: async () => [],
+      readTranscript: async () => "",
+    });
+    const sending = adapter.prompt(S1, "hi", null, []).catch(() => null);
+    adapter.dispose();
+    release?.();
+    await sending;
+
+    expect(killed).toBe(true);
+  });
+
   it("routes each step's deltas to its own part", async () => {
     // A multi-step run restarts the block index at 0; a part id without the
     // message would append step two's text onto step one's part.
     const { adapter, children, events } = await makeHarness([S1]);
     await adapter.prompt(S1, "hi", null, []);
     const child = children.spawned[0];
-    const delta = (messageUuid: string, text: string) => ({
+    const delta = (text: string) => ({
       type: "stream_event",
       event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
-      uuid: messageUuid,
     });
+    const start = (id: string) => ({
+      type: "stream_event",
+      event: { type: "message_start", message: { id } },
+    });
+    child?.fire(start("step-1"));
+    child?.fire(delta("first"));
     child?.fire({ type: "assistant", uuid: "step-1" });
-    child?.fire(delta("step-1", "first"));
-    child?.fire({ type: "assistant", uuid: "step-2" });
-    child?.fire(delta("step-2", "second"));
+    child?.fire(start("step-2"));
+    child?.fire(delta("second"));
 
     const parts = events.filter((e) => e.type === "message.delta").map((e) => e);
     expect(parts).toHaveLength(2);

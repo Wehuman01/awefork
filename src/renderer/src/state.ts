@@ -6629,6 +6629,9 @@ async function digestMaterialOf(
     title: option.title,
     path,
     messages,
+    // The fork records let the builder trim each fork's copied prefix — the
+    // parent's history is already counted once the root session is walked.
+    lineage: state.lineage,
     selectedTurnId: option.selectedTurnId,
     scope,
   });

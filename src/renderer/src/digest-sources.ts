@@ -1,3 +1,4 @@
+import { type BuildGraphOptions, sharedPrefixCount } from "../../shared/canvas-graph";
 import type { DigestScope, DigestStorySource } from "../../shared/digest-types";
 import { buildTurns } from "../../shared/turns";
 import type { ChatMessage } from "../../shared/types";
@@ -31,6 +32,8 @@ export interface DigestTurn {
   /** User message id that starts the turn; also the turn's identity. */
   messageId: string;
   title: string;
+  /** Creation time of the prompt row — a copy's re-keyed rows keep it. */
+  createdAt: number;
   prompt: string;
   reply: string;
   /** Model that wrote the last reply; null when unreported. */
@@ -63,12 +66,11 @@ export interface DigestStoryInput {
   /** Loaded rows per session on the path; missing sessions contribute nothing. */
   messages: Readonly<Record<string, readonly ChatMessage[]>>;
   /**
-   * Fork records for the story's sessions. A fork's copied prefix is its
-   * parent's history, not new material — the builder trims it per session
-   * with the canvas graph's shared-prefix rule. Absent (older callers) means
-   * no trimming.
+   * Fork records for the story's sessions, so a fork's copied prefix (its
+   * parent's history, already counted when the root session was walked) can
+   * be trimmed. Absent means no trimming.
    */
-  lineage?: Readonly<Record<string, { parentId?: string | null; context?: string }>>;
+  lineage?: Readonly<Record<string, { parentId?: string | null }>>;
   /** The parked tab's locked turn (`sessionId:messageId`), when it has one. */
   selectedTurnId: string | null;
   scope: DigestScope;
@@ -94,6 +96,7 @@ export function digestTurnsOfSession(
     model: turn.model?.modelId ?? turn.modelIds.at(-1) ?? null,
     toolNames: turn.toolNames,
     error: turn.error,
+    createdAt: turn.createdAt,
   }));
 }
 
@@ -110,13 +113,21 @@ export function buildDigestStoryMaterial(input: DigestStoryInput): DigestStoryMa
   // A fork's copied prefix is its parent's history, not new material: the
   // story lists root first, so the parent's turns are already in — counting
   // the copy again doubles them in the model's material and eats the budget
-  // with repeats. Trim each session's inherited prefix (same rule the canvas
-  // graph uses to keep a fork from redrawing its ancestor's story).
+  // with repeats. Trim each session's inherited prefix with the same
+  // shared-prefix rule the canvas graph uses (ids, then time+prompt text,
+  // then the recorded fork position).
   const all: DigestTurn[] = [];
+  const graphOptions: BuildGraphOptions = {
+    sessions: [],
+    lineage: (input.lineage ?? {}) as BuildGraphOptions["lineage"],
+    messages: {},
+  };
   for (const sessionId of input.path) {
     const parentId = input.lineage?.[sessionId]?.parentId ?? null;
     const inherited =
-      parentId !== null ? sharedPrefixCount(sessionId, parentId, turnsOf) : 0;
+      parentId !== null && parentId !== sessionId
+        ? sharedPrefixCount(sessionId, parentId, turnsOf, graphOptions)
+        : 0;
     const own = (turnsOf.get(sessionId) ?? []).slice(inherited);
     all.push(...own);
   }

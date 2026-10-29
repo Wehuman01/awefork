@@ -193,7 +193,10 @@ async function spawnClaudeChild(cwd: string, plan: ClaudeSpawnPlan): Promise<Cla
           killed
             ? "stopped by awefork"
             : isCmdNotFound(exitCode)
-              ? missingCliMessage("claude", "Install it with: npm install -g @anthropic-ai/claude-code")
+              ? missingCliMessage(
+                  "claude",
+                  "Install it with: npm install -g @anthropic-ai/claude-code",
+                )
               : `exit ${exitCode ?? "signal"}`,
         );
         return;

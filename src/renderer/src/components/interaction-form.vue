@@ -5,9 +5,22 @@
       <span v-if="field.description" class="interaction-field-hint">{{ field.description }}</span>
 
       <template v-if="field.type === 'external'">
-        <a class="interaction-field-link" :href="field.url" target="_blank" rel="noreferrer">
+        <!-- An external field's URL comes from the agent, so it is untrusted:
+             a `javascript:` href would execute in the renderer's main world
+             (where window.awefork lives) on click. Only http/https/mailto
+             pass — the same gate ipc's openExternal applies — and the link
+             routes through it rather than a raw href. -->
+        <a
+          v-if="isSafeExternalUrl(field.url)"
+          class="interaction-field-link"
+          :href="field.url"
+          target="_blank"
+          rel="noreferrer"
+          @click.prevent="openExternal(field.url)"
+        >
           {{ field.url }}
         </a>
+        <span v-else class="interaction-field-link">{{ field.url }}</span>
       </template>
 
       <template v-else-if="field.type === 'boolean'">
@@ -68,6 +81,28 @@ import { t } from "../i18n";
 type ReadonlyField = DeepReadonly<AgentFormField>;
 
 const props = defineProps<{ fields: readonly ReadonlyField[] }>();
+
+/** The schemes an external link may carry — ipc's openExternal gate, mirrored. */
+const SAFE_URL_SCHEMES = ["http:", "https:", "mailto:"];
+
+/**
+ * Whether one external field's url is safe to render as a link. The value
+ * comes from the agent, so a `javascript:` (or any other) href would execute
+ * in the renderer's main world on click — where window.awefork lives.
+ */
+function isSafeExternalUrl(url: string): boolean {
+  try {
+    return SAFE_URL_SCHEMES.includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/** Open a safe external link through main's gated openExternal. */
+function openExternal(url: string): void {
+  if (!isSafeExternalUrl(url)) return;
+  void window.awefork?.openExternal?.(url);
+}
 
 /**
  * Field values, keyed by field key. A form's answer map is heterogeneous —

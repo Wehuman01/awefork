@@ -357,6 +357,17 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
 }
 
 /**
+ * The turn fields `sharedPrefixCount` reads. Widened from `Turn` so callers
+ * with a slimmer turn shape (the digest's turns carry the full prompt, not
+ * Turn's timing fields) share the rule instead of reimplementing it.
+ */
+export interface SharedPrefixTurn {
+  messageId: string;
+  title: string;
+  createdAt: number;
+}
+
+/**
  * How many of `sessionId`'s leading turns are a copy of `parentId`'s — the
  * inherited prefix a fork carries. Shared by the canvas layout (which skips
  * them so a branch does not redraw its ancestor's story) and the digest
@@ -370,8 +381,8 @@ export function buildTurnGraph(options: BuildGraphOptions): TurnGraph {
 export function sharedPrefixCount(
   sessionId: string,
   parentId: string,
-  turnsOf: ReadonlyMap<string, Turn[]>,
-  options: BuildGraphOptions,
+  turnsOf: ReadonlyMap<string, readonly SharedPrefixTurn[]>,
+  options: Pick<BuildGraphOptions, "lineage">,
 ): number {
   // turnsOf already holds every session's turns; rebuilding them here (per
   // fork relationship, on every layout) doubled the graph's parsing cost.

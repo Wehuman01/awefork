@@ -340,11 +340,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
     const stamp = options.statTranscript ? await options.statTranscript(file) : null;
     if (stamp) {
       const cached = parseCache.get(file);
-      if (
-        cached &&
-        cached.mtimeMs === stamp.mtimeMs &&
-        cached.size === stamp.size
-      ) {
+      if (cached && cached.mtimeMs === stamp.mtimeMs && cached.size === stamp.size) {
         return cached.parsed;
       }
     }
@@ -881,10 +877,11 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
         // per message and present before the first delta — and the assistant
         // frame below re-tags what was collected under it.
         const message = (isBlock(event.message) ? event.message : {}) as Record<string, unknown>;
-        const messageId =
-          typeof message.id === "string" && message.id !== ""
-            ? message.id
-            : `live-${(liveFallbackSeq += 1)}`;
+        let messageId = typeof message.id === "string" ? message.id : "";
+        if (messageId === "") {
+          liveFallbackSeq += 1;
+          messageId = `live-${liveFallbackSeq}`;
+        }
         liveMessageIds.set(sessionId, messageId);
         sawMessageStart.add(sessionId);
         emit({ type: "message.started", sessionId, messageId });
@@ -932,11 +929,12 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions): AgentAdapter
       if (!sawMessageStart.delete(sessionId)) {
         // A CLI that streams no message_start: the run's first step is only
         // announced here, so the renderer still sees it start.
-        emit({
-          type: "message.started",
-          sessionId,
-          messageId: uuid ?? `live-${(liveFallbackSeq += 1)}`,
-        });
+        let messageId = uuid ?? "";
+        if (messageId === "") {
+          liveFallbackSeq += 1;
+          messageId = `live-${liveFallbackSeq}`;
+        }
+        emit({ type: "message.started", sessionId, messageId });
       }
       return;
     }
