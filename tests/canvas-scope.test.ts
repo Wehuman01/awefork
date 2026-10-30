@@ -62,6 +62,24 @@ describe("selectCanvasSessions", () => {
     const ids = selectCanvasSessions(onlyAgent, agentLineage, "a-fork").map((s) => s.id);
     expect(ids.sort()).toEqual(["a-fork", "root-a"]);
   });
+
+  it("keeps a story whole when the listing drops its root row", () => {
+    // The root's row vanished (an index-backed listing lagging the disk);
+    // the lineage still ties both forks to it. The canvas shows every
+    // visible member of the story — walking to the lineage-only root and
+    // collecting its (visible) subtree, not two unrelated islands.
+    const gapped = [
+      session("root-gone"),
+      session("fork-1", { origin: "fork" }),
+      session("fork-2", { origin: "fork" }),
+    ].filter((s) => s.id !== "root-gone");
+    const lineage = lineageOf([
+      ["fork-1", "root-gone"],
+      ["fork-2", "root-gone"],
+    ]);
+    const ids = selectCanvasSessions(gapped, lineage, "fork-1").map((s) => s.id);
+    expect(ids.sort()).toEqual(["fork-1", "fork-2"]);
+  });
 });
 
 describe("storyRootOf", () => {
@@ -93,5 +111,29 @@ describe("storyRootOf", () => {
     ]);
     // Any member of the cycle is a valid stop; the guarantee is termination.
     expect(["x", "y"]).toContain(storyRootOf([session("x"), session("y")], cyclic, "x"));
+  });
+
+  it("follows a lineage link across a listing gap — a dropped root row must not tear the story", () => {
+    // codex 0.165's listing is index-backed and can lag the rollouts for
+    // hours: the story's ROOT drops out while its forks stay listed. The
+    // lineage sidecar still names the parent, and that record is durable
+    // truth — the walk must reach the missing root, because the tab strip
+    // dedupes on it (a stop at the fork is how one story became two tabs).
+    const gapped = [session("fork-1"), session("fork-2")];
+    const lineage = lineageOf([
+      ["fork-1", "root-gone"],
+      ["fork-2", "root-gone"],
+    ]);
+    expect(storyRootOf(gapped, lineage, "fork-1")).toBe("root-gone");
+    expect(storyRootOf(gapped, lineage, "fork-2")).toBe("root-gone");
+  });
+
+  it("stops at a row-only link whose parent row is gone", () => {
+    // Only the agent's own row claims the parent (no lineage record), and
+    // the listing dropped that parent: the chain genuinely ends here —
+    // inventing an invisible parent from a stale row would hang stories off
+    // sessions the backend no longer has.
+    const sessions = [session("fork", { parentSessionId: "vanished-root", origin: "fork" })];
+    expect(storyRootOf(sessions, {}, "fork")).toBe("fork");
   });
 });

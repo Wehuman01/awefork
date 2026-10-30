@@ -69,6 +69,19 @@ function homeAdapter(byHome: Map<string, FakeHomeAdapter>, id: string): FakeHome
   return adapter;
 }
 
+/** A RolloutSession-shaped record for the facade's disk fallback. */
+function rolloutRow(id: string, parentId: string | null, updatedAt: number) {
+  return {
+    sessionId: id,
+    parentId,
+    listed: true,
+    cwd: "/repo",
+    title: null,
+    createdAt: 1,
+    updatedAt,
+  };
+}
+
 function makeSummary(
   id: string,
   updatedAt: number,
@@ -243,6 +256,75 @@ describe("codex multi-home facade", () => {
     expect(forked).toMatchObject({ id: "fork-1", origin: "fork", parentSessionId: "parent" });
     const sessions = await facade.listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["fork-1", "parent"]);
+  });
+
+  it("lists a rollout the server's listing dropped, so a story stays whole", async () => {
+    // codex 0.165's thread/list is index-backed and can lag the rollouts for
+    // hours (verified: 282 of 418 on-disk threads missing, settled turns
+    // included, while thread/read stayed correct). A story's root dropping
+    // out of the listing is what tore the user's canvas tabs apart, so the
+    // facade merges disk rows for what the listing lacks.
+    const { facade } = makeFacade(
+      { default: ["fork-1"] },
+      {
+        rolloutSessions: async () => [
+          rolloutRow("disk-root", null, 150),
+          rolloutRow("disk-fork", "disk-root", 180),
+        ],
+      },
+    );
+    const sessions = await facade.listSessions();
+    expect(sessions.map((s) => s.id).sort()).toEqual(["disk-fork", "disk-root", "fork-1"]);
+    const diskRoot = sessions.find((s) => s.id === "disk-root");
+    expect(diskRoot).toMatchObject({ parentSessionId: null, origin: "root" });
+    // The disk row carries its recorded parent, so a fork the listing missed
+    // still nests under the root the listing missed.
+    expect(sessions.find((s) => s.id === "disk-fork")).toMatchObject({
+      parentSessionId: "disk-root",
+      origin: "fork",
+    });
+    // The server's own row wins whenever it exists — the disk is a fallback.
+    expect(sessions.find((s) => s.id === "fork-1")?.updatedAt).toBe(200);
+  });
+
+  it("does not let a disk row override the server's own row", async () => {
+    const { facade } = makeFacade(
+      { default: ["listed-1"] },
+      { rolloutSessions: async () => [rolloutRow("listed-1", null, 999)] },
+    );
+    const sessions = await facade.listSessions();
+    expect(sessions.filter((s) => s.id === "listed-1")).toHaveLength(1);
+    expect(sessions.find((s) => s.id === "listed-1")?.updatedAt).toBe(200);
+  });
+
+  it("skips subagent rollouts in the disk fallback", async () => {
+    // The rollout scan marks subagent/guardian files (source is an object),
+    // and the facade must drop them: a listing never carries them, and every
+    // awefork view hides them by design.
+    const { facade } = makeFacade(
+      { default: [] },
+      {
+        rolloutSessions: async () => [
+          { ...rolloutRow("sub-1", "parent", 100), listed: false },
+          rolloutRow("plain", null, 100),
+        ],
+      },
+    );
+    const sessions = await facade.listSessions();
+    expect(sessions.map((s) => s.id)).toEqual(["plain"]);
+  });
+
+  it("keeps the listing usable when the rollout scan fails", async () => {
+    const { facade } = makeFacade(
+      { default: ["own"] },
+      {
+        rolloutSessions: async () => {
+          throw new Error("home unreadable");
+        },
+      },
+    );
+    const sessions = await facade.listSessions();
+    expect(sessions.map((s) => s.id)).toEqual(["own"]);
   });
 
   it("keeps a just-exported copy listed before its first own turn", async () => {

@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   stopPiChildren: vi.fn(),
   probeClaude: vi.fn(),
   claudeNodeSeams: vi.fn(),
+  readRolloutSessions: vi.fn(),
 }));
 
 vi.mock("../src/main/codex-server.js", () => ({
@@ -74,6 +75,14 @@ vi.mock("../src/main/claude-server.js", () => ({
 vi.mock("../src/main/codex-homes.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/main/codex-homes.js")>()),
   discoverCodexHomes: mocks.discoverCodexHomes,
+}));
+
+// The codex facade falls back to the rollout scan for threads the listing
+// dropped; the scan reads the dev machine's real ~/.codex, so it is mocked
+// here to keep the registry's contracts deterministic.
+vi.mock("../src/main/codex-rollout.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/main/codex-rollout.js")>()),
+  readRolloutSessions: mocks.readRolloutSessions,
 }));
 
 vi.mock("../src/main/opencode-server", () => ({
@@ -151,6 +160,8 @@ beforeEach(async () => {
   // Default: nothing already listening looks like opencode; spawn path runs.
   mocks.tryReuseOpencodeServer.mockResolvedValue(null);
   mocks.findListeningLocalPorts.mockResolvedValue([]);
+  // Default: no disk-found rollouts the listing lacks.
+  mocks.readRolloutSessions.mockResolvedValue([]);
   userDataDir = await mkdtemp(join(tmpdir(), "awefork-registry-"));
   registry = createBackendRegistry(userDataDir);
   // By default the opencode CLI "is on PATH" with a version inside the

@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readForkParents } from "../src/main/codex-rollout.js";
+import { readForkParents, readRolloutSessions } from "../src/main/codex-rollout.js";
 
 const roots: string[] = [];
 
@@ -197,5 +197,74 @@ describe("readForkParents", () => {
       },
     ]);
     expect(await readForkParents(home)).toEqual({ "cached-1": "cached-parent" });
+  });
+});
+
+describe("readRolloutSessions", () => {
+  it("marks subagent rollouts as not listed, and reads the fallback facts", async () => {
+    const home = makeHome();
+    writeRollout(home, "plain-root", [
+      {
+        type: "session_meta",
+        timestamp: "2026-10-27T09:59:44.000Z",
+        payload: { session_id: "plain-root", id: "plain-root", cwd: "/repo" },
+      },
+    ]);
+    writeRollout(home, "disk-fork", [
+      {
+        type: "session_meta",
+        timestamp: "2026-10-27T10:00:00.000Z",
+        payload: {
+          session_id: "disk-fork",
+          id: "disk-fork",
+          forked_from_id: "plain-root",
+          cwd: "/repo",
+        },
+      },
+    ]);
+    // A subagent rollout: `source` is an object naming the spawner. A listing
+    // never carries these — the scan marks them so the caller can drop them.
+    writeRollout(home, "sub-agent", [
+      {
+        type: "session_meta",
+        payload: {
+          session_id: "sub-agent",
+          id: "sub-agent",
+          source: { subagent: { thread_spawn: { parent_thread_id: "plain-root" } } },
+        },
+      },
+    ]);
+
+    const sessions = await readRolloutSessions(home);
+    const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+    expect(byId.get("sub-agent")?.listed).toBe(false);
+
+    const root = byId.get("plain-root");
+    expect(root).toBeDefined();
+    if (root) {
+      expect(root.parentId).toBeNull();
+      expect(root.cwd).toBe("/repo");
+      expect(root.listed).toBe(true);
+      expect(root.createdAt).toBe(Date.parse("2026-10-27T09:59:44.000Z"));
+    }
+
+    const fork = byId.get("disk-fork");
+    expect(fork).toBeDefined();
+    if (fork) expect(fork.parentId).toBe("plain-root");
+  });
+
+  it("is cached like readForkParents, sharing the same scan", async () => {
+    const home = makeHome();
+    writeRollout(home, "scan-1", [
+      { type: "session_meta", payload: { session_id: "scan-1", id: "scan-1" } },
+    ]);
+    const first = await readRolloutSessions(home);
+    expect(first.map((s) => s.sessionId)).toEqual(["scan-1"]);
+
+    writeRollout(home, "scan-2", [
+      { type: "session_meta", payload: { session_id: "scan-2", id: "scan-2" } },
+    ]);
+    const second = await readRolloutSessions(home);
+    expect(second.map((s) => s.sessionId)).toEqual(["scan-1"]);
   });
 });

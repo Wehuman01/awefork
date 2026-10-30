@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AweforkApi } from "../src/shared/awefork-api";
 import type { BackendId } from "../src/shared/backend";
-import type { ChatMessage, SessionSummary } from "../src/shared/types";
+import type { ChatMessage, LineageMap, SessionSummary } from "../src/shared/types";
 import { createDiagnosticsMock } from "./helpers/diagnostics-mock";
 import { createOverviewCacheMock, createOverviewLedgerMock } from "./helpers/overview-ledger-mock";
 
@@ -71,12 +71,14 @@ function rowsFor(sessionId: string): ChatMessage[] {
 
 /** Sessions the scripted API reports; tests reassign between refreshes. */
 let apiSessions: SessionSummary[] = [STORY_A, STORY_B];
+/** Lineage the scripted API reports alongside the listing. */
+let apiLineage: LineageMap = {};
 
 async function bootState() {
   vi.resetModules();
   const api = {
     ready: async () => ({ ok: true }),
-    sessions: async () => ({ sessions: apiSessions, lineage: {} }),
+    sessions: async () => ({ sessions: apiSessions, lineage: apiLineage }),
     messages: async (_backend: BackendId, sessionId: string) => rowsFor(sessionId),
     models: async () => [],
     messageAttachments: async () => [],
@@ -141,6 +143,7 @@ async function bootState() {
 beforeEach(() => {
   vi.useFakeTimers();
   apiSessions = [STORY_A, STORY_B];
+  apiLineage = {};
 });
 
 afterEach(() => {
@@ -322,6 +325,46 @@ describe("canvas tabs", () => {
     expect(rerooted?.rootId).toBe("a-fork");
     expect(rerooted).toBeDefined();
     if (rerooted) expect(state.tabRootSession(rerooted)?.id).toBe("a-fork");
+  });
+
+  it("keeps a story's root identity when the listing drops the root row", async () => {
+    // The incident: codex 0.165's index-backed listing omitted the story's
+    // root (01a1866d) for hours while its forks stayed listed. The tab strip
+    // keys on storyRootOf, and the lineage sidecar durably names the parent —
+    // so a gap must not re-root the tab onto the fork (that re-root is how
+    // one story became two tabs), and the canvas keeps every visible member.
+    const state = await bootState();
+    apiLineage = { "a-fork": { parentId: "story-a", atMessageId: null, createdAt: 1 } };
+    apiSessions = [STORY_A, STORY_B, FORK_OF_A];
+    await state.refreshSessions();
+    await state.openCanvasTab("a-fork"); // the story-a story tab, a-fork active
+    expect(state.activeCanvasTab.value?.rootId).toBe("story-a");
+
+    // Park on the story-b tab, then the listing loses story-a's row: only
+    // the fork survives, and its lineage link names the missing root.
+    const storyBTab = state.store.canvasTabs.find((t) => t.selectedId === "story-b");
+    expect(storyBTab).toBeDefined();
+    if (storyBTab) await state.activateCanvasTab(storyBTab.id);
+    apiSessions = [STORY_B, FORK_OF_A];
+    await state.refreshSessions();
+
+    // Inside the grace the record keeps its real root.
+    const forkTab = state.store.canvasTabs.find((t) => t.selectedId === "a-fork");
+    expect(forkTab?.rootId).toBe("story-a");
+
+    // Past the grace the root stays story-a: the lineage link is durable
+    // truth, not a listing artifact. Re-rooting here is what split the
+    // user's story into two tabs.
+    vi.advanceTimersByTime(9_000);
+    await state.refreshSessions();
+    const settled = state.store.canvasTabs.find((t) => t.selectedId === "a-fork");
+    expect(settled?.rootId).toBe("story-a");
+
+    // The canvas still draws the whole visible story — the fork tab shows
+    // the fork (the root card has no row this refresh, so it is not drawn).
+    expect(state.store.selectedId).toBe("story-b");
+    if (settled) await state.activateCanvasTab(settled.id);
+    expect(state.canvasSessions.value.map((s) => s.id)).toEqual(["a-fork"]);
   });
 
   it("heals a tab activation that raced a stale listing", async () => {

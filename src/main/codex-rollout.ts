@@ -111,19 +111,52 @@ function textOrNull(value: unknown): string | null {
  * this to a small read per session instead of a full parse.
  */
 export async function readForkParents(homePath: string): Promise<Record<string, string>> {
-  const cached = forkParentCache.get(homePath);
-  if (cached && Date.now() - cached.readAt < FORK_PARENT_TTL_MS) return cached.parents;
+  const records = await readRolloutSessions(homePath);
   const parents: Record<string, string> = {};
-  for (const path of listRolloutFiles(homePath)) {
-    const parent = await readForkParentOf(path);
-    if (parent) parents[parent.sessionId] = parent.parentId;
+  for (const record of records) {
+    if (record.parentId) parents[record.sessionId] = record.parentId;
   }
-  forkParentCache.set(homePath, { parents, readAt: Date.now() });
   return parents;
 }
 
+/** One rollout's first record, as the listing fallback needs it. */
+export interface RolloutSession {
+  sessionId: string;
+  parentId: string | null;
+  /** Not a subagent/guardian thread — the kinds a listing would carry. */
+  listed: boolean;
+  cwd: string | null;
+  title: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
 /**
- * How long a home's fork parents stay valid.
+ * Every rollout in a home, read from each file's first record.
+ *
+ * Beyond the fork parents, this is the disk truth the listing fallback merges
+ * in: codex 0.165's `thread/list` is backed by a sqlite index that can lag
+ * the rollouts (verified: hours where the listing omitted 282 of 418
+ * on-disk threads, including ones with many settled turns), while
+ * `thread/read` and the rollouts stayed correct. The walk this function
+ * already did for fork parents reads the same first lines, so the sessions
+ * come along for the ride — minus subagent/guardian rollouts, which a
+ * listing never carries and awefork's views hide by design.
+ */
+export async function readRolloutSessions(homePath: string): Promise<RolloutSession[]> {
+  const cached = sessionCache.get(homePath);
+  if (cached && Date.now() - cached.readAt < FORK_PARENT_TTL_MS) return cached.sessions;
+  const sessions: RolloutSession[] = [];
+  for (const path of listRolloutFiles(homePath)) {
+    const record = await readRolloutSessionOf(path);
+    if (record) sessions.push(record);
+  }
+  sessionCache.set(homePath, { sessions, readAt: Date.now() });
+  return sessions;
+}
+
+/**
+ * How long a home's rollout scan stays valid.
  *
  * A fork's parent never changes once written, and a new fork adds a session
  * rather than editing one, so a stale entry only means a fork made in the
@@ -133,22 +166,11 @@ export async function readForkParents(homePath: string): Promise<Record<string, 
  */
 const FORK_PARENT_TTL_MS = 5_000;
 
-/** Per-home fork parents, read from the rollouts. */
-const forkParentCache = new Map<string, { parents: Record<string, string>; readAt: number }>();
+/** Per-home rollout scan (parents + session facts). */
+const sessionCache = new Map<string, { sessions: RolloutSession[]; readAt: number }>();
 
-interface ForkParent {
-  sessionId: string;
-  parentId: string;
-}
-
-/**
- * The parent one rollout recorded, or null when the file names no parent.
- *
- * The record's own `session_id` is the session's id: a rollout file can hold
- * another session's copied prefix (codex writes one file per fork point), and
- * the id that matters is the one the record states.
- */
-async function readForkParentOf(path: string): Promise<ForkParent | null> {
+/** The facts one rollout's first record states, or null when unreadable. */
+async function readRolloutSessionOf(path: string): Promise<RolloutSession | null> {
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
     handle = await fs.open(path, "r");
@@ -158,7 +180,7 @@ async function readForkParentOf(path: string): Promise<ForkParent | null> {
     // long instruction would outgrow.
     const firstLine = await readFirstLine(handle);
     if (firstLine === null) return null;
-    let record: { type?: unknown; payload?: Record<string, unknown> };
+    let record: { type?: unknown; payload?: Record<string, unknown>; timestamp?: unknown };
     try {
       record = JSON.parse(firstLine);
     } catch {
@@ -167,18 +189,50 @@ async function readForkParentOf(path: string): Promise<ForkParent | null> {
     }
     if (record.type !== "session_meta") return null;
     const sessionId = textOrNull(record.payload?.session_id);
+    if (!sessionId) return null;
     const parentId = textOrNull(record.payload?.forked_from_id);
     // A session that forked from itself is not a fork — codex writes that
     // shape for a resumed thread, and treating it as one would make the
     // story walk loop.
-    if (!sessionId || !parentId || parentId === sessionId) return null;
-    return { sessionId, parentId };
+    const forkParent = parentId && parentId !== sessionId ? parentId : null;
+    return {
+      sessionId,
+      parentId: forkParent,
+      // Subagent and guardian rollouts carry a `source` object naming their
+      // spawning thread; a listing never carries them, so the fallback must
+      // not either — they would surface rows every awefork view hides.
+      listed: !isSubagentSource(record.payload?.source),
+      cwd: textOrNull(record.payload?.cwd),
+      title: null,
+      createdAt: timestampMsOf(record.timestamp) ?? (await statMtimeMs(path)),
+      updatedAt: await statMtimeMs(path),
+    };
   } catch {
     // Pruned between the listing and the read, or unreadable: the caller
-    // keeps the thread's own (parentless) shape.
+    // keeps the thread's own shape.
     return null;
   } finally {
     await handle?.close();
+  }
+}
+
+/** codex's subagent/guardian marker: `source` becomes an object, never a string. */
+function isSubagentSource(source: unknown): boolean {
+  return typeof source === "object" && source !== null;
+}
+
+function timestampMsOf(value: unknown): number | null {
+  if (typeof value !== "string" || value === "") return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+async function statMtimeMs(path: string): Promise<number> {
+  try {
+    const stat = await fs.stat(path);
+    return stat.mtimeMs;
+  } catch {
+    return Date.now();
   }
 }
 

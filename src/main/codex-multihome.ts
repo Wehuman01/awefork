@@ -19,7 +19,12 @@ import {
   discoverCodexHomes,
   findRolloutRelPath,
 } from "./codex-homes.js";
-import { readForkParents, readTurnContexts } from "./codex-rollout.js";
+import type { RolloutSession } from "./codex-rollout.js";
+import {
+  readRolloutSessions as defaultRolloutScan,
+  readForkParents,
+  readTurnContexts,
+} from "./codex-rollout.js";
 import { ensureCodexServer } from "./codex-server.js";
 
 export interface CodexMultiHomeOptions {
@@ -34,6 +39,13 @@ export interface CodexMultiHomeOptions {
   homes?: () => CodexHome[];
   /** Test seam: import destination (production: the primary CODEX_HOME). */
   defaultHomePath?: () => string;
+  /**
+   * Test seam: the default home's rollout scan (production: readRolloutSessions
+   * over the primary CODEX_HOME). Only the default home falls back to disk —
+   * foreign aweswitch homes serve sessions awefork merely browses, and the
+   * facade never imports their unlisted threads.
+   */
+  rolloutSessions?: () => Promise<RolloutSession[]>;
 }
 
 interface HomeEntry {
@@ -96,6 +108,27 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
   const UNLISTED_TTL_MS = 24 * 60 * 60 * 1000;
 
   const emit = (event: AgentEvent) => emitEvent?.(event);
+
+  /**
+   * A disk-found rollout as a session row. The server's own rows win; this
+   * is only for threads the listing dropped, so it carries the facts the
+   * rollout states and nothing it cannot: the title falls back the way
+   * mapThread's does for a fresh thread, and model/effort stay unknown (a
+   * disk row is not a model source — the model picker reads listModels).
+   */
+  function rolloutRowOf(record: RolloutSession): SessionSummary {
+    return {
+      id: record.sessionId,
+      title: record.title ?? "(untitled session)",
+      directory: record.cwd ?? "",
+      parentSessionId: record.parentId,
+      origin: record.parentId ? "fork" : "root",
+      createdAt: record.createdAt ?? Date.now(),
+      updatedAt: record.updatedAt ?? Date.now(),
+      modelId: null,
+      variant: null,
+    };
+  }
 
   const createDefaultHomeAdapter = async (home: CodexHome): Promise<AgentAdapter> => {
     const { client, version, authMessage } = await ensureCodexServer(
@@ -299,6 +332,31 @@ export function createCodexMultiHomeAdapter(options: CodexMultiHomeOptions): Age
           owners.set(session.id, home.id);
           merged.push(session);
         }
+      }
+      // Disk fallback for the default home: codex 0.165's listing is backed
+      // by a sqlite index that can lag the rollouts for hours (verified: a
+      // listing omitting 282 of 418 on-disk threads, settled turns
+      // included, while thread/read and the rollouts stayed correct). A
+      // story's root dropping out of the listing tears its canvas tabs and
+      // sidebar tree apart, so a rollout the listing missed still gets a
+      // row — the server's own row wins whenever it exists, and the disk is
+      // only consulted for what the listing lacks. thread/delete removes
+      // the rollout itself (verified on 0.165), so a file on disk is proof
+      // the session lives; subagent/guardian rollouts are skipped to match
+      // what a listing ever carries.
+      try {
+        const scan = options.rolloutSessions ?? (() => defaultRolloutScan(defaultHome()));
+        const rollouts = await scan();
+        for (const record of rollouts) {
+          if (!record.listed || seen.has(record.sessionId)) continue;
+          seen.add(record.sessionId);
+          owners.set(record.sessionId, DEFAULT_HOME_ID);
+          merged.push(rolloutRowOf(record));
+        }
+      } catch (error) {
+        // The scan is a fallback, not a source: unreadable rollouts keep the
+        // listing's own answer.
+        console.warn(`codex rollout scan unavailable: ${String(error)}`);
       }
       // Retire memo rows the server now lists; expire the ones it never
       // will; merge the rest in so a zero-own-turn session stays selectable
