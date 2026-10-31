@@ -481,6 +481,64 @@ try {
     await cdp.send("Emulation.clearDeviceMetricsOverride");
   }
 
+  // 4h. The same layout on the app's own window: the overview pill keeps
+  //     the canvas's top strip to itself and the search stack takes the row
+  //     below it, bounded by the canvas alone. The pill used to take part of
+  //     that width, which squeezed the search box into a narrow column.
+  await retry(
+    () =>
+      cdp.evaluate(
+        `window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }))`,
+      ),
+    5000,
+    "open the story search",
+  );
+  await retry(() => cdp.evaluate(`Boolean(document.querySelector(".ss-box"))`), 5000, "search box open");
+  const wideLayout = await retry(async () => {
+    const state = await cdp.evaluate(`(() => {
+      const rect = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          w: Math.round(r.width),
+          top: Math.round(r.top),
+          bottom: Math.round(r.bottom),
+          left: Math.round(r.left),
+          right: Math.round(r.right),
+        };
+      };
+      const stack = document.querySelector(".canvas-panels");
+      // A probe wider than any content makes the stack take its own cap.
+      const probe = document.createElement("div");
+      probe.style.width = "5000px";
+      probe.style.height = "0";
+      stack.appendChild(probe);
+      const cap = Math.round(stack.getBoundingClientRect().width);
+      probe.remove();
+      return {
+        viewport: rect(".viewport"),
+        stack: rect(".canvas-panels"),
+        trigger: rect(".overview-trigger"),
+        cap,
+      };
+    })()`);
+    if (!state.trigger) throw new Error("no overview trigger");
+    return state;
+  }, 5000, "wide layout");
+  check(
+    "the search stack's cap is the canvas, not the pill's row",
+    wideLayout.cap >= wideLayout.viewport.w - 40,
+    JSON.stringify(wideLayout),
+  );
+  check(
+    "the search stack sits below the overview pill",
+    wideLayout.stack.top >= wideLayout.trigger.bottom,
+    JSON.stringify(wideLayout),
+  );
+  await retry(() => cdp.evaluate(`document.querySelector(".ss-box .ss-close").click()`), 5000, "close the search");
+  await retry(() => cdp.evaluate(`!document.querySelector(".ss-box")`), 5000, "search box closed");
+
   // 5. Fork flow: ＋ on a mid turn opens a draft; sending grows a new branch.
   await retry(() => cdp.evaluate(`document.querySelectorAll(".turn .add-chip")[0].click()`), 5000, "open draft");
   const draft = await retry(
@@ -1298,6 +1356,68 @@ try {
     const back = await panelWidth(".viewport");
     if (!near(back, canvasBefore, 4)) throw new Error(`canvas did not return the pixels: ${back}px`);
   }, 5000, "canvas returns the pixels on expand");
+
+  // 8. A wide canvas: the overview pill keeps the canvas's top strip to
+  //    itself — centered, no longer dodging to the corner to make room for
+  //    the search box — and the search stack stays on the row below it. This
+  //    runs last: a wide canvas re-lays the canvas out, and the sections
+  //    above count on the cards they found.
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 1600,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    await retry(
+      () =>
+        cdp.evaluate(
+          `window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }))`,
+        ),
+      5000,
+      "open the story search",
+    );
+    await retry(() => cdp.evaluate(`Boolean(document.querySelector(".ss-box"))`), 5000, "search box open");
+    const wideCanvas = await retry(async () => {
+      const state = await cdp.evaluate(`(() => {
+        const rect = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return {
+            w: Math.round(r.width),
+            top: Math.round(r.top),
+            bottom: Math.round(r.bottom),
+            left: Math.round(r.left),
+            right: Math.round(r.right),
+          };
+        };
+        return {
+          viewport: rect(".viewport"),
+          stack: rect(".canvas-panels"),
+          trigger: rect(".overview-trigger"),
+        };
+      })()`);
+      if (!state.trigger) throw new Error("no overview trigger");
+      return state;
+    }, 5000, "wide canvas layout");
+    check(
+      "the overview pill keeps the canvas's top strip, centered",
+      Math.abs(
+        (wideCanvas.trigger.left + wideCanvas.trigger.right) / 2 -
+          (wideCanvas.viewport.left + wideCanvas.viewport.right) / 2,
+      ) <= 2,
+      JSON.stringify(wideCanvas),
+    );
+    check(
+      "the search stack sits below the centered pill",
+      wideCanvas.stack.top >= wideCanvas.trigger.bottom,
+      JSON.stringify(wideCanvas),
+    );
+    await retry(() => cdp.evaluate(`document.querySelector(".ss-box .ss-close").click()`), 5000, "close the search");
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+  }
 
 } catch (error) {
   failures += 1;

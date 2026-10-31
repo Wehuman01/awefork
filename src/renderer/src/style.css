@@ -5966,17 +5966,24 @@ code.md-code {
   align-items: stretch;
   gap: 8px;
   z-index: 5;
-  /* The stack shares the canvas's top strip with the overview trigger: an
-     open surface takes the width the pill leaves it once the pill dodges
-     to the corner, so the box follows the canvas — and with it the context
-     panel being dragged — instead of sitting at one fixed width; the floor
-     keeps the box usable when the canvas is too narrow for both, and there
-     the whole stack drops below the pill's row instead (see the overview
-     section below). Stretch, not flex-start: an open surface is a flex item
-     whose own fit-content rides over this cap, so a long hit's text pushes
-     the box past the canvas's right edge, where the context panel cuts it
-     off. The closed-state pill opts back out with align-self below. */
-  max-width: max(200px, calc(100% - 440px));
+  /* The stack is bounded by the canvas and nothing else: the context panel
+     is a separate column, so the canvas's right edge already is the
+     boundary these surfaces must respect, and none of them may reach past
+     it. The overview pill used to take part of that width (the stack gave
+     up 440px so a dodging pill would fit beside it), which squeezed the
+     story search into a narrow column — the pill now keeps the top strip
+     to itself and the stack takes the row below it, so the search box
+     spans the canvas. Stretch, not flex-start: an open surface is a flex
+     item, so it fills the stack's width — the canvas's, capped — instead of
+     hugging its own text. The closed-state pill opts back out with
+     align-self below. */
+  max-width: calc(100% - 32px);
+}
+
+/* The session overview's pill owns the canvas's top strip; the stack drops
+   one row below it, clear of the pill whatever it measures. */
+.viewport:has(.canvas-overview) .canvas-panels {
+  top: 56px;
 }
 
 .panel-pill {
@@ -6298,6 +6305,9 @@ code.md-code {
 
 .digest-panel {
   width: 100%;
+  /* The stack now spans the canvas, but a digest is a reading column: it
+     keeps the width it had when the stack still reserved the pill's row. */
+  max-width: 460px;
   background: var(--glass-strong);
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
@@ -7211,34 +7221,25 @@ code.md-code {
   pointer-events: auto;
 }
 
-/* The trigger pill and the left-stack surfaces (story search, branch
-   digest, key-turn marks) share the canvas's top strip. Wide canvas: the
-   pill stays centered until a surface opens, then dodges to the right
-   corner — centered, it used to sit on top of the story search box (the
-   stack paints below .canvas-overview, so the pill always won that
-   overlap) and swallow the box's hit count and close button. Narrow
-   canvas: a centered pill only has half the canvas before it wraps to two
-   rows, so it anchors right from the start and the stack drops below its
-   row — the way story tabs wrap into rows rather than hide. */
-@container (min-width: 761px) {
-  .viewport:has(.canvas-panels .story-search) .overview-trigger,
-  .viewport:has(.canvas-panels .digest-panel) .overview-trigger,
-  .viewport:has(.canvas-panels .marks-panel) .overview-trigger {
-    left: auto;
-    right: 12px;
-    transform: none;
-  }
-}
-
+/* The trigger pill keeps the canvas's top strip to itself: the left stack
+   (story search, branch digest, key-turn marks) sits on the row below it,
+   so the pill no longer has to dodge to the corner and the surfaces below
+   keep the canvas's full width. Narrow canvas: a centered pill only has
+   half the canvas before it wraps to two rows, so it anchors right from
+   the start — the way story tabs wrap into rows rather than hide. */
 @container (max-width: 760px) {
   .overview-trigger {
     left: auto;
     right: 12px;
     transform: none;
   }
+}
 
-  .canvas-panels {
-    top: 56px;
+/* Narrower still: the pill needs about 390px for one row, so below that it
+   wraps and its second row reaches into the stack's row. */
+@container (max-width: 430px) {
+  .viewport:has(.canvas-overview) .canvas-panels {
+    top: 88px;
   }
 }
 
