@@ -7,6 +7,7 @@ import {
   type CodexRpc,
   createCodexAdapter,
   OWNED_ELSEWHERE_MESSAGE,
+  PROVIDER_CHANGED_MESSAGE,
 } from "../src/shared/codex-adapter";
 import type { AgentEvent, AgentInteractionRequest, PromptAttachment } from "../src/shared/types";
 
@@ -675,6 +676,98 @@ describe("createCodexAdapter prompt()", () => {
     expect(callsOf("turn/start")).toHaveLength(0);
     const error = events.find((e) => e.type === "server.error");
     expect(error).toMatchObject({ sessionId: "s1", message: OWNED_ELSEWHERE_MESSAGE });
+  });
+
+  it("continues in a fork when the chat's model provider changed", async () => {
+    // codex pins a chat to the provider it was created with and refuses to
+    // resume it once the configured provider is a different one. magpie's
+    // codex connection rewrites config.toml between "openai" and "magpie"
+    // and moves the chat records with it, so this happens to old chats
+    // without anyone touching them. thread/fork is not gated on the check:
+    // it copies the rollout under the CURRENT provider, so the run continues.
+    const { client, callsOf } = fakeClient({
+      "thread/resume": () => {
+        throw new Error(
+          "This chat uses openai, but your current provider is magpie. Switch to openai to continue.",
+        );
+      },
+      "thread/fork": () => ({
+        thread: { id: "fork-10", forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 1 },
+      }),
+      "turn/start": (params) => ({ turn: { id: `turn-${params.threadId}` } }),
+    });
+    const lineagePath = await tempLineagePath();
+    const created: string[] = [];
+    const adapter = createCodexAdapter({
+      client,
+      lineagePath,
+      cliVersion: "0.163.0",
+      forkCreated: (forked) => created.push(forked.id),
+    });
+
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    await adapter.prompt("s1", "继续", null);
+
+    // The message runs on the fork, under the current provider.
+    const turnStarts = callsOf("turn/start");
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.params).toMatchObject({ threadId: "fork-10" });
+    expect(callsOf("thread/fork")[0]?.params).toMatchObject({ threadId: "s1" });
+
+    // The user is told it moved, and the run is not reported as failed.
+    const continued = events.find((e) => e.type === "session.branchContinued");
+    expect(continued).toMatchObject({ sessionId: "s1", forkedSessionId: "fork-10" });
+    expect(continued?.message).toContain(PROVIDER_CHANGED_MESSAGE);
+    expect(events.find((e) => e.type === "server.error")).toBeUndefined();
+    expect(created).toEqual(["fork-10"]);
+  });
+
+  it("reports the provider change when the recovery fork is refused too", async () => {
+    const { client, callsOf } = fakeClient({
+      "thread/resume": () => {
+        throw new Error(
+          "This chat uses openai, but your current provider is magpie. Switch to openai to continue.",
+        );
+      },
+      "thread/fork": () => {
+        throw new Error("no fork for you");
+      },
+      "turn/start": () => ({ turn: { id: "turn-9" } }),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    await expect(adapter.prompt("s1", "继续", null)).rejects.toThrow(/current provider is magpie/);
+
+    expect(callsOf("turn/start")).toHaveLength(0);
+    const error = events.find((e) => e.type === "server.error");
+    expect(error).toMatchObject({ sessionId: "s1" });
+  });
+
+  it("explains a provider that is no longer configured at all", async () => {
+    // The other wording codex uses: the chat's provider vanished from the
+    // config instead of merely being a different one.
+    const { client } = fakeClient({
+      "thread/resume": () => {
+        throw new Error(
+          "This chat uses model provider gone, which is no longer configured. Restore this provider's configuration to continue.",
+        );
+      },
+      "thread/fork": () => ({
+        thread: { id: "fork-11", forkedFromId: "s1", cwd: "/demo", createdAt: 1, updatedAt: 1 },
+      }),
+      "turn/start": (params) => ({ turn: { id: `turn-${params.threadId}` } }),
+    });
+    const adapter = createCodexAdapter({ client, lineagePath: await tempLineagePath() });
+
+    const events: AgentEvent[] = [];
+    await adapter.subscribe((event) => events.push(event));
+    await adapter.prompt("s1", "继续", null);
+
+    const continued = events.find((e) => e.type === "session.branchContinued");
+    expect(continued).toMatchObject({ forkedSessionId: "fork-11" });
   });
 });
 

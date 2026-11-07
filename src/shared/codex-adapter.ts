@@ -196,6 +196,20 @@ export const CODEX_NOT_LOGGED_IN_MESSAGE =
 export const OWNED_ELSEWHERE_MESSAGE =
   "this session is being written by another codex instance (e.g. a session in aweswitch) and cannot continue; close that one and retry";
 
+/**
+ * Shown when codex refuses a chat because the configured model provider is no
+ * longer the one the chat was created with.
+ *
+ * codex pins every chat to its creation-time provider, and the provider in
+ * `config.toml` changes under the user's feet: magpie's codex connection
+ * rewrites it between "openai" and "magpie" every time it is toggled, and
+ * moves the chat records with it. The chat itself is fine — only the
+ * provider binding is stale — so the run continues on a fork under the
+ * current provider.
+ */
+export const PROVIDER_CHANGED_MESSAGE =
+  "codex pins each chat to the model provider it was created with, and the configured provider has changed since (magpie's codex connection switches between them)";
+
 const PAGE_LIMIT = 100;
 
 export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
@@ -433,6 +447,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       await resumeThread(threadId);
     } catch (error) {
       if (isWriterConflict(error)) throw new Error(OWNED_ELSEWHERE_MESSAGE);
+      // A chat pinned to a provider the config no longer names cannot be
+      // loaded at all: say that, instead of reporting a missing message.
+      if (isProviderMismatch(error)) throw new Error(PROVIDER_CHANGED_MESSAGE);
       return null;
     }
     return lookup();
@@ -706,6 +723,19 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
     return message.includes("already has an active writer");
   }
 
+  /**
+   * codex pins a chat to the model provider it was created with, and refuses
+   * to resume it once the configured provider is a different one: "This chat
+   * uses openai, but your current provider is magpie. Switch to openai to
+   * continue." Both wordings codex 0.166/0.167 use ("... which is no longer
+   * configured" for a provider that vanished entirely) start with "This chat
+   * uses", which is what this matches.
+   */
+  function isProviderMismatch(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("This chat uses");
+  }
+
   function isNotMaterialized(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     // 0.154 said "is not materialized yet"; 0.163's thread/resume says
@@ -947,6 +977,44 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
       // Claim the slot before the call: a staging this thread still holds
       // belongs to a finished turn (its end frame may have been dropped).
       if (staged) registerStaging(sessionId, staged);
+      /**
+       * Run this message on a fork of `sessionId` rather than on it.
+       *
+       * Two codex refusals have the same shape: the thread itself cannot be
+       * written here, but a copy of it can. Another process holds the writer
+       * lock; or the chat is pinned to the model provider it was created with
+       * and the configured provider has changed since (magpie's codex
+       * connection flips `config.toml` between "openai" and "magpie" and
+       * rewrites the chat records with it). thread/fork is gated on neither:
+       * it copies the rollout into a fresh thread id under the CURRENT
+       * provider, so the message runs there with the history intact.
+       *
+       * Returns false when the fork itself was refused; the caller then
+       * reports the original refusal.
+       */
+      const continueOnFork = async (reason: string): Promise<boolean> => {
+        const forked = await forkForContinuation(sessionId);
+        if (!forked) return false;
+        try {
+          await client.request("turn/start", turnParams(forked.id));
+        } catch (forkError) {
+          releaseStaging(sessionId);
+          throw forkError instanceof Error ? forkError : new Error(String(forkError));
+        }
+        // The turn now runs on the fork, so the staged files outlive the
+        // fork's turn end, not the original thread's.
+        if (staged) {
+          stagedByThread.delete(sessionId);
+          registerStaging(forked.id, staged);
+        }
+        emit({
+          type: "session.branchContinued",
+          sessionId,
+          forkedSessionId: forked.id,
+          message: `${reason}; continued in the new branch ${forked.id}`,
+        });
+        return true;
+      };
       try {
         // turn/start only sees threads this server has loaded, and reading a
         // thread no longer loads it (readThread deliberately avoids the
@@ -958,7 +1026,17 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
         try {
           await resumeThread(sessionId);
         } catch (error) {
-          if (!isNotMaterialized(error)) throw error;
+          if (isNotMaterialized(error)) {
+            // Nothing to resume: the turn/start below materializes the thread.
+          } else if (isProviderMismatch(error)) {
+            // The chat is bound to a provider the config no longer names.
+            // The binding is stale, not the chat, so the run moves to a fork
+            // under the current provider instead of failing.
+            if (await continueOnFork(PROVIDER_CHANGED_MESSAGE)) return;
+            throw error;
+          } else {
+            throw error;
+          }
         }
         const response = await client.request<{ turn?: { id?: string } }>(
           "turn/start",
@@ -986,28 +1064,7 @@ export function createCodexAdapter(options: CodexAdapterOptions): AgentAdapter {
           // the rollout into a fresh thread id — so continue the run there:
           // the user keeps their message, and the fork carries the history
           // the locked thread held.
-          const forked = await forkForContinuation(sessionId);
-          if (forked) {
-            try {
-              await client.request("turn/start", turnParams(forked.id));
-            } catch (forkError) {
-              releaseStaging(sessionId);
-              throw forkError instanceof Error ? forkError : new Error(String(forkError));
-            }
-            // The turn now runs on the fork, so the staged files outlive the
-            // fork's turn end, not the locked thread's.
-            if (staged) {
-              stagedByThread.delete(sessionId);
-              registerStaging(forked.id, staged);
-            }
-            emit({
-              type: "session.branchContinued",
-              sessionId,
-              forkedSessionId: forked.id,
-              message: `${OWNED_ELSEWHERE_MESSAGE}; continued in the new branch ${forked.id}`,
-            });
-            return;
-          }
+          if (await continueOnFork(OWNED_ELSEWHERE_MESSAGE)) return;
         }
         // The turn never started: nothing will read the staged files.
         releaseStaging(sessionId);
